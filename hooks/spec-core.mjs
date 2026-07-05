@@ -12,11 +12,15 @@ export function parseRequirements(md) {
   const matches = [...text.matchAll(REQ_RE)];
   const reqs = [];
   for (let i = 0; i < matches.length; i += 1) {
-    const name = matches[i][1].trim();
+    const raw = matches[i][1].trim();
+    // Identity is the ID (e.g. GATE-1) when the heading is "<ID> — <nome>"; else the whole text.
+    const idM = raw.match(/^([A-Z][A-Z0-9]*-\d+)\s*—\s*(.+)$/);
+    const id = idM ? idM[1] : null;
+    const name = idM ? idM[2].trim() : raw;
     const start = matches[i].index + matches[i][0].length;
     const end = i + 1 < matches.length ? matches[i + 1].index : text.length;
     const body = text.slice(start, end).replace(/(\n>[^\n]*)+\s*$/, '').trim();
-    reqs.push({ name, body });
+    reqs.push({ id, name, body });
   }
   return reqs;
 }
@@ -33,35 +37,36 @@ export function parseDelta(md) {
   return {
     added: parseRequirements(grab('ADDED')),
     modified: parseRequirements(grab('MODIFIED')),
-    removed: parseRequirements(grab('REMOVED')).map((r) => r.name),
+    removed: parseRequirements(grab('REMOVED')).map((r) => r.id || r.name),
   };
 }
 
 export function applyDelta(reqs, delta) {
-  const order = reqs.map((r) => r.name);
-  const map = new Map(reqs.map((r) => [r.name, r.body]));
+  const keyOf = (r) => r.id || r.name; // identity = ID when present, else the name
+  const order = reqs.map(keyOf);
+  const map = new Map(reqs.map((r) => [keyOf(r), r])); // key -> full {id,name,body}
   const warnings = [];
   for (const r of delta.added || []) {
-    if (map.has(r.name)) warnings.push(`ADDED já existe: ${r.name}`); else order.push(r.name);
-    map.set(r.name, r.body);
+    const k = keyOf(r);
+    if (map.has(k)) warnings.push(`ADDED já existe: ${k}`); else order.push(k);
+    map.set(k, r);
   }
   for (const r of delta.modified || []) {
-    if (!map.has(r.name)) { warnings.push(`MODIFIED inexistente: ${r.name}`); order.push(r.name); }
-    map.set(r.name, r.body);
+    const k = keyOf(r);
+    if (!map.has(k)) { warnings.push(`MODIFIED inexistente: ${k}`); order.push(k); }
+    map.set(k, r);
   }
-  for (const name of delta.removed || []) {
-    if (!map.has(name)) warnings.push(`REMOVED inexistente: ${name}`);
-    map.delete(name);
+  for (const k of delta.removed || []) {
+    if (!map.has(k)) warnings.push(`REMOVED inexistente: ${k}`);
+    map.delete(k);
   }
   const seen = new Set();
-  const out = order
-    .filter((n) => map.has(n) && !seen.has(n) && seen.add(n))
-    .map((n) => ({ name: n, body: map.get(n) }));
+  const out = order.filter((k) => map.has(k) && !seen.has(k) && seen.add(k)).map((k) => map.get(k));
   return { reqs: out, warnings };
 }
 
 export function renderSpec(capability, reqs, { footer } = {}) {
-  const blocks = reqs.map((r) => `### Requisito: ${r.name}\n${r.body}`).join('\n\n');
+  const blocks = reqs.map((r) => `### Requisito: ${r.id ? `${r.id} — ${r.name}` : r.name}\n${r.body}`).join('\n\n');
   const foot = footer ? `\n\n> ${footer}\n` : '\n';
   return `---\ntype: spec\ncssclasses:\n  - topic-spec\ntags:\n  - spec\n---\n\n# ${capability}\n\n## Requisitos\n\n${blocks}${foot}`;
 }
@@ -94,4 +99,16 @@ export function promoteSpecs(vaultBase, changeDir, specs, { changeWikilink, date
     promoted.push(cap);
   }
   return { promoted, warnings };
+}
+
+// Gate check for the independent verdict (Wave A). A requirement-bearing change must have
+// a verdict that is ok and covers every declared req id. A requirement-less change passes:
+// nothing for an independent verifier to check — the sensor gate is already the proof.
+export function evaluateVerdict(verdict, reqIds) {
+  const ids = reqIds || [];
+  if (ids.length === 0) return { ok: true, missing: [] };
+  if (!verdict || verdict.ok !== true) return { ok: false, missing: [] };
+  const covered = new Set((verdict.coverage || []).filter((c) => c.covered).map((c) => c.req));
+  const missing = ids.filter((r) => !covered.has(r));
+  return { ok: missing.length === 0, missing };
 }

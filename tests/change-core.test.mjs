@@ -16,6 +16,13 @@ test('parseTasks: extracts [sensor:id] hint, strips it from text', () => {
   assert.equal(t[1].sensor, undefined);
 });
 
+test('parseTasks: extracts [req:ID] alongside [sensor:]', () => {
+  const t = parseTasks('- [ ] 3.2 faz [req:GATE-1] [sensor:tests]\n');
+  assert.equal(t[0].req, 'GATE-1');
+  assert.equal(t[0].sensor, 'tests');
+  assert.equal(t[0].text, 'faz');
+});
+
 import { mkdtempSync, existsSync, readFileSync, rmSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';

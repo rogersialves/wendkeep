@@ -9,6 +9,7 @@ import {
   archiveChange,
 } from '../hooks/change-core.mjs';
 import { evaluateGate, requiredSensors } from '../hooks/sensors-core.mjs';
+import { evaluateVerdict } from '../hooks/spec-core.mjs';
 import { getNextAdrNumber } from '../hooks/obsidian-common.mjs';
 
 function resolveVault(argv) {
@@ -70,15 +71,24 @@ export function runChange(argv) {
     if (!slug) { process.stderr.write('wendkeep change archive: missing <slug> and no active change\n'); process.exit(2); }
     // Real gate (Pilar C): every sensor a task declared must be green in evidencia.json.
     const gate = (dir) => {
-      let required = [];
-      try { required = requiredSensors(parseTasks(readFileSync(join(dir, 'tarefas.md'), 'utf8'))); } catch { /* no tasks */ }
+      let tasks = [];
+      try { tasks = parseTasks(readFileSync(join(dir, 'tarefas.md'), 'utf8')); } catch { /* no tasks */ }
+      const required = requiredSensors(tasks);
+      const reqIds = [...new Set(tasks.map((t) => t.req).filter(Boolean))];
       let evidence = [];
       try { evidence = JSON.parse(readFileSync(join(dir, 'evidencia.json'), 'utf8')); } catch { /* no evidence */ }
-      return evaluateGate(evidence, required);
+      const s = evaluateGate(evidence, required);
+      if (!s.ok) return s;
+      // Independent verdict (Wave A): required only when the change declares [req:] tasks.
+      let verdict = null;
+      try { verdict = JSON.parse(readFileSync(join(dir, 'verdict.json'), 'utf8')); } catch { /* none */ }
+      const v = evaluateVerdict(verdict, reqIds);
+      if (!v.ok) return { ok: false, failing: verdict ? [`verdict incompleto: falta ${v.missing.join(', ')}`] : ['sem verdict — rode `wendkeep verify --deep` + skill wk-verify'] };
+      return { ok: true, failing: [] };
     };
     const r = archiveChange(vaultBase, slug, { dateStr: today(), adrNum: getNextAdrNumber(vaultBase), gate });
     if (!r.ok) {
-      process.stderr.write(`change archive BLOCKED (gate): failing sensors: ${r.failing.join(', ')} — run \`wendkeep verify\`.\n`);
+      process.stderr.write(`change archive BLOCKED (gate): ${r.failing.join('; ')}\n`);
       process.exit(1);
     }
     process.stdout.write(`archived: ${r.archivedRel}; ADR: ${r.adrRel}\n`);

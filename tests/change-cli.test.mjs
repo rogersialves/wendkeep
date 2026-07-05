@@ -100,3 +100,46 @@ test('warning sensor red does not block verify or archive', () => {
     assert.equal(arch.status, 0, `red warning does not block archive; stderr=${arch.stderr}`);
   } finally { rmSync(vault, { recursive: true, force: true }); rmSync(proj, { recursive: true, force: true }); }
 });
+
+test('archive requires a verdict when a task declares [req:]; ADR lists the req id', () => {
+  const vault = mkdtempSync(join(tmpdir(), 'wk-verdict-'));
+  const spawn = (a) => spawnSync(process.execPath, [BIN, 'change', ...a, '--vault', vault], { encoding: 'utf8' });
+  try {
+    mkdirSync(join(vault, '04-Decisões'), { recursive: true });
+    assert.equal(spawn(['new', 'x']).status, 0);
+    writeFileSync(join(vault, '08-Mudanças', 'x', 'tarefas.md'), '- [ ] 1.1 faz [req:X-1]\n');
+    const blocked = spawn(['archive', 'x']);
+    assert.equal(blocked.status, 1, 'blocked without verdict');
+    assert.match(blocked.stderr, /verdict/i);
+    writeFileSync(join(vault, '08-Mudanças', 'x', 'verdict.json'), JSON.stringify({ slug: 'x', ok: true, coverage: [{ req: 'X-1', covered: true }] }));
+    const ok = spawn(['archive', 'x']);
+    assert.equal(ok.status, 0, ok.stderr);
+    const year = String(new Date().getFullYear());
+    const adr = readFileSync(join(vault, '04-Decisões', year, 'ADR-001-x.md'), 'utf8');
+    assert.match(adr, /X-1/);
+  } finally { rmSync(vault, { recursive: true, force: true }); }
+});
+
+test('verify --deep: trivial auto-writes verdict; a change with [req:] only writes the package', () => {
+  const vault = mkdtempSync(join(tmpdir(), 'wk-deep-'));
+  const proj = mkdtempSync(join(tmpdir(), 'wk-deepp-'));
+  const spawn = (a) => spawnSync(process.execPath, [BIN, ...a, '--vault', vault, '--project', proj], { encoding: 'utf8' });
+  try {
+    mkdirSync(join(vault, '.brain'), { recursive: true });
+    writeFileSync(join(proj, 'wendkeep.sensors.json'), JSON.stringify({ version: 1, sensors: [{ id: 'ok', severity: 'critical', command: 'exit 0' }] }));
+    // trivial: no [req:]
+    mkdirSync(join(vault, '08-Mudanças', 't'), { recursive: true });
+    writeFileSync(join(vault, '08-Mudanças', 't', 'tarefas.md'), '- [ ] 1.1 faz [sensor:ok]\n');
+    writeFileSync(join(vault, '.brain', 'CURRENT_CHANGE.md'), 'change: t\n');
+    assert.equal(spawn(['verify', '--deep']).status, 0);
+    assert.ok(existsSync(join(vault, '08-Mudanças', 't', 'verificacao.json')));
+    assert.ok(existsSync(join(vault, '08-Mudanças', 't', 'verdict.json')), 'trivial auto-verdict');
+    // with [req:]: package yes, verdict no (agent pass required)
+    mkdirSync(join(vault, '08-Mudanças', 'r'), { recursive: true });
+    writeFileSync(join(vault, '08-Mudanças', 'r', 'tarefas.md'), '- [ ] 1.1 faz [req:X-1] [sensor:ok]\n');
+    writeFileSync(join(vault, '.brain', 'CURRENT_CHANGE.md'), 'change: r\n');
+    assert.equal(spawn(['verify', '--deep']).status, 0);
+    assert.ok(existsSync(join(vault, '08-Mudanças', 'r', 'verificacao.json')));
+    assert.ok(!existsSync(join(vault, '08-Mudanças', 'r', 'verdict.json')), 'req change needs the agent verdict');
+  } finally { rmSync(vault, { recursive: true, force: true }); rmSync(proj, { recursive: true, force: true }); }
+});

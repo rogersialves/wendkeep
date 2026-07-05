@@ -5,9 +5,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { WK_SKILLS, seedWkSkills } from '../src/skills-seed.mjs';
 
-test('WK_SKILLS: the 5 process skills, each valid SKILL.md with matching name', () => {
+test('WK_SKILLS: the process skills, each valid SKILL.md with matching name', () => {
   const names = WK_SKILLS.map((s) => s.name);
-  for (const n of ['wk-workflow', 'wk-tdd', 'wk-debugging', 'wk-brainstorming', 'wk-planning']) {
+  for (const n of ['wk-workflow', 'wk-tdd', 'wk-debugging', 'wk-brainstorming', 'wk-planning', 'wk-verify']) {
     assert.ok(names.includes(n), `has ${n}`);
   }
   for (const s of WK_SKILLS) {
@@ -15,6 +15,15 @@ test('WK_SKILLS: the 5 process skills, each valid SKILL.md with matching name', 
     assert.match(s.body, /description:/, `${s.name} has description`);
     assert.ok(s.body.length > 200, `${s.name} body non-trivial`);
   }
+});
+
+test('wk-verify present; wk-tdd/brainstorming carry TLC discipline; workflow cites verify --deep', () => {
+  const by = Object.fromEntries(WK_SKILLS.map((s) => [s.name, s.body]));
+  assert.ok(by['wk-verify'], 'wk-verify existe');
+  assert.match(by['wk-verify'], /autor.*verificador|read-only|verdict/i);
+  assert.match(by['wk-tdd'], /spec|adequa|raso|litmus/i);
+  assert.match(by['wk-brainstorming'], /out-of-scope|assumption|closure|ambigu/i);
+  assert.match(by['wk-workflow'], /verify --deep/);
 });
 
 test('wk-workflow references the wendkeep loop commands', () => {

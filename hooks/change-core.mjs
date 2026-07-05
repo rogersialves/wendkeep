@@ -105,13 +105,18 @@ export function parseTasks(md) {
   const tasks = [];
   const re = /^-\s+\[( |x)\]\s+(\S+)\s+(.*)$/gm;
   const sensorRe = /\[sensor:\s*([\w.-]+)\]/;
+  const reqRe = /\[req:\s*([A-Z][A-Z0-9]*-\d+)\]/;
   let m;
   while ((m = re.exec(String(md))) !== null) {
     let text = m[3].trim();
     const sm = text.match(sensorRe);
+    const rm = text.match(reqRe);
     const sensor = sm ? sm[1] : undefined;
-    if (sm) text = text.replace(sensorRe, '').replace(/\s+/g, ' ').trim();
-    tasks.push({ id: m[2], text, done: m[1] === 'x', ...(sensor ? { sensor } : {}) });
+    const req = rm ? rm[1] : undefined;
+    if (sm) text = text.replace(sensorRe, '');
+    if (rm) text = text.replace(reqRe, '');
+    text = text.replace(/\s+/g, ' ').trim();
+    tasks.push({ id: m[2], text, done: m[1] === 'x', ...(sensor ? { sensor } : {}), ...(req ? { req } : {}) });
   }
   return tasks;
 }
@@ -176,6 +181,9 @@ export function archiveChange(vaultBase, slug, { gate = gateGreen, dateStr, adrN
     }
   } catch { /* proposta ilegível — segue só com ADR */ }
 
+  let reqIds = [];
+  try { reqIds = [...new Set(parseTasks(readFileSync(join(src, 'tarefas.md'), 'utf8')).map((t) => t.req).filter(Boolean))]; } catch { /* sem tarefas */ }
+
   ensureDir(join(vaultBase, CHANGES_DIR, ARCHIVE_DIR));
   renameSync(src, join(vaultBase, destRel));
 
@@ -187,6 +195,7 @@ export function archiveChange(vaultBase, slug, { gate = gateGreen, dateStr, adrN
   const capLine = promoted.length
     ? `\n\nCapabilities: ${promoted.map((c) => wikilinkFromRel(join(SPECS_DIR, c))).join(', ')}.`
     : '';
+  const reqLine = reqIds.length ? `\n\nRequisitos: ${reqIds.join(', ')}.` : '';
   writeFileSync(join(vaultBase, adrRel), `---
 type: decision
 status: accepted
@@ -201,7 +210,7 @@ tags:
 
 ## Decisão
 
-Mudança ${changeWikilink} concluída e arquivada.${capLine}
+Mudança ${changeWikilink} concluída e arquivada.${capLine}${reqLine}
 `, 'utf8');
 
   clearActiveChange(vaultBase);

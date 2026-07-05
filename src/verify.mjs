@@ -39,6 +39,27 @@ export function runVerify(argv) {
     process.stdout.write(`  ${mark} ${e.id}${e.severity === 'warning' && e.status === 'red' ? ' (warning)' : ''}\n`);
   }
   if (!ok) { process.stderr.write(`verify: critical sensors red: ${failing.join(', ')}\n`); process.exit(1); }
+
+  // --deep (Q2=B): assemble the verification package the wk-verify skill judges. A trivial
+  // change (no [req:] tasks, sensors green) gets an auto verdict — no agent pass needed.
+  if (argv.includes('--deep')) {
+    const tasks = parseTasks(tarefas);
+    const reqIds = [...new Set(tasks.map((t) => t.req).filter(Boolean))];
+    const pkg = {
+      slug,
+      requirements: reqIds.map((id) => ({ id })),
+      tasks: tasks.map((t) => ({ id: t.id, text: t.text, req: t.req || null, done: t.done })),
+      sensors: evidence,
+    };
+    writeFileSync(join(changeDir, 'verificacao.json'), `${JSON.stringify(pkg, null, 2)}\n`, 'utf8');
+    if (reqIds.length === 0) {
+      writeFileSync(join(changeDir, 'verdict.json'), `${JSON.stringify({ slug, ok: true, coverage: [], notes: ['trivial: sem requisito'] }, null, 2)}\n`, 'utf8');
+      process.stdout.write('verify --deep: pacote + verdict trivial escritos\n');
+    } else {
+      process.stdout.write('verify --deep: pacote escrito — rode a skill wk-verify pra gravar verdict.json\n');
+    }
+    process.exit(0);
+  }
   process.stdout.write(`verify OK (${ids.length} sensor(s))\n`);
   process.exit(0);
 }

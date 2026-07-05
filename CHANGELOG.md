@@ -4,6 +4,29 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] — 2026-07-05
+
+Verification & credibility layer (Wave A of the TLC-parity program). The gate stops being
+"green sensors" alone and starts requiring an independent verdict for changes that touch a spec.
+
+### Added
+- **Requirement IDs + traceability:** living-spec requirements carry a stable ID
+  (`### Requisito: GATE-1 — nome`); tasks reference them with `[req:<ID>]`; the archive ADR
+  lists the requirements it satisfied. Rastro req → task → verdict → ADR.
+- **`wendkeep verify --deep`:** assembles a verification package (`verificacao.json`) for an
+  independent pass. A trivial change (no `[req:]`, sensors green) gets an auto verdict.
+- **Independent verdict gate:** `change archive` now also requires `verdict.json` (`ok`, covering
+  every declared `[req:]`) for requirement-bearing changes.
+- **TLC-grade process skills:** rewrote `wk-tdd` (spec-derived assertions, non-shallow litmus,
+  test adequacy, test-learning) and `wk-brainstorming` (closure gate + out-of-scope); new
+  `wk-verify` (fresh read-only verifier, author≠verifier).
+- **Harness contract v1** (`docs/14-harness-contract.md`): the extension-point formats.
+
+### Changed
+- Requirement-less changes are unaffected — the sensor gate remains their proof. The verdict
+  requirement applies only when a change declares `[req:]` tasks. Specs from 0.4.0 (headings
+  without an ID) stay valid.
+
 ## [0.4.0] — 2026-07-05
 
 Spec promotion (the living contract) + harness fixes.
@@ -80,6 +103,7 @@ Initial release — the capture engine, extracted from a system in daily product
 - `wendkeep init` (cross-platform installer) + optional `@bitbonsai/mcpvault` MCP server.
 
 <!-- Only v0.4.0+ is tagged in git (history starts here); older versions link to npm. -->
+[0.5.0]: https://github.com/rogersialves/wendkeep/releases/tag/v0.5.0
 [0.4.0]: https://github.com/rogersialves/wendkeep/releases/tag/v0.4.0
 [0.3.0]: https://www.npmjs.com/package/wendkeep/v/0.3.0
 [0.2.7]: https://www.npmjs.com/package/wendkeep/v/0.2.7
