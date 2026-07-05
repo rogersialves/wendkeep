@@ -1,0 +1,45 @@
+{
+  "name": "wendkeep",
+  "version": "0.4.0",
+  "description": "Automatically capture AI coding agent sessions (Claude Code, Codex) as local Markdown in your Obsidian vault — turn-by-turn history, cost/token tracking, auto-extracted decisions/bugs/learnings, rendered in the graph. Local-first.",
+  "type": "module",
+  "bin": {
+    "wendkeep": "bin/wendkeep.mjs",
+    "wk": "bin/wendkeep.mjs"
+  },
+  "files": [
+    "bin",
+    "src",
+    "hooks",
+    "README.md",
+    "CHANGELOG.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "check": "node --check bin/wendkeep.mjs && node --check src/init.mjs && node --check src/doctor.mjs",
+    "test": "node --test"
+  },
+  "keywords": [
+    "claude-code",
+    "codex",
+    "obsidian",
+    "session-memory",
+    "ai-agent",
+    "markdown",
+    "local-first",
+    "knowledge-graph",
+    "token-cost"
+  ],
+  "author": "Roger Alves",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/rogersialves/wendkeep.git"
+  },
+  "homepage": "https://github.com/rogersialves/wendkeep#readme",
+  "bugs": {
+    "url": "https://github.com/rogersialves/wendkeep/issues"
+  }
+}

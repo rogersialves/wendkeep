@@ -1,0 +1,48 @@
+{
+  "_nota": "Preços API por milhão de tokens. cachedInput = cache read. Cache write aplica multiplicador no código: 5m = 1.25x input, 1h = 2x input. Editar aqui quando o provedor mudar preços (sem mexer no .mjs). Se o arquivo sumir ou ficar inválido, o hook usa a tabela embutida em token-usage.mjs.",
+  "_fonte": "Anthropic https://www.anthropic.com/pricing — conferido 2026-06-13 (Opus 4.8: $5 input / $25 output; cache read 0.1x; cache write 1.25x 5m / 2x 1h)",
+  "models": {
+    "gpt-5.5": {
+      "label": "GPT-5.5 API",
+      "provider": "openai",
+      "input": 5,
+      "cachedInput": 0.5,
+      "output": 30
+    },
+    "claude-opus-4.7": {
+      "label": "Claude Opus 4.7 API",
+      "provider": "anthropic",
+      "input": 5,
+      "cachedInput": 0.5,
+      "output": 25
+    },
+    "claude-opus-4.8": {
+      "label": "Claude Opus 4.8 API",
+      "provider": "anthropic",
+      "input": 5,
+      "cachedInput": 0.5,
+      "output": 25
+    },
+    "claude-sonnet-4.6": {
+      "label": "Claude Sonnet 4.6 API",
+      "provider": "anthropic",
+      "input": 3,
+      "cachedInput": 0.3,
+      "output": 15
+    },
+    "claude-haiku-4.5": {
+      "label": "Claude Haiku 4.5 API",
+      "provider": "anthropic",
+      "input": 1,
+      "cachedInput": 0.1,
+      "output": 5
+    },
+    "claude-fable-5": {
+      "label": "Claude Fable 5 API",
+      "provider": "anthropic",
+      "input": 10,
+      "cachedInput": 1,
+      "output": 50
+    }
+  }
+}

@@ -1,0 +1,536 @@
+#!/usr/bin/env node
+import { existsSync, readFileSync, readdirSync, writeFileSync } from 'fs';
+import { basename, join } from 'path';
+import {
+  monthFolderRelFromDateStr,
+  derivedContentKey,
+  ensureDir,
+  getNextAdrNumber,
+  keysBate,
+  providerMeta,
+  slugify,
+  toVaultRelative,
+  wikilinkFromRel,
+} from './obsidian-common.mjs';
+
+function yamlQuote(value) {
+  return `"${String(value || '').replaceAll('"', '\\"')}"`;
+}
+
+function uniqueTags(tags) {
+  return [...new Set(tags.filter(Boolean).map((tag) => slugify(tag, 'tag')))];
+}
+
+function assistantText(tx) {
+  return (tx.assistantMessages || []).join('\n');
+}
+
+function firstUserPrompt(tx) {
+  return (tx.userPrompts || [])[0] || tx.latestUserPrompt || '';
+}
+
+function normalizeInline(text, max = 0) {
+  const clean = String(text || '').replace(/\n/g, ' ').replace(/\s{2,}/g, ' ').trim();
+  return max && clean.length > max ? `${clean.slice(0, max).trim()}...` : clean;
+}
+
+function adrFileExistsBySlug(dir, slug) {
+  try {
+    return readdirSync(dir).find((file) => /^ADR-\d{3}-.+\.md$/i.test(file) && file.includes(`-${slug}`));
+  } catch {
+    return '';
+  }
+}
+
+function markdownList(items, fallback) {
+  return items.length ? items.map((item) => `- ${item}`).join('\n') : fallback;
+}
+
+function yamlTags(tags) {
+  return uniqueTags(tags).map((tag) => `  - ${tag}`).join('\n');
+}
+
+function sessionYamlLinks(sessionRel) {
+  const link = wikilinkFromRel(sessionRel);
+  return [
+    'source:',
+    `  - ${yamlQuote(link)}`,
+    'related:',
+    `  - ${yamlQuote(link)}`,
+  ].join('\n');
+}
+
+function extractIssueRefs(tx) {
+  const text = [
+    assistantText(tx),
+    firstUserPrompt(tx),
+    tx.rawTextForDetection || '',
+  ].join('\n');
+  return [...new Set((text.match(/\bNUT-\d+\b/gi) || []).map((ref) => ref.toUpperCase()))];
+}
+
+export function extractBugDetails(tx) {
+  const allContent = assistantText(tx);
+  const hasFixCommit = (tx.assistantMessages || []).some((message) => /git commit[^\"]*"fix\(/i.test(message));
+  const hasFixMention = /(?:commit|commitar)[\s:*]*`?fix\(/i.test(allContent);
+  const hasFixPattern = /\*\*Fix\s+\d+\s*[—–-]/i.test(allContent);
+  const hasRootCause = /\*?\*?(?:causa[- ]?raiz|root cause)\*?\*?\s*:/i.test(allContent);
+
+  if (!hasFixCommit && !(hasFixMention && hasRootCause) && !(hasFixPattern && hasRootCause)) return null;
+
+  let match;
+  let rootCause = '';
+  const rootCauses = [];
+  const rootCausePattern = /\*?\*?(?:causa[- ]?raiz|root cause)\*?\*?[:\s]+(.{30,500}?)(?:\.\s|\n\n|\n\*\*|$)/gim;
+  while ((match = rootCausePattern.exec(allContent)) !== null) {
+    const text = normalizeInline(match[1]);
+    if (text.length > 20) rootCauses.push(text);
+  }
+  if (rootCauses.length > 0) rootCause = rootCauses.sort((a, b) => b.length - a.length)[0];
+
+  const bugPrompt = (tx.userPrompts || []).find((prompt) =>
+    /NUT-\d+|bug|erro|problema|não funciona|falha|corrigir|fix\b/i.test(prompt)
+  );
+  const symptom = bugPrompt ? normalizeInline(bugPrompt, 300) : '';
+
+  const fixes = [];
+  const fixPattern = /\*\*Fix\s+\d+\s*[—–-]\s*(\w+)\*\*[^:]*:\s*(.{20,300}?)(?:\.\s|\n\n|$)/gim;
+  while ((match = fixPattern.exec(allContent)) !== null) {
+    fixes.push(`**${match[1]}:** ${normalizeInline(match[2])}`);
+  }
+
+  for (const message of tx.assistantMessages || []) {
+    const commits = message.match(/git commit[^\"]*"(fix\([^\"]+)"/gi);
+    if (!commits) continue;
+    for (const commit of commits) {
+      const commitMatch = commit.match(/"(fix\([^\"]+)"/i);
+      if (commitMatch) fixes.push(`Commit: \`${commitMatch[1]}\``);
+    }
+  }
+
+  const correctionPattern = /(?:corre[çc][ãa]o|a\s+corre[çc][ãa]o\s+(?:foi|é))\s*[:\s]+(.{20,300}?)(?:\n\n|$)/gim;
+  while ((match = correctionPattern.exec(allContent)) !== null) {
+    const text = normalizeInline(match[1]);
+    if (!fixes.some((fix) => fix.includes(text.slice(0, 30)))) fixes.push(text);
+  }
+
+  const fileSet = new Set();
+  for (const file of [...(tx.changedFiles || []), ...(tx.editedFiles || [])]) {
+    const rel = String(file).replace(/^.*?(?=backend-core|mobile-app|ngv-admin|vision-|\.\.)/i, '');
+    if (rel) fileSet.add(rel);
+  }
+  const pathPattern = /`((?:backend-core|mobile-app|ngv-admin-api|vision-food|vision-gym|\.?\.?\/?)[^\s`]+\.(?:py|ts|tsx|js|jsx|sql|md|mjs))`/g;
+  while ((match = pathPattern.exec(allContent)) !== null) fileSet.add(match[1]);
+
+  const evidence = [];
+  const testMatch = allContent.match(/(\d+)\s+(?:passed|tests?\s+pass)/i);
+  const failMatch = allContent.match(/(\d+)\s+(?:failures?|failed)/i);
+  if (testMatch) evidence.push(`Testes: ${testMatch[1]} passed, ${failMatch ? failMatch[1] : '0'} failures`);
+  if (/deploy\s+(?:concluído|realizado|com\s+sucesso)/i.test(allContent)) evidence.push('Deploy realizado com sucesso');
+  const migrationMatch = allContent.match(/(?:migra[çc][ãa]o|alembic\s+upgrade)\s+(\S+)/i);
+  if (migrationMatch) evidence.push(`Migração aplicada: ${migrationMatch[1]}`);
+  const httpMatch = allContent.match(/(?:status|HTTP|health)[:\s]*(\d{3})\s*(?:OK)?/i);
+  if (httpMatch) evidence.push(`HTTP ${httpMatch[1]} OK`);
+
+  let lessons = '';
+  const lessonMatch = allContent.match(/(?:li[çc][ãa]o|aprendizado|lesson|sempre)\s*(?:aprendida|learned)?[:\s]+(.{20,300}?)(?:\.\s|\n\n|$)/i);
+  if (lessonMatch) lessons = normalizeInline(lessonMatch[1]);
+
+  const lc = allContent.toLowerCase();
+  let severity = 'média';
+  if (/produ[çc][ãa]o|vps|deploy|billing|payment|data.?loss|race.?condition|security/.test(lc)) severity = 'alta';
+  else if (/ui|visual|layout|estilo|css|\bcor\b/.test(lc)) severity = 'baixa';
+
+  const tags = ['bug', 'codex', 'obsidian'];
+  if (/stripe|billing|payment|subscription/i.test(lc)) tags.push('stripe', 'billing');
+  if (/celery|worker|task|queue/i.test(lc)) tags.push('celery');
+  if (/alembic|migra[çc]|database|postgres/i.test(lc)) tags.push('database');
+  if (/react.?native|expo|mobile/i.test(lc)) tags.push('mobile');
+  if (/fastapi|backend|endpoint|api/i.test(lc)) tags.push('backend');
+  if (/race.?condition|concurrent|deadlock/i.test(lc)) tags.push('concurrency');
+
+  return {
+    symptom,
+    rootCause: rootCause || '_Causa raiz não identificada automaticamente._',
+    fixes,
+    changedFiles: [...fileSet].sort(),
+    evidence,
+    lessons: lessons || '_Revisar e complementar._',
+    severity,
+    tags: uniqueTags(tags),
+  };
+}
+
+export function buildBugNoteContent(bug, issueRef, dateStr, sessionRel, provider = providerMeta(), contentKey = derivedContentKey(bug.rootCause)) {
+  const title = issueRef
+    ? `${issueRef} - ${normalizeInline(bug.rootCause, 80)}`
+    : normalizeInline(bug.rootCause, 80);
+
+  return `---
+type: bug
+date: ${dateStr}
+status: fixed
+provider: ${provider.id}
+content_key: "${contentKey}"
+${sessionYamlLinks(sessionRel)}
+cssclasses:
+  - topic-bug
+tags:
+${yamlTags(bug.tags.map((tag) => (tag === 'codex' ? provider.tag : tag)))}
+severity: ${yamlQuote(bug.severity)}
+issue: ${yamlQuote(issueRef || '')}
+---
+
+# Bug - ${title}
+
+> [!note] Auto-gerada
+> Nota criada automaticamente pelo hook Stop do ${provider.label}.
+> Sessão: ${wikilinkFromRel(sessionRel)}
+
+## Sintoma
+
+${bug.symptom || '_Extraído da sessão — verificar._'}
+
+## Causa raiz
+
+${bug.rootCause}
+
+## Correção
+
+${markdownList(bug.fixes, '_Nenhuma correção explícita detectada._')}
+
+## Arquivos alterados
+
+${markdownList(bug.changedFiles.map((file) => `\`${file}\``), '_Ver sessão vinculada._')}
+
+## Evidência
+
+${markdownList(bug.evidence, '_Adicionar evidência empírica._')}
+
+## Lições aprendidas
+
+${bug.lessons}
+`;
+}
+
+export function extractDecisionDetails(tx) {
+  const allContent = assistantText(tx);
+  const lc = allContent.toLowerCase();
+  const metaSignals = [
+    /\bextract\w*Details\b/,
+    /\bcreateLinkedNotes\b/,
+    /\bbuildDecisionNoteContent\b/,
+    /\bgetNextAdrNumber\b/,
+    /\bsession-stop\.mjs\b/,
+    /hasDecisionKeyword|hasAlternatives|hasArchCommit/,
+  ];
+  if (metaSignals.filter((rx) => rx.test(allContent)).length >= 2) return null;
+
+  // Registro DELIBERADO: linha com rótulo `Decisão:`/`ADR:` (opcional negrito/
+  // heading). A palavra "decisão"/"decidimos"/"adotar" solta em prosa do
+  // assistente NÃO conta — senão fragmentos de conversa viram ADRs no Vault.
+  const hasDecisionKeyword = /(?:^|\n)\s*(?:#{1,6}\s*|[-*]\s*)?\*{0,2}\s*(?:decis[ãa]o(?:\s+t[ée]cnica|\s+de\s+arquitetura)?|ADR(?:-\d+)?)\s*\*{0,2}\s*:/im.test(allContent);
+  const hasAlternatives = /\b(?:alternativ|em\s+vez\s+de|ao\s+inv[eé]s\s+de|consideramos|op[çc][ãa]o\s+[A-C]|descartamos)\b/i.test(allContent);
+  const hasArchCommit = (tx.assistantMessages || []).some((message) =>
+    /git commit[^\"]*"(?:refactor|chore|feat)\([^\"]*(?:arch|pattern|convention|design|theme|stack)/i.test(message)
+  );
+
+  if (!hasDecisionKeyword && !(hasAlternatives && hasArchCommit)) return null;
+
+  const isMetaText = (text) => {
+    if (/[\"']{2,}|[(\[]\?[:!]|\\[bdsw]|\|\||\b(?:const|function|import|return|=>)\b/i.test(text)) return true;
+    if ((String(text).match(/[\"'][^\"']+[\"']/g) || []).length >= 3) return true;
+    return /extract\w+Details|buildDecisionNote|createLinkedNotes|session-stop/i.test(text);
+  };
+
+  const matches = [];
+  let match;
+  const decisionPattern = /(?:^|\n)\s*(?:#{1,6}\s*|[-*]\s*)?\*{0,2}\s*(?:decis[ãa]o(?:\s+t[ée]cnica|\s+de\s+arquitetura)?|ADR(?:-\d+)?)\s*\*{0,2}\s*:\s*\*{0,2}\s*(.{10,500}?)(?:\.\s|\n|$)/gim;
+  while ((match = decisionPattern.exec(allContent)) !== null) matches.push(normalizeInline(match[1]));
+
+  if (matches.length === 0 && !hasArchCommit) return null;
+
+  const cleanMatches = matches.filter((item) => !isMetaText(item));
+  let title = '';
+  let detail = '';
+  if (cleanMatches.length > 0) {
+    const best = cleanMatches.sort((a, b) => b.length - a.length)[0];
+    detail = best;
+    title = best.slice(0, 80);
+  } else if (hasArchCommit) {
+    for (const message of tx.assistantMessages || []) {
+      const commitMatch = message.match(/git commit[^\"]*"((?:refactor|feat|chore)\([^\"]+)"/i);
+      if (commitMatch) {
+        title = commitMatch[1];
+        detail = commitMatch[1];
+        break;
+      }
+    }
+  }
+
+  if (!title || isMetaText(title)) return null;
+
+  const contextMatch = allContent.match(/\*?\*?contexto\*?\*?\s*[:\s]+(.{20,500}?)(?:\n\n|\n\*\*|$)/i);
+  const context = contextMatch && !isMetaText(contextMatch[1])
+    ? normalizeInline(contextMatch[1])
+    : normalizeInline(firstUserPrompt(tx), 300);
+
+  const consequencesMatch = allContent.match(/\*?\*?consequ[êe]ncia\*?\*?s?\s*[:\s]+(.{20,500}?)(?:\n\n|\n##|$)/i);
+  const consequences = consequencesMatch && !isMetaText(consequencesMatch[1])
+    ? normalizeInline(consequencesMatch[1])
+    : '_Avaliar impacto._';
+
+  const alternatives = [];
+  const alternativesPattern = /\b(?:alternativ\w*|op[çc][ãa]\s+[A-C]|consideramos|descartamos)\b[:\s]+(.{10,300}?)(?:\.\s|\n|$)/gim;
+  while ((match = alternativesPattern.exec(allContent)) !== null) {
+    const text = normalizeInline(match[1]);
+    if (text.length > 10 && !isMetaText(text)) alternatives.push(text);
+  }
+
+  const tags = ['decisao', 'arquitetura', 'codex'];
+  const domainTags = [];
+  if (/backend|fastapi|python/i.test(lc) && !/\bbackend.specialist\b/i.test(lc)) domainTags.push('backend');
+  if (/mobile|react.?native|expo/i.test(lc)) domainTags.push('mobile');
+  if (/database|postgres|alembic|migra/i.test(lc)) domainTags.push('database');
+  if (/docker|infra|deploy/i.test(lc)) domainTags.push('infra');
+  if (/\btema\b|theme|design.?system/i.test(lc)) domainTags.push('design');
+  if (/\btest\b|jest|pytest/i.test(lc) && !/test-linked-notes/i.test(lc)) domainTags.push('testes');
+  if (domainTags.length >= 5) return null;
+  tags.push(...domainTags);
+
+  return {
+    title,
+    detail,
+    context,
+    consequences,
+    alternatives,
+    tags: uniqueTags(tags),
+  };
+}
+
+export function buildDecisionNoteContent(decision, adrNum, dateStr, sessionRel, provider = providerMeta(), contentKey = derivedContentKey(decision.title)) {
+  const adrId = `ADR-${String(adrNum).padStart(3, '0')}`;
+  return `---
+type: decision
+date: ${dateStr}
+status: accepted
+provider: ${provider.id}
+content_key: "${contentKey}"
+${sessionYamlLinks(sessionRel)}
+cssclasses:
+  - topic-decision
+tags:
+${yamlTags(decision.tags.map((tag) => (tag === 'codex' ? provider.tag : tag)))}
+superseded_by: ""
+---
+
+# ${adrId} - ${decision.title}
+
+> [!note] Auto-gerada
+> Nota criada automaticamente pelo hook Stop do ${provider.label}.
+> Sessão: ${wikilinkFromRel(sessionRel)}
+
+## Contexto
+
+${decision.context || '_Extraído da sessão — complementar._'}
+
+## Decisão
+
+${decision.detail}
+
+## Consequências
+
+${decision.consequences}
+
+## Alternativas consideradas
+
+${markdownList(decision.alternatives, '_Nenhuma alternativa registrada automaticamente._')}
+`;
+}
+
+export function extractLearningDetails(tx, bugDetails) {
+  const allContent = assistantText(tx);
+  const learnings = [];
+  const seen = new Set();
+  let match;
+
+  const fixPattern = /\*\*Fix\s+\d+\s*[—–-]\s*(\w+)\*\*[^:]*:\s*(.{20,500}?)(?:\n\n|\n\*\*|$)/gim;
+  while ((match = fixPattern.exec(allContent)) !== null) {
+    const scope = match[1];
+    const detail = normalizeInline(match[2]);
+    const key = detail.toLowerCase().slice(0, 60);
+    if (!seen.has(key)) {
+      seen.add(key);
+      learnings.push({
+        title: `${scope}: ${detail.slice(0, 60)}`,
+        context: bugDetails?.symptom || normalizeInline(firstUserPrompt(tx), 200),
+        content: detail,
+        tags: ['aprendizado', 'codex', scope.toLowerCase()],
+      });
+    }
+  }
+
+  // Só registro DELIBERADO conta: linha com rótulo `Aprendizado:`/`Lição:`/`TIL:`
+  // (opcional negrito/heading). Frases conversacionais soltas ("a solução foi…",
+  // "descobrimos que…", "importante:…") NÃO viram nota — senão prosa do
+  // assistente vira aprendizado-lixo e ressuscita a cada Stop.
+  const lessonPatterns = [
+    /(?:^|\n)\s*(?:#{1,6}\s*|[-*]\s*)?\*{0,2}\s*(?:li[çc][ãa]o(?:\s+aprendida)?|aprendizado|lesson(?:\s+learned)?|TIL)\s*\*{0,2}\s*:\s*\*{0,2}\s*(.{15,500}?)(?:\n|$)/gim,
+  ];
+  for (const pattern of lessonPatterns) {
+    while ((match = pattern.exec(allContent)) !== null) {
+      const detail = normalizeInline(match[1]);
+      const key = detail.toLowerCase().slice(0, 60);
+      if (detail.length > 15 && !seen.has(key)) {
+        seen.add(key);
+        learnings.push({
+          title: detail.slice(0, 80),
+          context: normalizeInline(firstUserPrompt(tx), 200),
+          content: detail,
+          tags: ['aprendizado', 'codex'],
+        });
+      }
+    }
+  }
+
+  if (bugDetails?.rootCause && !bugDetails.rootCause.startsWith('_')) {
+    const key = bugDetails.rootCause.toLowerCase().slice(0, 60);
+    if (!seen.has(key)) {
+      seen.add(key);
+      learnings.push({
+        title: `Debugging: ${bugDetails.rootCause.slice(0, 60)}`,
+        context: bugDetails.symptom || '',
+        content: `**Causa raiz identificada:** ${bugDetails.rootCause}\n\n**Lição:** ${bugDetails.lessons}`,
+        tags: ['aprendizado', 'codex', 'debugging'],
+      });
+    }
+  }
+
+  // Sem fallback genérico: sessão que só mexeu em arquivos, sem registro
+  // deliberado (`Aprendizado:`/`Lição:`), NÃO vira nota — complemento é manual
+  // (regra do Vault). Evita aprendizado-lixo + ressurreição a cada Stop.
+  return learnings.length ? learnings.slice(0, 5) : null;
+}
+
+export function buildLearningNoteContent(learning, dateStr, sessionRel, provider = providerMeta(), contentKey = derivedContentKey(learning.title)) {
+  return `---
+type: learning
+date: ${dateStr}
+status: active
+provider: ${provider.id}
+content_key: "${contentKey}"
+${sessionYamlLinks(sessionRel)}
+cssclasses:
+  - topic-learning
+tags:
+${yamlTags(learning.tags.map((tag) => (tag === 'codex' ? provider.tag : tag)))}
+---
+
+# Aprendizado - ${learning.title}
+
+> [!note] Auto-gerada
+> Nota criada automaticamente pelo hook Stop do ${provider.label}.
+> Sessão: ${wikilinkFromRel(sessionRel)}
+
+## Contexto
+
+${learning.context || '_Extraído da sessão — complementar._'}
+
+## O que aprendemos
+
+${learning.content}
+
+## Como aplicar no futuro
+
+_Registrar como este conhecimento pode ser reutilizado._
+`;
+}
+
+const DERIVED_FOLDERS = { bugs: '05-Bugs', decisions: '04-Decisões', learnings: '06-Aprendizados' };
+
+function listMd(dir) {
+  try { return readdirSync(dir).filter((f) => f.endsWith('.md')); } catch { return []; }
+}
+
+// Chaves content_key das derivadas já existentes que linkam esta sessão.
+function existingKeysForSession(vaultBase, sessionRel, dateStr) {
+  const wikilink = wikilinkFromRel(sessionRel);
+  const out = { bugs: [], decisions: [], learnings: [] };
+  for (const [type, folder] of Object.entries(DERIVED_FOLDERS)) {
+    const dir = join(vaultBase, monthFolderRelFromDateStr(folder, dateStr));
+    for (const fileName of listMd(dir)) {
+      try {
+        const c = readFileSync(join(dir, fileName), 'utf-8');
+        if (!c.includes(sessionRel) && !c.includes(wikilink)) continue;
+        const m = c.match(/^content_key:\s*"?(.*?)"?\s*$/m);
+        if (m && m[1]) out[type].push(m[1]);
+      } catch { /* ignora nota ilegível */ }
+    }
+  }
+  return out;
+}
+
+function alreadyHasKey(keys, candidate) {
+  return !!candidate && keys.some((k) => keysBate(k, candidate));
+}
+
+export function createLinkedNotes(vaultBase, dateStr, sessionRel, tx, options = {}) {
+  const linked = { decisions: [], bugs: [], learnings: [] };
+  const provider = providerMeta(options.provider);
+  const bugsDir = join(vaultBase, monthFolderRelFromDateStr('05-Bugs', dateStr));
+  const decisionsDir = join(vaultBase, monthFolderRelFromDateStr('04-Decisões', dateStr));
+  const learningsDir = join(vaultBase, monthFolderRelFromDateStr('06-Aprendizados', dateStr));
+  ensureDir(bugsDir);
+  ensureDir(decisionsDir);
+  ensureDir(learningsDir);
+
+  const existingKeys = existingKeysForSession(vaultBase, sessionRel, dateStr);
+
+  const issueRefs = options.issueRefs?.length ? options.issueRefs : extractIssueRefs(tx);
+  const bugDetails = extractBugDetails(tx);
+  if (bugDetails) {
+    const issueRef = issueRefs[0] || '';
+    const bugKey = derivedContentKey(bugDetails.rootCause);
+    if (!alreadyHasKey(existingKeys.bugs, bugKey)) {
+      const causeSlug = slugify(bugDetails.rootCause.slice(0, 40), 'bug');
+      const fileName = issueRef ? `${issueRef}-${causeSlug}.md` : `${dateStr}-bug-${causeSlug}.md`;
+      const filePath = join(bugsDir, fileName);
+      if (!existsSync(filePath)) writeFileSync(filePath, buildBugNoteContent(bugDetails, issueRef, dateStr, sessionRel, provider, bugKey), 'utf-8');
+      linked.bugs.push(toVaultRelative(vaultBase, filePath));
+      existingKeys.bugs.push(bugKey);
+    }
+  }
+
+  const decisionDetails = extractDecisionDetails(tx);
+  if (decisionDetails) {
+    const decisionKey = derivedContentKey(decisionDetails.title);
+    if (!alreadyHasKey(existingKeys.decisions, decisionKey)) {
+      const titleSlug = slugify(decisionDetails.title.slice(0, 40), 'decisao');
+      const existing = adrFileExistsBySlug(decisionsDir, titleSlug);
+      const fileName = existing || `ADR-${String(getNextAdrNumber(vaultBase)).padStart(3, '0')}-${titleSlug}.md`;
+      const filePath = join(decisionsDir, fileName);
+      if (!existsSync(filePath)) {
+        const adrNum = Number(fileName.match(/^ADR-(\d+)/i)?.[1]) || getNextAdrNumber(vaultBase);
+        writeFileSync(filePath, buildDecisionNoteContent(decisionDetails, adrNum, dateStr, sessionRel, provider, decisionKey), 'utf-8');
+      }
+      linked.decisions.push(toVaultRelative(vaultBase, filePath));
+      existingKeys.decisions.push(decisionKey);
+    }
+  }
+
+  const learnings = extractLearningDetails(tx, bugDetails);
+  if (learnings) {
+    for (const learning of learnings) {
+      const learningKey = derivedContentKey(learning.title);
+      if (alreadyHasKey(existingKeys.learnings, learningKey)) continue;
+      const learningSlug = slugify(learning.title.slice(0, 40), 'aprendizado');
+      const fileName = `${dateStr}-${learningSlug}.md`;
+      const filePath = join(learningsDir, fileName);
+      if (!existsSync(filePath)) writeFileSync(filePath, buildLearningNoteContent(learning, dateStr, sessionRel, provider, learningKey), 'utf-8');
+      linked.learnings.push(toVaultRelative(vaultBase, filePath));
+      existingKeys.learnings.push(learningKey);
+    }
+  }
+
+  return linked;
+}

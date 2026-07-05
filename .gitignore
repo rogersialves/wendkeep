@@ -1,0 +1,24 @@
+# Dependencies (wendkeep is zero-dependency; this is only for local tooling)
+node_modules/
+
+# Logs / OS cruft
+*.log
+npm-debug.log*
+.DS_Store
+Thumbs.db
+
+# Test / build artifacts
+coverage/
+*.tgz
+.tmp/
+tmp/
+
+# Local Obsidian vaults created by `wendkeep init` and the test suite
+.*-vault/
+
+# Stray scrape data from another project — NOT part of wendkeep
+.firecrawl/
+
+# Editors
+.vscode/
+.idea/
