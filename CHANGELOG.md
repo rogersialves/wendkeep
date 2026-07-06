@@ -4,6 +4,17 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.14.0] — 2026-07-06
+
+### Changed
+- **dotcontext is no longer a default companion.** wendkeep's native a2 loop (`change` /
+  `verify` / gate) recreates dotcontext's execution/gate role, so pinning it duplicates the
+  harness. The interactive / `--yes` default is now **`context-mode` only**; dotcontext stays
+  selectable via `--companions dotcontext` for anyone already invested.
+- **README:** rewrote "Install & set up" with a clear **`init` options table** and a
+  per-companion breakdown; clarified that `--no-mcp` skips **only wendkeep's own** vault MCP
+  (companion MCPs still follow `--companions`).
+
 ## [0.13.0] — 2026-07-06
 
 Cost intelligence: waste + average.
@@ -272,6 +283,7 @@ Initial release — the capture engine, extracted from a system in daily product
 - `wendkeep init` (cross-platform installer) + optional `@bitbonsai/mcpvault` MCP server.
 
 <!-- Only v0.4.0+ is tagged in git (history starts here); older versions link to npm. -->
+[0.14.0]: https://github.com/rogersialves/wendkeep/releases/tag/v0.14.0
 [0.13.0]: https://github.com/rogersialves/wendkeep/releases/tag/v0.13.0
 [0.12.0]: https://github.com/rogersialves/wendkeep/releases/tag/v0.12.0
 [0.11.0]: https://github.com/rogersialves/wendkeep/releases/tag/v0.11.0

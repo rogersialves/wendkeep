@@ -124,8 +124,11 @@ export const COMPANIONS = [
   },
   {
     id: 'dotcontext',
-    label: 'dotcontext — orquestração de execução (PREVC + sensores + gate E→V)',
-    default: true,
+    // Legacy: wendkeep's native a2 loop (change/verify/gate) recreates dotcontext's role,
+    // so it is no longer recommended — installing it would duplicate the native harness.
+    // Kept selectable for anyone already invested in it; not a default.
+    label: 'dotcontext — legado (o loop a2 nativo do wendkeep substitui; não recomendado)',
+    default: false,
     // MCP-only (no Claude Code plugin). Agent-agnostic server, @latest surface.
     mcp: { key: 'dotcontext', entry: { type: 'stdio', command: 'npx', args: ['-y', '@dotcontext/mcp@latest'], env: {} } },
     // Lifecycle hooks via the pinned CLI; wired by wendkeep (single writer).

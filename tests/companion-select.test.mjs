@@ -22,7 +22,7 @@ test('initialCompanionMenu: defaults are pre-checked, cursor at top', () => {
   const s = initialCompanionMenu(COMPANIONS);
   assert.equal(s.cursor, 0);
   const checked = s.items.filter((i) => i.checked).map((i) => i.id);
-  assert.deepEqual(checked, ['context-mode', 'dotcontext']);
+  assert.deepEqual(checked, ['context-mode']);
 });
 
 test('reduceCompanionMenu: up/down move the cursor and wrap', () => {
@@ -50,7 +50,7 @@ test('reduceCompanionMenu: all/none check or clear everything', () => {
 test('reduceCompanionMenu: enter finishes with selected ids in registry order', () => {
   const done = reduceCompanionMenu(initialCompanionMenu(COMPANIONS), 'enter');
   assert.equal(done.done, true);
-  assert.deepEqual(done.selected, ['context-mode', 'dotcontext']);
+  assert.deepEqual(done.selected, ['context-mode']);
   const all = reduceCompanionMenu(reduceCompanionMenu(initialCompanionMenu(COMPANIONS), 'all'), 'enter');
   assert.deepEqual(all.selected, COMPANIONS.map((c) => c.id));
 });

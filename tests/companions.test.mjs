@@ -14,16 +14,18 @@ import {
   dotcontextHookCommand,
 } from '../src/taxonomy.mjs';
 
-test('COMPANIONS: context-mode and dotcontext are pre-checked defaults; others are not', () => {
+test('COMPANIONS: only context-mode is a pre-checked default (dotcontext de-recommended)', () => {
   const byId = Object.fromEntries(COMPANIONS.map((c) => [c.id, c]));
   assert.equal(byId['context-mode'].default, true);
-  assert.equal(byId['dotcontext'].default, true);
+  assert.equal(byId['dotcontext'].default, false); // legacy — the native a2 loop replaces it
   assert.equal(byId['caveman'].default, false);
   assert.equal(byId['understand-anything'].default, false);
 });
 
-test('resolveCompanions: non-interactive defaults are context-mode + dotcontext', () => {
-  assert.deepEqual(resolveCompanions({}), ['context-mode', 'dotcontext']);
+test('resolveCompanions: non-interactive default is context-mode only', () => {
+  assert.deepEqual(resolveCompanions({}), ['context-mode']);
+  // dotcontext still selectable when explicitly asked
+  assert.deepEqual(resolveCompanions({ companionsFlag: 'dotcontext' }), ['dotcontext']);
 });
 
 test('resolveCompanions: --no-companions yields none', () => {
