@@ -95,11 +95,26 @@ No re‑copying, no snapshot to re‑sync — the package is the single source o
 | `wendkeep spec <sub>` | Living specs: `list` / `show <capability>`. |
 | `wendkeep sensors <sub>` | `list` / `add <id> "<command>"` — view/edit `wendkeep.sensors.json` (JSON Schema shipped). |
 | `wendkeep cost [--since d]` | Aggregate AI-coding spend across the vault's sessions — total, by model, by day (`--json`). |
+| `wendkeep import [opts]` | **Retroactive memory** — backfill past Claude sessions into the vault (deduped by `session_id`). `--from <dir>` / `--since d` / `--limit n` / `--dry-run` / `--json`. |
 | `wendkeep lesson add "t" "l"` | Record a project-local lesson (injected at the next SessionStart). |
 | `wendkeep sync-defs` | Copy `.brain/agents\|skills` into the project (`.codex/agents`, `.claude/skills`). |
 | `wendkeep validate-memory [path]` | Validate `.brain/CORE.md` (cap 25, 3 sections, no secrets/PII). |
 | `wendkeep doctor [--vault P]` | Run a vault health check (integrity of sessions, registry, links). |
 | `wendkeep --version` / `--help` | Version / usage. |
+
+## Retroactive memory (`import`)
+
+Install wendkeep into an existing project and it only remembers sessions **from now on**. `wendkeep import` fixes that: it reads the project's past Claude Code transcripts (`~/.claude/projects/<slug>/*.jsonl`) and rebuilds each one as a full session note in its **real** date folder — frontmatter, one iteration block per turn, cost + subagent telemetry, derived decision/bug/learning notes, finalized closing. It is an offline replay of the live capture flow, so an imported note is indistinguishable from a captured one.
+
+```bash
+wendkeep import --vault .myproject-vault --dry-run   # preview what would be imported
+wendkeep import --vault .myproject-vault             # write the notes
+```
+
+- **Deduped** by `session_id` against the vault's `SESSION_REGISTRY` — only sessions not already present are imported, and it never overwrites an existing note. Re-running is a no-op.
+- **`--from <dir>`** points at the `.claude/projects/<slug>/` folder explicitly (use it if the auto-derived path misses). Also: `--since <date>`, `--limit <n>`, `--json`.
+- Once imported, `wendkeep cost` aggregates your entire history — retroactively.
+- v1 covers Claude Code; Codex import is a follow-up.
 
 ## Change lifecycle — the a2 loop (spec‑driven, native)
 

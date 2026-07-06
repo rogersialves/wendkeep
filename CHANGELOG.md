@@ -4,6 +4,31 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.0] — 2026-07-06
+
+Retroactive memory.
+
+### Added
+- **`wendkeep import`** — backfill the vault with this project's *past* Claude Code sessions.
+  It scans `.claude/projects/<slug>/*.jsonl`, and for every session not already in the vault
+  (deduped by `session_id` against the `SESSION_REGISTRY`) reconstructs a full, dated session
+  note — frontmatter, one iteration block per turn, cost + subagent telemetry, derived
+  decision/bug/learning notes, and a finalized closing — placed in its **real** date folder
+  (`02-Sessões/<year>/<MM-MMM>/DIA <dd>/`), not today's. One command turns your whole history
+  into memory that `wendkeep cost` immediately aggregates.
+  - Offline replay of the live capture flow (same `buildSessionContent` / `insertIteration` /
+    `finalizeSessionFile` / usage + subagent code) so an imported note is indistinguishable
+    from a captured one.
+  - Options: `--from <dir>` (point at the `.claude/projects` folder explicitly), `--project`,
+    `--since <date>`, `--limit <n>`, `--dry-run` (report without writing), `--json`.
+  - Idempotent: re-running skips everything already imported. Never overwrites an existing note.
+  - v1 covers Claude Code transcripts; Codex is a follow-up.
+
+### Changed
+- `session-start.mjs` now guards its `main()` behind the standard `import.meta.url` check (like
+  `session-stop.mjs`) so its note-building helpers can be imported by `import`/tests without
+  running the hook. No behavioral change when invoked as a hook.
+
 ## [0.15.0] — 2026-07-06
 
 ### Added

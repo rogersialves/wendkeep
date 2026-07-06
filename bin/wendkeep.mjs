@@ -48,6 +48,7 @@ Usage:
   wendkeep spec <sub>          Living specs: list | show <capability>.
   wendkeep sensors <sub>       list | add <id> "<command>" [--severity --type --report].
   wendkeep cost [opts]         Aggregate AI-coding spend across the vault's sessions.
+  wendkeep import [opts]       Backfill: import this project's past Claude sessions into the vault.
                            --since <date> · --top [N] (priciest sessions) · --json.
   wendkeep verify [--change s] Run a change's task sensors + record evidence (the gate).
   wendkeep lesson add "t" "l"   Record a project-local lesson (injected at SessionStart).
@@ -135,6 +136,11 @@ async function main() {
     case 'cost': {
       const { runCost } = await import('../src/cost.mjs');
       runCost(rest);
+      break;
+    }
+    case 'import': {
+      const { runImportCli } = await import('../src/import.mjs');
+      runImportCli(rest);
       break;
     }
     case '--version':

@@ -43,6 +43,7 @@ export const HOOK_FILES = [
   'brain-recall.mjs',
   'brain-reindex.mjs',
   'session-backfill.mjs',
+  'import-sessions.mjs',
   'vault-health.mjs',
   'understand-inject.mjs',
 ];

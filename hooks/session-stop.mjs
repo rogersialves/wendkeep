@@ -781,7 +781,7 @@ function noteReferencesSession(content, sessionRel) {
   return content.includes(sessionRel) || content.includes(sessionLink);
 }
 
-function findLinkedDerivedNotes(vaultBase, sessionRel) {
+export function findLinkedDerivedNotes(vaultBase, sessionRel) {
   const linked = { decisions: [], bugs: [], learnings: [] };
   const locF = getLocale(vaultBase).folders;
   const folders = {
@@ -808,7 +808,7 @@ function findLinkedDerivedNotes(vaultBase, sessionRel) {
   return linked;
 }
 
-function mergeCreatedNotes(created, linked) {
+export function mergeCreatedNotes(created, linked) {
   const merged = { decisions: [], bugs: [], learnings: [] };
   for (const key of Object.keys(merged)) {
     merged[key] = [...new Set([...(created[key] || []), ...(linked[key] || [])])];
@@ -861,7 +861,7 @@ function replaceClosingSection(content, closing) {
   return `${content.slice(0, index).trimEnd()}\n\n${closing}\n`;
 }
 
-function finalizeSessionFile(sessionPath, tx, created, endedAt) {
+export function finalizeSessionFile(sessionPath, tx, created, endedAt) {
   const pending = extractPending(tx.rawTextForDetection);
   const links = (items) => items.length ? items.map((rel) => `  - ${wikilinkFromRel(rel)}`).join('\n') : '  - Nenhuma';
   const summary = tx.latestAssistantMessage

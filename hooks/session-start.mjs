@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { existsSync, writeFileSync } from 'fs';
 import { basename, join } from 'path';
+import { pathToFileURL } from 'url';
 import {
   controlPath,
   ensureDir,
@@ -30,7 +31,7 @@ import {
   yamlQuote,
 } from './obsidian-common.mjs';
 
-function buildSessionContent({ relPath, now, summary = 'session' }) {
+export function buildSessionContent({ relPath, now, summary = 'session' }) {
   const date = formatDate(now);
   const startedAt = formatLocalIso(now);
   const titleTime = formatTime(now).slice(0, 5);
@@ -112,7 +113,7 @@ Sessão ainda em andamento.
 `;
 }
 
-function allocateSessionPath(vaultBase, now, summary = 'session') {
+export function allocateSessionPath(vaultBase, now, summary = 'session') {
   const folderRel = sessionFolderRel(now, vaultBase);
   const folderAbs = join(vaultBase, folderRel);
   ensureDir(folderAbs);
@@ -301,11 +302,13 @@ function main() {
   });
 }
 
-try {
-  main();
-} catch (error) {
-  process.stderr.write(`[codex-obsidian] SessionStart falhou: ${error.message}\n`);
-  writeHookOutput({
-    systemMessage: `[codex-obsidian] Não foi possível criar a sessão Obsidian: ${error.message}`,
-  });
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  try {
+    main();
+  } catch (error) {
+    process.stderr.write(`[codex-obsidian] SessionStart falhou: ${error.message}\n`);
+    writeHookOutput({
+      systemMessage: `[codex-obsidian] Não foi possível criar a sessão Obsidian: ${error.message}`,
+    });
+  }
 }
