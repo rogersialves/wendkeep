@@ -78,6 +78,10 @@ export const MCP_SERVER_KEY = 'wendkeep-vault';
 // installed package is the single source of truth (update with `npm update wendkeep`,
 // no re-copying). Returned as a spec the merge logic folds into settings.json.
 export const SESSION_HOOKS = [
+  // Memory + active-change injection. Runs FIRST on SessionStart (order -10, folds before
+  // session-start) so the agent gets CORE + DIGEST + the active change + lessons as context.
+  // matcher 'startup|clear|compact' re-injects after a compaction/clear, not only cold startup.
+  { event: 'SessionStart', matcher: 'startup|clear|compact', name: 'brain-inject', timeout: 15, order: -10, statusMessage: 'wendkeep: injecting memory + active change' },
   { event: 'SessionStart', matcher: 'startup', name: 'session-start', timeout: 30, statusMessage: 'wendkeep: opening Obsidian session' },
   { event: 'Stop', matcher: null, name: 'session-stop', timeout: 60, statusMessage: 'wendkeep: writing session checkpoint' },
   { event: 'UserPromptSubmit', matcher: null, name: 'session-ensure', timeout: 30, statusMessage: 'wendkeep: ensuring active session' },

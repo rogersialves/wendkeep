@@ -20,6 +20,26 @@ test('mergeSettings: adds companion marketplaces + enabledPlugins', () => {
   assert.equal(settings.enabledPlugins['understand-anything@understand-anything'], true);
 });
 
+test('mergeSettings: wires brain-inject on SessionStart before session-start, by default', () => {
+  const { settings } = mergeSettings(null, { vaultPath: '/v', withMcp: true, companions: [] });
+  const groups = settings.hooks.SessionStart || [];
+  const cmds = groups.flatMap((g) => (g.hooks || []).map((h) => h.command));
+  const bi = cmds.indexOf('npx wendkeep hook brain-inject');
+  const ss = cmds.indexOf('npx wendkeep hook session-start');
+  assert.ok(bi >= 0, 'brain-inject wired (memory + active change injection)');
+  assert.ok(ss >= 0, 'session-start wired');
+  assert.ok(bi < ss, 'brain-inject folds before session-start');
+
+  // Re-inject memory after compaction/clear, not only on a cold startup.
+  const biGroup = groups.find((g) => (g.hooks || []).some((h) => h.command === 'npx wendkeep hook brain-inject'));
+  assert.equal(biGroup.matcher, 'startup|clear|compact');
+
+  // Idempotent: second merge doesn't duplicate it.
+  const second = mergeSettings(settings, { vaultPath: '/v', withMcp: true, companions: [] }).settings;
+  const dup = (second.hooks.SessionStart || []).flatMap((g) => g.hooks || []).filter((h) => h.command === 'npx wendkeep hook brain-inject').length;
+  assert.equal(dup, 1);
+});
+
 test('mergeSettings: wires understand-inject SessionStart hook when UA selected', () => {
   const { settings } = mergeSettings(null, {
     vaultPath: '/v',

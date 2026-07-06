@@ -4,6 +4,24 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.19.0] — 2026-07-06
+
+Fix: memory + active-change injection wired by default.
+
+### Fixed
+- `wendkeep init` now wires the **`brain-inject`** hook into SessionStart (ordered *before*
+  `session-start`), so every session gets `<brain_memory>` injected: CORE + DIGEST + the
+  **active change** (proposal + open tasks) + project lessons. Previously the default hook set was
+  only `session-start` / `session-stop` / `session-ensure` — the memory/change injector existed
+  (`wendkeep hook brain-inject`) but wasn't wired, so the "the change is injected at the next
+  SessionStart" promise (the `wk-workflow` skill and the README) didn't actually hold on a fresh
+  install. matcher `startup|clear|compact` re-injects after a compaction or clear, not only on a
+  cold startup.
+
+### Upgrade
+- Existing installs pick it up by re-running `wendkeep init --force` (idempotent — it only adds the
+  missing hook), or by adding `npx wendkeep hook brain-inject` to the SessionStart hooks manually.
+
 ## [0.18.0] — 2026-07-06
 
 Session identity in the note.
