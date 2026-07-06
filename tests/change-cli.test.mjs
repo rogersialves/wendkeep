@@ -175,6 +175,84 @@ test('archive blocks on open tasks; --force overrides (G1)', () => {
   } finally { rmSync(vault, { recursive: true, force: true }); }
 });
 
+test('change status: one screen with tasks, sensors, verdict state (0.7.0)', () => {
+  const vault = mkdtempSync(join(tmpdir(), 'wk-status-'));
+  const spawn = (a) => spawnSync(process.execPath, [BIN, 'change', ...a, '--vault', vault], { encoding: 'utf8' });
+  try {
+    assert.equal(spawn(['new', 'x']).status, 0);
+    writeFileSync(join(vault, '08-Mudanças', 'x', 'tarefas.md'), '- [x] 1.1 feita [req:X-1] [sensor:tests]\n- [ ] 1.2 aberta\n');
+    writeFileSync(join(vault, '08-Mudanças', 'x', 'evidencia.json'), JSON.stringify([{ id: 'tests', status: 'green', severity: 'critical' }]));
+    const r = spawn(['status']);
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stdout, /x/);
+    assert.match(r.stdout, /1 done.*1 open|1 aberta/i);
+    assert.match(r.stdout, /\[x\] 1\.1/);
+    assert.match(r.stdout, /tests.*green|✓ tests/i);
+    assert.match(r.stdout, /verdict: ausente/i);
+  } finally { rmSync(vault, { recursive: true, force: true }); }
+});
+
+test('change done/undone: toggles a task from the CLI (0.7.0)', () => {
+  const vault = mkdtempSync(join(tmpdir(), 'wk-donecli-'));
+  const spawn = (a) => spawnSync(process.execPath, [BIN, 'change', ...a, '--vault', vault], { encoding: 'utf8' });
+  try {
+    assert.equal(spawn(['new', 'x']).status, 0);
+    writeFileSync(join(vault, '08-Mudanças', 'x', 'tarefas.md'), '- [ ] 1.1 faz\n');
+    assert.equal(spawn(['done', '1.1']).status, 0);
+    assert.match(readFileSync(join(vault, '08-Mudanças', 'x', 'tarefas.md'), 'utf8'), /- \[x\] 1\.1/);
+    assert.equal(spawn(['undone', '1.1']).status, 0);
+    assert.match(readFileSync(join(vault, '08-Mudanças', 'x', 'tarefas.md'), 'utf8'), /- \[ \] 1\.1/);
+    assert.equal(spawn(['done', '9.9']).status, 2, 'missing id errors');
+  } finally { rmSync(vault, { recursive: true, force: true }); }
+});
+
+test('change diff: previews the spec promotion without writing (0.7.0)', () => {
+  const vault = mkdtempSync(join(tmpdir(), 'wk-diff-'));
+  const spawn = (a) => spawnSync(process.execPath, [BIN, 'change', ...a, '--vault', vault], { encoding: 'utf8' });
+  try {
+    assert.equal(spawn(['new', 'x']).status, 0);
+    writeFileSync(join(vault, '08-Mudanças', 'x', 'proposta.md'), '---\nspecs: [auth]\n---\n# x\n');
+    mkdirSync(join(vault, '08-Mudanças', 'x', 'specs', 'auth'), { recursive: true });
+    writeFileSync(join(vault, '08-Mudanças', 'x', 'specs', 'auth', 'spec.md'), '## ADDED Requirements\n### Requisito: AUTH-2 — logout\nsai\n\n## MODIFIED Requirements\n### Requisito: AUTH-1 — login\n2fa\n');
+    mkdirSync(join(vault, '07-Specs'), { recursive: true });
+    writeFileSync(join(vault, '07-Specs', 'auth.md'), '# auth\n## Requisitos\n### Requisito: AUTH-1 — login\nsimples\n');
+    const r = spawn(['diff']);
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stdout, /\+ .*AUTH-2/);
+    assert.match(r.stdout, /~ .*AUTH-1/);
+    // dry-run: spec vivo intacto
+    assert.match(readFileSync(join(vault, '07-Specs', 'auth.md'), 'utf8'), /simples/);
+  } finally { rmSync(vault, { recursive: true, force: true }); }
+});
+
+test('spec list/show + sensors list: read-only views (0.7.0)', () => {
+  const vault = mkdtempSync(join(tmpdir(), 'wk-views-'));
+  const proj = mkdtempSync(join(tmpdir(), 'wk-viewsp-'));
+  try {
+    mkdirSync(join(vault, '07-Specs'), { recursive: true });
+    writeFileSync(join(vault, '07-Specs', 'auth.md'), '# auth\n## Requisitos\n### Requisito: AUTH-1 — login\nx\n\n### Requisito: AUTH-2 — logout\ny\n\n> Atualizado por [[a]] em 2026-07-05.\n');
+    writeFileSync(join(proj, 'wendkeep.sensors.json'), JSON.stringify({ version: 1, sensors: [{ id: 'tests', type: 'command', severity: 'critical', command: 'npm test' }] }));
+    const list = spawnSync(process.execPath, [BIN, 'spec', 'list', '--vault', vault], { encoding: 'utf8' });
+    assert.equal(list.status, 0, list.stderr);
+    assert.match(list.stdout, /auth: 2 requisito/);
+    assert.match(list.stdout, /2026-07-05/);
+    const show = spawnSync(process.execPath, [BIN, 'spec', 'show', 'auth', '--vault', vault], { encoding: 'utf8' });
+    assert.equal(show.status, 0, show.stderr);
+    assert.match(show.stdout, /AUTH-1 — login/);
+    const sens = spawnSync(process.execPath, [BIN, 'sensors', 'list', '--project', proj], { encoding: 'utf8' });
+    assert.equal(sens.status, 0, sens.stderr);
+    assert.match(sens.stdout, /tests: command · critical · npm test/);
+  } finally { rmSync(vault, { recursive: true, force: true }); rmSync(proj, { recursive: true, force: true }); }
+});
+
+test('sensors schema: valid JSON, seed points $schema at it (0.7.0)', async () => {
+  const schema = JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'schema', 'wendkeep.sensors.schema.json'), 'utf8'));
+  assert.equal(schema.properties.version.const, 1);
+  const { renderSensorsJson } = await import('../src/dotcontext-seed.mjs');
+  const seeded = JSON.parse(renderSensorsJson({}));
+  assert.match(seeded.$schema, /wendkeep\.sensors\.schema\.json/);
+});
+
 test('wendkeep lesson add: writes a lesson under .brain/lessons', () => {
   const vault = mkdtempSync(join(tmpdir(), 'wk-les-cli-'));
   try {

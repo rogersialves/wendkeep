@@ -36,7 +36,22 @@ import {
   archiveChange,
   activeChangeLink,
   appendFixTasks,
+  setTaskDone,
 } from '../hooks/change-core.mjs';
+
+test('setTaskDone: toggles the exact task id; false when id missing', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'wk-done-'));
+  try {
+    writeFileSync(join(dir, 'tarefas.md'), '- [ ] 1.1 faz algo\n- [ ] 1.10 outra\n');
+    assert.equal(setTaskDone(dir, '1.1', true), true);
+    const md = readFileSync(join(dir, 'tarefas.md'), 'utf8');
+    assert.match(md, /- \[x\] 1\.1 faz algo/);
+    assert.match(md, /- \[ \] 1\.10 outra/, '1.10 untouched (anchored id)');
+    assert.equal(setTaskDone(dir, '1.1', false), true, 'undone');
+    assert.match(readFileSync(join(dir, 'tarefas.md'), 'utf8'), /- \[ \] 1\.1 faz algo/);
+    assert.equal(setTaskDone(dir, '9.9', true), false, 'missing id');
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
 
 test('appendFixTasks: appends numbered fix tasks, dedups by file:line', () => {
   const dir = mkdtempSync(join(tmpdir(), 'wk-fix-'));

@@ -70,8 +70,11 @@ No re‑copying, no snapshot to re‑sync — the package is the single source o
 |---|---|
 | `wendkeep init` | Set up wendkeep in a project (vault taxonomy + settings + MCP + skills). |
 | `wendkeep hook <name>` | Run a session hook; invoked by `settings.json` (reads agent JSON on stdin). |
-| `wendkeep change <sub>` | Change lifecycle: `new <slug>` / `list` / `show <slug>` / `archive <slug>`. |
-| `wendkeep verify [--change s]` | Run the active (or named) change's task sensors; record evidence (the gate). |
+| `wendkeep change <sub>` | Change lifecycle: `new [--simple]` / `list` / `show` / `status` / `done <id>` / `undone <id>` / `diff` / `archive [--force]`. |
+| `wendkeep verify [--deep]` | Run the change's task sensors; `--deep` assembles the independent-verification package. |
+| `wendkeep spec <sub>` | Living specs: `list` / `show <capability>`. |
+| `wendkeep sensors list` | Show the sensors from `wendkeep.sensors.json` (JSON Schema included in the package). |
+| `wendkeep lesson add "t" "l"` | Record a project-local lesson (injected at the next SessionStart). |
 | `wendkeep sync-defs` | Copy `.brain/agents\|skills` into the project (`.codex/agents`, `.claude/skills`). |
 | `wendkeep validate-memory [path]` | Validate `.brain/CORE.md` (cap 25, 3 sections, no secrets/PII). |
 | `wendkeep doctor [--vault P]` | Run a vault health check (integrity of sessions, registry, links). |
@@ -90,7 +93,37 @@ explore → propose → apply (TDD) → verify → archive
 - **Verify** — `wendkeep verify` runs the sensors your tasks declared (from `wendkeep.sensors.json` at the project root) and records `evidencia.json`. A critical red fails the gate; a `warning` red is advisory.
 - **Archive** — `wendkeep change archive <slug>` **gates** on the evidence (blocks unless every declared critical sensor is green), promotes each capability's spec delta (`ADDED`/`MODIFIED`/`REMOVED`) into the living `07-Specs/<capability>.md`, moves the change to `_arquivo/`, and mints an ADR in `04-Decisões/`.
 
-`wendkeep init` also seeds **native process skills** (`wk-workflow`, `wk-tdd`, `wk-debugging`, `wk-brainstorming`, `wk-planning`) into `.brain/skills` and delivers them to `.claude/skills` — the *how* layer, zero‑dep. Optional companions (`context-mode`, `dotcontext`, `understand-anything`, `caveman`) remain an opt‑in extra layer.
+`wendkeep init` also seeds **native process skills** (`wk-workflow`, `wk-tdd`, `wk-debugging`, `wk-brainstorming`, `wk-planning`, `wk-verify`) into `.brain/skills` and delivers them to `.claude/skills` — the *how* layer, zero‑dep. Optional companions (`context-mode`, `dotcontext`, `understand-anything`, `caveman`) remain an opt‑in extra layer.
+
+### The loop in five minutes
+
+```bash
+npx wendkeep init --yes                        # vault + hooks + sensors + skills
+npx wendkeep change new dark-mode              # proposta/design/tarefas — change is now active
+```
+
+Edit `tarefas.md` — tag proof and requirement per task:
+
+```markdown
+- [ ] 1.1 toggle persists across sessions [req:UI-1] [sensor:tests]
+```
+
+Declare the capability in `proposta.md` (`specs: [ui]`) and author its delta in
+`specs/ui/spec.md` (`## ADDED Requirements` → `### Requisito: UI-1 — dark mode toggle`). Then:
+
+```bash
+npx wendkeep change status                     # one screen: tasks / sensors / verdict
+npx wendkeep change done 1.1                   # tick a task from the CLI
+npx wendkeep verify                            # run the declared sensors -> evidencia.json
+npx wendkeep verify --deep                     # assemble the verification package
+# the wk-verify skill (fresh, read-only pass) writes verdict.json
+npx wendkeep change diff                       # preview what will land in 07-Specs
+npx wendkeep change archive dark-mode          # gate: sensors + verdict + no open tasks
+```
+
+The archive promotes the delta into the living `07-Specs/ui.md`, mints an ADR, and the
+Obsidian graph now links *session ↔ change ↔ requirement ↔ decision*. A change that names
+no `[req:]` skips the independent verdict — the sensor gate is its proof.
 
 ## How it works
 

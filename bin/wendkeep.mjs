@@ -43,7 +43,10 @@ Usage:
                            agent's JSON on stdin. Names: ${RUNNABLE_HOOKS.join(', ')}.
 
   wendkeep doctor [--vault P]  Run a vault health check.
-  wendkeep change <sub>        Change lifecycle: new <slug> | list | show <slug> | archive <slug>.
+  wendkeep change <sub>        Change lifecycle: new [--simple] | list | show | status |
+                           done <id> | undone <id> | diff | archive [--force].
+  wendkeep spec <sub>          Living specs: list | show <capability>.
+  wendkeep sensors list        Show the sensors from wendkeep.sensors.json.
   wendkeep verify [--change s] Run a change's task sensors + record evidence (the gate).
   wendkeep lesson add "t" "l"   Record a project-local lesson (injected at SessionStart).
   wendkeep validate-memory [path]  Validate .brain/CORE.md against the compaction
@@ -115,6 +118,16 @@ async function main() {
     case 'lesson': {
       const { runLesson } = await import('../src/lessons.mjs');
       runLesson(rest);
+      break;
+    }
+    case 'spec': {
+      const { runSpec } = await import('../src/spec.mjs');
+      runSpec(rest);
+      break;
+    }
+    case 'sensors': {
+      const { runSensors } = await import('../src/sensors.mjs');
+      runSensors(rest);
       break;
     }
     case '--version':

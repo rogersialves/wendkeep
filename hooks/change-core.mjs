@@ -123,6 +123,17 @@ export function parseTasks(md) {
   return tasks;
 }
 
+// Toggle a task checkbox by its exact id (0.7.0 ergonomics). Returns false when absent.
+export function setTaskDone(changeDir, taskId, done = true) {
+  const path = join(changeDir, 'tarefas.md');
+  const md = readFileSync(path, 'utf8');
+  const esc = String(taskId).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const re = new RegExp(`^(-\\s+\\[)( |x)(\\]\\s+${esc}\\s)`, 'm');
+  if (!re.test(md)) return false;
+  writeFileSync(path, md.replace(re, `$1${done ? 'x' : ' '}$3`), 'utf8');
+  return true;
+}
+
 export function listChanges(vaultBase) {
   const base = join(vaultBase, CHANGES_DIR);
   const active = [];

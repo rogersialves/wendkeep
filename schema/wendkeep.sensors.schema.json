@@ -1,0 +1,34 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://raw.githubusercontent.com/rogersialves/wendkeep/main/schema/wendkeep.sensors.schema.json",
+  "title": "wendkeep.sensors.json",
+  "description": "Native sensor config for the wendkeep harness (harness contract v1.1).",
+  "type": "object",
+  "required": ["version", "sensors"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "version": { "const": 1 },
+    "source": { "type": "string" },
+    "sensors": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "command"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "name": { "type": "string" },
+          "description": { "type": "string" },
+          "severity": { "enum": ["critical", "warning"], "default": "critical" },
+          "type": { "enum": ["command", "mutation"], "default": "command" },
+          "command": { "type": "string", "minLength": 1 },
+          "report": {
+            "type": "string",
+            "description": "type: mutation only — path (project-relative) to the mutation-testing-elements report."
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

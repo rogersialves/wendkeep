@@ -37,7 +37,7 @@ export function renderSensorsJson(scripts = {}) {
       });
     }
   }
-  return `${JSON.stringify({ version: 1, source: 'manual', sensors }, null, 2)}\n`;
+  return `${JSON.stringify({ $schema: 'https://raw.githubusercontent.com/rogersialves/wendkeep/main/schema/wendkeep.sensors.schema.json', version: 1, source: 'manual', sensors }, null, 2)}\n`;
 }
 
 function readProjectScripts(projectPath) {

@@ -6,10 +6,11 @@ import {
   activeChange,
   listChanges,
   parseTasks,
+  setTaskDone,
   archiveChange,
 } from '../hooks/change-core.mjs';
 import { evaluateGate, requiredSensors } from '../hooks/sensors-core.mjs';
-import { evaluateVerdict, tasksHashOf } from '../hooks/spec-core.mjs';
+import { evaluateVerdict, tasksHashOf, parseSpecsList, parseDelta, parseRequirements, applyDelta } from '../hooks/spec-core.mjs';
 import { getNextAdrNumber, readControl } from '../hooks/obsidian-common.mjs';
 
 function resolveVault(argv) {
@@ -27,6 +28,13 @@ function resolveVault(argv) {
   return isAbsolute(base) ? base : resolve(process.cwd(), base);
 }
 
+function opt(argv, name) {
+  const i = argv.indexOf(name);
+  if (i >= 0) return argv[i + 1];
+  const eq = argv.find((a) => a.startsWith(`${name}=`));
+  return eq ? eq.slice(name.length + 1) : undefined;
+}
+
 function today() {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -35,7 +43,8 @@ function today() {
 export function runChange(argv) {
   const [sub, ...rest] = argv;
   const vaultBase = resolveVault(rest);
-  const slugArg = () => rest.find((a) => !a.startsWith('-'));
+  const VALUE_FLAGS = new Set(['--vault', '--change', '--project']);
+  const slugArg = () => rest.find((a, i) => !a.startsWith('-') && !VALUE_FLAGS.has(rest[i - 1]));
 
   if (sub === 'new') {
     const slug = slugArg();
@@ -66,6 +75,76 @@ export function runChange(argv) {
     const open = tasks.filter((t) => !t.done).length;
     process.stdout.write(`${slug}: ${tasks.length} task(s), ${open} open\n`);
     for (const t of tasks) process.stdout.write(`  [${t.done ? 'x' : ' '}] ${t.id} ${t.text}\n`);
+    process.exit(0);
+  }
+
+  if (sub === 'status') {
+    const slug = slugArg() || activeChange(vaultBase);
+    if (!slug) { process.stderr.write('wendkeep change status: no change (arg or active)\n'); process.exit(2); }
+    const dir = join(vaultBase, '08-Mudanças', slug);
+    let tarefasMd;
+    try { tarefasMd = readFileSync(join(dir, 'tarefas.md'), 'utf8'); }
+    catch { process.stderr.write(`wendkeep change status: not found: ${slug}\n`); process.exit(2); }
+    const tasks = parseTasks(tarefasMd);
+    const done = tasks.filter((t) => t.done).length;
+    process.stdout.write(`change: ${slug}${slug === activeChange(vaultBase) ? ' (ativa)' : ''}\n`);
+    let specs = [];
+    try { specs = parseSpecsList(readFileSync(join(dir, 'proposta.md'), 'utf8')); } catch { /* sem proposta */ }
+    process.stdout.write(`specs: ${specs.join(', ') || '(nenhuma)'}\n`);
+    process.stdout.write(`tarefas: ${done} done / ${tasks.length - done} open\n`);
+    for (const t of tasks) {
+      process.stdout.write(`  [${t.done ? 'x' : ' '}] ${t.id} ${t.text}${t.req ? ` [req:${t.req}]` : ''}${t.sensor ? ` [sensor:${t.sensor}]` : ''}\n`);
+    }
+    let evidence = null;
+    try { evidence = JSON.parse(readFileSync(join(dir, 'evidencia.json'), 'utf8')); } catch { /* sem evidência */ }
+    if (evidence) for (const e of evidence) process.stdout.write(`  ${e.status === 'green' ? '✓' : '✗'} ${e.id} (${e.severity || 'critical'})\n`);
+    else process.stdout.write('evidencia: ausente\n');
+    const reqIds = [...new Set(tasks.map((t) => t.req).filter(Boolean))];
+    let verdict = null;
+    try { verdict = JSON.parse(readFileSync(join(dir, 'verdict.json'), 'utf8')); } catch { /* sem verdict */ }
+    if (!reqIds.length) process.stdout.write('verdict: não exigido (sem [req:])\n');
+    else if (!verdict) process.stdout.write('verdict: ausente — rode `wendkeep verify --deep` + wk-verify\n');
+    else {
+      const v = evaluateVerdict(verdict, reqIds, { tasksHash: tasksHashOf(tarefasMd) });
+      process.stdout.write(`verdict: ${v.ok ? 'ok' : v.stale ? 'stale — re-verifique' : `incompleto: falta ${v.missing.join(', ')}`}\n`);
+    }
+    try { process.stdout.write(`mutation-round: ${readFileSync(join(dir, '.mutation-round'), 'utf8').trim()}/3\n`); } catch { /* sem rodadas */ }
+    process.exit(0);
+  }
+
+  if (sub === 'done' || sub === 'undone') {
+    const taskId = slugArg();
+    if (!taskId) { process.stderr.write(`wendkeep change ${sub}: missing <taskId>\n`); process.exit(2); }
+    const slug = opt(rest, '--change') || activeChange(vaultBase);
+    if (!slug) { process.stderr.write(`wendkeep change ${sub}: no active change\n`); process.exit(2); }
+    const dir = join(vaultBase, '08-Mudanças', slug);
+    let ok = false;
+    try { ok = setTaskDone(dir, taskId, sub === 'done'); } catch { /* sem tarefas.md */ }
+    if (!ok) { process.stderr.write(`wendkeep change ${sub}: task não encontrada: ${taskId}\n`); process.exit(2); }
+    process.stdout.write(`task ${taskId}: ${sub === 'done' ? '[x]' : '[ ]'}\n`);
+    process.exit(0);
+  }
+
+  if (sub === 'diff') {
+    const slug = slugArg() || activeChange(vaultBase);
+    if (!slug) { process.stderr.write('wendkeep change diff: no change (arg or active)\n'); process.exit(2); }
+    const dir = join(vaultBase, '08-Mudanças', slug);
+    let specs = [];
+    try { specs = parseSpecsList(readFileSync(join(dir, 'proposta.md'), 'utf8')); }
+    catch { process.stderr.write(`wendkeep change diff: not found: ${slug}\n`); process.exit(2); }
+    if (!specs.length) { process.stdout.write('diff: sem specs declaradas na proposta\n'); process.exit(0); }
+    for (const cap of specs) {
+      let delta;
+      try { delta = parseDelta(readFileSync(join(dir, 'specs', cap, 'spec.md'), 'utf8')); }
+      catch { process.stdout.write(`! sem delta para ${cap}\n`); continue; }
+      process.stdout.write(`spec: ${cap}\n`);
+      for (const r of delta.added) process.stdout.write(`  + ${r.id || r.name} (ADDED)\n`);
+      for (const r of delta.modified) process.stdout.write(`  ~ ${r.id || r.name} (MODIFIED)\n`);
+      for (const k of delta.removed) process.stdout.write(`  - ${k} (REMOVED)\n`);
+      let living = [];
+      try { living = parseRequirements(readFileSync(join(vaultBase, '07-Specs', `${cap}.md`), 'utf8')); } catch { /* nova capability */ }
+      for (const w of applyDelta(living, delta).warnings) process.stdout.write(`  ! ${w}\n`);
+    }
     process.exit(0);
   }
 
@@ -109,6 +188,6 @@ export function runChange(argv) {
     process.exit(0);
   }
 
-  process.stderr.write(`wendkeep change: unknown subcommand "${sub}". Known: new, list, show, archive.\n`);
+  process.stderr.write(`wendkeep change: unknown subcommand "${sub}". Known: new, list, show, status, done, undone, diff, archive.\n`);
   process.exit(2);
 }

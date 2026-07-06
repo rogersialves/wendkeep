@@ -4,6 +4,25 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] — 2026-07-05
+
+Ergonomics: the loop without hand-editing files.
+
+### Added
+- **`change status`** — one screen: tasks (done/open with `[req:]`/`[sensor:]`), sensor
+  evidence, verdict state (ok / stale / incomplete / absent), mutation round.
+- **`change done <id>` / `undone <id>`** — tick tasks from the CLI (exact-id anchored).
+- **`change diff`** — dry-run preview of the spec promotion (`+` ADDED / `~` MODIFIED /
+  `-` REMOVED / `!` warnings) without touching `07-Specs`.
+- **`spec list` / `spec show <capability>`** — read-only views over the living specs.
+- **`sensors list`** — the sensors from `wendkeep.sensors.json`; a **JSON Schema** for the
+  file now ships in the package (`schema/`) and the init seed points `$schema` at it.
+- README: "the loop in five minutes" worked example.
+
+### Fixed
+- `change` subcommands without a positional argument no longer mistake the `--vault` value
+  for a slug.
+
 ## [0.6.1] — 2026-07-05
 
 Hardening: CI + real-world gate holes found by self-audit.
@@ -141,6 +160,7 @@ Initial release — the capture engine, extracted from a system in daily product
 - `wendkeep init` (cross-platform installer) + optional `@bitbonsai/mcpvault` MCP server.
 
 <!-- Only v0.4.0+ is tagged in git (history starts here); older versions link to npm. -->
+[0.7.0]: https://github.com/rogersialves/wendkeep/releases/tag/v0.7.0
 [0.6.1]: https://github.com/rogersialves/wendkeep/releases/tag/v0.6.1
 [0.6.0]: https://github.com/rogersialves/wendkeep/releases/tag/v0.6.0
 [0.5.0]: https://github.com/rogersialves/wendkeep/releases/tag/v0.5.0
