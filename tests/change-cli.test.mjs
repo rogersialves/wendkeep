@@ -225,6 +225,32 @@ test('change diff: previews the spec promotion without writing (0.7.0)', () => {
   } finally { rmSync(vault, { recursive: true, force: true }); }
 });
 
+test('sensors add: appends to wendkeep.sensors.json, creates file, dedups by id (0.9.0)', () => {
+  const proj = mkdtempSync(join(tmpdir(), 'wk-sadd-'));
+  const spawn = (a) => spawnSync(process.execPath, [BIN, 'sensors', ...a, '--project', proj], { encoding: 'utf8' });
+  try {
+    // creates the file when absent
+    assert.equal(spawn(['add', 'tests', 'npm test']).status, 0);
+    let cfg = JSON.parse(readFileSync(join(proj, 'wendkeep.sensors.json'), 'utf8'));
+    assert.equal(cfg.version, 1);
+    assert.match(cfg.$schema || '', /wendkeep\.sensors\.schema\.json/);
+    assert.equal(cfg.sensors[0].id, 'tests');
+    assert.equal(cfg.sensors[0].command, 'npm test');
+    assert.equal(cfg.sensors[0].severity, 'critical');
+    // second sensor with flags
+    assert.equal(spawn(['add', 'lint', 'npm run lint', '--severity', 'warning']).status, 0);
+    cfg = JSON.parse(readFileSync(join(proj, 'wendkeep.sensors.json'), 'utf8'));
+    assert.equal(cfg.sensors.length, 2);
+    assert.equal(cfg.sensors[1].severity, 'warning');
+    // mutation type carries report
+    assert.equal(spawn(['add', 'mut', 'npx stryker run', '--type', 'mutation', '--report', 'reports/m.json']).status, 0);
+    cfg = JSON.parse(readFileSync(join(proj, 'wendkeep.sensors.json'), 'utf8'));
+    assert.equal(cfg.sensors.find((s) => s.id === 'mut').report, 'reports/m.json');
+    // dedup: adding an existing id errors
+    assert.equal(spawn(['add', 'tests', 'echo x']).status, 2, 'duplicate id errors');
+  } finally { rmSync(proj, { recursive: true, force: true }); }
+});
+
 test('spec list/show + sensors list: read-only views (0.7.0)', () => {
   const vault = mkdtempSync(join(tmpdir(), 'wk-views-'));
   const proj = mkdtempSync(join(tmpdir(), 'wk-viewsp-'));

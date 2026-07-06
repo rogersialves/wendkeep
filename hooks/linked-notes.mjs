@@ -162,7 +162,28 @@ export function extractBugDetails(tx) {
   };
 }
 
-export function buildBugNoteContent(bug, issueRef, dateStr, sessionRel, provider = providerMeta(), contentKey = derivedContentKey(bug.rootCause)) {
+// Locale labels for the auto-generated derived notes (0.9.0). Output-only — the extraction
+// heuristics are untouched. Default pt-BR keeps existing behaviour for every legacy caller.
+const NOTE_LABELS = {
+  'pt-BR': {
+    autoTag: 'Auto-gerada', autoLine: (p) => `Nota criada automaticamente pelo hook Stop do ${p}.`, session: 'Sessão',
+    verify: '_Extraído da sessão — verificar._', complete: '_Extraído da sessão — complementar._',
+    bug: { symptom: 'Sintoma', rootCause: 'Causa raiz', fix: 'Correção', files: 'Arquivos alterados', evidence: 'Evidência', lessons: 'Lições aprendidas', noFix: '_Nenhuma correção explícita detectada._', seeSession: '_Ver sessão vinculada._', addEvidence: '_Adicionar evidência empírica._' },
+    dec: { context: 'Contexto', decision: 'Decisão', consequences: 'Consequências', alternatives: 'Alternativas consideradas', noAlt: '_Nenhuma alternativa registrada automaticamente._' },
+    learn: { title: 'Aprendizado', context: 'Contexto', learned: 'O que aprendemos', future: 'Como aplicar no futuro', futureHint: '_Registrar como este conhecimento pode ser reutilizado._' },
+  },
+  en: {
+    autoTag: 'Auto-generated', autoLine: (p) => `Note created automatically by the ${p} Stop hook.`, session: 'Session',
+    verify: '_Extracted from the session — verify._', complete: '_Extracted from the session — complete._',
+    bug: { symptom: 'Symptom', rootCause: 'Root cause', fix: 'Fix', files: 'Changed files', evidence: 'Evidence', lessons: 'Lessons learned', noFix: '_No explicit fix detected._', seeSession: '_See the linked session._', addEvidence: '_Add empirical evidence._' },
+    dec: { context: 'Context', decision: 'Decision', consequences: 'Consequences', alternatives: 'Alternatives considered', noAlt: '_No alternative recorded automatically._' },
+    learn: { title: 'Learning', context: 'Context', learned: 'What we learned', future: 'How to apply in future', futureHint: '_Record how this knowledge can be reused._' },
+  },
+};
+function noteLabels(localeId) { return NOTE_LABELS[localeId] || NOTE_LABELS['pt-BR']; }
+
+export function buildBugNoteContent(bug, issueRef, dateStr, sessionRel, provider = providerMeta(), contentKey = derivedContentKey(bug.rootCause), localeId = 'pt-BR') {
+  const L = noteLabels(localeId);
   const title = issueRef
     ? `${issueRef} - ${normalizeInline(bug.rootCause, 80)}`
     : normalizeInline(bug.rootCause, 80);
@@ -184,31 +205,31 @@ issue: ${yamlQuote(issueRef || '')}
 
 # Bug - ${title}
 
-> [!note] Auto-gerada
-> Nota criada automaticamente pelo hook Stop do ${provider.label}.
-> Sessão: ${wikilinkFromRel(sessionRel)}
+> [!note] ${L.autoTag}
+> ${L.autoLine(provider.label)}
+> ${L.session}: ${wikilinkFromRel(sessionRel)}
 
-## Sintoma
+## ${L.bug.symptom}
 
-${bug.symptom || '_Extraído da sessão — verificar._'}
+${bug.symptom || L.verify}
 
-## Causa raiz
+## ${L.bug.rootCause}
 
 ${bug.rootCause}
 
-## Correção
+## ${L.bug.fix}
 
-${markdownList(bug.fixes, '_Nenhuma correção explícita detectada._')}
+${markdownList(bug.fixes, L.bug.noFix)}
 
-## Arquivos alterados
+## ${L.bug.files}
 
-${markdownList(bug.changedFiles.map((file) => `\`${file}\``), '_Ver sessão vinculada._')}
+${markdownList(bug.changedFiles.map((file) => `\`${file}\``), L.bug.seeSession)}
 
-## Evidência
+## ${L.bug.evidence}
 
-${markdownList(bug.evidence, '_Adicionar evidência empírica._')}
+${markdownList(bug.evidence, L.bug.addEvidence)}
 
-## Lições aprendidas
+## ${L.bug.lessons}
 
 ${bug.lessons}
 `;
@@ -309,7 +330,8 @@ export function extractDecisionDetails(tx) {
   };
 }
 
-export function buildDecisionNoteContent(decision, adrNum, dateStr, sessionRel, provider = providerMeta(), contentKey = derivedContentKey(decision.title)) {
+export function buildDecisionNoteContent(decision, adrNum, dateStr, sessionRel, provider = providerMeta(), contentKey = derivedContentKey(decision.title), localeId = 'pt-BR') {
+  const L = noteLabels(localeId);
   const adrId = `ADR-${String(adrNum).padStart(3, '0')}`;
   return `---
 type: decision
@@ -327,25 +349,25 @@ superseded_by: ""
 
 # ${adrId} - ${decision.title}
 
-> [!note] Auto-gerada
-> Nota criada automaticamente pelo hook Stop do ${provider.label}.
-> Sessão: ${wikilinkFromRel(sessionRel)}
+> [!note] ${L.autoTag}
+> ${L.autoLine(provider.label)}
+> ${L.session}: ${wikilinkFromRel(sessionRel)}
 
-## Contexto
+## ${L.dec.context}
 
-${decision.context || '_Extraído da sessão — complementar._'}
+${decision.context || L.complete}
 
-## Decisão
+## ${L.dec.decision}
 
 ${decision.detail}
 
-## Consequências
+## ${L.dec.consequences}
 
 ${decision.consequences}
 
-## Alternativas consideradas
+## ${L.dec.alternatives}
 
-${markdownList(decision.alternatives, '_Nenhuma alternativa registrada automaticamente._')}
+${markdownList(decision.alternatives, L.dec.noAlt)}
 `;
 }
 
@@ -413,7 +435,8 @@ export function extractLearningDetails(tx, bugDetails) {
   return learnings.length ? learnings.slice(0, 5) : null;
 }
 
-export function buildLearningNoteContent(learning, dateStr, sessionRel, provider = providerMeta(), contentKey = derivedContentKey(learning.title)) {
+export function buildLearningNoteContent(learning, dateStr, sessionRel, provider = providerMeta(), contentKey = derivedContentKey(learning.title), localeId = 'pt-BR') {
+  const L = noteLabels(localeId);
   return `---
 type: learning
 date: ${dateStr}
@@ -427,23 +450,23 @@ tags:
 ${yamlTags(learning.tags.map((tag) => (tag === 'codex' ? provider.tag : tag)))}
 ---
 
-# Aprendizado - ${learning.title}
+# ${L.learn.title} - ${learning.title}
 
-> [!note] Auto-gerada
-> Nota criada automaticamente pelo hook Stop do ${provider.label}.
-> Sessão: ${wikilinkFromRel(sessionRel)}
+> [!note] ${L.autoTag}
+> ${L.autoLine(provider.label)}
+> ${L.session}: ${wikilinkFromRel(sessionRel)}
 
-## Contexto
+## ${L.learn.context}
 
-${learning.context || '_Extraído da sessão — complementar._'}
+${learning.context || L.complete}
 
-## O que aprendemos
+## ${L.learn.learned}
 
 ${learning.content}
 
-## Como aplicar no futuro
+## ${L.learn.future}
 
-_Registrar como este conhecimento pode ser reutilizado._
+${L.learn.futureHint}
 `;
 }
 
@@ -478,7 +501,8 @@ function alreadyHasKey(keys, candidate) {
 export function createLinkedNotes(vaultBase, dateStr, sessionRel, tx, options = {}) {
   const linked = { decisions: [], bugs: [], learnings: [] };
   const provider = providerMeta(options.provider);
-  const locF = getLocale(vaultBase).folders;
+  const loc = getLocale(vaultBase);
+  const locF = loc.folders;
   const bugsDir = join(vaultBase, monthFolderRelFromDateStr(locF.bugs, dateStr, vaultBase));
   const decisionsDir = join(vaultBase, monthFolderRelFromDateStr(locF.decisions, dateStr, vaultBase));
   const learningsDir = join(vaultBase, monthFolderRelFromDateStr(locF.learnings, dateStr, vaultBase));
@@ -497,7 +521,7 @@ export function createLinkedNotes(vaultBase, dateStr, sessionRel, tx, options = 
       const causeSlug = slugify(bugDetails.rootCause.slice(0, 40), 'bug');
       const fileName = issueRef ? `${issueRef}-${causeSlug}.md` : `${dateStr}-bug-${causeSlug}.md`;
       const filePath = join(bugsDir, fileName);
-      if (!existsSync(filePath)) writeFileSync(filePath, buildBugNoteContent(bugDetails, issueRef, dateStr, sessionRel, provider, bugKey), 'utf-8');
+      if (!existsSync(filePath)) writeFileSync(filePath, buildBugNoteContent(bugDetails, issueRef, dateStr, sessionRel, provider, bugKey, loc.id), 'utf-8');
       linked.bugs.push(toVaultRelative(vaultBase, filePath));
       existingKeys.bugs.push(bugKey);
     }
@@ -513,7 +537,7 @@ export function createLinkedNotes(vaultBase, dateStr, sessionRel, tx, options = 
       const filePath = join(decisionsDir, fileName);
       if (!existsSync(filePath)) {
         const adrNum = Number(fileName.match(/^ADR-(\d+)/i)?.[1]) || getNextAdrNumber(vaultBase);
-        writeFileSync(filePath, buildDecisionNoteContent(decisionDetails, adrNum, dateStr, sessionRel, provider, decisionKey), 'utf-8');
+        writeFileSync(filePath, buildDecisionNoteContent(decisionDetails, adrNum, dateStr, sessionRel, provider, decisionKey, loc.id), 'utf-8');
       }
       linked.decisions.push(toVaultRelative(vaultBase, filePath));
       existingKeys.decisions.push(decisionKey);
@@ -528,7 +552,7 @@ export function createLinkedNotes(vaultBase, dateStr, sessionRel, tx, options = 
       const learningSlug = slugify(learning.title.slice(0, 40), 'aprendizado');
       const fileName = `${dateStr}-${learningSlug}.md`;
       const filePath = join(learningsDir, fileName);
-      if (!existsSync(filePath)) writeFileSync(filePath, buildLearningNoteContent(learning, dateStr, sessionRel, provider, learningKey), 'utf-8');
+      if (!existsSync(filePath)) writeFileSync(filePath, buildLearningNoteContent(learning, dateStr, sessionRel, provider, learningKey, loc.id), 'utf-8');
       linked.learnings.push(toVaultRelative(vaultBase, filePath));
       existingKeys.learnings.push(learningKey);
     }

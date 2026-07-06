@@ -4,6 +4,23 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0] — 2026-07-06
+
+Engineering debt: sensor editing + i18n coherence for auto-generated notes.
+
+### Added
+- **`wendkeep sensors add <id> "<command>"`** (`--severity` / `--type` / `--report` / `--name`
+  / `--description`) — append a sensor to `wendkeep.sensors.json` (creates the file with
+  `$schema` when absent, dedups by id) instead of hand-editing JSON.
+- **Locale-aware derived notes:** the auto-generated bug/decision/learning notes render their
+  headings + callout in the vault locale — an `en` vault no longer gets Portuguese headings.
+
+### Deferred (with reason)
+- `migrate-locale`: renaming a populated vault breaks every wikilink to the old folder names;
+  needs a backlink-repair pass — its own effort, not a patch.
+- Code-hash verdict freshness: a change carries no file manifest, so "the code" is undefined;
+  the existing `tarefas.md` hash already blocks task drift.
+
 ## [0.8.1] — 2026-07-06
 
 Polish: i18n coherence + presentation.
@@ -196,6 +213,7 @@ Initial release — the capture engine, extracted from a system in daily product
 - `wendkeep init` (cross-platform installer) + optional `@bitbonsai/mcpvault` MCP server.
 
 <!-- Only v0.4.0+ is tagged in git (history starts here); older versions link to npm. -->
+[0.9.0]: https://github.com/rogersialves/wendkeep/releases/tag/v0.9.0
 [0.8.1]: https://github.com/rogersialves/wendkeep/releases/tag/v0.8.1
 [0.8.0]: https://github.com/rogersialves/wendkeep/releases/tag/v0.8.0
 [0.7.0]: https://github.com/rogersialves/wendkeep/releases/tag/v0.7.0

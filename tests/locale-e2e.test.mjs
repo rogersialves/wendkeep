@@ -57,6 +57,20 @@ test('en surfaces: months, session folder, CORE skeleton, theme groups', async (
   } finally { rmSync(vault, { recursive: true, force: true }); }
 });
 
+test('derived notes: en locale renders english headings; pt default intact (B3)', async () => {
+  const { buildBugNoteContent, buildDecisionNoteContent, buildLearningNoteContent } = await import('../hooks/linked-notes.mjs');
+  const bug = { symptom: 's', rootCause: 'rc', fixes: [], changedFiles: [], evidence: [], lessons: 'l', tags: [], severity: 'high' };
+  const bugEn = buildBugNoteContent(bug, '', '2026-07-06', '02-Sessions/x', undefined, 'k', 'en');
+  assert.match(bugEn, /## Root cause/);
+  assert.match(bugEn, /## Lessons learned/);
+  assert.match(bugEn, /Auto-generated/);
+  assert.match(buildBugNoteContent(bug, '', '2026-07-06', '02-Sessões/x', undefined, 'k'), /## Causa raiz/, 'pt default');
+  const dec = { title: 't', context: 'c', detail: 'd', consequences: 'q', alternatives: [], tags: [] };
+  assert.match(buildDecisionNoteContent(dec, 1, '2026-07-06', 'x', undefined, 'k', 'en'), /## Consequences/);
+  const learn = { title: 't', context: 'c', content: 'w', tags: [] };
+  assert.match(buildLearningNoteContent(learn, '2026-07-06', 'x', undefined, 'k', 'en'), /## What we learned/);
+});
+
 test('en vault: change loop end-to-end (scaffold, requirement heading, ADR in 04-Decisions)', () => {
   const vault = mkdtempSync(join(tmpdir(), 'wk-enloop-'));
   const spawn = (a) => spawnSync(process.execPath, [BIN, 'change', ...a, '--vault', vault], { encoding: 'utf8' });

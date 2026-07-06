@@ -46,7 +46,7 @@ Usage:
   wendkeep change <sub>        Change lifecycle: new [--simple] | list | show | status |
                            done <id> | undone <id> | diff | archive [--force].
   wendkeep spec <sub>          Living specs: list | show <capability>.
-  wendkeep sensors list        Show the sensors from wendkeep.sensors.json.
+  wendkeep sensors <sub>       list | add <id> "<command>" [--severity --type --report].
   wendkeep verify [--change s] Run a change's task sensors + record evidence (the gate).
   wendkeep lesson add "t" "l"   Record a project-local lesson (injected at SessionStart).
   wendkeep validate-memory [path]  Validate .brain/CORE.md against the compaction
