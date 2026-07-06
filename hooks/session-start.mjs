@@ -31,7 +31,7 @@ import {
   yamlQuote,
 } from './obsidian-common.mjs';
 
-export function buildSessionContent({ relPath, now, summary = 'session', provider: providerId }) {
+export function buildSessionContent({ relPath, now, summary = 'session', provider: providerId, sessionId = '' }) {
   const date = formatDate(now);
   const startedAt = formatLocalIso(now);
   const titleTime = formatTime(now).slice(0, 5);
@@ -46,6 +46,7 @@ date: ${date}
 started_at: ${startedAt}
 ended_at:
 provider: ${provider.id}
+session_id: ${sessionId ? yamlQuote(sessionId) : ''}
 status: active
 summary: ${yamlQuote(summary)}
 cssclasses:
@@ -202,7 +203,7 @@ function main() {
       const knownAbs = join(vaultBase, known.session_file);
       if (!existsSync(knownAbs)) {
         ensureDir(join(vaultBase, known.session_file.split('/').slice(0, -1).join('/')));
-        writeFileSync(knownAbs, buildSessionContent({ relPath: known.session_file, now, summary: sessionSummaryFromInput(input) }), 'utf-8');
+        writeFileSync(knownAbs, buildSessionContent({ relPath: known.session_file, now, summary: sessionSummaryFromInput(input), sessionId }), 'utf-8');
       }
       const startedAt = known.started_at || control.started_at || formatLocalIso(now);
       writeControl(vaultBase, {
@@ -244,7 +245,7 @@ function main() {
       const matchAbs = join(vaultBase, match.session_file);
       if (!existsSync(matchAbs)) {
         ensureDir(join(vaultBase, match.session_file.split('/').slice(0, -1).join('/')));
-        writeFileSync(matchAbs, buildSessionContent({ relPath: match.session_file, now, summary: sessionSummaryFromInput(input) }), 'utf-8');
+        writeFileSync(matchAbs, buildSessionContent({ relPath: match.session_file, now, summary: sessionSummaryFromInput(input), sessionId: sessionId || match.sessionId }), 'utf-8');
       }
       const startedAt = match.started_at || control.started_at || formatLocalIso(now);
       writeControl(vaultBase, {
@@ -276,7 +277,7 @@ function main() {
   const summary = sessionSummaryFromInput(input);
   const { absPath, relPath } = allocateSessionPath(vaultBase, now, summary);
   const startedAt = formatLocalIso(now);
-  writeFileSync(absPath, buildSessionContent({ relPath, now, summary }), 'utf-8');
+  writeFileSync(absPath, buildSessionContent({ relPath, now, summary, sessionId }), 'utf-8');
   writeControl(vaultBase, {
     status: 'active',
     session_file: relPath,

@@ -4,7 +4,7 @@
 // dated folder, deduped by session_id against the vault's SESSION_REGISTRY. This is an offline
 // replay of the live capture flow — same skeleton, same iteration blocks, same cost/subagent
 // telemetry, same finalize — so an imported note is indistinguishable from a captured one.
-import { existsSync, readdirSync, writeFileSync, openSync, readSync, closeSync } from 'fs';
+import { existsSync, readdirSync, writeFileSync, readFileSync, openSync, readSync, closeSync } from 'fs';
 import { basename, join } from 'path';
 import {
   parseTranscript,
@@ -19,6 +19,7 @@ import { createLinkedNotes } from './linked-notes.mjs';
 import { updateSessionUsage } from './token-usage.mjs';
 import { upsertSubagentUsage } from './subagent-usage.mjs';
 import { readSessionRegistry, upsertSessionRegistry, formatLocalIso, formatDate } from './obsidian-common.mjs';
+import { getLocale } from './locale.mjs';
 
 // Claude encodes a project's absolute path as its `.claude/projects` dir name by replacing each
 // path separator and the drive colon with '-'. `C:\GitHub\WendKeep` -> `C--GitHub-WendKeep`.
@@ -69,45 +70,71 @@ function cwdMatchesProject(cwd, projectPath) {
   return c === proj || c.startsWith(`${proj}/`);
 }
 
-// Recursively collect *.jsonl paths (manual walk: readdir recursive lands in Node 20; floor is 18).
-function walkJsonl(dir, out = []) {
+// Recursively collect paths matching `re` (manual walk: readdir recursive lands in Node 20; floor is 18).
+function walkFiles(dir, re, out = []) {
   let entries;
   try { entries = readdirSync(dir, { withFileTypes: true }); } catch { return out; }
   for (const e of entries) {
     const p = join(dir, e.name);
-    if (e.isDirectory()) walkJsonl(p, out);
-    else if (/\.jsonl$/i.test(e.name)) out.push(p);
+    if (e.isDirectory()) walkFiles(p, re, out);
+    else if (re.test(e.name)) out.push(p);
   }
   return out;
 }
 
-// Read only the leading bytes to pull the session_meta payload (id + cwd); session_meta is the
-// first line of a rollout, so a bounded prefix read avoids parsing multi-MB transcripts twice.
-function readSessionMeta(path) {
+// Read only the leading bytes of a file (avoids slurping multi-MB transcripts / notes).
+function readPrefix(path, bytes = 4096) {
   let fd;
   try {
     fd = openSync(path, 'r');
-    const buf = Buffer.alloc(16384);
-    const n = readSync(fd, buf, 0, buf.length, 0);
-    for (const line of buf.slice(0, n).toString('utf-8').split('\n')) {
-      if (!line.trim()) continue;
-      let e;
-      try { e = JSON.parse(line); } catch { return null; } // partial/oversized first line -> skip
-      return e.type === 'session_meta' ? (e.payload || {}) : null; // meta is always line 1
-    }
+    const buf = Buffer.alloc(bytes);
+    const n = readSync(fd, buf, 0, bytes, 0);
+    return buf.slice(0, n).toString('utf-8');
   } catch {
-    return null;
+    return '';
   } finally {
     if (fd !== undefined) { try { closeSync(fd); } catch { /* already closed */ } }
   }
+}
+
+// Pull the session_meta payload (id + cwd). session_meta is line 1 of a rollout.
+function readSessionMeta(path) {
+  for (const line of readPrefix(path, 16384).split('\n')) {
+    if (!line.trim()) continue;
+    let e;
+    try { e = JSON.parse(line); } catch { return null; } // partial/oversized first line -> skip
+    return e.type === 'session_meta' ? (e.payload || {}) : null;
+  }
   return null;
+}
+
+// The `session_id` recorded in a note's frontmatter (empty when absent).
+function noteSessionId(path) {
+  const m = readPrefix(path, 2048).match(/^session_id:\s*["']?([^"'\r\n]+)["']?\s*$/m);
+  return m ? m[1].trim() : '';
+}
+
+// Every session_id the vault already has a record of: the SESSION_REGISTRY plus every session
+// note's frontmatter id. The registry is authoritative for wendkeep-native vaults, but scanning
+// notes too keeps import safe even if the registry was reset/lost — a session with a note on
+// disk is never re-imported.
+export function capturedSessionIds(vaultBase) {
+  const ids = new Set(Object.keys(readSessionRegistry(vaultBase).sessions || {}));
+  try {
+    const sessionsDir = join(vaultBase, getLocale(vaultBase).folders.sessions);
+    for (const path of walkFiles(sessionsDir, /\.md$/i)) {
+      const id = noteSessionId(path);
+      if (id) ids.add(id);
+    }
+  } catch { /* registry alone is enough */ }
+  return ids;
 }
 
 export function discoverCodexTranscripts(projectPath, fromDir) {
   const dir = fromDir || defaultCodexSessionsDir();
   if (!dir || !existsSync(dir)) return { dir, transcripts: [] };
   const transcripts = [];
-  for (const path of walkJsonl(dir)) {
+  for (const path of walkFiles(dir, /\.jsonl$/i)) {
     const meta = readSessionMeta(path);
     if (!meta || !meta.id) continue;
     if (projectPath && !cwdMatchesProject(meta.cwd, projectPath)) continue;
@@ -147,9 +174,9 @@ export function importSession(vaultBase, txPath, opts = {}) {
   const endDate = toDate(turns.at(-1).timestamp, startDate);
   const summary = deriveSummary(tx);
 
-  // Skeleton in the real dated folder, tagged with the transcript's own provider.
+  // Skeleton in the real dated folder, tagged with the transcript's own provider + session id.
   const { absPath, relPath } = allocateSessionPath(vaultBase, startDate, summary);
-  writeFileSync(absPath, buildSessionContent({ relPath, now: startDate, summary, provider: tx.provider }), 'utf-8');
+  writeFileSync(absPath, buildSessionContent({ relPath, now: startDate, summary, provider: tx.provider, sessionId }), 'utf-8');
 
   // One iteration block per turn (insertIteration dedups by turn marker -> re-import safe).
   for (const turn of turns) {
@@ -186,6 +213,34 @@ export function importSession(vaultBase, txPath, opts = {}) {
   return { sessionId, relPath, turns: turns.length };
 }
 
+// Stamp a missing/empty `session_id` into a note's frontmatter (only within the frontmatter
+// block, right after `provider:`). Leaves a note that already has a non-empty id untouched.
+function injectSessionIdFrontmatter(content, sessionId) {
+  const q = `"${String(sessionId).replace(/"/g, '\\"')}"`;
+  if (/^session_id:\s*$/m.test(content)) return content.replace(/^session_id:\s*$/m, `session_id: ${q}`);
+  if (/^session_id:\s*\S/m.test(content)) return content; // already has a value
+  if (/^provider:.*$/m.test(content)) return content.replace(/^(provider:.*)$/m, `$1\nsession_id: ${q}`);
+  return content.replace(/^---\s*$/m, `---\nsession_id: ${q}`);
+}
+
+// Backfill `session_id` into existing session notes from the SESSION_REGISTRY (session_file -> id).
+// For notes captured/imported before the field existed. Idempotent; only touches notes missing it.
+export function stampSessionIds(vaultBase) {
+  const reg = readSessionRegistry(vaultBase).sessions || {};
+  const report = { total: Object.keys(reg).length, stamped: 0, alreadyOk: 0, missingFile: 0 };
+  for (const [sessionId, entry] of Object.entries(reg)) {
+    if (!entry?.session_file) continue;
+    const abs = join(vaultBase, entry.session_file);
+    if (!existsSync(abs)) { report.missingFile++; continue; }
+    let content;
+    try { content = readFileSync(abs, 'utf-8'); } catch { report.missingFile++; continue; }
+    const next = injectSessionIdFrontmatter(content, sessionId);
+    if (next !== content) { writeFileSync(abs, next, 'utf-8'); report.stamped++; }
+    else { report.alreadyOk++; }
+  }
+  return report;
+}
+
 // Import every not-yet-captured transcript from the requested source(s). Deduped by session_id
 // against the registry. Options: { projectPath, source ('all'|'claude'|'codex'), from, codexFrom,
 // since (ISO/date), limit, dryRun }. importSession is provider-agnostic, so both sources share
@@ -206,7 +261,7 @@ export function runImport(vaultBase, opts = {}) {
     codexDir = d.dir;
     transcripts.push(...d.transcripts);
   }
-  const captured = new Set(Object.keys(readSessionRegistry(vaultBase).sessions || {}));
+  const captured = capturedSessionIds(vaultBase);
   const sinceMs = since ? Date.parse(since) : 0;
   const report = { source: src, claudeDir, codexDir, scanned: transcripts.length, imported: 0, skipped: 0, errors: [], sessions: [] };
 

@@ -4,6 +4,25 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.18.0] — 2026-07-06
+
+Session identity in the note.
+
+### Added
+- Session notes now carry **`session_id`** in their frontmatter — both live capture and import,
+  Claude and Codex. Pairs with the existing `provider:` field so every note self-identifies
+  (which conversation, which agent) without consulting the registry.
+- **`wendkeep import --stamp-ids`** — backfill `session_id` into existing notes from the
+  `SESSION_REGISTRY` (for notes captured or imported before the field existed). Idempotent;
+  only touches notes missing the field.
+- Import dedup now also scans existing notes' `session_id` (`capturedSessionIds` = registry ∪
+  note frontmatter), so a session that already has a note on disk is never re-imported even if
+  the registry was reset or lost.
+
+### Changed
+- `buildSessionContent` accepts a `sessionId`; the SessionStart hook (all three create/recreate
+  paths) and `importSession` thread the id through, so a note records its identity at creation.
+
 ## [0.17.0] — 2026-07-06
 
 Retroactive memory, now agent-agnostic (Codex).

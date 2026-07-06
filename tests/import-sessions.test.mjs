@@ -7,8 +7,10 @@ import {
   claudeProjectSlug,
   discoverTranscripts,
   discoverCodexTranscripts,
+  capturedSessionIds,
   importSession,
   runImport,
+  stampSessionIds,
 } from '../hooks/import-sessions.mjs';
 import { readSessionRegistry } from '../hooks/obsidian-common.mjs';
 
@@ -70,6 +72,10 @@ test('importSession builds a full dated note from a transcript', () => {
 
   // Finalized: ended_at stamped from the last turn.
   assert.match(note, /^ended_at:\s*\S+/m);
+
+  // Identity is on the note itself: session_id + provider.
+  assert.match(note, /^session_id:\s*["']?sid-alpha["']?\s*$/m);
+  assert.match(note, /^provider:\s*claude\s*$/m);
 
   // Registered so a re-run dedups.
   const reg = readSessionRegistry(vault).sessions['sid-alpha'];
@@ -139,10 +145,47 @@ test('importSession tags a Codex note with provider: codex', () => {
 
   const note = readFileSync(join(vault, r.relPath), 'utf-8');
   assert.match(note, /^provider:\s*codex\s*$/m);
+  assert.match(note, /^session_id:\s*["']?cdx-alpha["']?\s*$/m);
   assert.match(note, /^\s+- codex\s*$/m); // tag
   assert.match(note, /^date:\s*2026-05-10\s*$/m);
   assert.ok(note.includes('<!-- codex-turn: turn-1 -->'));
   assert.ok(note.includes('<!-- codex-turn: turn-2 -->'));
+});
+
+test('capturedSessionIds + import skip a session whose note exists but the registry was lost', () => {
+  const src = tmp('wk-src-');
+  const vault = tmp('wk-vault-');
+  writeTranscript(src, 'sid-alpha', TRANSCRIPT);
+
+  importSession(vault, join(src, 'sid-alpha.jsonl'));
+  assert.ok(capturedSessionIds(vault).has('sid-alpha'), 'id seen via registry');
+
+  // Simulate a lost/reset registry: wipe it but keep the note on disk.
+  writeFileSync(join(vault, '.brain', 'SESSION_REGISTRY.json'), JSON.stringify({ version: 1, sessions: {} }), 'utf-8');
+  assert.ok(capturedSessionIds(vault).has('sid-alpha'), 'id still seen via the note frontmatter');
+
+  // Re-import must NOT duplicate — the note-scan dedup covers the registry gap.
+  const rerun = runImport(vault, { source: 'claude', from: src });
+  assert.equal(rerun.imported, 0);
+  assert.equal(rerun.skipped, 1);
+});
+
+test('stampSessionIds backfills session_id into pre-existing notes', () => {
+  const src = tmp('wk-src-');
+  const vault = tmp('wk-vault-');
+  const r = importSession(vault, writeTranscript(src, 'sid-alpha', TRANSCRIPT));
+  const abs = join(vault, r.relPath);
+
+  // Simulate a note that predates the field: strip its session_id line.
+  writeFileSync(abs, readFileSync(abs, 'utf-8').replace(/^session_id:.*\r?\n/m, ''), 'utf-8');
+  assert.ok(!/^session_id:/m.test(readFileSync(abs, 'utf-8')), 'precondition: no id line');
+
+  const rep = stampSessionIds(vault);
+  assert.equal(rep.stamped, 1);
+  assert.match(readFileSync(abs, 'utf-8'), /^session_id:\s*["']?sid-alpha["']?\s*$/m);
+
+  // Idempotent.
+  assert.equal(stampSessionIds(vault).stamped, 0);
 });
 
 test('runImport source: codex / all combine sources project-scoped', () => {

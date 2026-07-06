@@ -113,7 +113,8 @@ wendkeep import --vault .myproject-vault --source codex   # just Codex
 ```
 
 - **Both agents by default** (`--source all`). Claude sessions come from `~/.claude/projects/<slug>/`; Codex rollouts from `~/.codex/sessions/**`, scoped to this project by the `cwd` recorded in each session (case- and separator-insensitive, subdirs included). Narrow with `--source claude` / `--source codex`.
-- **Deduped** by `session_id` against the vault's `SESSION_REGISTRY` — only sessions not already present are imported, and it never overwrites an existing note. Re-running is a no-op.
+- Every note records its **`session_id`** and **`provider`** in frontmatter (live capture and import alike). Backfill older notes with `wendkeep import --stamp-ids` (fills the id from the registry; idempotent).
+- **Deduped** by `session_id` against the vault's `SESSION_REGISTRY` **and** existing notes' frontmatter — only sessions not already present are imported, and it never overwrites an existing note. Re-running is a no-op.
 - **`--from <dir>`** / **`--codex-from <dir>`** point at the transcript folders explicitly (use if the auto-derived path misses). Also: `--since <date>`, `--limit <n>`, `--json`.
 - Once imported, `wendkeep cost` aggregates your entire history — retroactively, across both agents.
 
