@@ -13,7 +13,7 @@ import {
   mcpServerEntry,
   hookCommand,
   deriveVaultDirName,
-  COMPANIONS,
+  selectableCompanions,
   resolveCompanions,
   companionSettingsPatch,
   companionMcpPatch,
@@ -260,11 +260,11 @@ export async function runInit(argv) {
   } else if (process.stdin.isTTY && !args.yes) {
     if (canInteractiveSelect()) {
       log(''); // the checkbox menu renders its own header
-      companions = await selectCompanionsInteractive(COMPANIONS, { labels: P.menu });
+      companions = await selectCompanionsInteractive(selectableCompanions(), { labels: P.menu });
     } else {
       // Text fallback (no raw-mode TTY): list + comma input with clear instructions.
       log(P.companionsHeader);
-      for (const c of COMPANIONS) log(`  ${c.default ? '[x]' : '[ ]'} ${c.label}`);
+      for (const c of selectableCompanions()) log(`  ${c.default ? '[x]' : '[ ]'} ${c.label}`);
       const def = resolveCompanions({}).join(',');
       const rl = createInterface({ input: process.stdin, output: process.stdout });
       const ans = (await rl.question(P.companionsAsk(def))).trim();

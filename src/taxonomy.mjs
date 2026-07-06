@@ -134,6 +134,9 @@ export const COMPANIONS = [
     // Kept selectable for anyone already invested in it; not a default.
     label: 'dotcontext — legado (o loop a2 nativo do wendkeep substitui; não recomendado)',
     default: false,
+    // Hidden from the interactive/text companion picker — the native a2 loop replaces it.
+    // Still reachable for anyone already invested via explicit `--companions dotcontext`.
+    hidden: true,
     // MCP-only (no Claude Code plugin). Agent-agnostic server, @latest surface.
     mcp: { key: 'dotcontext', entry: { type: 'stdio', command: 'npx', args: ['-y', '@dotcontext/mcp@latest'], env: {} } },
     // Lifecycle hooks via the pinned CLI; wired by wendkeep (single writer).
@@ -144,6 +147,12 @@ export const COMPANIONS = [
 ];
 
 const COMPANION_BY_ID = Object.fromEntries(COMPANIONS.map((c) => [c.id, c]));
+
+// Companions offered in the interactive / text picker. Excludes `hidden` ones (e.g. the legacy
+// dotcontext) — those stay reachable only via an explicit `--companions <id>`.
+export function selectableCompanions() {
+  return COMPANIONS.filter((c) => !c.hidden);
+}
 
 // Resolve the companion ids for the NON-interactive path (the interactive prompt
 // supplies its own selection). --no-companions wins; an explicit flag selects the

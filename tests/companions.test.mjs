@@ -5,6 +5,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   COMPANIONS,
+  selectableCompanions,
   resolveCompanions,
   companionSettingsPatch,
   companionMcpPatch,
@@ -13,6 +14,15 @@ import {
   CAVEMAN_AGENTS,
   dotcontextHookCommand,
 } from '../src/taxonomy.mjs';
+
+test('selectableCompanions: hides legacy dotcontext from the picker, keeps it opt-in-able', () => {
+  const ids = selectableCompanions().map((c) => c.id);
+  assert.ok(!ids.includes('dotcontext'), 'dotcontext not offered in the picker');
+  assert.ok(ids.includes('context-mode'), 'context-mode offered');
+  assert.ok(ids.includes('understand-anything') && ids.includes('caveman'), 'the rest still offered');
+  // Explicit opt-in still works — hiding is UI-only.
+  assert.deepEqual(resolveCompanions({ companionsFlag: 'dotcontext' }), ['dotcontext']);
+});
 
 test('COMPANIONS: only context-mode is a pre-checked default (dotcontext de-recommended)', () => {
   const byId = Object.fromEntries(COMPANIONS.map((c) => [c.id, c]));

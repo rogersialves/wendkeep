@@ -1,6 +1,6 @@
 {
   "name": "wendkeep",
-  "version": "0.20.0",
+  "version": "0.20.1",
   "description": "A persistent-memory harness for AI coding agents on your Obsidian vault: turn-by-turn session capture plus a native, zero-dependency spec→change→verify→archive loop (sensor-gated, independent verdict, mutation discrimination). Local-first, agent-agnostic (Claude Code, Codex, Cursor…).",
   "type": "module",
   "bin": {

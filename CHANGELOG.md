@@ -4,6 +4,15 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.20.1] — 2026-07-06
+
+### Changed
+- The interactive (and text-fallback) companion picker in `wendkeep init` **no longer lists
+  dotcontext**. The native a2 loop replaces it, so leaving it in the prompt was just clutter. It
+  stays reachable for anyone already invested via an explicit `--companions dotcontext` — the
+  hiding is UI-only (`resolveCompanions` still honors the id). New `selectableCompanions()` helper
+  drives the picker.
+
 ## [0.20.0] — 2026-07-06
 
 Richer skills: bundled templates (multi-file).
