@@ -8,6 +8,7 @@ import { addUsage, costBreakdown, emptyTokenUsage, normalizeClaudeUsage, normali
 import { buildBrainDigest, buildBrainIndex } from './brain-core.mjs';
 import { activeChangeLink } from './change-core.mjs';
 import { getLocale } from './locale.mjs';
+import { upsertSubagentUsage } from './subagent-usage.mjs';
 import {
   ensureDir,
   findActiveSessionByTranscript,
@@ -1042,6 +1043,14 @@ function main() {
     });
   } catch (error) {
     process.stderr.write(`[codex-obsidian] Token usage falhou: ${error.message}\n`);
+  }
+
+  // Subagent/workflow telemetry (0.10.0): fold sibling subagent transcripts into the note.
+  // Provider-gated by structure + fail-open — never derruba o Stop.
+  try {
+    upsertSubagentUsage(sessionPath, transcriptPath);
+  } catch (error) {
+    process.stderr.write(`[codex-obsidian] Subagent usage falhou: ${error.message}\n`);
   }
 
   if (!shouldFinalizeSession()) {

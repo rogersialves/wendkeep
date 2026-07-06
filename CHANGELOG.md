@@ -4,6 +4,22 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.0] — 2026-07-06
+
+Subagent & workflow telemetry — closing the biggest observability gap.
+
+### Added
+- **Subagent + workflow capture:** the Stop hook now scans the session's sibling subagent
+  transcripts (`<session>/subagents/**`) and workflow runs, and folds them into the session
+  note — a new `## Subagents & Workflows` section (aggregate + a collapsible per-subagent
+  table) plus frontmatter fields (`subagents_count`, `subagents_tokens_total`,
+  `subagents_custo_usd`, `tokens_total_incl_subagents`). Reuses the token-usage parser
+  (deduped per request). Previously a session that spawned a Workflow recorded ONLY the main
+  transcript — on a real audit session that hid **12 subagents / 4.6M tokens / $7.59** (2× the
+  main). The main `tokens_total` stays the main agent's (comparable to Claude Code's own
+  display); subagents are a separate axis.
+- Provider-gated by structure (Claude Code's `subagents/` layout); fail-open — never blocks Stop.
+
 ## [0.9.1] — 2026-07-06
 
 Interactive install UX: language first.
@@ -223,6 +239,7 @@ Initial release — the capture engine, extracted from a system in daily product
 - `wendkeep init` (cross-platform installer) + optional `@bitbonsai/mcpvault` MCP server.
 
 <!-- Only v0.4.0+ is tagged in git (history starts here); older versions link to npm. -->
+[0.10.0]: https://github.com/rogersialves/wendkeep/releases/tag/v0.10.0
 [0.9.1]: https://github.com/rogersialves/wendkeep/releases/tag/v0.9.1
 [0.9.0]: https://github.com/rogersialves/wendkeep/releases/tag/v0.9.0
 [0.8.1]: https://github.com/rogersialves/wendkeep/releases/tag/v0.8.1

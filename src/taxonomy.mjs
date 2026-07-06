@@ -31,6 +31,7 @@ export const HOOK_FILES = [
   'session-stop.mjs',
   'linked-notes.mjs',
   'token-usage.mjs',
+  'subagent-usage.mjs',
   'pricing.json',
   'brain-core.mjs',
   'change-core.mjs',
