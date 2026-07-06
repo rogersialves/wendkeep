@@ -115,7 +115,7 @@ Sessão ainda em andamento.
 }
 
 function allocateSessionPath(vaultBase, now, summary = 'session') {
-  const folderRel = sessionFolderRel(now);
+  const folderRel = sessionFolderRel(now, vaultBase);
   const folderAbs = join(vaultBase, folderRel);
   ensureDir(folderAbs);
 

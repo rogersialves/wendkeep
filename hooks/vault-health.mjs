@@ -10,6 +10,7 @@ import {
   readSessionRegistry,
   wikilinkFromRel,
 } from './obsidian-common.mjs';
+import { getLocale } from './locale.mjs';
 
 const DEFAULT_PENDING_PATTERNS = [
   /^- \[ \] Revisar resumo da sessão$/i,
@@ -164,7 +165,8 @@ export function runVaultHealth({ vaultBase, session = '' }) {
     .length;
   if (staleDone) warnings.push(`${staleDone} entradas active com ended_at no SESSION_REGISTRY.`);
 
-  const derivedFolders = ['04-Decisões', '05-Bugs', '06-Aprendizados'];
+  const locF = getLocale(vaultBase).folders;
+  const derivedFolders = [locF.decisions, locF.bugs, locF.learnings];
   const derivedCount = derivedFolders.reduce((total, folder) => {
     const dir = join(vaultBase, folder);
     return total + (existsSync(dir) ? listMarkdownFiles(dir).length : 0);

@@ -7,6 +7,7 @@ import { createLinkedNotes } from './linked-notes.mjs';
 import { addUsage, costBreakdown, emptyTokenUsage, normalizeClaudeUsage, normalizeCodexUsage, priceForModel, updateSessionUsage } from './token-usage.mjs';
 import { buildBrainDigest, buildBrainIndex } from './brain-core.mjs';
 import { activeChangeLink } from './change-core.mjs';
+import { getLocale } from './locale.mjs';
 import {
   ensureDir,
   findActiveSessionByTranscript,
@@ -781,10 +782,11 @@ function noteReferencesSession(content, sessionRel) {
 
 function findLinkedDerivedNotes(vaultBase, sessionRel) {
   const linked = { decisions: [], bugs: [], learnings: [] };
+  const locF = getLocale(vaultBase).folders;
   const folders = {
-    decisions: '04-Decisões',
-    bugs: '05-Bugs',
-    learnings: '06-Aprendizados',
+    decisions: locF.decisions,
+    bugs: locF.bugs,
+    learnings: locF.learnings,
   };
 
   for (const [key, folder] of Object.entries(folders)) {

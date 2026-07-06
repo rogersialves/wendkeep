@@ -3,6 +3,7 @@
 import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { ensureDir, stripYamlQuotes, toVaultRelative } from './obsidian-common.mjs';
+import { getLocale } from './locale.mjs';
 
 export function brainDir(vaultBase) {
   return join(vaultBase, '.brain');
@@ -60,7 +61,7 @@ function derivedLinks(content) {
 // Varre 02-Sessões/** e regrava .brain/index.jsonl inteiro. Provider-agnóstico.
 export function buildBrainIndex(vaultBase) {
   const rows = [];
-  for (const fp of walkMd(join(vaultBase, '02-Sessões'))) {
+  for (const fp of walkMd(join(vaultBase, getLocale(vaultBase).folders.sessions))) {
     let content;
     try { content = readFileSync(fp, 'utf8'); } catch { continue; }
     const fm = parseFrontmatter(content);

@@ -25,6 +25,7 @@ export const VAULT_FOLDERS = [
 // entrypoints + price table). Mirrors the list the old setup-vault.ps1 copied.
 export const HOOK_FILES = [
   'obsidian-common.mjs',
+  'locale.mjs',
   'session-start.mjs',
   'session-ensure.mjs',
   'session-stop.mjs',

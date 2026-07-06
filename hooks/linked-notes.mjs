@@ -12,6 +12,7 @@ import {
   toVaultRelative,
   wikilinkFromRel,
 } from './obsidian-common.mjs';
+import { getLocale } from './locale.mjs';
 
 function yamlQuote(value) {
   return `"${String(value || '').replaceAll('"', '\\"')}"`;
@@ -446,7 +447,7 @@ _Registrar como este conhecimento pode ser reutilizado._
 `;
 }
 
-const DERIVED_FOLDERS = { bugs: '05-Bugs', decisions: '04-Decisões', learnings: '06-Aprendizados' };
+const derivedFoldersFor = (vaultBase) => { const f = getLocale(vaultBase).folders; return { bugs: f.bugs, decisions: f.decisions, learnings: f.learnings }; };
 
 function listMd(dir) {
   try { return readdirSync(dir).filter((f) => f.endsWith('.md')); } catch { return []; }
@@ -456,8 +457,8 @@ function listMd(dir) {
 function existingKeysForSession(vaultBase, sessionRel, dateStr) {
   const wikilink = wikilinkFromRel(sessionRel);
   const out = { bugs: [], decisions: [], learnings: [] };
-  for (const [type, folder] of Object.entries(DERIVED_FOLDERS)) {
-    const dir = join(vaultBase, monthFolderRelFromDateStr(folder, dateStr));
+  for (const [type, folder] of Object.entries(derivedFoldersFor(vaultBase))) {
+    const dir = join(vaultBase, monthFolderRelFromDateStr(folder, dateStr, vaultBase));
     for (const fileName of listMd(dir)) {
       try {
         const c = readFileSync(join(dir, fileName), 'utf-8');
@@ -477,9 +478,10 @@ function alreadyHasKey(keys, candidate) {
 export function createLinkedNotes(vaultBase, dateStr, sessionRel, tx, options = {}) {
   const linked = { decisions: [], bugs: [], learnings: [] };
   const provider = providerMeta(options.provider);
-  const bugsDir = join(vaultBase, monthFolderRelFromDateStr('05-Bugs', dateStr));
-  const decisionsDir = join(vaultBase, monthFolderRelFromDateStr('04-Decisões', dateStr));
-  const learningsDir = join(vaultBase, monthFolderRelFromDateStr('06-Aprendizados', dateStr));
+  const locF = getLocale(vaultBase).folders;
+  const bugsDir = join(vaultBase, monthFolderRelFromDateStr(locF.bugs, dateStr, vaultBase));
+  const decisionsDir = join(vaultBase, monthFolderRelFromDateStr(locF.decisions, dateStr, vaultBase));
+  const learningsDir = join(vaultBase, monthFolderRelFromDateStr(locF.learnings, dateStr, vaultBase));
   ensureDir(bugsDir);
   ensureDir(decisionsDir);
   ensureDir(learningsDir);

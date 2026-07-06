@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, writeFileSync } from 'fs';
 import { basename, dirname, join, relative } from 'path';
+import { getLocale } from './locale.mjs';
 
 // Neutral fallback only. The vault is normally resolved from the
 // OBSIDIAN_VAULT_PATH env var (set by `wendkeep init`) via getVaultBase() below.
@@ -128,26 +129,28 @@ export function formatLocalIso(date = new Date()) {
   return `${formatDate(date)}T${formatTime(date)}`;
 }
 
-export function datedFolderRel(rootFolder, date = new Date()) {
+// Locale (0.8.0): month labels + folder names come from the vault locale when a
+// vaultBase is given; without it, pt-BR (backward compat — every legacy caller).
+export function datedFolderRel(rootFolder, date = new Date(), vaultBase) {
   const p = localDateParts(date);
-  return join(rootFolder, String(p.year), MONTH_FOLDERS[p.month - 1], `DIA ${pad2(p.day)}`);
+  return join(rootFolder, String(p.year), getLocale(vaultBase).months[p.month - 1], `DIA ${pad2(p.day)}`);
 }
 
 // Mesma estrutura datada a partir de uma string 'YYYY-MM-DD' (sessões: até o DIA).
-export function datedFolderRelFromDateStr(rootFolder, dateStr) {
+export function datedFolderRelFromDateStr(rootFolder, dateStr, vaultBase) {
   const [year, month, day] = String(dateStr).split('-');
-  return join(rootFolder, year, MONTH_FOLDERS[Number(month) - 1], `DIA ${pad2(day)}`);
+  return join(rootFolder, year, getLocale(vaultBase).months[Number(month) - 1], `DIA ${pad2(day)}`);
 }
 
 // Estrutura até o MÊS (sem DIA) — usada pelas notas derivadas (decisões/bugs/
 // aprendizados): tudo do mês fica junto em <pasta>/<ano>/<MM-MMM>/.
-export function monthFolderRelFromDateStr(rootFolder, dateStr) {
+export function monthFolderRelFromDateStr(rootFolder, dateStr, vaultBase) {
   const [year, month] = String(dateStr).split('-');
-  return join(rootFolder, year, MONTH_FOLDERS[Number(month) - 1]);
+  return join(rootFolder, year, getLocale(vaultBase).months[Number(month) - 1]);
 }
 
-export function sessionFolderRel(date = new Date()) {
-  return datedFolderRel('02-Sessões', date);
+export function sessionFolderRel(date = new Date(), vaultBase) {
+  return datedFolderRel(getLocale(vaultBase).folders.sessions, date, vaultBase);
 }
 
 export function controlPath(vaultBase) {
@@ -532,7 +535,7 @@ export function listMarkdownFiles(dir) {
 }
 
 export function getNextAdrNumber(vaultBase) {
-  const decisionsDir = join(vaultBase, '04-Decisões');
+  const decisionsDir = join(vaultBase, getLocale(vaultBase).folders.decisions);
   let max = 0;
   // Varre recursivamente: os ADRs agora vivem em subpastas datadas (AAAA/MM-MMM/DIA DD).
   const walk = (dir) => {
