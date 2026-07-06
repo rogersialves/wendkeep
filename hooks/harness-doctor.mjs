@@ -4,11 +4,12 @@ import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { activeChange, parseTasks } from './change-core.mjs';
 import { parseRequirements, parseSpecsList, parseDelta, evaluateVerdict } from './spec-core.mjs';
-
-const CHANGES_DIR = '08-Mudanças';
-const SPECS_DIR = '07-Specs';
+import { getLocale } from './locale.mjs';
 
 export function checkHarness(vaultBase, projectRoot) {
+  const loc = getLocale(vaultBase);
+  const CHANGES_DIR = loc.folders.changes;
+  const SPECS_DIR = loc.folders.specs;
   const errors = [];
   const warnings = [];
 

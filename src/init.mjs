@@ -33,6 +33,7 @@ import {
 import { renderCoreSkeleton, renderCompactionProtocol } from './validate-core.mjs';
 import { seedDefinitions, syncDefs } from './sync-defs.mjs';
 import { seedWkSkills } from './skills-seed.mjs';
+import { LOCALES, DEFAULT_LOCALE, getLocale, clearLocaleCache, vaultFolders } from '../hooks/locale.mjs';
 import { seedDotcontext, globalHasDotcontext, resolveDotcontextSkipMcp, renderSensorsJson } from './dotcontext-seed.mjs';
 
 function parseArgs(argv) {
@@ -40,6 +41,8 @@ function parseArgs(argv) {
   for (let i = 0; i < argv.length; i += 1) {
     const a = argv[i];
     if (a === '--vault') args.vault = argv[++i];
+    else if (a === '--locale') args.locale = argv[++i];
+    else if (a.startsWith('--locale=')) args.locale = a.slice(9);
     else if (a === '--project') args.project = argv[++i];
     else if (a === '--no-mcp') args.mcp = false;
     else if (a === '--yes' || a === '-y') args.yes = true;
@@ -253,9 +256,21 @@ export async function runInit(argv) {
   }
 
   // 1. Vault taxonomy ---------------------------------------------------------
+  // Locale (0.8.0): a vault property, locked at init. Written BEFORE folder creation so
+  // the folder names follow it. Invalid/absent = pt-BR (backward compat).
   if (!existsSync(vaultPath)) mkdirSync(vaultPath, { recursive: true });
+  const localeId = args.locale && LOCALES[args.locale] ? args.locale : DEFAULT_LOCALE;
+  if (args.locale && !LOCALES[args.locale]) {
+    log(`  ! locale desconhecido "${args.locale}" — usando ${DEFAULT_LOCALE} (opções: ${Object.keys(LOCALES).join(', ')})`);
+  }
+  mkdirSync(join(vaultPath, '.brain'), { recursive: true });
+  const configPath = join(vaultPath, '.brain', 'config.json');
+  if (!existsSync(configPath)) writeFileSync(configPath, `${JSON.stringify({ locale: localeId }, null, 2)}\n`, 'utf8');
+  clearLocaleCache();
+  const loc = getLocale(vaultPath);
+  const folders = vaultFolders(loc);
   let created = 0;
-  for (const f of VAULT_FOLDERS) {
+  for (const f of folders) {
     const p = join(vaultPath, f);
     if (!existsSync(p)) {
       mkdirSync(p, { recursive: true });
@@ -283,8 +298,8 @@ export async function runInit(argv) {
   seedDefinitions(brainDir);
   seedWkSkills(brainDir); // Pilar A: native process skills (wk-workflow/tdd/debugging/...).
   // Seed the change/spec layer starters (Pilar B) — non-destructive.
-  const specsReadme = join(vaultPath, '07-Specs', 'README.md');
-  if (!existsSync(specsReadme)) writeFileSync(specsReadme, '# Specs — contrato vivo\n\nCapacidades do projeto (requisitos/cenários). Changes em `08-Mudanças/` promovem deltas aqui no `wendkeep change archive`.\n', 'utf8');
+  const specsReadme = join(vaultPath, loc.folders.specs, 'README.md');
+  if (!existsSync(specsReadme)) writeFileSync(specsReadme, `# Specs — contrato vivo\n\nCapacidades do projeto (requisitos/cenários). Changes em \`${loc.folders.changes}/\` promovem deltas aqui no \`wendkeep change archive\`.\n`, 'utf8');
   const changeTpl = join(vaultPath, 'Templates', 'Change.md');
   if (!existsSync(changeTpl)) writeFileSync(changeTpl, '---\ntype: change\nstatus: active\ncssclasses:\n  - topic-change\n---\n\n# <slug>\n\n## Por quê\n\n## O que muda\n', 'utf8');
   // Seed the native sensor config (Pilar C) at project root — non-destructive.
@@ -294,7 +309,7 @@ export async function runInit(argv) {
     try { scripts = JSON.parse(readFileSync(join(projectPath, 'package.json'), 'utf8')).scripts || {}; } catch { /* no package.json */ }
     writeFileSync(sensorsFile, renderSensorsJson(scripts), 'utf8');
   }
-  log(`  [1/4] vault taxonomy: ${VAULT_FOLDERS.length} folders (${created} created)${readmeNote}, .brain + change/spec + sensors seeded`);
+  log(`  [1/4] vault taxonomy: ${folders.length} folders (${created} created, locale ${loc.id})${readmeNote}, .brain + change/spec + sensors seeded`);
   // Deliver the seeded defs (agents + wk process skills) to the project so they're
   // usable immediately — no separate `wendkeep sync-defs` step needed.
   const synced = syncDefs(vaultPath, projectPath);

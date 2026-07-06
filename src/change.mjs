@@ -12,6 +12,7 @@ import {
 import { evaluateGate, requiredSensors } from '../hooks/sensors-core.mjs';
 import { evaluateVerdict, tasksHashOf, parseSpecsList, parseDelta, parseRequirements, applyDelta } from '../hooks/spec-core.mjs';
 import { getNextAdrNumber, readControl } from '../hooks/obsidian-common.mjs';
+import { getLocale } from '../hooks/locale.mjs';
 
 function resolveVault(argv) {
   let vault;
@@ -69,7 +70,7 @@ export function runChange(argv) {
     const slug = slugArg();
     if (!slug) { process.stderr.write('wendkeep change show: missing <slug>\n'); process.exit(2); }
     let md;
-    try { md = readFileSync(join(vaultBase, '08-Mudanças', slug, 'tarefas.md'), 'utf8'); }
+    try { md = readFileSync(join(vaultBase, getLocale(vaultBase).folders.changes, slug, 'tarefas.md'), 'utf8'); }
     catch { process.stderr.write(`wendkeep change show: not found: ${slug}\n`); process.exit(2); }
     const tasks = parseTasks(md);
     const open = tasks.filter((t) => !t.done).length;
@@ -81,7 +82,7 @@ export function runChange(argv) {
   if (sub === 'status') {
     const slug = slugArg() || activeChange(vaultBase);
     if (!slug) { process.stderr.write('wendkeep change status: no change (arg or active)\n'); process.exit(2); }
-    const dir = join(vaultBase, '08-Mudanças', slug);
+    const dir = join(vaultBase, getLocale(vaultBase).folders.changes, slug);
     let tarefasMd;
     try { tarefasMd = readFileSync(join(dir, 'tarefas.md'), 'utf8'); }
     catch { process.stderr.write(`wendkeep change status: not found: ${slug}\n`); process.exit(2); }
@@ -117,7 +118,7 @@ export function runChange(argv) {
     if (!taskId) { process.stderr.write(`wendkeep change ${sub}: missing <taskId>\n`); process.exit(2); }
     const slug = opt(rest, '--change') || activeChange(vaultBase);
     if (!slug) { process.stderr.write(`wendkeep change ${sub}: no active change\n`); process.exit(2); }
-    const dir = join(vaultBase, '08-Mudanças', slug);
+    const dir = join(vaultBase, getLocale(vaultBase).folders.changes, slug);
     let ok = false;
     try { ok = setTaskDone(dir, taskId, sub === 'done'); } catch { /* sem tarefas.md */ }
     if (!ok) { process.stderr.write(`wendkeep change ${sub}: task não encontrada: ${taskId}\n`); process.exit(2); }
@@ -128,7 +129,7 @@ export function runChange(argv) {
   if (sub === 'diff') {
     const slug = slugArg() || activeChange(vaultBase);
     if (!slug) { process.stderr.write('wendkeep change diff: no change (arg or active)\n'); process.exit(2); }
-    const dir = join(vaultBase, '08-Mudanças', slug);
+    const dir = join(vaultBase, getLocale(vaultBase).folders.changes, slug);
     let specs = [];
     try { specs = parseSpecsList(readFileSync(join(dir, 'proposta.md'), 'utf8')); }
     catch { process.stderr.write(`wendkeep change diff: not found: ${slug}\n`); process.exit(2); }
@@ -142,7 +143,7 @@ export function runChange(argv) {
       for (const r of delta.modified) process.stdout.write(`  ~ ${r.id || r.name} (MODIFIED)\n`);
       for (const k of delta.removed) process.stdout.write(`  - ${k} (REMOVED)\n`);
       let living = [];
-      try { living = parseRequirements(readFileSync(join(vaultBase, '07-Specs', `${cap}.md`), 'utf8')); } catch { /* nova capability */ }
+      try { living = parseRequirements(readFileSync(join(vaultBase, getLocale(vaultBase).folders.specs, `${cap}.md`), 'utf8')); } catch { /* nova capability */ }
       for (const w of applyDelta(living, delta).warnings) process.stdout.write(`  ! ${w}\n`);
     }
     process.exit(0);

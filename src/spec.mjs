@@ -2,6 +2,7 @@
 import { readFileSync, readdirSync } from 'node:fs';
 import { isAbsolute, join, resolve } from 'node:path';
 import { parseRequirements } from '../hooks/spec-core.mjs';
+import { getLocale } from '../hooks/locale.mjs';
 
 function resolveVault(argv) {
   let vault;
@@ -21,7 +22,7 @@ function resolveVault(argv) {
 export function runSpec(argv) {
   const [sub, ...rest] = argv;
   const vaultBase = resolveVault(rest);
-  const specsDir = join(vaultBase, '07-Specs');
+  const specsDir = join(vaultBase, getLocale(vaultBase).folders.specs);
 
   if (sub === 'list') {
     let files = [];

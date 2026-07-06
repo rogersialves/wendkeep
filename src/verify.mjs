@@ -7,6 +7,7 @@ import { parseTasks, activeChange, appendFixTasks } from '../hooks/change-core.m
 import { loadSensors, requiredSensors, runSensors, evaluateGate } from '../hooks/sensors-core.mjs';
 import { tasksHashOf } from '../hooks/spec-core.mjs';
 import { addLesson } from '../hooks/lessons-core.mjs';
+import { getLocale } from '../hooks/locale.mjs';
 
 function today() {
   const d = new Date();
@@ -28,7 +29,7 @@ export function runVerify(argv) {
   const slug = opt(argv, '--change') || activeChange(vaultBase);
   if (!slug) { process.stderr.write('wendkeep verify: no change (--change or active).\n'); process.exit(2); }
 
-  const changeDir = join(vaultBase, '08-Mudanças', slug);
+  const changeDir = join(vaultBase, getLocale(vaultBase).folders.changes, slug);
   let tarefas = '';
   try { tarefas = readFileSync(join(changeDir, 'tarefas.md'), 'utf8'); }
   catch { process.stderr.write(`wendkeep verify: change not found: ${slug}\n`); process.exit(2); }

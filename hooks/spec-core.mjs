@@ -4,14 +4,15 @@ import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { ensureDir } from './obsidian-common.mjs';
+import { getLocale } from './locale.mjs';
 
 // Short stable fingerprint of tarefas.md — freshness check between package/verdict and gate.
 export function tasksHashOf(md) {
   return createHash('sha1').update(String(md)).digest('hex').slice(0, 12);
 }
 
-const SPECS_DIR = '07-Specs';
-const REQ_RE = /^### Requisito:\s*(.+)$/gm;
+// Parse is BILINGUAL always (mixed vaults never break); rendering follows the vault locale.
+const REQ_RE = /^### (?:Requisito|Requirement):\s*(.+)$/gm;
 
 export function parseRequirements(md) {
   const text = String(md);
@@ -71,8 +72,8 @@ export function applyDelta(reqs, delta) {
   return { reqs: out, warnings };
 }
 
-export function renderSpec(capability, reqs, { footer } = {}) {
-  const blocks = reqs.map((r) => `### Requisito: ${r.id ? `${r.id} — ${r.name}` : r.name}\n${r.body}`).join('\n\n');
+export function renderSpec(capability, reqs, { footer, reqHeading = 'Requisito' } = {}) {
+  const blocks = reqs.map((r) => `### ${reqHeading}: ${r.id ? `${r.id} — ${r.name}` : r.name}\n${r.body}`).join('\n\n');
   const foot = footer ? `\n\n> ${footer}\n` : '\n';
   return `---\ntype: spec\ncssclasses:\n  - topic-spec\ntags:\n  - spec\n---\n\n# ${capability}\n\n## Requisitos\n\n${blocks}${foot}`;
 }
@@ -88,20 +89,22 @@ export function parseSpecsList(propostaMd) {
 
 // Merge each capability's delta (in the change) into the living spec in 07-Specs.
 export function promoteSpecs(vaultBase, changeDir, specs, { changeWikilink, dateStr } = {}) {
+  const loc = getLocale(vaultBase);
+  const specsDir = loc.folders.specs;
   const promoted = [];
   const warnings = [];
   for (const cap of specs) {
     let delta;
     try { delta = parseDelta(readFileSync(join(changeDir, 'specs', cap, 'spec.md'), 'utf8')); }
     catch { warnings.push(`sem delta para ${cap}`); continue; }
-    const livePath = join(vaultBase, SPECS_DIR, `${cap}.md`);
+    const livePath = join(vaultBase, specsDir, `${cap}.md`);
     let current = [];
     try { current = parseRequirements(readFileSync(livePath, 'utf8')); } catch { /* nova capability */ }
     const applied = applyDelta(current, delta);
     warnings.push(...applied.warnings.map((w) => `${cap}: ${w}`));
-    ensureDir(join(vaultBase, SPECS_DIR));
+    ensureDir(join(vaultBase, specsDir));
     const footer = changeWikilink ? `Atualizado por ${changeWikilink} em ${dateStr}.` : '';
-    writeFileSync(livePath, renderSpec(cap, applied.reqs, { footer }), 'utf8');
+    writeFileSync(livePath, renderSpec(cap, applied.reqs, { footer, reqHeading: loc.reqHeading }), 'utf8');
     promoted.push(cap);
   }
   return { promoted, warnings };

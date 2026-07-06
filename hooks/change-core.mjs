@@ -2,20 +2,20 @@
 // Native change/spec lifecycle in the vault (Pilar B). Vault-facing lib consumed by
 // the `wendkeep change` CLI (src/change.mjs) and the brain-inject hook. No external deps.
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { ensureDir, wikilinkFromRel } from './obsidian-common.mjs';
 import { parseSpecsList, promoteSpecs } from './spec-core.mjs';
+import { getLocale } from './locale.mjs';
 
-export const CHANGES_DIR = '08-Mudanças';
-export const SPECS_DIR = '07-Specs';
 export const ARCHIVE_DIR = '_arquivo';
 const POINTER = '.brain/CURRENT_CHANGE.md';
 
-export function changeDirRel(slug) {
-  return join(CHANGES_DIR, slug);
+export function changeDirRel(slug, vaultBase) {
+  return join(getLocale(vaultBase).folders.changes, slug);
 }
 
-export function renderChangeScaffold({ slug, sessionRel, dateStr }) {
+export function renderChangeScaffold({ slug, sessionRel, dateStr, locale = 'pt-BR' }) {
+  const en = locale === 'en';
   const source = sessionRel ? `\n  - "${wikilinkFromRel(sessionRel)}"` : ' []';
   const proposta = `---
 type: change
@@ -31,27 +31,20 @@ specs: []
 
 # ${slug}
 
-## Por quê
-
-(motivo da mudança)
-
-## O que muda
-
-(escopo da mudança)
+${en ? '## Why\n\n(reason for the change)\n\n## What changes\n\n(scope of the change)' : '## Por quê\n\n(motivo da mudança)\n\n## O que muda\n\n(escopo da mudança)'}
 `;
   const design = `# ${slug} — design
 
-## Abordagem
-
-(abordagem técnica)
+${en ? '## Approach\n\n(technical approach)' : '## Abordagem\n\n(abordagem técnica)'}
 `;
-  const tarefas = `# ${slug} — tarefas
+  const tarefas = `# ${slug} — ${en ? 'tasks' : 'tarefas'}
 
-- [ ] 1.1 (primeira tarefa)
+- [ ] 1.1 ${en ? '(first task)' : '(primeira tarefa)'}
 `;
+  const reqHeading = en ? 'Requirement' : 'Requisito';
   const specDelta = `## ADDED Requirements
-### Requisito: (nome)
-(comportamento / cenários)
+### ${reqHeading}: ${en ? '(name)' : '(nome)'}
+${en ? '(behaviour / scenarios)' : '(comportamento / cenários)'}
 
 ## MODIFIED Requirements
 
@@ -80,10 +73,11 @@ export function clearActiveChange(vaultBase) {
 }
 
 export function newChange(vaultBase, slug, { sessionRel = '', dateStr, simple = false }) {
-  const dir = join(vaultBase, CHANGES_DIR, slug);
+  const loc = getLocale(vaultBase);
+  const dir = join(vaultBase, loc.folders.changes, slug);
   const existed = existsSync(join(dir, 'proposta.md'));
   mkdirSync(dir, { recursive: true });
-  const files = renderChangeScaffold({ slug, sessionRel, dateStr });
+  const files = renderChangeScaffold({ slug, sessionRel, dateStr, locale: loc.id });
   const write = (name, content) => {
     const f = join(dir, name);
     if (!existsSync(f)) writeFileSync(f, content, 'utf8');
@@ -100,7 +94,7 @@ export function newChange(vaultBase, slug, { sessionRel = '', dateStr, simple = 
     }
   }
   setActiveChange(vaultBase, slug);
-  return { rel: changeDirRel(slug), created: !existed };
+  return { rel: changeDirRel(slug, vaultBase), created: !existed };
 }
 
 export function parseTasks(md) {
@@ -135,7 +129,7 @@ export function setTaskDone(changeDir, taskId, done = true) {
 }
 
 export function listChanges(vaultBase) {
-  const base = join(vaultBase, CHANGES_DIR);
+  const base = join(vaultBase, getLocale(vaultBase).folders.changes);
   const active = [];
   let archived = [];
   try {
@@ -153,29 +147,33 @@ export function listChanges(vaultBase) {
 export function buildActiveChangeInjection(vaultBase, { maxTasks = 8 } = {}) {
   const slug = activeChange(vaultBase);
   if (!slug) return '';
+  const chDir = getLocale(vaultBase).folders.changes;
   let md = '';
-  try { md = readFileSync(join(vaultBase, CHANGES_DIR, slug, 'tarefas.md'), 'utf8'); } catch { return ''; }
+  try { md = readFileSync(join(vaultBase, chDir, slug, 'tarefas.md'), 'utf8'); } catch { return ''; }
   const open = parseTasks(md).filter((t) => !t.done).slice(0, maxTasks);
   const lines = open.map((t) => `- [ ] ${t.id} ${t.text}`);
   const more = open.length === maxTasks ? '\n*…mais tarefas em tarefas.md*' : '';
   return `<active_change>
-Mudança ativa: ${slug} — [[${CHANGES_DIR}/${slug}/proposta]]. Tarefas abertas:
+Mudança ativa: ${slug} — [[${chDir}/${slug}/proposta]]. Tarefas abertas:
 ${lines.join('\n')}${more}
 </active_change>`;
 }
 
 export function activeChangeLink(vaultBase) {
   const slug = activeChange(vaultBase);
-  return slug ? `Change ativa: [[${CHANGES_DIR}/${slug}/proposta]]` : '';
+  return slug ? `Change ativa: [[${getLocale(vaultBase).folders.changes}/${slug}/proposta]]` : '';
 }
 
 // Append fix tasks for surviving mutants to a change's tarefas.md (Wave B). Deduped by
 // file:line, numbered M.<n> continuing from any existing fix tasks. Returns count added.
 export function appendFixTasks(changeDir, mutants, sensorId) {
   const path = join(changeDir, 'tarefas.md');
+  // changeDir = <vault>/<changesDir>/<slug> — derive the vault for the locale verb.
+  const verb = getLocale(dirname(dirname(changeDir))).fixTaskVerb;
   let md = '';
   try { md = readFileSync(path, 'utf8'); } catch { /* nova */ }
-  const existing = new Set([...md.matchAll(/mata mutante (\S+):(\d+)/g)].map((m) => `${m[1]}:${m[2]}`));
+  // Dedup is bilingual so a vault that switched locale mid-change never duplicates.
+  const existing = new Set([...md.matchAll(/(?:mata mutante|kill mutant) (\S+):(\d+)/g)].map((m) => `${m[1]}:${m[2]}`));
   const nums = [...md.matchAll(/^-\s+\[[ x]\]\s+M\.(\d+)\b/gm)].map((m) => Number(m[1]));
   let n = nums.length ? Math.max(...nums) : 0;
   const lines = [];
@@ -184,7 +182,7 @@ export function appendFixTasks(changeDir, mutants, sensorId) {
     if (existing.has(key)) continue;
     existing.add(key);
     n += 1;
-    lines.push(`- [ ] M.${n} mata mutante ${mut.file}:${mut.line} (${mut.mutator}) [sensor:${sensorId}]`);
+    lines.push(`- [ ] M.${n} ${verb} ${mut.file}:${mut.line} (${mut.mutator}) [sensor:${sensorId}]`);
   }
   if (!lines.length) return 0;
   const sep = md === '' || md.endsWith('\n') ? '' : '\n';
@@ -198,11 +196,13 @@ export function gateGreen() {
 }
 
 export function archiveChange(vaultBase, slug, { gate = gateGreen, dateStr, adrNum }) {
-  const src = join(vaultBase, CHANGES_DIR, slug);
+  const loc = getLocale(vaultBase);
+  const chDir = loc.folders.changes;
+  const src = join(vaultBase, chDir, slug);
   const verdict = gate(src);
   if (!verdict.ok) return { ok: false, failing: verdict.failing || [] };
 
-  const destRel = join(CHANGES_DIR, ARCHIVE_DIR, `${dateStr}-${slug}`);
+  const destRel = join(chDir, ARCHIVE_DIR, `${dateStr}-${slug}`);
   const changeWikilink = wikilinkFromRel(join(destRel, 'proposta'));
 
   // Promote spec deltas into the living 07-Specs BEFORE moving (deltas live in src).
@@ -220,16 +220,16 @@ export function archiveChange(vaultBase, slug, { gate = gateGreen, dateStr, adrN
   let reqIds = [];
   try { reqIds = [...new Set(parseTasks(readFileSync(join(src, 'tarefas.md'), 'utf8')).map((t) => t.req).filter(Boolean))]; } catch { /* sem tarefas */ }
 
-  ensureDir(join(vaultBase, CHANGES_DIR, ARCHIVE_DIR));
+  ensureDir(join(vaultBase, chDir, ARCHIVE_DIR));
   renameSync(src, join(vaultBase, destRel));
 
   const [year] = String(dateStr).split('-');
-  const adrDirRel = join('04-Decisões', year);
+  const adrDirRel = join(loc.folders.decisions, year);
   ensureDir(join(vaultBase, adrDirRel));
   const num = String(adrNum).padStart(3, '0');
   const adrRel = join(adrDirRel, `ADR-${num}-${slug}.md`);
   const capLine = promoted.length
-    ? `\n\nCapabilities: ${promoted.map((c) => wikilinkFromRel(join(SPECS_DIR, c))).join(', ')}.`
+    ? `\n\nCapabilities: ${promoted.map((c) => wikilinkFromRel(join(loc.folders.specs, c))).join(', ')}.`
     : '';
   const reqLine = reqIds.length ? `\n\nRequisitos: ${reqIds.join(', ')}.` : '';
   writeFileSync(join(vaultBase, adrRel), `---
