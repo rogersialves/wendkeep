@@ -4,8 +4,11 @@
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-function skill(name, description, body) {
-  return { name, description, body: `---\nname: ${name}\ndescription: ${description}\n---\n${body}` };
+// A skill is a SKILL.md plus optional bundled files (templates/prompts) that ship in the same
+// folder and are delivered together by `wendkeep sync-defs` (cpSync of the whole dir). The
+// SKILL.md references them; the model reads them on demand — depth without bloating SKILL.md.
+function skill(name, description, body, files = []) {
+  return { name, description, body: `---\nname: ${name}\ndescription: ${description}\n---\n${body}`, files };
 }
 
 const WORKFLOW = `# Loop a2 — o ciclo de trabalho do wendkeep
@@ -144,6 +147,10 @@ precisar de design" é onde suposições não-checadas mais custam. O design pod
 mas tem que existir e ser aprovado.
 
 Ao aprovar, o próximo passo é **wk-planning** (design → plano). Não pule pra implementação.
+
+## Template
+Use o \`design-template.md\` (nesta pasta da skill) pra estruturar o design (contexto, abordagens,
+decisões assinadas, tabela out-of-scope, aceite).
 `;
 
 const PLANNING = `# Planejamento — design vira plano de tarefas
@@ -174,6 +181,9 @@ de 2–5 min:
   "tratar erros apropriadamente", "similar à Task N".
 - DRY, YAGNI. Corte features que o design não pediu.
 - Nomes/assinaturas consistentes entre tarefas (uma função é \`x()\` em toda parte).
+
+## Template
+Comece do \`plan-template.md\` (nesta pasta da skill) — a estrutura de arquivos + tarefas TDD.
 `;
 
 const VERIFY = `# Verificação independente — o passe fresco
@@ -201,6 +211,10 @@ nunca tivesse visto a implementação. Contexto fresco, read-only.
 - \`ok: false\` se algum requisito não tem cobertura que discrimina. Gap não é "quase lá" — é vermelho.
 - Não conserte aqui. Gap vira tarefa de correção na change; re-verifica depois.
 - O gate do \`archive\` **exige** \`verdict.json\` com \`ok\` cobrindo todo \`[req:]\`. Sem isso, não arquiva.
+
+## Templates (nesta pasta)
+- \`spec-reviewer-prompt.md\` — cole ao spawnar o subagente verificador (read-only, autor≠verificador).
+- \`verdict-template.json\` — o formato exato do \`verdict.json\` a gravar.
 `;
 
 const WORKFLOW_EN = `# The a2 loop — wendkeep's work cycle
@@ -291,6 +305,10 @@ List explicitly what the change does **not** do. Undeclared scope becomes creep.
 ## Hard gate
 No code / scaffold / implementation action until a design is presented and approved. Then go to
 **wk-planning**.
+
+## Template
+Use \`design-template.md\` (in this skill folder) to structure the design (context, approaches,
+signed-off decisions, out-of-scope table, acceptance).
 `;
 
 const PLANNING_EN = `# Planning — design into a task plan
@@ -309,6 +327,9 @@ implementation (show code) → run and see it pass → checkpoint: suite green.
 ## Rules
 - Exact file paths, always. Real code in each step — no "TODO", "handle errors appropriately",
   "similar to Task N". DRY, YAGNI. Consistent names/signatures across tasks.
+
+## Template
+Start from \`plan-template.md\` (in this skill folder) — the file map + TDD task structure.
 `;
 
 const VERIFY_EN = `# Independent verification — the fresh pass
@@ -329,24 +350,190 @@ the author — even if you wrote the code, enter as if you'd never seen it. Fres
 - \`ok: false\` if any requirement lacks discriminating coverage. A gap is red, not "almost".
 - Don't fix here — a gap becomes a fix task; re-verify after.
 - The archive gate **requires** a fresh \`verdict.json\` (matching \`tasksHash\`) covering every \`[req:]\`.
+
+## Templates (in this folder)
+- \`spec-reviewer-prompt.md\` — hand it to the verifier sub-agent you spawn (read-only, author≠verifier).
+- \`verdict-template.json\` — the exact shape of the \`verdict.json\` to write.
+`;
+
+// --- bundled templates (shipped alongside the relevant SKILL.md) -------------
+
+// Shared, language-neutral verdict skeleton for the independent verify pass.
+const VERDICT_TEMPLATE = `{
+  "slug": "<change-slug>",
+  "ok": true,
+  "coverage": [
+    { "req": "GATE-1", "covered": true, "evidence": "tests/foo.test.mjs:42" }
+  ],
+  "tasksHash": "<copie de verificacao.json — selo de frescor / copy from verificacao.json — freshness seal>",
+  "notes": []
+}
+`;
+
+const REVIEWER_PROMPT_PT = `# Prompt — passe de verificação independente (read-only)
+
+Entregue este prompt ao spawnar o subagente verificador (via o harness nativo — Task/Agent no
+Claude). Ele NÃO é o autor: entra fresco, read-only, não edita nada.
+
+---
+Você é o verificador independente de uma mudança do wendkeep. Não escreveu este código —
+entre como se nunca o tivesse visto. Read-only.
+
+Leia o pacote \`08-Mudanças/<slug>/verificacao.json\` (requisitos, tarefas, evidência) e os
+specs vivos em \`07-Specs/<capability>.md\`.
+
+Para cada \`[req:ID]\` da mudança:
+1. Leia o **critério de aceite do requisito** no spec — NÃO leia a implementação primeiro.
+2. Ache o teste que cobre esse comportamento. Ele **discrimina**? (falharia sob uma
+   implementação errada; afirma valor/estado persistido, não "o mock foi chamado").
+3. Evidência \`arquivo:linha\`. Sem teste que discrimina = \`covered: false\` (é vermelho, não "quase").
+4. Cheque o resultado observável contra o critério — não contra o código.
+
+Grave \`08-Mudanças/<slug>/verdict.json\` no formato de \`verdict-template.json\`. \`ok: false\` se
+qualquer \`[req:]\` não tem cobertura que discrimina. Não conserte aqui — gap vira tarefa de
+correção. O \`tasksHash\` vem do pacote (selo de frescor; alterou tarefa depois, o gate rejeita).
+---
+`;
+
+const REVIEWER_PROMPT_EN = `# Prompt — independent verification pass (read-only)
+
+Hand this to the verifier sub-agent you spawn (via the native harness — Task/Agent on Claude).
+It is NOT the author: fresh context, read-only, edits nothing.
+
+---
+You are the independent verifier of a wendkeep change. You did not write this code — enter as if
+you'd never seen it. Read-only.
+
+Read the package \`08-Changes/<slug>/verificacao.json\` (requirements, tasks, evidence) and the
+living specs in \`07-Specs/<capability>.md\`.
+
+For each \`[req:ID]\`:
+1. Read the requirement's **acceptance criterion** in the spec — do NOT read the implementation first.
+2. Find the test covering that behaviour. Does it **discriminate**? (would fail under a wrong
+   implementation; asserts a persisted value/state, not "the mock was called").
+3. \`file:line\` evidence. No discriminating test = \`covered: false\` (red, not "almost").
+4. Check the observable result against the criterion — not the code.
+
+Write \`08-Changes/<slug>/verdict.json\` in the shape of \`verdict-template.json\`. \`ok: false\` if any
+\`[req:]\` lacks discriminating coverage. Don't fix here — a gap becomes a fix task. \`tasksHash\`
+comes from the package (freshness seal; edit a task later and the gate rejects it as stale).
+---
+`;
+
+const PLAN_TEMPLATE_PT = `# Template — plano de tarefas (TDD, bite-sized)
+
+## Arquivos
+- Criar: \`caminho/exato.mjs\`
+- Modificar: \`caminho/existente.mjs:120-140\`
+- Teste: \`tests/exato.test.mjs\`
+
+## Tarefa N — <nome>
+- **Consome:** <o que usa de tarefas anteriores — assinaturas exatas>
+- **Produz:** <o que tarefas seguintes usam — nomes/tipos exatos>
+
+- [ ] N.1 escreva o teste que falha (mostre o código do teste)  \`[req:<ID>]\`
+- [ ] N.2 rode e veja falhar — pelo motivo certo (comando exato + saída esperada)
+- [ ] N.3 implementação mínima (mostre o código)  \`[sensor:<id>]\` se precisa de prova
+- [ ] N.4 rode e veja passar
+- [ ] N.5 checkpoint: suíte verde · commit
+
+## Regras
+Caminhos exatos sempre. Código real em cada passo — nada de "TODO" / "tratar erros
+apropriadamente" / "similar à Tarefa N". DRY, YAGNI. Nomes e assinaturas consistentes entre
+tarefas (uma função é \`x()\` em toda parte). Cada tarefa termina num entregável testável sozinho.
+`;
+
+const PLAN_TEMPLATE_EN = `# Template — task plan (TDD, bite-sized)
+
+## Files
+- Create: \`exact/path.mjs\`
+- Modify: \`exact/existing.mjs:120-140\`
+- Test: \`tests/exact.test.mjs\`
+
+## Task N — <name>
+- **Consumes:** <what it uses from earlier tasks — exact signatures>
+- **Produces:** <what later tasks rely on — exact names/types>
+
+- [ ] N.1 write the failing test (show the test code)  \`[req:<ID>]\`
+- [ ] N.2 run and see it fail — for the right reason (exact command + expected output)
+- [ ] N.3 minimal implementation (show the code)  \`[sensor:<id>]\` if it needs proof
+- [ ] N.4 run and see it pass
+- [ ] N.5 checkpoint: suite green · commit
+
+## Rules
+Exact paths always. Real code in every step — no "TODO" / "handle errors appropriately" /
+"similar to Task N". DRY, YAGNI. Consistent names/signatures across tasks. Each task ends in an
+independently testable deliverable.
+`;
+
+const DESIGN_TEMPLATE_PT = `# Template — documento de design
+
+## Contexto
+<o problema, o estado atual, por que agora>
+
+## Abordagens consideradas
+1. **<A>** — <trade-off>.
+2. **<B>** — <trade-off>.
+Recomendada: **<qual>** — <por quê>.
+
+## Design
+<arquitetura, componentes, fluxo de dados, tratamento de erro, estratégia de teste — em seções
+escaladas ao tamanho do problema>
+
+## Decisões e assumptions assinadas
+- Assumo **X** porque **Y** — corrija se errado.
+
+## Out-of-scope (o contrato do que NÃO muda)
+| Item | Por que fora |
+|---|---|
+| <x> | <razão> |
+
+## Aceite
+<critérios verificáveis: para cada requisito, o teste que falha → passa>
+`;
+
+const DESIGN_TEMPLATE_EN = `# Template — design document
+
+## Context
+<the problem, the current state, why now>
+
+## Approaches considered
+1. **<A>** — <trade-off>.
+2. **<B>** — <trade-off>.
+Recommended: **<which>** — <why>.
+
+## Design
+<architecture, components, data flow, error handling, test strategy — sections scaled to the
+size of the problem>
+
+## Decisions and signed-off assumptions
+- Assuming **X** because **Y** — correct me if wrong.
+
+## Out-of-scope (the contract of what does NOT change)
+| Item | Why out |
+|---|---|
+| <x> | <reason> |
+
+## Acceptance
+<verifiable criteria: for each requirement, the test that fails → passes>
 `;
 
 const WK_SKILLS_PT = [
   skill('wk-workflow', 'Use ao começar qualquer mudança não-trivial — orquestra o loop a2 (explore, propose, apply, verify, archive) nos comandos wendkeep.', WORKFLOW),
   skill('wk-tdd', 'Use ao implementar qualquer comportamento — Red/Green/Refactor com testes que discriminam (derivados do spec, litmus não-raso, adequação).', TDD),
   skill('wk-debugging', 'Use quando algo falha ou quebra — depuração sistemática por hipótese antes de corrigir.', DEBUGGING),
-  skill('wk-brainstorming', 'Use quando a ideia ainda é vaga — vira design aprovado, com closure gate e tabela out-of-scope, antes de código.', BRAINSTORMING),
-  skill('wk-planning', 'Use após um design aprovado — decompõe em plano de tarefas TDD bite-sized.', PLANNING),
-  skill('wk-verify', 'Use no verify deep — passe independente read-only (autor≠verificador) que re-deriva a cobertura do spec e grava verdict.json.', VERIFY),
+  skill('wk-brainstorming', 'Use quando a ideia ainda é vaga — vira design aprovado, com closure gate e tabela out-of-scope, antes de código.', BRAINSTORMING, [{ name: 'design-template.md', content: DESIGN_TEMPLATE_PT }]),
+  skill('wk-planning', 'Use após um design aprovado — decompõe em plano de tarefas TDD bite-sized.', PLANNING, [{ name: 'plan-template.md', content: PLAN_TEMPLATE_PT }]),
+  skill('wk-verify', 'Use no verify deep — passe independente read-only (autor≠verificador) que re-deriva a cobertura do spec e grava verdict.json.', VERIFY, [{ name: 'spec-reviewer-prompt.md', content: REVIEWER_PROMPT_PT }, { name: 'verdict-template.json', content: VERDICT_TEMPLATE }]),
 ];
 
 const WK_SKILLS_EN = [
   skill('wk-workflow', 'Use when starting any non-trivial change — orchestrates the a2 loop (explore, propose, apply, verify, archive) over the wendkeep commands.', WORKFLOW_EN),
   skill('wk-tdd', 'Use when implementing any behaviour — Red/Green/Refactor with tests that discriminate (spec-derived, non-shallow litmus, adequacy).', TDD_EN),
   skill('wk-debugging', 'Use when something fails or breaks — systematic hypothesis-driven debugging before fixing.', DEBUGGING_EN),
-  skill('wk-brainstorming', 'Use when the idea is still vague — turns it into an approved design, with a closure gate and out-of-scope table, before code.', BRAINSTORMING_EN),
-  skill('wk-planning', 'Use after an approved design — decomposes it into a bite-sized TDD task plan.', PLANNING_EN),
-  skill('wk-verify', 'Use in verify deep — an independent read-only pass (author≠verifier) that re-derives spec coverage and writes verdict.json.', VERIFY_EN),
+  skill('wk-brainstorming', 'Use when the idea is still vague — turns it into an approved design, with a closure gate and out-of-scope table, before code.', BRAINSTORMING_EN, [{ name: 'design-template.md', content: DESIGN_TEMPLATE_EN }]),
+  skill('wk-planning', 'Use after an approved design — decomposes it into a bite-sized TDD task plan.', PLANNING_EN, [{ name: 'plan-template.md', content: PLAN_TEMPLATE_EN }]),
+  skill('wk-verify', 'Use in verify deep — an independent read-only pass (author≠verifier) that re-derives spec coverage and writes verdict.json.', VERIFY_EN, [{ name: 'spec-reviewer-prompt.md', content: REVIEWER_PROMPT_EN }, { name: 'verdict-template.json', content: VERDICT_TEMPLATE }]),
 ];
 
 // Skill set for a locale. WK_SKILLS stays the pt-BR set for back-compat.
@@ -355,17 +542,23 @@ export function wkSkills(localeId = 'pt-BR') {
 }
 export const WK_SKILLS = WK_SKILLS_PT;
 
-// Seed each skill into <brainDir>/skills/<name>/SKILL.md if absent (non-destructive).
+// Seed each skill into <brainDir>/skills/<name>/ if absent (non-destructive): SKILL.md plus any
+// bundled template/prompt files. Existing files are never overwritten, so re-seeding an older
+// install just fills in the new template files alongside its SKILL.md.
 export function seedWkSkills(brainDir, localeId = 'pt-BR') {
   const created = [];
   for (const s of wkSkills(localeId)) {
     const dir = join(brainDir, 'skills', s.name);
     mkdirSync(dir, { recursive: true });
-    const f = join(dir, 'SKILL.md');
-    if (!existsSync(f)) {
-      writeFileSync(f, s.body, 'utf8');
-      created.push(f);
-    }
+    const writeIfAbsent = (name, content) => {
+      const f = join(dir, name);
+      if (!existsSync(f)) {
+        writeFileSync(f, content, 'utf8');
+        created.push(f);
+      }
+    };
+    writeIfAbsent('SKILL.md', s.body);
+    for (const file of s.files || []) writeIfAbsent(file.name, file.content);
   }
   return created;
 }

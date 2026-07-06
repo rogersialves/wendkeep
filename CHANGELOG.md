@@ -4,6 +4,31 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.20.0] — 2026-07-06
+
+Richer skills: bundled templates (multi-file).
+
+### Added
+- The process skills now ship **bundled templates** next to their `SKILL.md`, delivered together
+  by `sync-defs` (the whole skill folder is copied) and auto-delivered by `init`. The model reads
+  them on demand — depth without bloating `SKILL.md`:
+  - **wk-verify** → `spec-reviewer-prompt.md` (the prompt to hand a fresh read-only verifier
+    sub-agent) + `verdict-template.json` (the exact `verdict.json` shape).
+  - **wk-planning** → `plan-template.md` (file map + bite-sized TDD task structure).
+  - **wk-brainstorming** → `design-template.md` (context, approaches, signed-off assumptions,
+    out-of-scope table, acceptance).
+  - pt-BR and en variants; the prose templates follow the vault locale, the JSON is shared.
+
+### Notes
+- Subagents stay the **native harness's** job. wendkeep ships the verifier **prompt** (the agent
+  spawns a read-only sub-agent via its own Task/Agent tool) and captures subagent telemetry — it
+  does not orchestrate spawning. So the reviewer is a template, not a Claude-only
+  `.claude/agents/*.md`, which keeps it agent-agnostic.
+
+### Upgrade
+- `npm update wendkeep`, then `wendkeep init` (or `wendkeep sync-defs`) to get the templates
+  alongside your existing skills. Non-destructive — existing `SKILL.md` files are never overwritten.
+
 ## [0.19.0] — 2026-07-06
 
 Fix: memory + active-change injection wired by default.
