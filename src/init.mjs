@@ -165,10 +165,11 @@ function runCavemanInstaller(log) {
 // enable it (non-destructive), and add graph color groups. Returns a short note.
 // Unparseable user JSON is left untouched (we only merge into valid/absent files).
 function installVaultColors(vaultPath) {
+  const loc = getLocale(vaultPath);
   const obsidianDir = join(vaultPath, '.obsidian');
   const snippetsDir = join(obsidianDir, 'snippets');
   mkdirSync(snippetsDir, { recursive: true });
-  writeFileSync(join(snippetsDir, `${SNIPPET_NAME}.css`), renderColorSnippetCss(), 'utf8');
+  writeFileSync(join(snippetsDir, `${SNIPPET_NAME}.css`), renderColorSnippetCss(loc), 'utf8');
 
   let enabled = false;
   const appPath = join(obsidianDir, 'appearance.json');
@@ -182,9 +183,9 @@ function installVaultColors(vaultPath) {
   const graphPath = join(obsidianDir, 'graph.json');
   const graphRead = readJsonSafe(graphPath);
   if (graphRead.ok) {
-    const merged = mergeGraphColorGroups(graphRead.data || {}, graphColorGroups());
+    const merged = mergeGraphColorGroups(graphRead.data || {}, graphColorGroups(loc));
     writeJson(graphPath, merged);
-    groups = graphColorGroups().length;
+    groups = graphColorGroups(loc).length;
   }
   return `snippet ${SNIPPET_NAME}.css${enabled ? ' (enabled)' : ' (enable by hand: appearance.json unreadable)'} + ${groups} graph group(s)`;
 }
@@ -290,7 +291,7 @@ export async function runInit(argv) {
   const brainDir = join(vaultPath, '.brain');
   mkdirSync(brainDir, { recursive: true });
   const corePath = join(brainDir, 'CORE.md');
-  if (!existsSync(corePath)) writeFileSync(corePath, renderCoreSkeleton(), 'utf8');
+  if (!existsSync(corePath)) writeFileSync(corePath, renderCoreSkeleton(loc.id), 'utf8');
   const protoPath = join(brainDir, 'COMPACTION_PROTOCOL.md');
   if (!existsSync(protoPath)) writeFileSync(protoPath, renderCompactionProtocol(), 'utf8');
   // Seed the definitions layer (.brain/agents + .brain/skills): versioned source of

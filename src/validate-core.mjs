@@ -11,11 +11,20 @@ import { isAbsolute, join, resolve } from 'node:path';
 const HARD_LIMIT = 25;
 const SOFT_LIMIT = 22;
 
-const REQUIRED_SECTIONS = [
-  { label: 'Preferências do Usuário', regex: /^##\s+Prefer[êe]ncias\s+do\s+Usu[áa]rio\s*$/im },
-  { label: 'Padrões Ativos', regex: /^##\s+Padr[õo]es\s+Ativos\s*$/im },
-  { label: 'Pendências Abertas', regex: /^##\s+Pend[êe]ncias\s+Abertas\s*$/im },
-];
+// Bilingual (0.8.0): a CORE is valid when it carries the COMPLETE section set of either
+// locale — pt-BR or en. Mixed/partial sets fail (the 3 sections are one contract).
+const SECTION_SETS = {
+  'pt-BR': [
+    { label: 'Preferências do Usuário', regex: /^##\s+Prefer[êe]ncias\s+do\s+Usu[áa]rio\s*$/im },
+    { label: 'Padrões Ativos', regex: /^##\s+Padr[õo]es\s+Ativos\s*$/im },
+    { label: 'Pendências Abertas', regex: /^##\s+Pend[êe]ncias\s+Abertas\s*$/im },
+  ],
+  en: [
+    { label: 'User Preferences', regex: /^##\s+User\s+Preferences\s*$/im },
+    { label: 'Active Patterns', regex: /^##\s+Active\s+Patterns\s*$/im },
+    { label: 'Open Items', regex: /^##\s+Open\s+Items\s*$/im },
+  ],
+};
 
 // Secret patterns reject only "real" values (length floor); abstract mentions like
 // `sk_*` / `whsec_*` (trailing asterisk) are allowed.
@@ -41,9 +50,10 @@ export function validateCore(content) {
   if (lineCount > HARD_LIMIT) {
     errors.push(`Tamanho ${lineCount} > ${HARD_LIMIT} linhas (hard limit). Curar: remover itens resolvidos (detalhe vive no vault/git).`);
   }
-  for (const { label, regex } of REQUIRED_SECTIONS) {
-    if (!regex.test(text)) errors.push(`Seção obrigatória ausente: ## ${label}`);
-  }
+  // Pick the locale set that matches best; require it to be complete.
+  const missingBySet = Object.values(SECTION_SETS).map((set) => set.filter(({ regex }) => !regex.test(text)));
+  const best = missingBySet.reduce((a, b) => (b.length < a.length ? b : a));
+  for (const { label } of best) errors.push(`Seção obrigatória ausente: ## ${label}`);
   for (const { name, regex } of SECRET_PATTERNS) {
     const m = text.match(regex);
     if (m) errors.push(`Possível ${name} detectado: "${m[0].slice(0, 30)}..." — substituir por [REDACTED_SECRET].`);
@@ -61,7 +71,22 @@ export function validateCore(content) {
 
 // The seeded CORE.md (must pass validateCore). Bootstraps the 3 sections so the
 // curated hot layer exists with the right shape from day one.
-export function renderCoreSkeleton() {
+export function renderCoreSkeleton(localeId = 'pt-BR') {
+  if (localeId === 'en') {
+    return `# CORE — curated memory core (.brain)
+
+> RULE #1 — the project's canonical memory. Hand-curated, 25-line cap (validate: \`wendkeep validate-memory\`). Volatile facts live in DIGEST.md (auto). Depth: /brain-recall <topic>.
+
+## User Preferences
+- (durable preferences: language, style, conventions)
+
+## Active Patterns
+- (active patterns/architecture another agent must know)
+
+## Open Items
+- (open items/decisions — remove when resolved)
+`;
+  }
   return `# CORE — núcleo curado da memória (.brain)
 
 > REGRA #1 — memória canônica do projeto. Curado à mão, cap 25 linhas (valide: \`wendkeep validate-memory\`). Volátil vive no DIGEST.md (auto). Profundidade: /brain-recall <tópico>.

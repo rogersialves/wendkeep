@@ -8,6 +8,9 @@
 
 export const SNIPPET_NAME = 'wendkeep-colors';
 
+import { LOCALES } from '../hooks/locale.mjs';
+const PT = LOCALES['pt-BR'];
+
 // Base palette (hex + "r, g, b" for rgba()).
 const PALETTE = {
   blue: { hex: '#2f80ed', rgb: '47, 128, 237' },
@@ -20,42 +23,49 @@ const PALETTE = {
   slate: { hex: '#64748b', rgb: '100, 116, 139' },
 };
 
-// File-explorer folder -> palette key (mirrors VAULT_FOLDERS in taxonomy.mjs).
-const FOLDER_PALETTE = [
-  ['00-Inbox', 'amber'],
-  ['01-Projeto', 'indigo'],
-  ['02-Sessões', 'blue'],
-  ['03-Linear', 'teal'],
-  ['04-Decisões', 'violet'],
-  ['05-Bugs', 'red'],
-  ['06-Aprendizados', 'green'],
-  ['07-Specs', 'teal'],
-  ['08-Mudanças', 'amber'],
-  ['Templates', 'slate'],
-];
-
-// Note cssclass -> palette key; `folder` is reused for the graph color groups.
-export const NOTE_COLORS = {
-  session: { cssClass: 'topic-session', folder: '02-Sessões', palette: 'blue' },
-  decision: { cssClass: 'topic-decision', folder: '04-Decisões', palette: 'violet' },
-  bug: { cssClass: 'topic-bug', folder: '05-Bugs', palette: 'red' },
-  learning: { cssClass: 'topic-learning', folder: '06-Aprendizados', palette: 'green' },
-  spec: { cssClass: 'topic-spec', folder: '07-Specs', palette: 'teal' },
-  change: { cssClass: 'topic-change', folder: '08-Mudanças', palette: 'amber' },
+// File-explorer folder KEY -> palette key; folder names resolve via the vault locale.
+const PALETTE_BY_KEY = {
+  inbox: 'amber',
+  project: 'indigo',
+  sessions: 'blue',
+  linear: 'teal',
+  decisions: 'violet',
+  bugs: 'red',
+  learnings: 'green',
+  specs: 'teal',
+  changes: 'amber',
 };
+function folderPalette(loc) {
+  return [...Object.entries(PALETTE_BY_KEY).map(([k, p]) => [loc.folders[k], p]), ['Templates', 'slate']];
+}
 
-// cssclasses that get the note-accent treatment (the four note types + a home note).
-const TOPIC_CLASSES = [...Object.values(NOTE_COLORS).map((n) => n.cssClass), 'vault-home'];
+// Note cssclass -> palette + locale folder key; `folder` resolves per locale.
+const NOTE_TYPES = {
+  session: { cssClass: 'topic-session', folderKey: 'sessions', palette: 'blue' },
+  decision: { cssClass: 'topic-decision', folderKey: 'decisions', palette: 'violet' },
+  bug: { cssClass: 'topic-bug', folderKey: 'bugs', palette: 'red' },
+  learning: { cssClass: 'topic-learning', folderKey: 'learnings', palette: 'green' },
+  spec: { cssClass: 'topic-spec', folderKey: 'specs', palette: 'teal' },
+  change: { cssClass: 'topic-change', folderKey: 'changes', palette: 'amber' },
+};
+// Legacy pt-shaped export (folder names resolved at pt-BR) kept for compat.
+export const NOTE_COLORS = Object.fromEntries(
+  Object.entries(NOTE_TYPES).map(([k, v]) => [k, { cssClass: v.cssClass, folder: PT.folders[v.folderKey], palette: v.palette }]),
+);
+
+// cssclasses that get the note-accent treatment (the note types + a home note).
+const TOPIC_CLASSES = [...Object.values(NOTE_TYPES).map((n) => n.cssClass), 'vault-home'];
 const NOTE_ACCENTS = [
-  ...Object.values(NOTE_COLORS).map((n) => ({ cssClass: n.cssClass, palette: n.palette })),
+  ...Object.values(NOTE_TYPES).map((n) => ({ cssClass: n.cssClass, palette: n.palette })),
   { cssClass: 'vault-home', palette: 'indigo' },
 ];
 
 const FX = '.workspace-leaf-content[data-type="file-explorer"] .nav-folder-title';
-const folderSel = FOLDER_PALETTE.map(([f]) => `[data-path^="${f}"]`).join(',\n  ');
 const topicReading = TOPIC_CLASSES.map((c) => `.${c}`).join(', ');
 
-export function renderColorSnippetCss() {
+export function renderColorSnippetCss(loc = PT) {
+  const FOLDER_PALETTE = folderPalette(loc);
+  const folderSel = FOLDER_PALETTE.map(([f]) => `[data-path^="${f}"]`).join(',\n  ');
   const rootVars = Object.entries(PALETTE)
     .map(([k, v]) => `  --us-${k}: ${v.hex};\n  --us-${k}-rgb: ${v.rgb};`)
     .join('\n');
@@ -181,9 +191,9 @@ export function mergeAppearance(existing, snippetName = SNIPPET_NAME) {
 }
 
 // Graph color groups: one per note folder, colored from the palette.
-export function graphColorGroups() {
-  return Object.values(NOTE_COLORS).map((v) => ({
-    query: `path:"${v.folder}"`,
+export function graphColorGroups(loc = PT) {
+  return Object.values(NOTE_TYPES).map((v) => ({
+    query: `path:"${loc.folders[v.folderKey]}"`,
     color: { a: 1, rgb: parseInt(PALETTE[v.palette].hex.slice(1), 16) },
   }));
 }

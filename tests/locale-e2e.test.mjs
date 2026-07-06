@@ -27,6 +27,30 @@ test('init --locale en: english folders + config; pt folders absent', () => {
   } finally { rmSync(parent, { recursive: true, force: true }); }
 });
 
+test('en surfaces: months, session folder, CORE skeleton, theme groups', async () => {
+  const vault = mkdtempSync(join(tmpdir(), 'wk-ensurf-'));
+  try {
+    mkdirSync(join(vault, '.brain'), { recursive: true });
+    writeFileSync(join(vault, '.brain', 'config.json'), '{ "locale": "en" }');
+    const { sessionFolderRel } = await import('../hooks/obsidian-common.mjs');
+    const rel = sessionFolderRel(new Date(2026, 1, 3), vault); // fevereiro
+    assert.match(rel.replaceAll('\\', '/'), /^02-Sessions\/2026\/02-FEB\/DIA 03$/, `en month+folder: ${rel}`);
+    const relPt = sessionFolderRel(new Date(2026, 1, 3)); // sem vault = pt
+    assert.match(relPt.replaceAll('\\', '/'), /^02-Sessões\/2026\/02-FEV\//, 'pt default intact');
+
+    const { renderCoreSkeleton, validateCore } = await import('../src/validate-core.mjs');
+    const enCore = renderCoreSkeleton('en');
+    assert.match(enCore, /## User Preferences/);
+    assert.equal(validateCore(enCore).ok, true, 'en skeleton validates');
+    assert.equal(validateCore(renderCoreSkeleton()).ok, true, 'pt skeleton still validates');
+
+    const { graphColorGroups } = await import('../src/vault-theme.mjs');
+    const { LOCALES } = await import('../hooks/locale.mjs');
+    const q = graphColorGroups(LOCALES.en).map((g) => g.query);
+    assert.ok(q.some((s) => s.includes('08-Changes')), 'en graph group');
+  } finally { rmSync(vault, { recursive: true, force: true }); }
+});
+
 test('en vault: change loop end-to-end (scaffold, requirement heading, ADR in 04-Decisions)', () => {
   const vault = mkdtempSync(join(tmpdir(), 'wk-enloop-'));
   const spawn = (a) => spawnSync(process.execPath, [BIN, 'change', ...a, '--vault', vault], { encoding: 'utf8' });
