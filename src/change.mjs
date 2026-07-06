@@ -9,8 +9,8 @@ import {
   archiveChange,
 } from '../hooks/change-core.mjs';
 import { evaluateGate, requiredSensors } from '../hooks/sensors-core.mjs';
-import { evaluateVerdict } from '../hooks/spec-core.mjs';
-import { getNextAdrNumber } from '../hooks/obsidian-common.mjs';
+import { evaluateVerdict, tasksHashOf } from '../hooks/spec-core.mjs';
+import { getNextAdrNumber, readControl } from '../hooks/obsidian-common.mjs';
 
 function resolveVault(argv) {
   let vault;
@@ -40,7 +40,10 @@ export function runChange(argv) {
   if (sub === 'new') {
     const slug = slugArg();
     if (!slug) { process.stderr.write('wendkeep change new: missing <slug>\n'); process.exit(2); }
-    const r = newChange(vaultBase, slug, { dateStr: today(), simple: rest.includes('--simple') });
+    // G2: link the active session into the proposta's source: (graph edge proposta->sessão).
+    let sessionRel = '';
+    try { sessionRel = readControl(vaultBase).session_file || ''; } catch { /* sem control */ }
+    const r = newChange(vaultBase, slug, { dateStr: today(), simple: rest.includes('--simple'), sessionRel });
     process.stdout.write(`change ${r.created ? 'created' : 'exists'}: ${r.rel} (active)\n`);
     process.exit(0);
   }
@@ -71,8 +74,14 @@ export function runChange(argv) {
     if (!slug) { process.stderr.write('wendkeep change archive: missing <slug> and no active change\n'); process.exit(2); }
     // Real gate (Pilar C): every sensor a task declared must be green in evidencia.json.
     const gate = (dir) => {
-      let tasks = [];
-      try { tasks = parseTasks(readFileSync(join(dir, 'tarefas.md'), 'utf8')); } catch { /* no tasks */ }
+      let tarefasMd = '';
+      try { tarefasMd = readFileSync(join(dir, 'tarefas.md'), 'utf8'); } catch { /* no tasks */ }
+      const tasks = parseTasks(tarefasMd);
+      // G1: uma change não arquiva com tarefa aberta (inclui fix-tasks M.n de mutação).
+      const open = tasks.filter((t) => !t.done);
+      if (open.length && !rest.includes('--force')) {
+        return { ok: false, failing: [`${open.length} tarefa(s) aberta(s) (ex.: ${open[0].id} ${open[0].text}) — conclua ou use --force`] };
+      }
       const required = requiredSensors(tasks);
       const reqIds = [...new Set(tasks.map((t) => t.req).filter(Boolean))];
       let evidence = [];
@@ -82,8 +91,11 @@ export function runChange(argv) {
       // Independent verdict (Wave A): required only when the change declares [req:] tasks.
       let verdict = null;
       try { verdict = JSON.parse(readFileSync(join(dir, 'verdict.json'), 'utf8')); } catch { /* none */ }
-      const v = evaluateVerdict(verdict, reqIds);
-      if (!v.ok) return { ok: false, failing: verdict ? [`verdict incompleto: falta ${v.missing.join(', ')}`] : ['sem verdict — rode `wendkeep verify --deep` + skill wk-verify'] };
+      const v = evaluateVerdict(verdict, reqIds, { tasksHash: tasksHashOf(tarefasMd) });
+      if (!v.ok) {
+        if (v.stale) return { ok: false, failing: ['verdict stale (tarefas.md mudou depois da verificação) — re-verifique: `wendkeep verify --deep` + wk-verify'] };
+        return { ok: false, failing: verdict ? [`verdict incompleto: falta ${v.missing.join(', ')}`] : ['sem verdict — rode `wendkeep verify --deep` + skill wk-verify'] };
+      }
       return { ok: true, failing: [] };
     };
     const r = archiveChange(vaultBase, slug, { dateStr: today(), adrNum: getNextAdrNumber(vaultBase), gate });

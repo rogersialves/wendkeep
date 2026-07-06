@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, existsSync, rmSync } from 'node:fs';
+import { mkdtempSync, existsSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { addLesson, buildLessonsInjection } from '../hooks/lessons-core.mjs';
@@ -15,6 +15,19 @@ test('addLesson writes .brain/lessons/<slug>.md; injection surfaces the lesson b
     assert.match(inj, /<lessons>/);
     assert.match(inj, /Sensor sem report/);
     assert.equal(buildLessonsInjection(join(vault, 'nope')), '');
+  } finally { rmSync(vault, { recursive: true, force: true }); }
+});
+
+test('addLesson prunes the directory to 50, oldest first (#7)', () => {
+  const vault = mkdtempSync(join(tmpdir(), 'wk-les3-'));
+  try {
+    for (let i = 1; i <= 55; i += 1) {
+      addLesson(vault, { trigger: `t${String(i).padStart(2, '0')}`, lesson: `l${i}`, dateStr: `2026-02-${String((i % 28) + 1).padStart(2, '0')}` });
+    }
+    const files = readdirSync(join(vault, '.brain', 'lessons')).filter((f) => f.endsWith('.md'));
+    assert.equal(files.length, 50, 'pruned to 50');
+    // a mais antiga por nome asc (dia 01) foi embora
+    assert.ok(!files.some((f) => f.startsWith('2026-02-01')), 'oldest pruned');
   } finally { rmSync(vault, { recursive: true, force: true }); }
 });
 

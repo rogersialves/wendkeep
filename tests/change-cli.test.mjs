@@ -1,12 +1,24 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const BIN = join(dirname(fileURLToPath(import.meta.url)), '..', 'bin', 'wendkeep.mjs');
+
+test('change new: proposta links the active session from the control file (G2)', async () => {
+  const { writeControl } = await import('../hooks/obsidian-common.mjs');
+  const vault = mkdtempSync(join(tmpdir(), 'wk-src-'));
+  try {
+    writeControl(vault, { status: 'active', session_file: '02-Sessões/2026/07-JUL/DIA 05/10-00-demo.md' });
+    const r = spawnSync(process.execPath, [BIN, 'change', 'new', 'x', '--vault', vault], { encoding: 'utf8' });
+    assert.equal(r.status, 0, r.stderr);
+    const proposta = readFileSync(join(vault, '08-Mudanças', 'x', 'proposta.md'), 'utf8');
+    assert.match(proposta, /\[\[02-Sessões\/2026\/07-JUL\/DIA 05\/10-00-demo\]\]/, 'session wikilink in source:');
+  } finally { rmSync(vault, { recursive: true, force: true }); }
+});
 
 test('wendkeep change new: creates change under the vault', () => {
   const vault = mkdtempSync(join(tmpdir(), 'wk-chgcli-'));
@@ -25,6 +37,7 @@ test('wendkeep change new then archive: moves + writes ADR', () => {
   try {
     const spawn = (args) => spawnSync(process.execPath, [BIN, 'change', ...args, '--vault', vault], { encoding: 'utf8' });
     assert.equal(spawn(['new', 'x']).status, 0);
+    writeFileSync(join(vault, '08-Mudanças', 'x', 'tarefas.md'), '- [x] 1.1 feito\n');
     const r = spawn(['archive', 'x']);
     assert.equal(r.status, 0, r.stderr);
     assert.ok(existsSync(join(vault, '08-Mudanças', '_arquivo')), 'archived dir exists');
@@ -57,7 +70,7 @@ test('archive blocked until verify green when a task declares a sensor', () => {
   try {
     mkdirSync(join(vault, '04-Decisões'), { recursive: true });
     assert.equal(spawn(['change', 'new', 'x']).status, 0);
-    writeFileSync(join(vault, '08-Mudanças', 'x', 'tarefas.md'), '- [ ] 1.1 do it [sensor:ok]\n');
+    writeFileSync(join(vault, '08-Mudanças', 'x', 'tarefas.md'), '- [x] 1.1 do it [sensor:ok]\n');
     writeFileSync(join(proj, 'wendkeep.sensors.json'), JSON.stringify({ version: 1, sensors: [{ id: 'ok', severity: 'critical', command: 'node -e "process.exit(0)"' }] }));
     const blocked = spawn(['change', 'archive', 'x']);
     assert.equal(blocked.status, 1, 'archive blocked without evidence');
@@ -75,6 +88,7 @@ test('archive promotes spec deltas into 07-Specs (living contract)', () => {
     mkdirSync(join(vault, '04-Decisões'), { recursive: true });
     assert.equal(spawn(['new', 'x']).status, 0);
     writeFileSync(join(vault, '08-Mudanças', 'x', 'proposta.md'), '---\ntype: change\nstatus: active\nspecs: [auth]\n---\n# x\n');
+    writeFileSync(join(vault, '08-Mudanças', 'x', 'tarefas.md'), '- [x] 1.1 feito\n');
     mkdirSync(join(vault, '08-Mudanças', 'x', 'specs', 'auth'), { recursive: true });
     writeFileSync(join(vault, '08-Mudanças', 'x', 'specs', 'auth', 'spec.md'), '## ADDED Requirements\n### Requisito: Login\nusuário faz login\n');
     const r = spawn(['archive', 'x']);
@@ -92,7 +106,7 @@ test('warning sensor red does not block verify or archive', () => {
   try {
     mkdirSync(join(vault, '04-Decisões'), { recursive: true });
     assert.equal(spawn(['change', 'new', 'x']).status, 0);
-    writeFileSync(join(vault, '08-Mudanças', 'x', 'tarefas.md'), '- [ ] 1.1 polish [sensor:style]\n');
+    writeFileSync(join(vault, '08-Mudanças', 'x', 'tarefas.md'), '- [x] 1.1 polish [sensor:style]\n');
     // style is a RED warning sensor (exit 1) — advisory, must NOT gate.
     writeFileSync(join(proj, 'wendkeep.sensors.json'), JSON.stringify({ version: 1, sensors: [{ id: 'style', severity: 'warning', command: 'exit 1' }] }));
     assert.equal(spawn(['verify']).status, 0, 'red warning still passes verify');
@@ -107,7 +121,7 @@ test('archive requires a verdict when a task declares [req:]; ADR lists the req 
   try {
     mkdirSync(join(vault, '04-Decisões'), { recursive: true });
     assert.equal(spawn(['new', 'x']).status, 0);
-    writeFileSync(join(vault, '08-Mudanças', 'x', 'tarefas.md'), '- [ ] 1.1 faz [req:X-1]\n');
+    writeFileSync(join(vault, '08-Mudanças', 'x', 'tarefas.md'), '- [x] 1.1 faz [req:X-1]\n');
     const blocked = spawn(['archive', 'x']);
     assert.equal(blocked.status, 1, 'blocked without verdict');
     assert.match(blocked.stderr, /verdict/i);
@@ -117,6 +131,47 @@ test('archive requires a verdict when a task declares [req:]; ADR lists the req 
     const year = String(new Date().getFullYear());
     const adr = readFileSync(join(vault, '04-Decisões', year, 'ADR-001-x.md'), 'utf8');
     assert.match(adr, /X-1/);
+  } finally { rmSync(vault, { recursive: true, force: true }); }
+});
+
+test('archive blocks a stale verdict when tarefas.md changed after verification (G3/#6)', () => {
+  const vault = mkdtempSync(join(tmpdir(), 'wk-stale-'));
+  const proj = mkdtempSync(join(tmpdir(), 'wk-stalep-'));
+  const spawn = (a) => spawnSync(process.execPath, [BIN, ...a, '--vault', vault, '--project', proj], { encoding: 'utf8' });
+  try {
+    mkdirSync(join(vault, '04-Decisões'), { recursive: true });
+    mkdirSync(join(vault, '.brain'), { recursive: true });
+    writeFileSync(join(proj, 'wendkeep.sensors.json'), JSON.stringify({ version: 1, sensors: [] }));
+    assert.equal(spawn(['change', 'new', 'x']).status, 0);
+    const tarefas = join(vault, '08-Mudanças', 'x', 'tarefas.md');
+    writeFileSync(tarefas, '- [x] 1.1 faz [req:X-1]\n');
+    assert.equal(spawn(['verify', '--deep']).status, 0);
+    const pkg = JSON.parse(readFileSync(join(vault, '08-Mudanças', 'x', 'verificacao.json'), 'utf8'));
+    assert.ok(pkg.tasksHash, 'package carries tasksHash');
+    writeFileSync(join(vault, '08-Mudanças', 'x', 'verdict.json'), JSON.stringify({ slug: 'x', ok: true, coverage: [{ req: 'X-1', covered: true }], tasksHash: pkg.tasksHash }));
+    // muda as tarefas depois do verdict -> stale
+    writeFileSync(tarefas, '- [x] 1.1 faz [req:X-1]\n- [x] 1.2 nova\n');
+    const blocked = spawn(['change', 'archive', 'x']);
+    assert.equal(blocked.status, 1, 'stale verdict blocks');
+    assert.match(blocked.stderr, /stale|re-verifique/i);
+    // volta ao estado verificado -> passa
+    writeFileSync(tarefas, '- [x] 1.1 faz [req:X-1]\n');
+    assert.equal(spawn(['change', 'archive', 'x']).status, 0);
+  } finally { rmSync(vault, { recursive: true, force: true }); rmSync(proj, { recursive: true, force: true }); }
+});
+
+test('archive blocks on open tasks; --force overrides (G1)', () => {
+  const vault = mkdtempSync(join(tmpdir(), 'wk-open-'));
+  const spawn = (a) => spawnSync(process.execPath, [BIN, 'change', ...a, '--vault', vault], { encoding: 'utf8' });
+  try {
+    mkdirSync(join(vault, '04-Decisões'), { recursive: true });
+    assert.equal(spawn(['new', 'x']).status, 0);
+    writeFileSync(join(vault, '08-Mudanças', 'x', 'tarefas.md'), '- [ ] 1.1 pendente\n- [x] 1.2 feita\n');
+    const blocked = spawn(['archive', 'x']);
+    assert.equal(blocked.status, 1, 'open task blocks');
+    assert.match(blocked.stderr, /aberta/i);
+    const forced = spawn(['archive', 'x', '--force']);
+    assert.equal(forced.status, 0, forced.stderr);
   } finally { rmSync(vault, { recursive: true, force: true }); }
 });
 
@@ -130,7 +185,7 @@ test('wendkeep lesson add: writes a lesson under .brain/lessons', () => {
   } finally { rmSync(vault, { recursive: true, force: true }); }
 });
 
-test('verify: mutation survivors become fix tasks, deduped on re-run', () => {
+test('verify: mutation survivors -> fix tasks + exit 1; clean report resets the round', () => {
   const vault = mkdtempSync(join(tmpdir(), 'wk-mutf-'));
   const proj = mkdtempSync(join(tmpdir(), 'wk-mutfp-'));
   const spawn = (a) => spawnSync(process.execPath, [BIN, ...a, '--vault', vault, '--project', proj], { encoding: 'utf8' });
@@ -141,11 +196,38 @@ test('verify: mutation survivors become fix tasks, deduped on re-run', () => {
     writeFileSync(join(vault, '.brain', 'CURRENT_CHANGE.md'), 'change: m\n');
     writeFileSync(join(proj, 'wendkeep.sensors.json'), JSON.stringify({ version: 1, sensors: [{ id: 'mut', type: 'mutation', severity: 'critical', command: 'exit 0', report: 'rep.json' }] }));
     writeFileSync(join(proj, 'rep.json'), JSON.stringify({ files: { 'a.js': { mutants: [{ mutatorName: 'M', status: 'Survived', location: { start: { line: 3 } } }] } } }));
-    assert.equal(spawn(['verify']).status, 0);
+    // G4: sobrevivente = exit 1 (a suíte não discrimina)
+    assert.equal(spawn(['verify']).status, 1, 'survivor fails verify');
     const tarefas = join(vault, '08-Mudanças', 'm', 'tarefas.md');
     assert.match(readFileSync(tarefas, 'utf8'), /mata mutante a\.js:3/, 'fix task appended');
-    spawn(['verify']);
+    assert.equal(spawn(['verify']).status, 1);
     assert.equal((readFileSync(tarefas, 'utf8').match(/mata mutante a\.js:3/g) || []).length, 1, 'no duplicate on re-run');
+    // #5: report limpo -> exit 0 + contador resetado
+    writeFileSync(join(proj, 'rep.json'), JSON.stringify({ files: {} }));
+    assert.equal(spawn(['verify']).status, 0, 'clean report passes');
+    assert.ok(!existsSync(join(vault, '08-Mudanças', 'm', '.mutation-round')), 'round reset');
+  } finally { rmSync(vault, { recursive: true, force: true }); rmSync(proj, { recursive: true, force: true }); }
+});
+
+test('verify: 3rd round escalates with an auto-lesson instead of new fix tasks', () => {
+  const vault = mkdtempSync(join(tmpdir(), 'wk-mut3-'));
+  const proj = mkdtempSync(join(tmpdir(), 'wk-mut3p-'));
+  const spawn = (a) => spawnSync(process.execPath, [BIN, ...a, '--vault', vault, '--project', proj], { encoding: 'utf8' });
+  try {
+    mkdirSync(join(vault, '.brain'), { recursive: true });
+    mkdirSync(join(vault, '08-Mudanças', 'm'), { recursive: true });
+    writeFileSync(join(vault, '08-Mudanças', 'm', 'tarefas.md'), '- [ ] 1.1 base [sensor:mut]\n');
+    writeFileSync(join(vault, '08-Mudanças', 'm', '.mutation-round'), '3');
+    writeFileSync(join(vault, '.brain', 'CURRENT_CHANGE.md'), 'change: m\n');
+    writeFileSync(join(proj, 'wendkeep.sensors.json'), JSON.stringify({ version: 1, sensors: [{ id: 'mut', type: 'mutation', severity: 'critical', command: 'exit 0', report: 'rep.json' }] }));
+    writeFileSync(join(proj, 'rep.json'), JSON.stringify({ files: { 'a.js': { mutants: [{ mutatorName: 'M', status: 'Survived', location: { start: { line: 3 } } }] } } }));
+    const r = spawn(['verify']);
+    assert.equal(r.status, 1);
+    assert.match(r.stderr, /3 rodadas/);
+    assert.doesNotMatch(readFileSync(join(vault, '08-Mudanças', 'm', 'tarefas.md'), 'utf8'), /mata mutante/, 'no new fix task at cap');
+    const lessons = join(vault, '.brain', 'lessons');
+    assert.ok(existsSync(lessons), 'auto-lesson dir');
+    assert.ok(readdirSync(lessons).some((f) => /mutantes-persistentes/.test(f)), 'auto-lesson written');
   } finally { rmSync(vault, { recursive: true, force: true }); rmSync(proj, { recursive: true, force: true }); }
 });
 

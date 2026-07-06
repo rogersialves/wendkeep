@@ -1,10 +1,17 @@
 // `wendkeep verify [--change <slug>]` — run a change's task sensors, record evidence.
 // Sensors run at the PROJECT root (--project or cwd); the change + evidence live in
 // the VAULT. Writes 08-Mudanças/<slug>/evidencia.json; exit 1 if a critical sensor is red.
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { isAbsolute, join, resolve } from 'node:path';
 import { parseTasks, activeChange, appendFixTasks } from '../hooks/change-core.mjs';
 import { loadSensors, requiredSensors, runSensors, evaluateGate } from '../hooks/sensors-core.mjs';
+import { tasksHashOf } from '../hooks/spec-core.mjs';
+import { addLesson } from '../hooks/lessons-core.mjs';
+
+function today() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
 
 function opt(argv, name) {
   const i = argv.indexOf(name);
@@ -31,20 +38,35 @@ export function runVerify(argv) {
   const evidence = runSensors(sensors, ids, { cwd: projectRoot });
   writeFileSync(join(changeDir, 'evidencia.json'), `${JSON.stringify(evidence, null, 2)}\n`, 'utf8');
 
-  // Mutation survivors -> fix tasks (Wave B), bounded at 3 rounds then escalate.
+  // Mutation survivors -> fix tasks (Wave B), bounded at 3 rounds then escalate. A surviving
+  // mutant always fails verify (exit 1): the suite does not discriminate yet. A clean report
+  // resets the round counter so a future survivor starts a fresh cycle.
   const withSurvivors = evidence.filter((e) => e.survivors && e.survivors.length);
-  if (withSurvivors.length) {
-    const roundFile = join(changeDir, '.mutation-round');
+  const roundFile = join(changeDir, '.mutation-round');
+  if (!withSurvivors.length) {
+    try { unlinkSync(roundFile); } catch { /* nunca houve rodada */ }
+  } else {
     let round = 0;
     try { round = Number(readFileSync(roundFile, 'utf8').trim()) || 0; } catch { /* first round */ }
     if (round >= 3) {
       process.stderr.write('verify: mutantes ainda sobrevivem após 3 rodadas — revise os testes à mão.\n');
+      const flat = withSurvivors.flatMap((e) => e.survivors.map((s) => `${s.file}:${s.line}`));
+      try {
+        addLesson(vaultBase, {
+          trigger: `mutantes persistentes em ${slug}`,
+          lesson: `3 rodadas de fix-tasks não mataram: ${flat.join(', ')} — os testes desses pontos não discriminam.`,
+          sourceChange: slug,
+          dateStr: today(),
+        });
+      } catch { /* lesson é bônus, nunca derruba o verify */ }
     } else {
       let added = 0;
       for (const e of withSurvivors) added += appendFixTasks(changeDir, e.survivors, e.id);
       writeFileSync(roundFile, String(round + 1), 'utf8');
       process.stdout.write(`verify: ${added} fix-task(s) de mutação (rodada ${round + 1}/3)\n`);
     }
+    process.stderr.write('verify: mutantes sobreviventes — a suíte não discrimina ainda.\n');
+    process.exit(1);
   }
 
   // Same rule as the archive gate: evidence carries severity, so evaluateGate blocks
@@ -61,15 +83,17 @@ export function runVerify(argv) {
   if (argv.includes('--deep')) {
     const tasks = parseTasks(tarefas);
     const reqIds = [...new Set(tasks.map((t) => t.req).filter(Boolean))];
+    const tasksHash = tasksHashOf(tarefas);
     const pkg = {
       slug,
+      tasksHash,
       requirements: reqIds.map((id) => ({ id })),
       tasks: tasks.map((t) => ({ id: t.id, text: t.text, req: t.req || null, done: t.done })),
       sensors: evidence,
     };
     writeFileSync(join(changeDir, 'verificacao.json'), `${JSON.stringify(pkg, null, 2)}\n`, 'utf8');
     if (reqIds.length === 0) {
-      writeFileSync(join(changeDir, 'verdict.json'), `${JSON.stringify({ slug, ok: true, coverage: [], notes: ['trivial: sem requisito'] }, null, 2)}\n`, 'utf8');
+      writeFileSync(join(changeDir, 'verdict.json'), `${JSON.stringify({ slug, ok: true, coverage: [], tasksHash, notes: ['trivial: sem requisito'] }, null, 2)}\n`, 'utf8');
       process.stdout.write('verify --deep: pacote + verdict trivial escritos\n');
     } else {
       process.stdout.write('verify --deep: pacote escrito — rode a skill wk-verify pra gravar verdict.json\n');

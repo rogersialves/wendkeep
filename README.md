@@ -1,5 +1,7 @@
 # wendkeep
 
+![test](https://github.com/rogersialves/wendkeep/actions/workflows/test.yml/badge.svg)
+
 **A persistent‑memory harness for AI coding agents, built on your Obsidian vault.** Every Claude Code / Codex session is captured turn‑by‑turn into local Markdown — with token/cost tracking, auto‑extracted decisions, bugs and learnings, and a curated memory layer injected back at the start of the next session. On top of that memory core sits a native, zero‑dependency **change lifecycle** (spec → change → TDD → sensor‑gated archive) that keeps intent, work and proof wikilinked in one graph. 100% local, open‑core.
 
 > Status: `v0.1` — extracted from a system in daily production use. The capture engine, cost tracking and graph wiring are battle‑tested; the cross‑platform installer (`wendkeep init`) is the new part. See [`docs/`](docs/) for the project's strategy and decision log.

@@ -64,10 +64,12 @@ source: ["[[02-Sessões/…]]"]
 ## Pacote de verificação — `08-Mudanças/<slug>/verificacao.json`
 Escrito por `wendkeep verify --deep`; consumido pela skill `wk-verify`.
 ```json
-{ "slug": "x", "requirements": [{ "id": "GATE-1" }],
+{ "slug": "x", "tasksHash": "a1b2c3d4e5f6",
+  "requirements": [{ "id": "GATE-1" }],
   "tasks": [{ "id": "3.2", "text": "...", "req": "GATE-1", "done": false }],
   "sensors": [{ "id": "tests", "status": "green", "severity": "critical" }] }
 ```
+`tasksHash` = sha1 curto de `tarefas.md` — o selo de frescor. A skill copia pro verdict.
 
 ## Veredito — `08-Mudanças/<slug>/verdict.json`
 Escrito pela skill `wk-verify` (autor≠verificador). O gate do `archive` exige `ok:true`
@@ -75,9 +77,13 @@ cobrindo todo `[req:]` declarado.
 ```json
 { "slug": "x", "ok": true,
   "coverage": [{ "req": "GATE-1", "covered": true, "evidence": "tests/gate.test.mjs:42" }],
+  "tasksHash": "a1b2c3d4e5f6",
   "notes": [] }
 ```
 Change sem `[req:]` = trivial: `verify --deep` auto-escreve o verdict; o gate passa pelo sensor.
+`tasksHash` divergente do `tarefas.md` atual = verdict **stale**, gate bloqueia (verdicts
+pré-0.6.1 sem o campo são aceitos). O gate também bloqueia **tarefas abertas** (`- [ ]`,
+inclui fix-tasks `M.n`); escape explícito: `change archive --force`.
 
 ## Skill — `.brain/skills/<name>/SKILL.md`
 ```markdown

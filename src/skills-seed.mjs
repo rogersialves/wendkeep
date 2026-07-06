@@ -190,7 +190,9 @@ nunca tivesse visto a implementação. Contexto fresco, read-only.
    passaria sob impl errada). Evidência \`arquivo:linha\`.
 3. Outcome check ancorado no spec: o resultado observável bate com o critério de aceite?
 4. Grave \`08-Mudanças/<slug>/verdict.json\`:
-   \`{ "slug": "...", "ok": true, "coverage": [{ "req": "GATE-1", "covered": true, "evidence": "arquivo:linha" }], "notes": [] }\`.
+   \`{ "slug": "...", "ok": true, "coverage": [{ "req": "GATE-1", "covered": true, "evidence": "arquivo:linha" }], "tasksHash": "<copie do verificacao.json>", "notes": [] }\`.
+   O \`tasksHash\` vem do pacote — é o selo de frescor; sem ele (ou com tarefas alteradas
+   depois), o gate rejeita o verdict como stale.
 
 ## Regras
 

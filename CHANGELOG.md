@@ -4,6 +4,27 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.1] — 2026-07-05
+
+Hardening: CI + real-world gate holes found by self-audit.
+
+### Added
+- **CI (GitHub Actions):** test + check matrix on ubuntu/windows × Node 18/20/22.
+- **Open-task gate:** `change archive` blocks while tasks are open (`- [ ]`, including mutation
+  fix-tasks `M.n` — a surviving mutant can no longer be archived). Explicit escape: `--force`.
+- **Freshness seal (`tasksHash`):** `verify --deep` fingerprints `tarefas.md` into the package
+  and verdict; the gate rejects a verdict minted against different tasks as stale. Pre-0.6.1
+  verdicts (no hash) still accepted.
+- **Auto-lesson on mutation escalation:** the 3rd surviving round records a project-local lesson.
+- **Session link in proposta:** `change new` fills `source:` with the active session (graph edge
+  proposta → sessão).
+
+### Fixed
+- `.mutation-round` now resets when the report comes back clean (a future survivor starts a
+  fresh 3-round cycle instead of instantly escalating).
+- `verify` exits 1 when mutants survive (was 0 — CI couldn't see it).
+- `.brain/lessons/` capped at 50 (oldest pruned) instead of growing unbounded.
+
 ## [0.6.0] — 2026-07-05
 
 Enforcement layer (Wave B of the TLC-parity program) — closes TLC parity.
@@ -120,6 +141,7 @@ Initial release — the capture engine, extracted from a system in daily product
 - `wendkeep init` (cross-platform installer) + optional `@bitbonsai/mcpvault` MCP server.
 
 <!-- Only v0.4.0+ is tagged in git (history starts here); older versions link to npm. -->
+[0.6.1]: https://github.com/rogersialves/wendkeep/releases/tag/v0.6.1
 [0.6.0]: https://github.com/rogersialves/wendkeep/releases/tag/v0.6.0
 [0.5.0]: https://github.com/rogersialves/wendkeep/releases/tag/v0.5.0
 [0.4.0]: https://github.com/rogersialves/wendkeep/releases/tag/v0.4.0

@@ -1,8 +1,14 @@
 // hooks/spec-core.mjs — living spec (07-Specs) + change delta merge (OpenSpec native).
 // Pure parsing/merge + promoteSpecs (fs). No import from change-core (avoids a cycle).
+import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { ensureDir } from './obsidian-common.mjs';
+
+// Short stable fingerprint of tarefas.md — freshness check between package/verdict and gate.
+export function tasksHashOf(md) {
+  return createHash('sha1').update(String(md)).digest('hex').slice(0, 12);
+}
 
 const SPECS_DIR = '07-Specs';
 const REQ_RE = /^### Requisito:\s*(.+)$/gm;
@@ -104,10 +110,15 @@ export function promoteSpecs(vaultBase, changeDir, specs, { changeWikilink, date
 // Gate check for the independent verdict (Wave A). A requirement-bearing change must have
 // a verdict that is ok and covers every declared req id. A requirement-less change passes:
 // nothing for an independent verifier to check — the sensor gate is already the proof.
-export function evaluateVerdict(verdict, reqIds) {
+export function evaluateVerdict(verdict, reqIds, { tasksHash } = {}) {
   const ids = reqIds || [];
   if (ids.length === 0) return { ok: true, missing: [] };
   if (!verdict || verdict.ok !== true) return { ok: false, missing: [] };
+  // Freshness (G3/#6): a verdict minted against a different tarefas.md is stale. Verdicts
+  // without a hash (pre-0.6.1) are accepted for backward compat.
+  if (tasksHash && verdict.tasksHash && verdict.tasksHash !== tasksHash) {
+    return { ok: false, missing: [], stale: true };
+  }
   const covered = new Set((verdict.coverage || []).filter((c) => c.covered).map((c) => c.req));
   const missing = ids.filter((r) => !covered.has(r));
   return { ok: missing.length === 0, missing };

@@ -1,8 +1,10 @@
 // hooks/lessons-core.mjs — project-local lessons from verification failures (Wave B).
 // A failure distilled into a terse lesson; brain-inject surfaces the recent ones at
 // SessionStart so the framework gets sharper on your codebase. No external deps.
-import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+
+const MAX_LESSONS = 50; // dir cap (#7): oldest (filename asc = date asc) pruned first
 
 function slugify(s) {
   return String(s)
@@ -22,6 +24,13 @@ export function addLesson(vaultBase, { trigger, lesson, sourceChange = '', dateS
     `---\ntype: lesson\ntrigger: ${JSON.stringify(String(trigger))}\nsource: ${sourceChange}\ndate: ${dateStr}\n---\n\n${lesson}\n`,
     'utf8',
   );
+  // Cap the directory (#7): prune oldest-by-name (date-prefixed = chronological).
+  try {
+    const files = readdirSync(dir).filter((f) => f.endsWith('.md')).sort();
+    for (const f of files.slice(0, Math.max(0, files.length - MAX_LESSONS))) {
+      unlinkSync(join(dir, f));
+    }
+  } catch { /* prune é bônus */ }
   return path;
 }
 

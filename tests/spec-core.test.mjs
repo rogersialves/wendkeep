@@ -3,7 +3,22 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { parseRequirements, parseDelta, applyDelta, renderSpec, parseSpecsList, promoteSpecs, evaluateVerdict } from '../hooks/spec-core.mjs';
+import { parseRequirements, parseDelta, applyDelta, renderSpec, parseSpecsList, promoteSpecs, evaluateVerdict, tasksHashOf } from '../hooks/spec-core.mjs';
+
+test('evaluateVerdict: tasksHash mismatch = stale; sem hash no verdict = retrocompat', () => {
+  const v = { ok: true, coverage: [{ req: 'A-1', covered: true }], tasksHash: 'abc123' };
+  assert.deepEqual(evaluateVerdict(v, ['A-1'], { tasksHash: 'abc123' }), { ok: true, missing: [] });
+  const stale = evaluateVerdict(v, ['A-1'], { tasksHash: 'zzz999' });
+  assert.equal(stale.ok, false);
+  assert.equal(stale.stale, true);
+  // verdict pré-0.6.1 (sem tasksHash): aceito
+  const old = { ok: true, coverage: [{ req: 'A-1', covered: true }] };
+  assert.equal(evaluateVerdict(old, ['A-1'], { tasksHash: 'abc123' }).ok, true);
+  // hash estável e curto
+  assert.equal(tasksHashOf('x'), tasksHashOf('x'));
+  assert.notEqual(tasksHashOf('x'), tasksHashOf('y'));
+  assert.equal(tasksHashOf('x').length, 12);
+});
 
 test('evaluateVerdict: sem req = trivial ok; com req exige verdict cobrindo', () => {
   const v = { ok: true, coverage: [{ req: 'A-1', covered: true }] };
