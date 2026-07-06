@@ -5,11 +5,67 @@
 //   .brain/skills/<name>/ -> <project>/.claude/skills/   (skill format)
 // .brain is the source of truth; re-run sync after editing. Copy (not symlink) for
 // cross-platform robustness.
-import { copyFileSync, cpSync, existsSync, mkdirSync, readdirSync, statSync, writeFileSync } from 'node:fs';
+import { copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { isAbsolute, join, resolve } from 'node:path';
 
+// Managed AGENTS.md section (0.8.0): the agent-agnostic distribution channel. Codex, Amp,
+// Cursor, Zed et al. read AGENTS.md — one file covers them all. Only the content between
+// the markers is ours; user content around it is never touched.
+const AG_START = '<!-- wendkeep:skills:start -->';
+const AG_END = '<!-- wendkeep:skills:end -->';
+
+function skillInventory(skillsSrc) {
+  const out = [];
+  let names = [];
+  try { names = readdirSync(skillsSrc); } catch { return out; }
+  for (const name of names) {
+    try {
+      if (!statSync(join(skillsSrc, name)).isDirectory()) continue;
+      const md = readFileSync(join(skillsSrc, name, 'SKILL.md'), 'utf8');
+      const desc = (md.match(/^description:\s*(.+)$/m) || [])[1] || '';
+      out.push({ name, description: desc.trim() });
+    } catch { /* skill sem SKILL.md */ }
+  }
+  return out;
+}
+
+function renderAgentsSection(skills) {
+  const list = skills.map((s) => `- **${s.name}** — ${s.description}`).join('\n');
+  return `${AG_START}
+## wendkeep — process skills & loop
+
+This project uses the [wendkeep](https://github.com/rogersialves/wendkeep) harness. Work
+through its change loop: \`wendkeep change new <slug>\` → implement tasks test-first
+(tag proof \`[sensor:id]\` and requirement \`[req:ID]\`) → \`wendkeep verify\` →
+\`wendkeep verify --deep\` + an independent read-only verification pass writing
+\`verdict.json\` → \`wendkeep change archive\` (gated). Inspect with \`wendkeep change
+status\` / \`spec list\` / \`sensors list\`.
+
+Process skills (full text in \`.claude/skills/\` and the vault's \`.brain/skills/\`):
+${list}
+${AG_END}`;
+}
+
+function upsertAgentsMd(projectPath, skillsSrc) {
+  const skills = skillInventory(skillsSrc);
+  if (!skills.length) return false;
+  const path = join(projectPath, 'AGENTS.md');
+  const section = renderAgentsSection(skills);
+  let content = '';
+  try { content = readFileSync(path, 'utf8'); } catch { /* novo */ }
+  if (content.includes(AG_START) && content.includes(AG_END)) {
+    const start = content.indexOf(AG_START);
+    const end = content.indexOf(AG_END) + AG_END.length;
+    content = content.slice(0, start) + section + content.slice(end);
+  } else {
+    content = content ? `${content.trimEnd()}\n\n${section}\n` : `${section}\n`;
+  }
+  writeFileSync(path, content, 'utf8');
+  return true;
+}
+
 export function syncDefs(vaultBase, projectPath) {
-  const out = { agents: [], skills: [] };
+  const out = { agents: [], skills: [], agentsMd: false };
 
   const agentsSrc = join(vaultBase, '.brain', 'agents');
   if (existsSync(agentsSrc)) {
@@ -33,6 +89,9 @@ export function syncDefs(vaultBase, projectPath) {
       out.skills.push(name);
     }
   }
+
+  // Agent-agnostic channel: the managed AGENTS.md section (docs/17).
+  out.agentsMd = upsertAgentsMd(projectPath, skillsSrc);
 
   return out;
 }

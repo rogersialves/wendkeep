@@ -17,6 +17,31 @@ function tempVaultWithDefs() {
   return vault;
 }
 
+test('syncDefs: writes the managed AGENTS.md section, idempotent, user content preserved (0.8.0)', () => {
+  const vault = tempVaultWithDefs();
+  const project = mkdtempSync(join(tmpdir(), 'wk-agmd-'));
+  try {
+    writeFileSync(join(vault, '.brain', 'skills', 'bar', 'SKILL.md'), '---\nname: bar\ndescription: does bar things\n---\nbody\n');
+    writeFileSync(join(project, 'AGENTS.md'), '# My project\n\nuser notes stay.\n');
+    syncDefs(vault, project);
+    const md = readFileSync(join(project, 'AGENTS.md'), 'utf8');
+    assert.match(md, /user notes stay\./, 'user content preserved');
+    assert.match(md, /<!-- wendkeep:skills:start -->/);
+    assert.match(md, /bar.*does bar things/, 'skill listed with description');
+    assert.match(md, /wendkeep change new|wendkeep verify/, 'loop commands present');
+    // idempotente: re-run = 1 seção só
+    syncDefs(vault, project);
+    const md2 = readFileSync(join(project, 'AGENTS.md'), 'utf8');
+    assert.equal((md2.match(/wendkeep:skills:start/g) || []).length, 1, 'single section');
+    // sem AGENTS.md: cria
+    const p2 = mkdtempSync(join(tmpdir(), 'wk-agmd2-'));
+    try {
+      syncDefs(vault, p2);
+      assert.ok(existsSync(join(p2, 'AGENTS.md')), 'created when absent');
+    } finally { rmSync(p2, { recursive: true, force: true }); }
+  } finally { rmSync(vault, { recursive: true, force: true }); rmSync(project, { recursive: true, force: true }); }
+});
+
 test('syncDefs: agents .toml -> .codex/agents, skills dir -> .claude/skills', () => {
   const vault = tempVaultWithDefs();
   const project = mkdtempSync(join(tmpdir(), 'wk-proj-'));
@@ -38,7 +63,7 @@ test('syncDefs: no .brain defs -> empty result, no crash', () => {
   const vault = mkdtempSync(join(tmpdir(), 'wk-empty-'));
   const project = mkdtempSync(join(tmpdir(), 'wk-proj2-'));
   try {
-    assert.deepEqual(syncDefs(vault, project), { agents: [], skills: [] });
+    assert.deepEqual(syncDefs(vault, project), { agents: [], skills: [], agentsMd: false });
   } finally {
     rmSync(vault, { recursive: true, force: true });
     rmSync(project, { recursive: true, force: true });

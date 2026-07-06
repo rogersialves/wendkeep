@@ -4,6 +4,26 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] — 2026-07-05
+
+Reach: internationalization + agent-agnostic distribution.
+
+### Added
+- **Vault locale (i18n):** `wendkeep init --locale en` creates an English vault
+  (`02-Sessions`, `04-Decisions`, `08-Changes`, …, English months, English change scaffold,
+  English CORE skeleton, localized theme/graph groups). The locale is a vault property
+  (`.brain/config.json`), locked at init; absent = `pt-BR` — existing vaults are untouched
+  and never renamed. Parsers are **bilingual everywhere** (`Requisito|Requirement`,
+  `mata mutante|kill mutant`, CORE section sets), so mixed content never breaks.
+- **AGENTS.md managed section:** `sync-defs`/`init` maintain a marker-delimited section in
+  the project's `AGENTS.md` (loop summary + skill inventory) — one file that Codex, Amp,
+  Cursor, Zed and any AGENTS.md-reading agent picks up. User content around it is preserved.
+- **Harness contract v1.2** (`docs/14`): locale + AGENTS.md channel.
+
+### Deferred
+- Extra mutation-report formats (mutmut/PIT) and per-agent session-hook wiring — backlog
+  (`docs/17`).
+
 ## [0.7.0] — 2026-07-05
 
 Ergonomics: the loop without hand-editing files.
@@ -160,6 +180,7 @@ Initial release — the capture engine, extracted from a system in daily product
 - `wendkeep init` (cross-platform installer) + optional `@bitbonsai/mcpvault` MCP server.
 
 <!-- Only v0.4.0+ is tagged in git (history starts here); older versions link to npm. -->
+[0.8.0]: https://github.com/rogersialves/wendkeep/releases/tag/v0.8.0
 [0.7.0]: https://github.com/rogersialves/wendkeep/releases/tag/v0.7.0
 [0.6.1]: https://github.com/rogersialves/wendkeep/releases/tag/v0.6.1
 [0.6.0]: https://github.com/rogersialves/wendkeep/releases/tag/v0.6.0

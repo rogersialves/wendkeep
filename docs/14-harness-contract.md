@@ -4,9 +4,26 @@ Os formatos que o harness do wendkeep lê/escreve. Quem estende (novos sensores,
 skills, integrações) mira **este contrato**, não o código. Estável dentro do major.
 Itens marcados *(Wave B)* ainda não implementados.
 
+## Locale (v1.2) — `<vault>/.brain/config.json`
+```json
+{ "locale": "pt-BR" }
+```
+Propriedade do VAULT, travada no `init --locale <id>`. Ausente/inválido = `pt-BR`
+(retrocompat total). Locales: `pt-BR`, `en`. Parsers são bilíngues sempre
+(`Requisito|Requirement`, `mata mutante|kill mutant`, seções do CORE em qualquer dos dois
+conjuntos completos); só a RENDERIZAÇÃO segue o locale. Vault existente nunca é renomeado.
+
 ## Taxonomia da vault
-Pastas (PT-BR, hardcoded nos hooks): `00-Inbox 01-Projeto 02-Sessões 03-Linear 04-Decisões
-05-Bugs 06-Aprendizados 07-Specs 08-Mudanças Templates .brain`.
+Pastas por locale (+ `Templates` e `.brain`):
+- `pt-BR`: `00-Inbox 01-Projeto 02-Sessões 03-Linear 04-Decisões 05-Bugs 06-Aprendizados 07-Specs 08-Mudanças`
+- `en`: `00-Inbox 01-Project 02-Sessions 03-Linear 04-Decisions 05-Bugs 06-Learnings 07-Specs 08-Changes`
+Meses: `01-JAN…12-DEZ` (pt) / `01-JAN…12-DEC` (en).
+
+## AGENTS.md (v1.2) — canal agent-agnostic
+`wendkeep sync-defs` (e o `init`) mantêm uma seção gerenciada em `<project>/AGENTS.md`
+entre `<!-- wendkeep:skills:start -->` e `<!-- wendkeep:skills:end -->`: o loop resumido +
+o inventário das skills. Só o miolo entre marcadores é regravado; o resto do arquivo é do
+usuário. Cobre Codex/Amp/Cursor/Zed e todo agente que leia AGENTS.md.
 
 ## Sensor — `wendkeep.sensors.json` (raiz do projeto)
 ```json
@@ -107,4 +124,4 @@ date: <YYYY-MM-DD>
 Corpo = a lição (a 1ª linha é o que entra na injeção).
 
 ---
-*harness contract v1.1 — wendkeep 0.6.0. Mudança de formato = major ou nota de migração no CHANGELOG.*
+*harness contract v1.2 — wendkeep 0.8.0. Mudança de formato = major ou nota de migração no CHANGELOG.*
