@@ -4,6 +4,16 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.0] — 2026-07-06
+
+Vault-wide cost.
+
+### Added
+- **`wendkeep cost`** — aggregate AI-coding spend across every session note in the vault:
+  total (main + subagents), by model, by day. `--since <YYYY-MM-DD>` to window; `--json` for
+  scripting. Builds on the per-session cost the capture hooks already record — on a real
+  project vault it surfaced **~$4.7k across 140 sessions** in one command.
+
 ## [0.10.0] — 2026-07-06
 
 Subagent & workflow telemetry — closing the biggest observability gap.
@@ -239,6 +249,7 @@ Initial release — the capture engine, extracted from a system in daily product
 - `wendkeep init` (cross-platform installer) + optional `@bitbonsai/mcpvault` MCP server.
 
 <!-- Only v0.4.0+ is tagged in git (history starts here); older versions link to npm. -->
+[0.11.0]: https://github.com/rogersialves/wendkeep/releases/tag/v0.11.0
 [0.10.0]: https://github.com/rogersialves/wendkeep/releases/tag/v0.10.0
 [0.9.1]: https://github.com/rogersialves/wendkeep/releases/tag/v0.9.1
 [0.9.0]: https://github.com/rogersialves/wendkeep/releases/tag/v0.9.0

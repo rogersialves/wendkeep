@@ -73,7 +73,8 @@ No re‑copying, no snapshot to re‑sync — the package is the single source o
 | `wendkeep change <sub>` | Change lifecycle: `new [--simple]` / `list` / `show` / `status` / `done <id>` / `undone <id>` / `diff` / `archive [--force]`. |
 | `wendkeep verify [--deep]` | Run the change's task sensors; `--deep` assembles the independent-verification package. |
 | `wendkeep spec <sub>` | Living specs: `list` / `show <capability>`. |
-| `wendkeep sensors list` | Show the sensors from `wendkeep.sensors.json` (JSON Schema included in the package). |
+| `wendkeep sensors <sub>` | `list` / `add <id> "<command>"` — view/edit `wendkeep.sensors.json` (JSON Schema shipped). |
+| `wendkeep cost [--since d]` | Aggregate AI-coding spend across the vault's sessions — total, by model, by day (`--json`). |
 | `wendkeep lesson add "t" "l"` | Record a project-local lesson (injected at the next SessionStart). |
 | `wendkeep sync-defs` | Copy `.brain/agents\|skills` into the project (`.codex/agents`, `.claude/skills`). |
 | `wendkeep validate-memory [path]` | Validate `.brain/CORE.md` (cap 25, 3 sections, no secrets/PII). |
