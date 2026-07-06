@@ -4,6 +4,13 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.15.0] — 2026-07-06
+
+### Added
+- **`wendkeep cost --top [N]`** — the N priciest sessions (cost incl. subagents · date · file),
+  most expensive first (default 10). Spot where the money went. `cost --json` now also carries
+  the per-session `sessions` list.
+
 ## [0.14.0] — 2026-07-06
 
 ### Changed
@@ -283,6 +290,7 @@ Initial release — the capture engine, extracted from a system in daily product
 - `wendkeep init` (cross-platform installer) + optional `@bitbonsai/mcpvault` MCP server.
 
 <!-- Only v0.4.0+ is tagged in git (history starts here); older versions link to npm. -->
+[0.15.0]: https://github.com/rogersialves/wendkeep/releases/tag/v0.15.0
 [0.14.0]: https://github.com/rogersialves/wendkeep/releases/tag/v0.14.0
 [0.13.0]: https://github.com/rogersialves/wendkeep/releases/tag/v0.13.0
 [0.12.0]: https://github.com/rogersialves/wendkeep/releases/tag/v0.12.0

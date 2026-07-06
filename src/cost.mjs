@@ -76,9 +76,15 @@ export function collectVaultCost(vaultBase, { since } = {}) {
     try { e = parseSessionCost(readFileSync(f, 'utf8')); } catch { continue; }
     if (!e) continue;
     if (since && e.date && e.date < since) continue;
+    e.file = f.slice(vaultBase.length + 1).replace(/\\/g, '/');
     entries.push(e);
   }
-  return aggregateCosts(entries);
+  const agg = aggregateCosts(entries);
+  // Per-session list (main+sub), most expensive first — powers `cost --top`.
+  agg.sessions = entries
+    .map((e) => ({ file: e.file, date: e.date, cost: round4(e.mainCost + e.subCost) }))
+    .sort((a, b) => b.cost - a.cost);
+  return agg;
 }
 
 function opt(argv, name) {
@@ -96,6 +102,14 @@ export function runCost(argv) {
   const agg = collectVaultCost(vaultBase, { since: opt(argv, '--since') });
 
   if (argv.includes('--json')) { process.stdout.write(`${JSON.stringify(agg, null, 2)}\n`); process.exit(0); }
+
+  const topIdx = argv.indexOf('--top');
+  if (topIdx >= 0) {
+    const n = Number(argv[topIdx + 1]) || 10;
+    process.stdout.write(`Sessões mais caras (top ${n} de ${agg.count}):\n`);
+    for (const s of agg.sessions.slice(0, n)) process.stdout.write(`  ${usd(s.cost).padStart(11)}  ${s.date || '?'}  ${s.file}\n`);
+    process.exit(0);
+  }
 
   process.stdout.write(`Custo total (vault): ${usd(agg.total)} — ${agg.count} sessão(ões) · ${usd(agg.avg)}/sessão\n`);
   process.stdout.write(`  main: ${usd(agg.main)} · subagents: ${usd(agg.sub)}\n`);

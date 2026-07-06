@@ -55,6 +55,16 @@ test('wendkeep cost: aggregates real session notes across the vault (e2e)', () =
     assert.match(r.stdout, /subagents: \$7\.5900/);
     assert.match(r.stdout, /claude-opus-4\.8/);
     const j = spawnSync(process.execPath, [BIN, 'cost', '--vault', vault, '--json'], { encoding: 'utf8' });
-    assert.equal(JSON.parse(j.stdout).total, 11.68);
+    const parsed = JSON.parse(j.stdout);
+    assert.equal(parsed.total, 11.68);
+    // sessions sorted by cost desc (s1 = 3.59+7.59 = 11.18 > s2 = 0.5)
+    assert.equal(parsed.sessions[0].cost, 11.18);
+    assert.match(parsed.sessions[0].file, /s1\.md$/);
+    // --top lists priciest first
+    const top = spawnSync(process.execPath, [BIN, 'cost', '--vault', vault, '--top', '1'], { encoding: 'utf8' });
+    assert.equal(top.status, 0, top.stderr);
+    assert.match(top.stdout, /Sessões mais caras \(top 1 de 2\)/);
+    assert.match(top.stdout, /\$11\.1800.*s1\.md/);
+    assert.doesNotMatch(top.stdout, /s2\.md/);
   } finally { rmSync(vault, { recursive: true, force: true }); }
 });

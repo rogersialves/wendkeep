@@ -47,7 +47,8 @@ Usage:
                            done <id> | undone <id> | diff | archive [--force].
   wendkeep spec <sub>          Living specs: list | show <capability>.
   wendkeep sensors <sub>       list | add <id> "<command>" [--severity --type --report].
-  wendkeep cost [--since d]    Aggregate AI-coding spend across the vault's sessions (--json).
+  wendkeep cost [opts]         Aggregate AI-coding spend across the vault's sessions.
+                           --since <date> · --top [N] (priciest sessions) · --json.
   wendkeep verify [--change s] Run a change's task sensors + record evidence (the gate).
   wendkeep lesson add "t" "l"   Record a project-local lesson (injected at SessionStart).
   wendkeep validate-memory [path]  Validate .brain/CORE.md against the compaction
