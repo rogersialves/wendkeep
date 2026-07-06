@@ -120,6 +120,35 @@ test('archive requires a verdict when a task declares [req:]; ADR lists the req 
   } finally { rmSync(vault, { recursive: true, force: true }); }
 });
 
+test('wendkeep lesson add: writes a lesson under .brain/lessons', () => {
+  const vault = mkdtempSync(join(tmpdir(), 'wk-les-cli-'));
+  try {
+    const r = spawnSync(process.execPath, [BIN, 'lesson', 'add', 'gate falso verde', 'sensor sem report engana', '--vault', vault], { encoding: 'utf8' });
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stdout, /lesson:.*gate-falso-verde/);
+    assert.ok(existsSync(join(vault, '.brain', 'lessons')));
+  } finally { rmSync(vault, { recursive: true, force: true }); }
+});
+
+test('verify: mutation survivors become fix tasks, deduped on re-run', () => {
+  const vault = mkdtempSync(join(tmpdir(), 'wk-mutf-'));
+  const proj = mkdtempSync(join(tmpdir(), 'wk-mutfp-'));
+  const spawn = (a) => spawnSync(process.execPath, [BIN, ...a, '--vault', vault, '--project', proj], { encoding: 'utf8' });
+  try {
+    mkdirSync(join(vault, '.brain'), { recursive: true });
+    mkdirSync(join(vault, '08-Mudanças', 'm'), { recursive: true });
+    writeFileSync(join(vault, '08-Mudanças', 'm', 'tarefas.md'), '- [ ] 1.1 base [sensor:mut]\n');
+    writeFileSync(join(vault, '.brain', 'CURRENT_CHANGE.md'), 'change: m\n');
+    writeFileSync(join(proj, 'wendkeep.sensors.json'), JSON.stringify({ version: 1, sensors: [{ id: 'mut', type: 'mutation', severity: 'critical', command: 'exit 0', report: 'rep.json' }] }));
+    writeFileSync(join(proj, 'rep.json'), JSON.stringify({ files: { 'a.js': { mutants: [{ mutatorName: 'M', status: 'Survived', location: { start: { line: 3 } } }] } } }));
+    assert.equal(spawn(['verify']).status, 0);
+    const tarefas = join(vault, '08-Mudanças', 'm', 'tarefas.md');
+    assert.match(readFileSync(tarefas, 'utf8'), /mata mutante a\.js:3/, 'fix task appended');
+    spawn(['verify']);
+    assert.equal((readFileSync(tarefas, 'utf8').match(/mata mutante a\.js:3/g) || []).length, 1, 'no duplicate on re-run');
+  } finally { rmSync(vault, { recursive: true, force: true }); rmSync(proj, { recursive: true, force: true }); }
+});
+
 test('verify --deep: trivial auto-writes verdict; a change with [req:] only writes the package', () => {
   const vault = mkdtempSync(join(tmpdir(), 'wk-deep-'));
   const proj = mkdtempSync(join(tmpdir(), 'wk-deepp-'));

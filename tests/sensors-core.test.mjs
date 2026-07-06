@@ -3,7 +3,33 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { loadSensors, requiredSensors, runSensors, evaluateGate } from '../hooks/sensors-core.mjs';
+import { loadSensors, requiredSensors, runSensors, evaluateGate, parseMutationReport } from '../hooks/sensors-core.mjs';
+
+test('parseMutationReport: only Survived/NoCoverage as file/line/mutator', () => {
+  const json = { files: {
+    'src/a.js': { mutants: [
+      { mutatorName: 'ArithmeticOperator', status: 'Survived', location: { start: { line: 10 } } },
+      { mutatorName: 'X', status: 'Killed', location: { start: { line: 2 } } },
+    ] },
+    'src/b.js': { mutants: [{ mutatorName: 'BooleanLiteral', status: 'NoCoverage', location: { start: { line: 5 } } }] },
+  } };
+  const s = parseMutationReport(json);
+  assert.equal(s.length, 2);
+  assert.deepEqual(s[0], { file: 'src/a.js', line: 10, mutator: 'ArithmeticOperator' });
+  assert.deepEqual(s[1], { file: 'src/b.js', line: 5, mutator: 'BooleanLiteral' });
+  assert.deepEqual(parseMutationReport({}), []);
+});
+
+test('runSensors: type mutation attaches survivors from the report', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'wk-mut-'));
+  try {
+    writeFileSync(join(dir, 'rep.json'), JSON.stringify({ files: { 'a.js': { mutants: [{ mutatorName: 'M', status: 'Survived', location: { start: { line: 3 } } }] } } }));
+    const sensors = [{ id: 'mut', type: 'mutation', command: 'run', report: 'rep.json' }];
+    const ev = runSensors(sensors, ['mut'], { spawn: () => ({ status: 0 }), cwd: dir, now: 'T' });
+    assert.equal(ev[0].survivors.length, 1);
+    assert.deepEqual(ev[0].survivors[0], { file: 'a.js', line: 3, mutator: 'M' });
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
 
 test('requiredSensors: distinct sensor ids from tasks', () => {
   assert.deepEqual(

@@ -79,7 +79,7 @@ export function clearActiveChange(vaultBase) {
   if (existsSync(p)) writeFileSync(p, 'change:\n', 'utf8');
 }
 
-export function newChange(vaultBase, slug, { sessionRel = '', dateStr }) {
+export function newChange(vaultBase, slug, { sessionRel = '', dateStr, simple = false }) {
   const dir = join(vaultBase, CHANGES_DIR, slug);
   const existed = existsSync(join(dir, 'proposta.md'));
   mkdirSync(dir, { recursive: true });
@@ -89,13 +89,15 @@ export function newChange(vaultBase, slug, { sessionRel = '', dateStr }) {
     if (!existsSync(f)) writeFileSync(f, content, 'utf8');
   };
   write('proposta.md', files.proposta);
-  write('design.md', files.design);
   write('tarefas.md', files.tarefas);
-  // Seed an example spec delta so the promotion format is discoverable.
-  const exampleDelta = join(dir, 'specs', 'exemplo', 'spec.md');
-  if (!existsSync(exampleDelta)) {
-    mkdirSync(join(dir, 'specs', 'exemplo'), { recursive: true });
-    writeFileSync(exampleDelta, files.specDelta, 'utf8');
+  // Auto-sizing (Wave B): a --simple change skips the design + spec-delta scaffold.
+  if (!simple) {
+    write('design.md', files.design);
+    const exampleDelta = join(dir, 'specs', 'exemplo', 'spec.md');
+    if (!existsSync(exampleDelta)) {
+      mkdirSync(join(dir, 'specs', 'exemplo'), { recursive: true });
+      writeFileSync(exampleDelta, files.specDelta, 'utf8');
+    }
   }
   setActiveChange(vaultBase, slug);
   return { rel: changeDirRel(slug), created: !existed };
@@ -154,6 +156,29 @@ ${lines.join('\n')}${more}
 export function activeChangeLink(vaultBase) {
   const slug = activeChange(vaultBase);
   return slug ? `Change ativa: [[${CHANGES_DIR}/${slug}/proposta]]` : '';
+}
+
+// Append fix tasks for surviving mutants to a change's tarefas.md (Wave B). Deduped by
+// file:line, numbered M.<n> continuing from any existing fix tasks. Returns count added.
+export function appendFixTasks(changeDir, mutants, sensorId) {
+  const path = join(changeDir, 'tarefas.md');
+  let md = '';
+  try { md = readFileSync(path, 'utf8'); } catch { /* nova */ }
+  const existing = new Set([...md.matchAll(/mata mutante (\S+):(\d+)/g)].map((m) => `${m[1]}:${m[2]}`));
+  const nums = [...md.matchAll(/^-\s+\[[ x]\]\s+M\.(\d+)\b/gm)].map((m) => Number(m[1]));
+  let n = nums.length ? Math.max(...nums) : 0;
+  const lines = [];
+  for (const mut of mutants || []) {
+    const key = `${mut.file}:${mut.line}`;
+    if (existing.has(key)) continue;
+    existing.add(key);
+    n += 1;
+    lines.push(`- [ ] M.${n} mata mutante ${mut.file}:${mut.line} (${mut.mutator}) [sensor:${sensorId}]`);
+  }
+  if (!lines.length) return 0;
+  const sep = md === '' || md.endsWith('\n') ? '' : '\n';
+  writeFileSync(path, `${md}${sep}${lines.join('\n')}\n`, 'utf8');
+  return lines.length;
 }
 
 // Gate seam (Pilar B stub; Pilar C replaces with real sensor evidence).

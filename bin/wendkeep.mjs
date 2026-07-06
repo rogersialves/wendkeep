@@ -45,6 +45,7 @@ Usage:
   wendkeep doctor [--vault P]  Run a vault health check.
   wendkeep change <sub>        Change lifecycle: new <slug> | list | show <slug> | archive <slug>.
   wendkeep verify [--change s] Run a change's task sensors + record evidence (the gate).
+  wendkeep lesson add "t" "l"   Record a project-local lesson (injected at SessionStart).
   wendkeep validate-memory [path]  Validate .brain/CORE.md against the compaction
                            protocol (cap 25, 3 sections, no secrets/PII). Uses
                            --vault <path> or OBSIDIAN_VAULT_PATH if no path given.
@@ -109,6 +110,11 @@ async function main() {
     case 'verify': {
       const { runVerify } = await import('../src/verify.mjs');
       runVerify(rest);
+      break;
+    }
+    case 'lesson': {
+      const { runLesson } = await import('../src/lessons.mjs');
+      runLesson(rest);
       break;
     }
     case '--version':

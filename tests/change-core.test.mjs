@@ -35,7 +35,34 @@ import {
   buildActiveChangeInjection,
   archiveChange,
   activeChangeLink,
+  appendFixTasks,
 } from '../hooks/change-core.mjs';
+
+test('appendFixTasks: appends numbered fix tasks, dedups by file:line', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'wk-fix-'));
+  try {
+    writeFileSync(join(dir, 'tarefas.md'), '- [ ] 1.1 base\n');
+    assert.equal(appendFixTasks(dir, [{ file: 'a.js', line: 3, mutator: 'M' }, { file: 'b.js', line: 5, mutator: 'N' }], 'mut'), 2);
+    const md = readFileSync(join(dir, 'tarefas.md'), 'utf8');
+    assert.match(md, /- \[ \] M\.1 mata mutante a\.js:3 \(M\) \[sensor:mut\]/);
+    assert.match(md, /M\.2 mata mutante b\.js:5/);
+    assert.equal(appendFixTasks(dir, [{ file: 'a.js', line: 3, mutator: 'M' }, { file: 'c.js', line: 9, mutator: 'O' }], 'mut'), 1);
+    assert.match(readFileSync(join(dir, 'tarefas.md'), 'utf8'), /M\.3 mata mutante c\.js:9/);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('newChange --simple: only proposta + tarefas, no design/specs (auto-sizing)', () => {
+  const vault = mkdtempSync(join(tmpdir(), 'wk-simple-'));
+  mkdirSync(join(vault, '.brain'), { recursive: true });
+  try {
+    newChange(vault, 's', { dateStr: '2026-07-05', simple: true });
+    const dir = join(vault, '08-Mudanças', 's');
+    assert.ok(existsSync(join(dir, 'proposta.md')));
+    assert.ok(existsSync(join(dir, 'tarefas.md')));
+    assert.ok(!existsSync(join(dir, 'design.md')), 'no design.md');
+    assert.ok(!existsSync(join(dir, 'specs')), 'no specs scaffold');
+  } finally { rmSync(vault, { recursive: true, force: true }); }
+});
 
 test('renderChangeScaffold: frontmatter + session wikilink + task line', () => {
   const { proposta, design, tarefas, specDelta } = renderChangeScaffold({

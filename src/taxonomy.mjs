@@ -35,6 +35,8 @@ export const HOOK_FILES = [
   'change-core.mjs',
   'spec-core.mjs',
   'sensors-core.mjs',
+  'harness-doctor.mjs',
+  'lessons-core.mjs',
   'brain-inject.mjs',
   'brain-recall.mjs',
   'brain-reindex.mjs',

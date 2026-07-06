@@ -3,7 +3,7 @@
 // the VAULT. Writes 08-Mudanças/<slug>/evidencia.json; exit 1 if a critical sensor is red.
 import { readFileSync, writeFileSync } from 'node:fs';
 import { isAbsolute, join, resolve } from 'node:path';
-import { parseTasks, activeChange } from '../hooks/change-core.mjs';
+import { parseTasks, activeChange, appendFixTasks } from '../hooks/change-core.mjs';
 import { loadSensors, requiredSensors, runSensors, evaluateGate } from '../hooks/sensors-core.mjs';
 
 function opt(argv, name) {
@@ -30,6 +30,22 @@ export function runVerify(argv) {
   const sensors = loadSensors(projectRoot);
   const evidence = runSensors(sensors, ids, { cwd: projectRoot });
   writeFileSync(join(changeDir, 'evidencia.json'), `${JSON.stringify(evidence, null, 2)}\n`, 'utf8');
+
+  // Mutation survivors -> fix tasks (Wave B), bounded at 3 rounds then escalate.
+  const withSurvivors = evidence.filter((e) => e.survivors && e.survivors.length);
+  if (withSurvivors.length) {
+    const roundFile = join(changeDir, '.mutation-round');
+    let round = 0;
+    try { round = Number(readFileSync(roundFile, 'utf8').trim()) || 0; } catch { /* first round */ }
+    if (round >= 3) {
+      process.stderr.write('verify: mutantes ainda sobrevivem após 3 rodadas — revise os testes à mão.\n');
+    } else {
+      let added = 0;
+      for (const e of withSurvivors) added += appendFixTasks(changeDir, e.survivors, e.id);
+      writeFileSync(roundFile, String(round + 1), 'utf8');
+      process.stdout.write(`verify: ${added} fix-task(s) de mutação (rodada ${round + 1}/3)\n`);
+    }
+  }
 
   // Same rule as the archive gate: evidence carries severity, so evaluateGate blocks
   // only on critical/missing — a red warning is advisory and passes verify.

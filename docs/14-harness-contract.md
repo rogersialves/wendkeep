@@ -19,8 +19,10 @@ Pastas (PT-BR, hardcoded nos hooks): `00-Inbox 01-Projeto 02-Sessões 03-Linear 
 }
 ```
 - `severity`: `critical` (trava o gate) | `warning` (advisory, não trava).
-- `type`: `command` (default) | `mutation` *(Wave B — delega à ferramenta do usuário)* |
-  `verifier` *(Wave B)*.
+- `type`: `command` (default) | `mutation` (delega à ferramenta + parseia o report) | `verifier` *(futuro)*.
+- `report` (só `type: mutation`): caminho do relatório mutation-testing-elements (Stryker et al.),
+  relativo ao root do projeto. `verify` extrai mutantes `Survived`/`NoCoverage` e anexa fix-tasks
+  na change ativa: `- [ ] M.<n> mata mutante <file>:<line> (<mutator>) [sensor:<id>]` (bounded, teto 3).
 - Roda no root do projeto; `exit 0` = verde.
 
 ## Requisito — `07-Specs/<capability>.md` (spec vivo)
@@ -87,8 +89,16 @@ description: <quando usar — usado pra roteamento>
 ```
 Distribuída por `wendkeep sync-defs` (e pelo `init`) pra `.claude/skills/<name>/`.
 
-## Lesson *(Wave B)* — `.brain/lessons/<slug>.md`
-Falha de verificação destilada em lição project-local, auto-injetada no próximo change.
+## Lesson — `.brain/lessons/[<data>-]<slug>.md`
+Falha de verificação destilada em lição project-local, injetada como bloco `<lessons>` no
+SessionStart (as N mais recentes). Escrita por `wendkeep lesson add "<trigger>" "<lesson>"`.
+```yaml
+type: lesson
+trigger: "<gatilho>"
+source: <slug da change>
+date: <YYYY-MM-DD>
+```
+Corpo = a lição (a 1ª linha é o que entra na injeção).
 
 ---
-*harness contract v1 — wendkeep 0.5.0. Mudança de formato = major ou nota de migração no CHANGELOG.*
+*harness contract v1.1 — wendkeep 0.6.0. Mudança de formato = major ou nota de migração no CHANGELOG.*

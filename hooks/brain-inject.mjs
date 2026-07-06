@@ -8,6 +8,7 @@ import { pathToFileURL } from 'node:url';
 import { getVaultBase, readHookInput, writeHookOutput } from './obsidian-common.mjs';
 import { brainDir } from './brain-core.mjs';
 import { buildActiveChangeInjection } from './change-core.mjs';
+import { buildLessonsInjection } from './lessons-core.mjs';
 
 const MAX_LINES = 45; // CORE ≤25 + DIGEST ≤15 + folga; salvaguarda se o CORE crescer à mão
 
@@ -26,7 +27,8 @@ export function buildInjection(vaultBase) {
   }
   const brain = ['<brain_memory>', ...lines, pointer, '</brain_memory>'].join('\n');
   const change = buildActiveChangeInjection(vaultBase);
-  return change ? `${brain}\n${change}` : brain;
+  const lessons = buildLessonsInjection(vaultBase);
+  return [brain, change, lessons].filter(Boolean).join('\n');
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

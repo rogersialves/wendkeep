@@ -40,7 +40,7 @@ export function runChange(argv) {
   if (sub === 'new') {
     const slug = slugArg();
     if (!slug) { process.stderr.write('wendkeep change new: missing <slug>\n'); process.exit(2); }
-    const r = newChange(vaultBase, slug, { dateStr: today() });
+    const r = newChange(vaultBase, slug, { dateStr: today(), simple: rest.includes('--simple') });
     process.stdout.write(`change ${r.created ? 'created' : 'exists'}: ${r.rel} (active)\n`);
     process.exit(0);
   }

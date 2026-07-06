@@ -4,6 +4,23 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] — 2026-07-05
+
+Enforcement layer (Wave B of the TLC-parity program) — closes TLC parity.
+
+### Added
+- **Discrimination sensor (`type: mutation`):** delegates to the project's mutation tool and
+  parses its mutation-testing-elements report; surviving mutants become fix tasks in the active
+  change (`- [ ] M.n mata mutante file:line`), bounded to 3 rounds before escalating.
+- **Harness self-check:** `wendkeep doctor` now validates the a2 state — an invalid
+  `wendkeep.sensors.json`, a broken `CURRENT_CHANGE` pointer, changes without a `proposta.md`,
+  an orphan `[req:]` (unknown requirement), and stale verdicts.
+- **Lessons loop:** `wendkeep lesson add "<trigger>" "<lesson>"` records a project-local lesson in
+  `.brain/lessons/`; `brain-inject` surfaces the recent ones as a `<lessons>` block at SessionStart.
+- **Auto-sizing:** `wendkeep change new <slug> --simple` scaffolds only proposta + tarefas
+  (no design / spec-delta) for trivial changes.
+- **Harness contract v1.1** (`docs/14-harness-contract.md`): the mutation + lesson formats.
+
 ## [0.5.0] — 2026-07-05
 
 Verification & credibility layer (Wave A of the TLC-parity program). The gate stops being
@@ -103,6 +120,7 @@ Initial release — the capture engine, extracted from a system in daily product
 - `wendkeep init` (cross-platform installer) + optional `@bitbonsai/mcpvault` MCP server.
 
 <!-- Only v0.4.0+ is tagged in git (history starts here); older versions link to npm. -->
+[0.6.0]: https://github.com/rogersialves/wendkeep/releases/tag/v0.6.0
 [0.5.0]: https://github.com/rogersialves/wendkeep/releases/tag/v0.5.0
 [0.4.0]: https://github.com/rogersialves/wendkeep/releases/tag/v0.4.0
 [0.3.0]: https://www.npmjs.com/package/wendkeep/v/0.3.0

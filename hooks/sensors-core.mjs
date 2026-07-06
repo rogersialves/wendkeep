@@ -26,9 +26,31 @@ export function runSensors(sensors, ids, { spawn = spawnSync, cwd, now } = {}) {
     const s = byId[id];
     if (!s) { evidence.push({ id, status: 'red', ts, severity: 'critical', note: 'sensor não definido' }); continue; }
     const r = spawn(s.command, [], { cwd, shell: true, stdio: 'ignore' });
-    evidence.push({ id, status: (r.status ?? 1) === 0 ? 'green' : 'red', ts, severity: s.severity || 'critical' });
+    const entry = { id, status: (r.status ?? 1) === 0 ? 'green' : 'red', ts, severity: s.severity || 'critical' };
+    if (s.type === 'mutation' && s.report) {
+      // Delegated mutation (Wave B): read the tool's mutation-testing-elements report and
+      // attach surviving mutants so verify can turn them into fix tasks.
+      try { entry.survivors = parseMutationReport(JSON.parse(readFileSync(join(cwd || '.', s.report), 'utf8'))); }
+      catch { /* report ausente/ilegível — segue só com o exit code */ }
+    }
+    evidence.push(entry);
   }
   return evidence;
+}
+
+// Parse a mutation-testing-elements report (Stryker et al.): return surviving mutants
+// (Survived | NoCoverage) as {file, line, mutator}.
+export function parseMutationReport(json) {
+  const out = [];
+  const files = json && json.files ? json.files : {};
+  for (const [file, data] of Object.entries(files)) {
+    for (const m of (data && data.mutants) || []) {
+      if (m.status === 'Survived' || m.status === 'NoCoverage') {
+        out.push({ file, line: m.location && m.location.start ? m.location.start.line : null, mutator: m.mutatorName || 'unknown' });
+      }
+    }
+  }
+  return out;
 }
 
 // A required sensor blocks the gate when it is missing (never verified) or red at a
