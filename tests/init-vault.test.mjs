@@ -8,8 +8,23 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { deriveVaultDirName, VAULT_FOLDERS } from '../src/taxonomy.mjs';
 import { renderVaultReadme } from '../src/vault-readme.mjs';
+import { parseLocaleAnswer, promptStrings } from '../src/init.mjs';
 
 const BIN = join(dirname(fileURLToPath(import.meta.url)), '..', 'bin', 'wendkeep.mjs');
+
+test('parseLocaleAnswer: 1/pt/empty -> pt-BR; 2/en -> en; unknown -> pt-BR', () => {
+  for (const a of ['', '1', 'pt', 'pt-BR', 'PT', 'português', 'xyz']) assert.equal(parseLocaleAnswer(a), 'pt-BR', `"${a}"`);
+  for (const a of ['2', 'en', 'EN', 'english']) assert.equal(parseLocaleAnswer(a), 'en', `"${a}"`);
+});
+
+test('promptStrings: localized init prompts; en distinct from pt', () => {
+  const pt = promptStrings('pt-BR');
+  const en = promptStrings('en');
+  assert.match(pt.vault('/x'), /vault Obsidian|Caminho/i);
+  assert.match(en.vault('/x'), /vault path/i);
+  assert.match(en.companionsHeader, /optional/i);
+  assert.equal(promptStrings('xx').vault('/x'), pt.vault('/x'), 'unknown falls back to pt');
+});
 
 test('deriveVaultDirName: .<project>-vault, case preserved (posix + windows seps)', () => {
   assert.equal(deriveVaultDirName('/home/u/NutriGym-Vision'), '.NutriGym-Vision-vault');

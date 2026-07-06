@@ -192,17 +192,55 @@ function installVaultColors(vaultPath) {
 
 // --- main -------------------------------------------------------------------
 
+// Interactive prompt strings by locale. The language question itself is bilingual (asked
+// before the locale is known); everything after follows the answer.
+const PROMPTS = {
+  'pt-BR': {
+    vault: (f) => `Caminho do vault Obsidian (Enter aceita o padrão, ou digite outro)\n  [${f}]\n> `,
+    companionsHeader: '\nCompanions (plugins/MCP opcionais — context-mode é a principal):',
+    companionsAsk: (def) => `Digite os ids separados por vírgula (Enter aceita [${def}], "none" p/ nenhum): `,
+    menu: { hint: 'Espaço marca/desmarca · ↑/↓ move · a=todos · n=nenhum · Enter confirma', header: 'Companions' },
+  },
+  en: {
+    vault: (f) => `Obsidian vault path (Enter for the default, or type another)\n  [${f}]\n> `,
+    companionsHeader: '\nCompanions (optional plugins/MCP — context-mode is the main one):',
+    companionsAsk: (def) => `Enter ids comma-separated (Enter for [${def}], "none" for none): `,
+    menu: { hint: 'Space toggles · ↑/↓ move · a=all · n=none · Enter confirms', header: 'Companions' },
+  },
+};
+
+export function promptStrings(localeId) {
+  return PROMPTS[localeId] || PROMPTS['pt-BR'];
+}
+
+// Map the language answer to a locale id. 2/en → en; 1/pt/empty/unknown → pt-BR.
+export function parseLocaleAnswer(ans) {
+  const a = String(ans || '').trim().toLowerCase();
+  if (a === '2' || a === 'en' || a === 'english') return 'en';
+  return 'pt-BR';
+}
+
 export async function runInit(argv) {
   const args = parseArgs(argv);
   const projectPath = resolve(args.project || process.cwd());
   const log = (s) => process.stdout.write(`${s}\n`);
+
+  // Language first (i18n): an interactive TTY without --locale is asked the vault language;
+  // folders, prompts and scaffold all follow the answer.
+  if (!args.locale && process.stdin.isTTY && !args.yes) {
+    const rl = createInterface({ input: process.stdin, output: process.stdout });
+    const ans = await rl.question('Idioma do vault / Vault language:\n  [1] Português (pt-BR)   [2] English (en)\n> ');
+    rl.close();
+    args.locale = parseLocaleAnswer(ans);
+  }
+  const P = promptStrings(args.locale && LOCALES[args.locale] ? args.locale : DEFAULT_LOCALE);
 
   let vaultPath = args.vault;
   if (!vaultPath) {
     const fallback = join(projectPath, deriveVaultDirName(projectPath));
     if (process.stdin.isTTY && !args.yes) {
       const rl = createInterface({ input: process.stdin, output: process.stdout });
-      const ans = (await rl.question(`Obsidian vault path (Enter aceita o padrão, ou digite outro caminho)\n  [${fallback}]\n> `)).trim();
+      const ans = (await rl.question(P.vault(fallback))).trim();
       rl.close();
       vaultPath = ans || fallback;
     } else {
@@ -222,16 +260,14 @@ export async function runInit(argv) {
   } else if (process.stdin.isTTY && !args.yes) {
     if (canInteractiveSelect()) {
       log(''); // the checkbox menu renders its own header
-      companions = await selectCompanionsInteractive(COMPANIONS);
+      companions = await selectCompanionsInteractive(COMPANIONS, { labels: P.menu });
     } else {
       // Text fallback (no raw-mode TTY): list + comma input with clear instructions.
-      log('\nCompanions (plugins/MCP opcionais — context-mode é a principal):');
+      log(P.companionsHeader);
       for (const c of COMPANIONS) log(`  ${c.default ? '[x]' : '[ ]'} ${c.label}`);
       const def = resolveCompanions({}).join(',');
       const rl = createInterface({ input: process.stdin, output: process.stdout });
-      const ans = (await rl.question(
-        `Digite os ids separados por vírgula (Enter aceita [${def}], "none" p/ nenhum): `,
-      )).trim();
+      const ans = (await rl.question(P.companionsAsk(def))).trim();
       rl.close();
       companions = ans.toLowerCase() === 'none' ? [] : resolveCompanions({ companionsFlag: ans || def });
     }

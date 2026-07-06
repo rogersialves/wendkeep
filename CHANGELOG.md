@@ -4,6 +4,16 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.1] — 2026-07-06
+
+Interactive install UX: language first.
+
+### Added
+- **`wendkeep init` asks the vault language first** on an interactive TTY (when `--locale`
+  isn't passed): `[1] Português  [2] English`. The answer drives the folders, scaffold and
+  skills — and the remaining prompts (vault path, companion selection) now render in the
+  chosen locale instead of always Portuguese. `--yes`, `--locale` and non-TTY are unchanged.
+
 ## [0.9.0] — 2026-07-06
 
 Engineering debt: sensor editing + i18n coherence for auto-generated notes.
@@ -213,6 +223,7 @@ Initial release — the capture engine, extracted from a system in daily product
 - `wendkeep init` (cross-platform installer) + optional `@bitbonsai/mcpvault` MCP server.
 
 <!-- Only v0.4.0+ is tagged in git (history starts here); older versions link to npm. -->
+[0.9.1]: https://github.com/rogersialves/wendkeep/releases/tag/v0.9.1
 [0.9.0]: https://github.com/rogersialves/wendkeep/releases/tag/v0.9.0
 [0.8.1]: https://github.com/rogersialves/wendkeep/releases/tag/v0.8.1
 [0.8.0]: https://github.com/rogersialves/wendkeep/releases/tag/v0.8.0

@@ -4,6 +4,7 @@
 import readline from 'node:readline';
 
 const HINT = 'Espaço marca/desmarca · ↑/↓ move · a=todos · n=nenhum · Enter confirma';
+const HEADER = 'Companions';
 
 export function initialCompanionMenu(companions) {
   return {
@@ -35,8 +36,8 @@ export function reduceCompanionMenu(state, action) {
   }
 }
 
-export function renderCompanionMenu(state) {
-  const lines = [`Companions — ${HINT}:`];
+export function renderCompanionMenu(state, { hint = HINT, header = HEADER } = {}) {
+  const lines = [`${header} — ${hint}:`];
   state.items.forEach((it, i) => {
     const cursor = i === state.cursor ? '>' : ' ';
     const box = it.checked ? '[x]' : '[ ]';
@@ -63,7 +64,7 @@ export function canInteractiveSelect(input = process.stdin, output = process.std
 
 // Run the raw-TTY checkbox menu; resolves with the selected ids. Caller must check
 // canInteractiveSelect() first (otherwise use the text fallback).
-export function selectCompanionsInteractive(companions, { input = process.stdin, output = process.stdout } = {}) {
+export function selectCompanionsInteractive(companions, { input = process.stdin, output = process.stdout, labels } = {}) {
   return new Promise((resolve) => {
     let state = initialCompanionMenu(companions);
     let drawnLines = 0;
@@ -77,7 +78,7 @@ export function selectCompanionsInteractive(companions, { input = process.stdin,
         readline.moveCursor(output, 0, -drawnLines);
         readline.clearScreenDown(output);
       }
-      const text = renderCompanionMenu(state);
+      const text = renderCompanionMenu(state, labels);
       output.write(`${text}\n`);
       drawnLines = text.split('\n').length;
     };

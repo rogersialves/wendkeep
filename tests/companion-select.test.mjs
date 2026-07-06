@@ -10,6 +10,14 @@ import {
 } from '../src/companion-select.mjs';
 import { COMPANIONS } from '../src/taxonomy.mjs';
 
+test('renderCompanionMenu: localized hint/header when labels passed; pt default', () => {
+  const s = initialCompanionMenu(COMPANIONS);
+  assert.match(renderCompanionMenu(s), /Espaço marca/, 'pt default');
+  const en = renderCompanionMenu(s, { hint: 'Space toggles', header: 'Companions' });
+  assert.match(en, /Space toggles/);
+  assert.doesNotMatch(en, /Espaço/);
+});
+
 test('initialCompanionMenu: defaults are pre-checked, cursor at top', () => {
   const s = initialCompanionMenu(COMPANIONS);
   assert.equal(s.cursor, 0);
