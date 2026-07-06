@@ -1,7 +1,7 @@
 {
   "name": "wendkeep",
-  "version": "0.8.0",
-  "description": "Automatically capture AI coding agent sessions (Claude Code, Codex) as local Markdown in your Obsidian vault — turn-by-turn history, cost/token tracking, auto-extracted decisions/bugs/learnings, rendered in the graph. Local-first.",
+  "version": "0.8.1",
+  "description": "A persistent-memory harness for AI coding agents on your Obsidian vault: turn-by-turn session capture plus a native, zero-dependency spec→change→verify→archive loop (sensor-gated, independent verdict, mutation discrimination). Local-first, agent-agnostic (Claude Code, Codex, Cursor…).",
   "type": "module",
   "bin": {
     "wendkeep": "bin/wendkeep.mjs",

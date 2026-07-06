@@ -4,6 +4,22 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.1] — 2026-07-06
+
+Polish: i18n coherence + presentation.
+
+### Added
+- **Locale-aware process skills + vault docs:** an `en` vault now seeds the `wk-*` skills,
+  the vault README, the change template, and the specs README in English (previously
+  Portuguese regardless of locale). Completes the `--locale en` promise.
+- **`wendkeep.sensors.json` at the repo root** — the project gates itself with its own
+  test/check sensors (dogfooding the harness).
+
+### Changed
+- npm `description` now describes the harness + a2 loop (was capture-only).
+- CI: `actions/checkout` and `actions/setup-node` bumped to `v5` (v4 runner deprecation).
+- README: the i18n "known limitation" is resolved.
+
 ## [0.8.0] — 2026-07-05
 
 Reach: internationalization + agent-agnostic distribution.
@@ -180,6 +196,7 @@ Initial release — the capture engine, extracted from a system in daily product
 - `wendkeep init` (cross-platform installer) + optional `@bitbonsai/mcpvault` MCP server.
 
 <!-- Only v0.4.0+ is tagged in git (history starts here); older versions link to npm. -->
+[0.8.1]: https://github.com/rogersialves/wendkeep/releases/tag/v0.8.1
 [0.8.0]: https://github.com/rogersialves/wendkeep/releases/tag/v0.8.0
 [0.7.0]: https://github.com/rogersialves/wendkeep/releases/tag/v0.7.0
 [0.6.1]: https://github.com/rogersialves/wendkeep/releases/tag/v0.6.1

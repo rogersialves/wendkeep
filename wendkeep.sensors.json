@@ -1,0 +1,21 @@
+{
+  "$schema": "https://raw.githubusercontent.com/rogersialves/wendkeep/main/schema/wendkeep.sensors.schema.json",
+  "version": 1,
+  "source": "manual",
+  "sensors": [
+    {
+      "id": "tests",
+      "name": "Tests",
+      "description": "node --test (the full suite)",
+      "severity": "critical",
+      "command": "npm test"
+    },
+    {
+      "id": "check",
+      "name": "Syntax check",
+      "description": "node --check on the entrypoints",
+      "severity": "critical",
+      "command": "npm run check"
+    }
+  ]
+}

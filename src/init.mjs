@@ -282,7 +282,7 @@ export async function runInit(argv) {
   const readmePath = join(vaultPath, 'README.md');
   let readmeNote = '';
   if (!existsSync(readmePath)) {
-    writeFileSync(readmePath, renderVaultReadme({ projectName: basename(projectPath), vaultPath, withMcp: args.mcp }), 'utf8');
+    writeFileSync(readmePath, renderVaultReadme({ projectName: basename(projectPath), vaultPath, withMcp: args.mcp, locale: loc.id }), 'utf8');
     readmeNote = ', README.md created';
   }
   // Seed the curated memory layer (CORE.md) + the compaction-protocol doc. The
@@ -297,12 +297,21 @@ export async function runInit(argv) {
   // Seed the definitions layer (.brain/agents + .brain/skills): versioned source of
   // truth for custom agents/skills. `wendkeep sync-defs` copies them to the agent dirs.
   seedDefinitions(brainDir);
-  seedWkSkills(brainDir); // Pilar A: native process skills (wk-workflow/tdd/debugging/...).
+  seedWkSkills(brainDir, loc.id); // Pilar A: native process skills, in the vault locale.
   // Seed the change/spec layer starters (Pilar B) — non-destructive.
+  const en = loc.id === 'en';
   const specsReadme = join(vaultPath, loc.folders.specs, 'README.md');
-  if (!existsSync(specsReadme)) writeFileSync(specsReadme, `# Specs — contrato vivo\n\nCapacidades do projeto (requisitos/cenários). Changes em \`${loc.folders.changes}/\` promovem deltas aqui no \`wendkeep change archive\`.\n`, 'utf8');
+  if (!existsSync(specsReadme)) {
+    writeFileSync(specsReadme, en
+      ? `# Specs — living contract\n\nThe project's capabilities (requirements/scenarios). Changes in \`${loc.folders.changes}/\` promote deltas here on \`wendkeep change archive\`.\n`
+      : `# Specs — contrato vivo\n\nCapacidades do projeto (requisitos/cenários). Changes em \`${loc.folders.changes}/\` promovem deltas aqui no \`wendkeep change archive\`.\n`, 'utf8');
+  }
   const changeTpl = join(vaultPath, 'Templates', 'Change.md');
-  if (!existsSync(changeTpl)) writeFileSync(changeTpl, '---\ntype: change\nstatus: active\ncssclasses:\n  - topic-change\n---\n\n# <slug>\n\n## Por quê\n\n## O que muda\n', 'utf8');
+  if (!existsSync(changeTpl)) {
+    writeFileSync(changeTpl, en
+      ? '---\ntype: change\nstatus: active\ncssclasses:\n  - topic-change\n---\n\n# <slug>\n\n## Why\n\n## What changes\n'
+      : '---\ntype: change\nstatus: active\ncssclasses:\n  - topic-change\n---\n\n# <slug>\n\n## Por quê\n\n## O que muda\n', 'utf8');
+  }
   // Seed the native sensor config (Pilar C) at project root — non-destructive.
   const sensorsFile = join(projectPath, 'wendkeep.sensors.json');
   if (!existsSync(sensorsFile)) {

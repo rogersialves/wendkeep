@@ -24,6 +24,12 @@ test('init --locale en: english folders + config; pt folders absent', () => {
     assert.ok(!existsSync(join(vault, '02-Sessões')), 'no pt sessions folder');
     assert.ok(!existsSync(join(vault, '08-Mudanças')), 'no pt changes folder');
     assert.ok(existsSync(join(vault, '07-Specs', 'README.md')), 'specs README seeded');
+    // 0.8.1 coherence: en vault gets en skills + en vault README + en change template.
+    assert.match(readFileSync(join(vault, '.brain', 'skills', 'wk-workflow', 'SKILL.md'), 'utf8'), /The a2 loop|verify --deep/, 'en workflow skill');
+    assert.match(readFileSync(join(vault, '.brain', 'skills', 'wk-verify', 'SKILL.md'), 'utf8'), /Independent verification/i, 'en verify skill');
+    assert.ok(existsSync(join(projectDir, '.claude', 'skills', 'wk-verify', 'SKILL.md')), 'skills delivered to project .claude');
+    assert.match(readFileSync(join(vault, 'README.md'), 'utf8'), /## Structure/, 'en vault README');
+    assert.match(readFileSync(join(vault, 'Templates', 'Change.md'), 'utf8'), /## Why/, 'en change template');
   } finally { rmSync(parent, { recursive: true, force: true }); }
 });
 

@@ -136,7 +136,7 @@ The agent's settings.json points each hook at `npx wendkeep hook …`. On `Stop`
 
 ## Known limitations (`v0.1`)
 
-- **Vault folder names and month labels are Portuguese** (`02-Sessões`, `04-Decisões`, …), hardcoded in the hooks. Internationalization is not done yet — the taxonomy `wendkeep init` creates matches what the hooks expect on purpose.
+- **Vault folder names default to Portuguese** (`02-Sessões`, `04-Decisões`, …). Pass `wendkeep init --locale en` for an English vault (`02-Sessions`, `04-Decisions`, English scaffold/skills). The locale is a vault property, locked at init; parsers are bilingual so mixed content never breaks.
 - **Search is keyword/frontmatter scoring**, not on‑device embeddings (that's on the roadmap).
 - **Transcript formats are agent‑internal** and can change between agent versions; parsing is isolated but may need updates.
 - Installer wires **Claude Code** settings + `.mcp.json`. Codex hooks run on the same scripts but are not auto‑wired yet.
