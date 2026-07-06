@@ -53,6 +53,14 @@ test('collectSubagentUsage: aggregates subagents, maps workflow name + cost', ()
     assert.equal(r.workflows[0].status, 'completed');
     assert.deepEqual(r.workflows[0].phases, ['Classify', 'Synthesize']);
     assert.equal(r.workflows[0].durationMs, 42000);
+    assert.equal(r.aggregate.wasted, 0, 'completed run = no waste');
+
+    // a killed run's cost counts as wasted
+    writeFileSync(join(sd, 'workflows', 'wf_abc123.json'), JSON.stringify({ runId: 'wf_abc123', workflowName: 'my-audit', status: 'killed', agentCount: 2, phases: [{ title: 'Classify' }] }));
+    const rk = collectSubagentUsage(sd);
+    assert.ok(rk.aggregate.wasted > 0, 'killed run cost is wasted');
+    assert.equal(rk.aggregate.wasted, rk.workflows[0].cost);
+    assert.match(renderSubagentSection(rk), /Desperdiçado \(runs killed\/failed\):/);
     // per-subagent: workflow name mapped, model, agentType from meta
     const a = r.subagents.find((s) => s.id === 'aaa111');
     assert.equal(a.workflow, 'my-audit');

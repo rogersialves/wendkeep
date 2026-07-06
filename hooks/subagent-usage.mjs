@@ -143,10 +143,15 @@ export function collectSubagentUsage(sessionDir) {
     };
   });
 
+  // Wasted spend: cost of workflow runs that did not complete (killed/failed/…). The
+  // subagents that ran before the kill still cost money — this makes that visible.
+  const WASTE = /^(killed|failed|error|aborted|cancel(l)?ed)$/i;
+  const wasted = round4(workflows.filter((w) => WASTE.test(w.status)).reduce((s, w) => s + w.cost, 0));
+
   return {
     subagents,
     workflows,
-    aggregate: { count, calls, tokens: tokensTotal(usageAgg), cost: round4(cost), usage: usageAgg, tools: [...allTools] },
+    aggregate: { count, calls, tokens: tokensTotal(usageAgg), cost: round4(cost), wasted, usage: usageAgg, tools: [...allTools] },
   };
 }
 
@@ -167,13 +172,14 @@ export function renderSubagentSection(c) {
   const rows = c.subagents
     .map((s) => `| ${s.id} | ${s.agentType || '-'} | ${s.workflow || '-'} | ${s.model} | ${s.tools} | ${fmt(s.tokens)} | ${usd(s.cost)} |`)
     .join('\n');
+  const wasteLine = a.wasted ? `\n- **Desperdiçado (runs killed/failed):** ${usd(a.wasted)}` : '';
   return `## Subagents & Workflows
 
 > Custo de subagents/workflows desta sessão — NÃO incluído no total principal acima.
 
 - **Subagents:** ${a.count} · ${a.calls} chamadas · ${fmt(a.tokens)} tokens · ${usd(a.cost)}
 - **Workflows:** ${wf}
-- **Tools (subagents):** ${tools}
+- **Tools (subagents):** ${tools}${wasteLine}
 
 <details><summary>Por subagent (${a.count})</summary>
 
@@ -220,6 +226,7 @@ export function upsertSubagentUsage(sessionPath, transcriptPath) {
   content = setFrontmatterField(content, 'subagents_tokens_total', a.tokens);
   content = setFrontmatterField(content, 'subagents_custo_usd', a.cost);
   content = setFrontmatterField(content, 'subagents_tools', `"${(a.tools || []).join(', ')}"`);
+  content = setFrontmatterField(content, 'subagents_wasted_usd', a.wasted || 0);
   content = setFrontmatterField(content, 'tokens_total_incl_subagents', frontmatterNumber(content, 'tokens_total') + a.tokens);
   content = upsertSection(content, '## Subagents & Workflows', renderSubagentSection(collected));
   writeFileSync(sessionPath, content, 'utf8');

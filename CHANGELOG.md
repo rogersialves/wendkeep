@@ -4,6 +4,17 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.13.0] — 2026-07-06
+
+Cost intelligence: waste + average.
+
+### Added
+- **Wasted-spend tracking:** a killed/failed workflow run's subagent cost is now recorded per
+  session (`subagents_wasted_usd` + a line in the note's `## Subagents & Workflows`) and rolled
+  up by `wendkeep cost` (`desperdiçado (runs killed/failed): $X`). Money burned on aborted runs
+  was invisible before.
+- **`wendkeep cost` per-session average** (`$/sessão`) alongside the vault total.
+
 ## [0.12.0] — 2026-07-06
 
 Deeper subagent/workflow telemetry.
@@ -261,6 +272,7 @@ Initial release — the capture engine, extracted from a system in daily product
 - `wendkeep init` (cross-platform installer) + optional `@bitbonsai/mcpvault` MCP server.
 
 <!-- Only v0.4.0+ is tagged in git (history starts here); older versions link to npm. -->
+[0.13.0]: https://github.com/rogersialves/wendkeep/releases/tag/v0.13.0
 [0.12.0]: https://github.com/rogersialves/wendkeep/releases/tag/v0.12.0
 [0.11.0]: https://github.com/rogersialves/wendkeep/releases/tag/v0.11.0
 [0.10.0]: https://github.com/rogersialves/wendkeep/releases/tag/v0.10.0

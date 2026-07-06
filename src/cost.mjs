@@ -21,6 +21,7 @@ export function parseSessionCost(content) {
     model: fmValue(content, 'custo_modelo_label') || fmValue(content, 'modelo') || '?',
     mainCost: Number(fmValue(content, 'custo_modelo_usd')) || 0,
     subCost: Number(fmValue(content, 'subagents_custo_usd')) || 0,
+    wasted: Number(fmValue(content, 'subagents_wasted_usd')) || 0,
     tokens: Number(fmValue(content, 'tokens_total')) || 0,
     subTokens: Number(fmValue(content, 'subagents_tokens_total')) || 0,
   };
@@ -31,19 +32,22 @@ export function aggregateCosts(entries) {
   const byModel = {};
   let main = 0;
   let sub = 0;
+  let wasted = 0;
   let tokens = 0;
   let subTokens = 0;
   for (const e of entries) {
-    main += e.mainCost; sub += e.subCost; tokens += e.tokens; subTokens += e.subTokens;
+    main += e.mainCost; sub += e.subCost; wasted += e.wasted || 0; tokens += e.tokens; subTokens += e.subTokens;
     const d = e.date || '?';
     (byDay[d] = byDay[d] || { cost: 0, count: 0 }).cost += e.mainCost + e.subCost;
     byDay[d].count += 1;
     (byModel[e.model] = byModel[e.model] || { cost: 0, count: 0 }).cost += e.mainCost + e.subCost;
     byModel[e.model].count += 1;
   }
+  const total = main + sub;
   return {
     count: entries.length,
-    main: round4(main), sub: round4(sub), total: round4(main + sub),
+    main: round4(main), sub: round4(sub), total: round4(total), wasted: round4(wasted),
+    avg: round4(entries.length ? total / entries.length : 0),
     tokens, subTokens,
     byDay: Object.entries(byDay).sort().map(([date, v]) => ({ date, cost: round4(v.cost), count: v.count })),
     byModel: Object.entries(byModel).sort((a, b) => b[1].cost - a[1].cost).map(([model, v]) => ({ model, cost: round4(v.cost), count: v.count })),
@@ -93,8 +97,9 @@ export function runCost(argv) {
 
   if (argv.includes('--json')) { process.stdout.write(`${JSON.stringify(agg, null, 2)}\n`); process.exit(0); }
 
-  process.stdout.write(`Custo total (vault): ${usd(agg.total)} — ${agg.count} sessão(ões)\n`);
+  process.stdout.write(`Custo total (vault): ${usd(agg.total)} — ${agg.count} sessão(ões) · ${usd(agg.avg)}/sessão\n`);
   process.stdout.write(`  main: ${usd(agg.main)} · subagents: ${usd(agg.sub)}\n`);
+  if (agg.wasted) process.stdout.write(`  desperdiçado (runs killed/failed): ${usd(agg.wasted)}\n`);
   if (agg.byModel.length) {
     process.stdout.write('\nPor modelo:\n');
     for (const m of agg.byModel) process.stdout.write(`  ${m.model.padEnd(20)} ${usd(m.cost)}  (${m.count})\n`);
