@@ -38,15 +38,21 @@ test('collectSubagentUsage: aggregates subagents, maps workflow name + cost', ()
     writeFileSync(join(wfDir, 'agent-aaa111.jsonl'), [agentLine('claude-opus-4-8', 1000, 500, 2000, 'Read', 'r1'), agentLine('claude-opus-4-8', 800, 300, 1000, 'Grep', 'r2')].join('\n'));
     writeFileSync(join(wfDir, 'agent-aaa111.meta.json'), '{"agentType":"Explore","spawnDepth":1}');
     writeFileSync(join(wfDir, 'agent-bbb222.jsonl'), agentLine('claude-opus-4-8', 500, 200, 0, 'Bash', 'r3'));
-    // the workflow script names the run
+    // the workflow script names the run + the run json carries authoritative metadata
     mkdirSync(join(sd, 'workflows', 'scripts'), { recursive: true });
     writeFileSync(join(sd, 'workflows', 'scripts', 'my-audit-wf_abc123.js'), "export const meta = { name: 'my-audit' }\n");
+    writeFileSync(join(sd, 'workflows', 'wf_abc123.json'), JSON.stringify({ runId: 'wf_abc123', workflowName: 'my-audit', status: 'completed', agentCount: 2, totalTokens: 5000, durationMs: 42000, phases: [{ title: 'Classify' }, { title: 'Synthesize' }] }));
 
     const r = collectSubagentUsage(sd);
     assert.equal(r.aggregate.count, 2, 'two subagents');
     assert.equal(r.aggregate.calls, 3, 'three llm calls');
     assert.ok(r.aggregate.tokens > 0, 'tokens summed');
     assert.ok(r.aggregate.cost > 0, 'cost computed from pricing');
+    // 0.12.0: tools rollup + workflow run metadata
+    assert.deepEqual([...r.aggregate.tools].sort(), ['Bash', 'Grep', 'Read']);
+    assert.equal(r.workflows[0].status, 'completed');
+    assert.deepEqual(r.workflows[0].phases, ['Classify', 'Synthesize']);
+    assert.equal(r.workflows[0].durationMs, 42000);
     // per-subagent: workflow name mapped, model, agentType from meta
     const a = r.subagents.find((s) => s.id === 'aaa111');
     assert.equal(a.workflow, 'my-audit');
@@ -62,6 +68,8 @@ test('collectSubagentUsage: aggregates subagents, maps workflow name + cost', ()
     const md = renderSubagentSection(r);
     assert.match(md, /## Subagents & Workflows/);
     assert.match(md, /\*\*Subagents:\*\* 2 · 3 chamadas/);
+    assert.match(md, /completed · 2 agentes · fases: Classify, Synthesize · 42s/);
+    assert.match(md, /\*\*Tools \(subagents\):\*\* .*Read/);
     assert.match(md, /<details>/);
     assert.match(md, /\| aaa111 \| Explore \| my-audit \|/);
   } finally { rmSync(sd, { recursive: true, force: true }); }

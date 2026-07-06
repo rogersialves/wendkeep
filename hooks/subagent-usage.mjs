@@ -45,6 +45,29 @@ function runIdOfPath(file) {
   return m ? m[1] : null;
 }
 
+// workflows/wf_<rid>.json carries authoritative run metadata (name/status/phases/duration).
+function readWorkflowRuns(sessionDir) {
+  const runs = {};
+  let names;
+  try { names = readdirSync(join(sessionDir, 'workflows')); } catch { return runs; }
+  for (const n of names) {
+    if (!/^wf_.*\.json$/i.test(n)) continue;
+    try {
+      const o = JSON.parse(readFileSync(join(sessionDir, 'workflows', n), 'utf8'));
+      const runId = o.runId || n.replace(/\.json$/i, '');
+      runs[runId] = {
+        name: o.workflowName || runId,
+        status: o.status || '',
+        agentCount: o.agentCount || 0,
+        totalTokens: o.totalTokens || 0,
+        durationMs: o.durationMs || 0,
+        phases: (o.phases || []).map((p) => p && p.title).filter(Boolean),
+      };
+    } catch { /* skip bad run json */ }
+  }
+  return runs;
+}
+
 function tokensTotal(t = {}) {
   return (t.input || 0) + (t.cached || 0) + (t.cacheWrite || 0) + (t.output || 0);
 }
@@ -60,8 +83,10 @@ export function collectSubagentUsage(sessionDir) {
   if (!files.length) return null;
 
   const nameMap = workflowNameMap(sessionDir);
+  const runs = readWorkflowRuns(sessionDir);
   const subagents = [];
   const wf = {};
+  const allTools = new Set();
   const usageAgg = { input: 0, cached: 0, cacheWrite: 0, output: 0 };
   let count = 0;
   let calls = 0;
@@ -71,10 +96,11 @@ export function collectSubagentUsage(sessionDir) {
     const summary = summarizeTokenUsage(parseTokenUsageFromTranscript(f));
     if (!summary.calls) continue;
     const runId = runIdOfPath(f);
-    const workflow = runId ? nameMap[runId] || runId : null;
+    const workflow = runId ? (runs[runId] && runs[runId].name) || nameMap[runId] || runId : null;
     let agentType = '';
     try { agentType = JSON.parse(readFileSync(f.replace(/\.jsonl$/i, '.meta.json'), 'utf8')).agentType || ''; } catch { /* no meta */ }
     const tokens = tokensTotal(summary.totals);
+    for (const t of summary.tools) allTools.add(t);
 
     subagents.push({
       id: basename(f).replace(/^agent-/, '').replace(/\.jsonl$/i, '').slice(0, 12),
@@ -82,6 +108,7 @@ export function collectSubagentUsage(sessionDir) {
       workflow,
       model: summary.models[0] || '?',
       tools: summary.tools.length,
+      toolNames: summary.tools,
       calls: summary.calls,
       tokens,
       cost: round4(summary.costs.model),
@@ -99,22 +126,44 @@ export function collectSubagentUsage(sessionDir) {
   }
   if (!count) return null;
 
-  const workflows = Object.entries(wf).map(([runId, v]) => ({
-    runId, name: nameMap[runId] || runId, agents: v.agents, cost: round4(v.cost),
-  }));
+  // Merge transcript-derived cost with the authoritative run metadata (status/phases/duration).
+  const runIds = new Set([...Object.keys(wf), ...Object.keys(runs)]);
+  const workflows = [...runIds].map((runId) => {
+    const t = wf[runId] || { agents: 0, cost: 0 };
+    const r = runs[runId] || {};
+    return {
+      runId,
+      name: r.name || nameMap[runId] || runId,
+      status: r.status || '',
+      agents: r.agentCount || t.agents,
+      cost: round4(t.cost),
+      totalTokens: r.totalTokens || 0,
+      durationMs: r.durationMs || 0,
+      phases: r.phases || [],
+    };
+  });
 
   return {
     subagents,
     workflows,
-    aggregate: { count, calls, tokens: tokensTotal(usageAgg), cost: round4(cost), usage: usageAgg },
+    aggregate: { count, calls, tokens: tokensTotal(usageAgg), cost: round4(cost), usage: usageAgg, tools: [...allTools] },
   };
+}
+
+function workflowLine(w) {
+  const parts = [w.runId];
+  if (w.status) parts.push(w.status);
+  parts.push(`${w.agents} agentes`);
+  if (w.phases && w.phases.length) parts.push(`fases: ${w.phases.join(', ')}`);
+  if (w.durationMs) parts.push(`${Math.round(w.durationMs / 1000)}s`);
+  parts.push(usd(w.cost));
+  return `${w.name} (${parts.join(' · ')})`;
 }
 
 export function renderSubagentSection(c) {
   const a = c.aggregate;
-  const wf = c.workflows.length
-    ? c.workflows.map((w) => `${w.name} (${w.runId} · ${w.agents} agentes · ${usd(w.cost)})`).join('; ')
-    : '(nenhum)';
+  const wf = c.workflows.length ? c.workflows.map(workflowLine).join('; ') : '(nenhum)';
+  const tools = a.tools && a.tools.length ? a.tools.join(', ') : '(nenhuma)';
   const rows = c.subagents
     .map((s) => `| ${s.id} | ${s.agentType || '-'} | ${s.workflow || '-'} | ${s.model} | ${s.tools} | ${fmt(s.tokens)} | ${usd(s.cost)} |`)
     .join('\n');
@@ -124,6 +173,7 @@ export function renderSubagentSection(c) {
 
 - **Subagents:** ${a.count} · ${a.calls} chamadas · ${fmt(a.tokens)} tokens · ${usd(a.cost)}
 - **Workflows:** ${wf}
+- **Tools (subagents):** ${tools}
 
 <details><summary>Por subagent (${a.count})</summary>
 
@@ -169,6 +219,7 @@ export function upsertSubagentUsage(sessionPath, transcriptPath) {
   content = setFrontmatterField(content, 'subagents_count', a.count);
   content = setFrontmatterField(content, 'subagents_tokens_total', a.tokens);
   content = setFrontmatterField(content, 'subagents_custo_usd', a.cost);
+  content = setFrontmatterField(content, 'subagents_tools', `"${(a.tools || []).join(', ')}"`);
   content = setFrontmatterField(content, 'tokens_total_incl_subagents', frontmatterNumber(content, 'tokens_total') + a.tokens);
   content = upsertSection(content, '## Subagents & Workflows', renderSubagentSection(collected));
   writeFileSync(sessionPath, content, 'utf8');

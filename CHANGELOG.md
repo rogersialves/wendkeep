@@ -4,6 +4,18 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.0] — 2026-07-06
+
+Deeper subagent/workflow telemetry.
+
+### Added
+- **Workflow run metadata** in the `## Subagents & Workflows` section: each run now shows its
+  **status** (completed / killed / …), phase titles, duration and agent count — read from the
+  authoritative `workflows/wf_*.json`. On a real session this surfaced a **killed** run that
+  still cost $2.50 next to the completed $5.76 one — wasted spend you couldn't see before.
+- **Subagent tools rollup:** the distinct tools the subagents used, shown in the section and a
+  new `subagents_tools` frontmatter field.
+
 ## [0.11.0] — 2026-07-06
 
 Vault-wide cost.
@@ -249,6 +261,7 @@ Initial release — the capture engine, extracted from a system in daily product
 - `wendkeep init` (cross-platform installer) + optional `@bitbonsai/mcpvault` MCP server.
 
 <!-- Only v0.4.0+ is tagged in git (history starts here); older versions link to npm. -->
+[0.12.0]: https://github.com/rogersialves/wendkeep/releases/tag/v0.12.0
 [0.11.0]: https://github.com/rogersialves/wendkeep/releases/tag/v0.11.0
 [0.10.0]: https://github.com/rogersialves/wendkeep/releases/tag/v0.10.0
 [0.9.1]: https://github.com/rogersialves/wendkeep/releases/tag/v0.9.1
