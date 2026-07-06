@@ -4,6 +4,30 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.17.0] — 2026-07-06
+
+Retroactive memory, now agent-agnostic (Codex).
+
+### Added
+- **`wendkeep import --source codex|all`** — import now covers **Codex** too. Codex rollouts
+  (`~/.codex/sessions/**`) aren't organized by project, so they're scoped by the `cwd` recorded
+  in each session's `session_meta` — matched case- and separator-insensitively, including
+  subdirectories. `--source` defaults to **`all`** (both agents); narrow with `claude` / `codex`.
+  `--codex-from <dir>` overrides the sessions root.
+- Transcript parsers now carry a `provider` field, so an imported note is tagged with the
+  transcript's **real** provider (`provider: codex` for Codex) instead of the ambient default.
+
+### Changed
+- `wendkeep import` default source is now **`all`** (was Claude-only in 0.16.0). Still idempotent —
+  already-imported sessions are skipped by `session_id`, per project (Claude by slug dir, Codex by
+  `session_meta.cwd`).
+- Import registration keys off the **discovered** `session_id` (filename for Claude,
+  `session_meta.id` for Codex) so the dedup key and the registry key are always identical —
+  closes a latent duplicate-on-reimport gap if a transcript's filename ever diverged from its
+  internal id.
+- Validated on real data: **24** Codex sessions discovered for a production project (across
+  drive-case variants), 0 parse errors, notes correctly tagged `codex`.
+
 ## [0.16.0] — 2026-07-06
 
 Retroactive memory.

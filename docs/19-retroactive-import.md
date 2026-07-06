@@ -58,6 +58,16 @@ existir, exige `--from <dir>` (robusto). Documentar o `--from` como o caminho ga
    importadas (dry-run, sem escrever no vault read-only até o usuário rodar `--write`... na
    verdade default é write; então testo em vault temp apontando `--from` pro real).
 
+## Codex (feito — 0.17.0)
+- `discoverCodexTranscripts` varre `~/.codex/sessions/**/rollout-*.jsonl`, lê o `session_meta`
+  (prefixo de 16KB) p/ `id` + `cwd`, filtra por `cwd` do projeto (case/sep-insensitive, subdirs).
+- `importSession` já era agnóstico (parseTranscript despacha). Parsers ganharam campo `provider`;
+  `buildSessionContent({provider})` taggeia a nota Codex como `provider: codex`.
+- `runImport({source})`: `all` (default) | `claude` | `codex`. Dedup por `session_id` (id do
+  `session_meta` p/ Codex). Registro usa o id descoberto (= chave do dedup).
+- Validado: 24 sessões Codex reais do NutriGym (variações de case de drive), 0 erros.
+
 ## Não-objetivos
-- Codex (`.codex/**`) — follow-up (parser já lê, mas extração de turno/localização difere).
 - Reprocessar notas já existentes — só importa ausentes (dedup).
+- Cruzar identidade de projeto entre OSes (ex.: path WSL `/home/...` vs Windows `C:\...` do mesmo
+  repo) — tratados como projetos distintos; casam só por `cwd` literal normalizado.

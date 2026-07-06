@@ -4,7 +4,7 @@
 // dated folder, deduped by session_id against the vault's SESSION_REGISTRY. This is an offline
 // replay of the live capture flow — same skeleton, same iteration blocks, same cost/subagent
 // telemetry, same finalize — so an imported note is indistinguishable from a captured one.
-import { existsSync, readdirSync, writeFileSync } from 'fs';
+import { existsSync, readdirSync, writeFileSync, openSync, readSync, closeSync } from 'fs';
 import { basename, join } from 'path';
 import {
   parseTranscript,
@@ -48,6 +48,74 @@ export function discoverTranscripts(projectPath, fromDir) {
   return { dir, transcripts };
 }
 
+// --- Codex source -----------------------------------------------------------
+// Codex rollouts live in ~/.codex/sessions/YYYY/MM/DD/rollout-<ISO>-<uuid>.jsonl and are NOT
+// organized by project, so we scope them by the `cwd` recorded in each session_meta.
+
+export function defaultCodexSessionsDir() {
+  const home = homeDir();
+  return home ? join(home, '.codex', 'sessions') : '';
+}
+
+function normPath(p) {
+  return String(p || '').replace(/[\\/]+/g, '/').replace(/\/+$/, '').toLowerCase();
+}
+
+// A Codex session belongs to the project when it ran from the project root or any subdir.
+function cwdMatchesProject(cwd, projectPath) {
+  const c = normPath(cwd);
+  const proj = normPath(projectPath);
+  if (!c || !proj) return false;
+  return c === proj || c.startsWith(`${proj}/`);
+}
+
+// Recursively collect *.jsonl paths (manual walk: readdir recursive lands in Node 20; floor is 18).
+function walkJsonl(dir, out = []) {
+  let entries;
+  try { entries = readdirSync(dir, { withFileTypes: true }); } catch { return out; }
+  for (const e of entries) {
+    const p = join(dir, e.name);
+    if (e.isDirectory()) walkJsonl(p, out);
+    else if (/\.jsonl$/i.test(e.name)) out.push(p);
+  }
+  return out;
+}
+
+// Read only the leading bytes to pull the session_meta payload (id + cwd); session_meta is the
+// first line of a rollout, so a bounded prefix read avoids parsing multi-MB transcripts twice.
+function readSessionMeta(path) {
+  let fd;
+  try {
+    fd = openSync(path, 'r');
+    const buf = Buffer.alloc(16384);
+    const n = readSync(fd, buf, 0, buf.length, 0);
+    for (const line of buf.slice(0, n).toString('utf-8').split('\n')) {
+      if (!line.trim()) continue;
+      let e;
+      try { e = JSON.parse(line); } catch { return null; } // partial/oversized first line -> skip
+      return e.type === 'session_meta' ? (e.payload || {}) : null; // meta is always line 1
+    }
+  } catch {
+    return null;
+  } finally {
+    if (fd !== undefined) { try { closeSync(fd); } catch { /* already closed */ } }
+  }
+  return null;
+}
+
+export function discoverCodexTranscripts(projectPath, fromDir) {
+  const dir = fromDir || defaultCodexSessionsDir();
+  if (!dir || !existsSync(dir)) return { dir, transcripts: [] };
+  const transcripts = [];
+  for (const path of walkJsonl(dir)) {
+    const meta = readSessionMeta(path);
+    if (!meta || !meta.id) continue;
+    if (projectPath && !cwdMatchesProject(meta.cwd, projectPath)) continue;
+    transcripts.push({ path, sessionId: meta.id, cwd: meta.cwd || '' });
+  }
+  return { dir, transcripts };
+}
+
 // Session objective for the note title/frontmatter: first real user prompt, one line.
 function deriveSummary(tx) {
   for (const turn of tx.turns || []) {
@@ -66,19 +134,22 @@ function toDate(ts, fallback) {
 
 // Replay one transcript into a fresh, finalized note. Returns {sessionId, relPath, turns} or
 // null when the transcript has no memorializable turns. Assumes the caller already deduped.
-export function importSession(vaultBase, txPath, preParsed) {
+// opts: { tx (pre-parsed), sessionId (registry key — pass the discovered id so registration
+// matches the dedup key exactly; falls back to the transcript's own id) }.
+export function importSession(vaultBase, txPath, opts = {}) {
+  const { tx: preParsed, sessionId: sessionIdOverride } = opts;
   const tx = preParsed || parseTranscript(txPath);
   const turns = tx.turns || [];
   if (!turns.length) return null;
 
-  const sessionId = tx.sessionId || basename(String(txPath), '.jsonl');
+  const sessionId = sessionIdOverride || tx.sessionId || basename(String(txPath), '.jsonl');
   const startDate = toDate(turns[0].timestamp, new Date());
   const endDate = toDate(turns.at(-1).timestamp, startDate);
   const summary = deriveSummary(tx);
 
-  // Skeleton in the real dated folder.
+  // Skeleton in the real dated folder, tagged with the transcript's own provider.
   const { absPath, relPath } = allocateSessionPath(vaultBase, startDate, summary);
-  writeFileSync(absPath, buildSessionContent({ relPath, now: startDate, summary }), 'utf-8');
+  writeFileSync(absPath, buildSessionContent({ relPath, now: startDate, summary, provider: tx.provider }), 'utf-8');
 
   // One iteration block per turn (insertIteration dedups by turn marker -> re-import safe).
   for (const turn of turns) {
@@ -115,14 +186,29 @@ export function importSession(vaultBase, txPath, preParsed) {
   return { sessionId, relPath, turns: turns.length };
 }
 
-// Import every not-yet-captured transcript. Deduped by session_id against the registry.
-// Options: { projectPath, from, since (ISO/date), limit, dryRun }.
+// Import every not-yet-captured transcript from the requested source(s). Deduped by session_id
+// against the registry. Options: { projectPath, source ('all'|'claude'|'codex'), from, codexFrom,
+// since (ISO/date), limit, dryRun }. importSession is provider-agnostic, so both sources share
+// the same dedup + import loop.
 export function runImport(vaultBase, opts = {}) {
-  const { projectPath = process.cwd(), from = '', since = '', limit = 0, dryRun = false } = opts;
-  const { dir, transcripts } = discoverTranscripts(projectPath, from);
+  const { projectPath = process.cwd(), source = 'all', from = '', codexFrom = '', since = '', limit = 0, dryRun = false } = opts;
+  const src = String(source).toLowerCase();
+  const transcripts = [];
+  let claudeDir = '';
+  let codexDir = '';
+  if (src === 'all' || src === 'claude') {
+    const d = discoverTranscripts(projectPath, from);
+    claudeDir = d.dir;
+    transcripts.push(...d.transcripts);
+  }
+  if (src === 'all' || src === 'codex') {
+    const d = discoverCodexTranscripts(projectPath, codexFrom);
+    codexDir = d.dir;
+    transcripts.push(...d.transcripts);
+  }
   const captured = new Set(Object.keys(readSessionRegistry(vaultBase).sessions || {}));
   const sinceMs = since ? Date.parse(since) : 0;
-  const report = { dir, scanned: transcripts.length, imported: 0, skipped: 0, errors: [], sessions: [] };
+  const report = { source: src, claudeDir, codexDir, scanned: transcripts.length, imported: 0, skipped: 0, errors: [], sessions: [] };
 
   let done = 0;
   for (const t of transcripts) {
@@ -153,7 +239,7 @@ export function runImport(vaultBase, opts = {}) {
     }
 
     try {
-      const r = importSession(vaultBase, t.path, tx);
+      const r = importSession(vaultBase, t.path, { tx, sessionId: t.sessionId });
       if (r) { report.sessions.push(r); report.imported++; done++; }
       else { report.skipped++; }
     } catch (error) {

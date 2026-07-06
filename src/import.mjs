@@ -3,7 +3,7 @@
 // by session_id). One command backfills your whole history: cost, subagents, iterations.
 import { existsSync } from 'node:fs';
 import { isAbsolute, resolve } from 'node:path';
-import { runImport, defaultClaudeProjectsDir } from '../hooks/import-sessions.mjs';
+import { runImport } from '../hooks/import-sessions.mjs';
 
 function opt(argv, name) {
   const i = argv.indexOf(name);
@@ -20,25 +20,24 @@ export function runImportCli(argv) {
 
   const projectRaw = opt(argv, '--project') || process.cwd();
   const projectPath = isAbsolute(projectRaw) ? projectRaw : resolve(process.cwd(), projectRaw);
+  const source = (opt(argv, '--source') || 'all').toLowerCase();
+  if (!['all', 'claude', 'codex'].includes(source)) {
+    process.stderr.write(`wendkeep import: --source must be all | claude | codex (got "${source}").\n`);
+    process.exit(2);
+  }
   const from = opt(argv, '--from') || '';
+  const codexFrom = opt(argv, '--codex-from') || '';
   const since = opt(argv, '--since') || '';
   const limit = Number(opt(argv, '--limit')) || 0;
   const dryRun = argv.includes('--dry-run');
 
-  const sourceDir = from || defaultClaudeProjectsDir(projectPath);
-  if (!from && (!sourceDir || !existsSync(sourceDir))) {
-    process.stderr.write(`wendkeep import: no Claude transcripts for this project.\n`);
-    process.stderr.write(`  Looked in: ${sourceDir || '(home not resolved)'}\n`);
-    process.stderr.write(`  Pass --from <dir> pointing at .claude/projects/<slug>/ explicitly.\n`);
-    process.exit(2);
-  }
-
-  const report = runImport(vaultBase, { projectPath, from, since, limit, dryRun });
+  const report = runImport(vaultBase, { projectPath, source, from, codexFrom, since, limit, dryRun });
 
   if (argv.includes('--json')) { process.stdout.write(`${JSON.stringify(report, null, 2)}\n`); process.exit(0); }
 
   const verb = dryRun ? 'importaria' : 'importadas';
-  process.stdout.write(`Fonte: ${report.dir}\n`);
+  if (report.claudeDir) process.stdout.write(`Claude: ${report.claudeDir}\n`);
+  if (report.codexDir) process.stdout.write(`Codex:  ${report.codexDir}\n`);
   process.stdout.write(`${report.scanned} transcript(s) · ${report.imported} ${verb} · ${report.skipped} já no vault\n`);
   for (const s of report.sessions) {
     const tag = s.dryRun ? '(dry-run)' : '→';

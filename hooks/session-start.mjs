@@ -31,12 +31,14 @@ import {
   yamlQuote,
 } from './obsidian-common.mjs';
 
-export function buildSessionContent({ relPath, now, summary = 'session' }) {
+export function buildSessionContent({ relPath, now, summary = 'session', provider: providerId }) {
   const date = formatDate(now);
   const startedAt = formatLocalIso(now);
   const titleTime = formatTime(now).slice(0, 5);
   const objective = summary === 'session' ? 'Preencher durante a sessão.' : summary;
-  const provider = providerMeta();
+  // Import passes the transcript's provider so a Codex note is tagged codex (not the
+  // ambient default); undefined falls back to providerMeta's own detection.
+  const provider = providerMeta(providerId);
 
   return `---
 type: session

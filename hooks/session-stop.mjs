@@ -199,6 +199,7 @@ function toolArgumentText(value) {
 
 export function parseCodexTranscript(transcriptPath) {
   const result = {
+    provider: 'codex',
     sessionId: '',
     model: '',
     latestTurnId: '',
@@ -380,6 +381,7 @@ function claudeUserText(content) {
 // Diferente do Codex (sem `payload`), por isso precisa de parser próprio.
 export function parseClaudeTranscript(transcriptPath) {
   const result = {
+    provider: 'claude',
     sessionId: '',
     model: '',
     latestTurnId: '',

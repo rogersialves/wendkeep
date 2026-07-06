@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import {
   claudeProjectSlug,
   discoverTranscripts,
+  discoverCodexTranscripts,
   importSession,
   runImport,
 } from '../hooks/import-sessions.mjs';
@@ -81,15 +82,84 @@ test('runImport dedups by session_id and is idempotent', () => {
   const vault = tmp('wk-vault-');
   writeTranscript(src, 'sid-alpha', TRANSCRIPT);
 
-  const first = runImport(vault, { from: src });
+  const first = runImport(vault, { source: 'claude', from: src });
   assert.equal(first.scanned, 1);
   assert.equal(first.imported, 1);
   assert.equal(first.skipped, 0);
 
   // Second run: already in the registry -> skipped, nothing new written.
-  const second = runImport(vault, { from: src });
+  const second = runImport(vault, { source: 'claude', from: src });
   assert.equal(second.imported, 0);
   assert.equal(second.skipped, 1);
+});
+
+// --- Codex source (0.17.0) --------------------------------------------------
+
+const CODEX_CWD = 'C:\\proj\\demo';
+const CODEX_TRANSCRIPT = [
+  { type: 'session_meta', timestamp: '2026-05-10T10:00:00.000Z', payload: { id: 'cdx-alpha', timestamp: '2026-05-10T10:00:00.000Z', cwd: CODEX_CWD, model: 'gpt-5', model_provider: 'openai' } },
+  { type: 'event_msg', timestamp: '2026-05-10T10:00:01.000Z', payload: { type: 'task_started', turn_id: 'turn-1' } },
+  { type: 'event_msg', timestamp: '2026-05-10T10:00:02.000Z', payload: { type: 'user_message', turn_id: 'turn-1', message: 'Primeira pergunta no codex' } },
+  { type: 'event_msg', timestamp: '2026-05-10T10:00:03.000Z', payload: { type: 'agent_message', turn_id: 'turn-1', message: 'Resposta codex um' } },
+  { type: 'event_msg', timestamp: '2026-05-10T10:00:04.000Z', payload: { type: 'token_count', turn_id: 'turn-1', info: { model: 'gpt-5', last_token_usage: { input_tokens: 100, output_tokens: 50 } } } },
+  { type: 'event_msg', timestamp: '2026-05-10T10:05:00.000Z', payload: { type: 'task_started', turn_id: 'turn-2' } },
+  { type: 'event_msg', timestamp: '2026-05-10T10:05:01.000Z', payload: { type: 'user_message', turn_id: 'turn-2', message: 'Segunda no codex' } },
+  { type: 'event_msg', timestamp: '2026-05-10T10:05:02.000Z', payload: { type: 'agent_message', turn_id: 'turn-2', message: 'Resposta codex dois' } },
+];
+
+// Codex names files rollout-<ISO>-<uuid>.jsonl; discovery reads session_meta for id + cwd.
+function writeCodexTranscript(dir, name, events, sub = '2026/05/10') {
+  const day = join(dir, ...sub.split('/'));
+  mkdirSync(day, { recursive: true });
+  const path = join(day, name);
+  writeFileSync(path, events.map((e) => JSON.stringify(e)).join('\n') + '\n', 'utf-8');
+  return path;
+}
+
+test('discoverCodexTranscripts filters by the session cwd', () => {
+  const src = tmp('wk-cdx-');
+  writeCodexTranscript(src, 'rollout-2026-05-10T10-00-00-cdx-alpha.jsonl', CODEX_TRANSCRIPT);
+
+  const hit = discoverCodexTranscripts(CODEX_CWD, src);
+  assert.equal(hit.transcripts.length, 1);
+  assert.equal(hit.transcripts[0].sessionId, 'cdx-alpha');
+
+  const miss = discoverCodexTranscripts('C:\\other\\project', src);
+  assert.equal(miss.transcripts.length, 0);
+});
+
+test('importSession tags a Codex note with provider: codex', () => {
+  const src = tmp('wk-cdx-');
+  const vault = tmp('wk-vault-');
+  const txPath = writeCodexTranscript(src, 'rollout-2026-05-10T10-00-00-cdx-alpha.jsonl', CODEX_TRANSCRIPT);
+
+  const r = importSession(vault, txPath);
+  assert.equal(r.sessionId, 'cdx-alpha');
+  assert.equal(r.turns, 2);
+
+  const note = readFileSync(join(vault, r.relPath), 'utf-8');
+  assert.match(note, /^provider:\s*codex\s*$/m);
+  assert.match(note, /^\s+- codex\s*$/m); // tag
+  assert.match(note, /^date:\s*2026-05-10\s*$/m);
+  assert.ok(note.includes('<!-- codex-turn: turn-1 -->'));
+  assert.ok(note.includes('<!-- codex-turn: turn-2 -->'));
+});
+
+test('runImport source: codex / all combine sources project-scoped', () => {
+  const claudeSrc = tmp('wk-src-');
+  const codexSrc = tmp('wk-cdx-');
+  const vault = tmp('wk-vault-');
+  writeTranscript(claudeSrc, 'sid-claude', TRANSCRIPT);
+  writeCodexTranscript(codexSrc, 'rollout-2026-05-10T10-00-00-cdx-alpha.jsonl', CODEX_TRANSCRIPT);
+
+  const onlyCodex = runImport(vault, { source: 'codex', projectPath: CODEX_CWD, codexFrom: codexSrc });
+  assert.equal(onlyCodex.imported, 1);
+  assert.equal(readSessionRegistry(vault).sessions['cdx-alpha'].status, 'done');
+
+  const all = runImport(vault, { source: 'all', projectPath: CODEX_CWD, from: claudeSrc, codexFrom: codexSrc });
+  // Codex already imported -> skipped; the Claude one is new -> imported.
+  assert.equal(all.imported, 1);
+  assert.ok(readSessionRegistry(vault).sessions['sid-claude']);
 });
 
 test('runImport --limit and --dry-run', () => {
@@ -98,11 +168,11 @@ test('runImport --limit and --dry-run', () => {
   writeTranscript(src, 'sid-a', TRANSCRIPT);
   writeTranscript(src, 'sid-b', TRANSCRIPT);
 
-  const dry = runImport(vault, { from: src, dryRun: true });
+  const dry = runImport(vault, { source: 'claude', from: src, dryRun: true });
   assert.equal(dry.imported, 2);
   // dry-run writes nothing to the registry.
   assert.equal(Object.keys(readSessionRegistry(vault).sessions).length, 0);
 
-  const limited = runImport(vault, { from: src, limit: 1 });
+  const limited = runImport(vault, { source: 'claude', from: src, limit: 1 });
   assert.equal(limited.imported, 1);
 });
