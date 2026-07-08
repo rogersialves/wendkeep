@@ -3,7 +3,7 @@
 // the `wendkeep change` CLI (src/change.mjs) and the brain-inject hook. No external deps.
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { ensureDir, wikilinkFromRel } from './obsidian-common.mjs';
+import { ensureDir, wikilinkFromRel, monthFolderRelFromDateStr } from './obsidian-common.mjs';
 import { parseSpecsList, promoteSpecs } from './spec-core.mjs';
 import { getLocale } from './locale.mjs';
 
@@ -261,8 +261,9 @@ export function archiveChange(vaultBase, slug, { gate = gateGreen, dateStr, adrN
     writeFileSync(pp, c, 'utf8');
   } catch { /* proposta ilegível — segue */ }
 
-  const [year] = String(dateStr).split('-');
-  const adrDirRel = join(loc.folders.decisions, year);
+  // ADR goes in the same dated month folder as session-derived decisions (04-Decisões/ano/MM-MMM/)
+  // — not the year root — so all ADRs sit together in the vault's convention.
+  const adrDirRel = monthFolderRelFromDateStr(loc.folders.decisions, dateStr, vaultBase);
   ensureDir(join(vaultBase, adrDirRel));
   const num = String(adrNum).padStart(3, '0');
   const adrRel = join(adrDirRel, `ADR-${num}-${slug}.md`);

@@ -140,9 +140,17 @@ test('archive requires a verdict when a task declares [req:]; ADR lists the req 
     writeFileSync(join(vault, '08-Mudanças', 'x', 'verdict.json'), JSON.stringify({ slug: 'x', ok: true, coverage: [{ req: 'X-1', covered: true }] }));
     const ok = spawn(['archive', 'x']);
     assert.equal(ok.status, 0, ok.stderr);
-    const year = String(new Date().getFullYear());
-    const adr = readFileSync(join(vault, '04-Decisões', year, 'ADR-001-x.md'), 'utf8');
-    assert.match(adr, /X-1/);
+    // ADR now lands in the dated month folder (04-Decisões/<year>/<MM-MMM>/) — locate it.
+    const adrPath = (function find(d) {
+      for (const e of readdirSync(d, { withFileTypes: true })) {
+        const p = join(d, e.name);
+        if (e.isDirectory()) { const hit = find(p); if (hit) return hit; }
+        else if (e.name === 'ADR-001-x.md') return p;
+      }
+      return '';
+    })(join(vault, '04-Decisões'));
+    assert.ok(adrPath, 'ADR-001-x.md found under 04-Decisões');
+    assert.match(readFileSync(adrPath, 'utf8'), /X-1/);
   } finally { rmSync(vault, { recursive: true, force: true }); }
 });
 

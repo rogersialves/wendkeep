@@ -56,6 +56,7 @@ Usage:
                            --dry-run · --json.
   wendkeep verify [--deep] [--change s]  Run a change's task sensors + record evidence (the gate);
                            --deep assembles the verification package for the wk-verify pass.
+  wendkeep dashboard [--force]  (Re)generate the vault's folder-filtered Bases + 00-Dashboard MOC.
   wendkeep lesson add "t" "l"   Record a project-local lesson (injected at SessionStart).
   wendkeep validate-memory [path]  Validate .brain/CORE.md against the compaction
                            protocol (cap 25, 3 sections, no secrets/PII). Uses
@@ -146,6 +147,11 @@ async function main() {
     case 'import': {
       const { runImportCli } = await import('../src/import.mjs');
       runImportCli(rest);
+      break;
+    }
+    case 'dashboard': {
+      const { runDashboard } = await import('../src/vault-views.mjs');
+      runDashboard(rest);
       break;
     }
     case '--version':

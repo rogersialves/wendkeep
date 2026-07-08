@@ -4,6 +4,34 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.23.0] — 2026-07-08
+
+Vault structure — generated views + housekeeping (audit wave 2).
+
+### Added
+- **Generated Bases + Dashboard MOC**: `wendkeep init` now writes one folder-filtered `.base`
+  per taxonomy area (sessions/decisions/bugs/learnings/specs/changes) and a `00-Dashboard.md`
+  that embeds them — the vault's structural index. Filters are **by folder**
+  (`file.inFolder("05-Bugs")`), fixing the tag-filter that hid ~1/3 of bugs. New
+  `wendkeep dashboard [--force]` (re)generates them; non-destructive (never clobbers your own
+  bases). Locale-aware. `src/vault-views.mjs`.
+
+### Changed
+- **Archive ADRs land in the dated month folder** (`04-Decisões/<year>/<MM-MMM>/`) alongside
+  session-derived decisions, instead of the year root. `hooks/change-core.mjs`.
+- **`SESSION_REGISTRY` is pruned** on the idle sweep: `done` entries older than 90 days, then a
+  cap of 200 most-recent — active entries are never touched. Bounds the per-hook read/serialize
+  cost that had grown to 330 entries / ~170 KB in production. `hooks/obsidian-common.mjs`.
+- **Generated note names truncate on a word boundary** instead of mid-word (`slugify` gained a
+  boundary-aware `maxLen`). `hooks/obsidian-common.mjs`, `hooks/linked-notes.mjs`.
+- **Learnings dedup vault-wide**: a learning already recorded anywhere in `06-Aprendizados`
+  (by `content_key`) is not re-emitted on a later day/session. `hooks/linked-notes.mjs`.
+
+### Deferred
+- Unifying the two `buildSessionContent` skeletons (session-start / session-ensure) stays as
+  tracked tech-debt — pure refactor, high regression risk in the capture layer, and the
+  user-facing drift (`session_id`) was already closed in 0.18/0.21.
+
 ## [0.22.0] — 2026-07-08
 
 Hardening — 10 audit-confirmed bugs fixed (each survived an adversarial refuter).

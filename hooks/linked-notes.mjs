@@ -477,6 +477,30 @@ function listMd(dir) {
 }
 
 // Chaves content_key das derivadas já existentes que linkam esta sessão.
+// Vault-wide learning content_keys (recursive over the learnings folder). existingKeysForSession
+// only looks at the current session + month, so the same lesson re-extracted on a later day/
+// session was duplicated. This dedups a learning against everything already learned in the vault.
+function collectLearningKeys(vaultBase) {
+  const keys = new Set();
+  const root = join(vaultBase, getLocale(vaultBase).folders.learnings);
+  const walk = (d) => {
+    let entries;
+    try { entries = readdirSync(d, { withFileTypes: true }); } catch { return; }
+    for (const e of entries) {
+      const p = join(d, e.name);
+      if (e.isDirectory()) walk(p);
+      else if (e.name.endsWith('.md')) {
+        try {
+          const m = readFileSync(p, 'utf-8').match(/^content_key:\s*"?(.*?)"?\s*$/m);
+          if (m && m[1]) keys.add(m[1]);
+        } catch { /* nota ilegível */ }
+      }
+    }
+  };
+  walk(root);
+  return keys;
+}
+
 function existingKeysForSession(vaultBase, sessionRel, dateStr) {
   const wikilink = wikilinkFromRel(sessionRel);
   const out = { bugs: [], decisions: [], learnings: [] };
@@ -518,7 +542,7 @@ export function createLinkedNotes(vaultBase, dateStr, sessionRel, tx, options = 
     const issueRef = issueRefs[0] || '';
     const bugKey = derivedContentKey(bugDetails.rootCause);
     if (!alreadyHasKey(existingKeys.bugs, bugKey)) {
-      const causeSlug = slugify(bugDetails.rootCause.slice(0, 40), 'bug');
+      const causeSlug = slugify(bugDetails.rootCause, 'bug', 40);
       const fileName = issueRef ? `${issueRef}-${causeSlug}.md` : `${dateStr}-bug-${causeSlug}.md`;
       const filePath = join(bugsDir, fileName);
       if (!existsSync(filePath)) writeFileSync(filePath, buildBugNoteContent(bugDetails, issueRef, dateStr, sessionRel, provider, bugKey, loc.id), 'utf-8');
@@ -531,7 +555,7 @@ export function createLinkedNotes(vaultBase, dateStr, sessionRel, tx, options = 
   if (decisionDetails) {
     const decisionKey = derivedContentKey(decisionDetails.title);
     if (!alreadyHasKey(existingKeys.decisions, decisionKey)) {
-      const titleSlug = slugify(decisionDetails.title.slice(0, 40), 'decisao');
+      const titleSlug = slugify(decisionDetails.title, 'decisao', 40);
       const existing = adrFileExistsBySlug(decisionsDir, titleSlug);
       const fileName = existing || `ADR-${String(getNextAdrNumber(vaultBase)).padStart(3, '0')}-${titleSlug}.md`;
       const filePath = join(decisionsDir, fileName);
@@ -546,10 +570,12 @@ export function createLinkedNotes(vaultBase, dateStr, sessionRel, tx, options = 
 
   const learnings = extractLearningDetails(tx, bugDetails);
   if (learnings) {
+    const vaultLearningKeys = collectLearningKeys(vaultBase); // vault-wide dedup
     for (const learning of learnings) {
       const learningKey = derivedContentKey(learning.title);
       if (alreadyHasKey(existingKeys.learnings, learningKey)) continue;
-      const learningSlug = slugify(learning.title.slice(0, 40), 'aprendizado');
+      if (vaultLearningKeys.has(learningKey)) continue; // already learned elsewhere in the vault
+      const learningSlug = slugify(learning.title, 'aprendizado', 40);
       const fileName = `${dateStr}-${learningSlug}.md`;
       const filePath = join(learningsDir, fileName);
       if (!existsSync(filePath)) writeFileSync(filePath, buildLearningNoteContent(learning, dateStr, sessionRel, provider, learningKey, loc.id), 'utf-8');

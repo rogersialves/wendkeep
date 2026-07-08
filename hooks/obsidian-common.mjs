@@ -289,12 +289,38 @@ export function sweepStaleSessions(registry, nowMs, maxIdleMs, excludeTranscript
   return closed;
 }
 
-// Wrapper de IO: varre as ociosas, grava o registry e fecha a NOTA `.md` de cada
+// Registry retention. The registry is read/serialized in full on every hook and scanned O(N)
+// for routing — it only needs active + recent sessions (historical audit lives in the notes).
+// Left unbounded it grew to 330 entries / ~170 KB in production.
+export const REGISTRY_KEEP_DONE = 200;
+export const REGISTRY_DONE_MAX_AGE_MS = 90 * 24 * 60 * 60 * 1000;
+
+// Pure: drop 'done' entries older than maxAgeMs, then cap the remaining 'done' at keepDone
+// (newest by ended_at/updated_at/started_at kept). Never touches active entries. Mutates the
+// registry and returns how many were pruned.
+export function pruneRegistry(registry, nowMs, { keepDone = REGISTRY_KEEP_DONE, maxAgeMs = REGISTRY_DONE_MAX_AGE_MS } = {}) {
+  const sessions = registry?.sessions || {};
+  const stamp = (v) => Date.parse((v && (v.ended_at || v.updated_at || v.started_at)) || '') || 0;
+  let pruned = 0;
+  for (const [id, v] of Object.entries(sessions)) {
+    if (!v || v.status !== 'done') continue;
+    const t = stamp(v);
+    if (t && nowMs - t > maxAgeMs) { delete sessions[id]; pruned += 1; }
+  }
+  const done = Object.entries(sessions)
+    .filter(([, v]) => v && v.status === 'done')
+    .sort((a, b) => stamp(b[1]) - stamp(a[1]));
+  for (const [id] of done.slice(keepDone)) { delete sessions[id]; pruned += 1; }
+  return pruned;
+}
+
+// Wrapper de IO: varre as ociosas, poda o registry, grava e fecha a NOTA `.md` de cada
 // sessão encerrada (mantém vault e registry alinhados). Devolve quantas fechou.
 export function sweepStaleSessionsFile(vaultBase, now = new Date(), maxIdleMs = SESSION_IDLE_CLOSE_MS, excludeTranscriptPath = '') {
   const registry = readSessionRegistry(vaultBase);
   const closed = sweepStaleSessions(registry, now.getTime(), maxIdleMs, excludeTranscriptPath);
-  if (closed.length) writeSessionRegistry(vaultBase, registry);
+  const pruned = pruneRegistry(registry, now.getTime());
+  if (closed.length || pruned) writeSessionRegistry(vaultBase, registry);
   for (const { session_file, ended_at } of closed) {
     try { closeSessionNoteFile(vaultBase, session_file, ended_at); } catch { /* nunca derruba o sweep */ }
   }
@@ -335,15 +361,20 @@ export function closeSessionNote(content, endedAt) {
   return next;
 }
 
-export function slugify(text, fallback = 'nota') {
-  const slug = String(text || '')
+export function slugify(text, fallback = 'nota', maxLen = 60) {
+  let slug = String(text || '')
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 70)
-    .replace(/-+$/g, '');
+    .replace(/^-+|-+$/g, '');
+  if (slug.length > maxLen) {
+    // Truncate on a word boundary (last '-' before maxLen) when a reasonable one exists,
+    // instead of cutting mid-word \u2014 keeps generated note names readable.
+    const cut = slug.slice(0, maxLen);
+    const lastDash = cut.lastIndexOf('-');
+    slug = (lastDash > maxLen * 0.5 ? cut.slice(0, lastDash) : cut).replace(/-+$/g, '');
+  }
   return slug || fallback;
 }
 

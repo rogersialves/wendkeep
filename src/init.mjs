@@ -22,6 +22,7 @@ import {
   DOTCONTEXT_GITIGNORE,
 } from './taxonomy.mjs';
 import { renderVaultReadme } from './vault-readme.mjs';
+import { seedVaultViews } from './vault-views.mjs';
 import { canInteractiveSelect, selectCompanionsInteractive } from './companion-select.mjs';
 import {
   SNIPPET_NAME,
@@ -364,7 +365,13 @@ export async function runInit(argv) {
     try { scripts = JSON.parse(readFileSync(join(projectPath, 'package.json'), 'utf8')).scripts || {}; } catch { /* no package.json */ }
     writeFileSync(sensorsFile, renderSensorsJson(scripts), 'utf8');
   }
-  log(`  [1/4] vault taxonomy: ${folders.length} folders (${created} created, locale ${loc.id})${readmeNote}, .brain + change/spec + sensors seeded`);
+  // Generated Bases + Dashboard MOC (folder-filtered views over the taxonomy) — non-destructive.
+  let viewsNote = '';
+  try {
+    const views = seedVaultViews(vaultPath);
+    if (views.length) viewsNote = `, ${views.length} view(s) + dashboard`;
+  } catch { /* views são bônus — nunca derrubam o init */ }
+  log(`  [1/4] vault taxonomy: ${folders.length} folders (${created} created, locale ${loc.id})${readmeNote}, .brain + change/spec + sensors seeded${viewsNote}`);
   // Deliver the seeded defs (agents + wk process skills) to the project so they're
   // usable immediately — no separate `wendkeep sync-defs` step needed.
   const synced = syncDefs(vaultPath, projectPath);
