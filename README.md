@@ -1,8 +1,20 @@
 # wendkeep
 
+> **Your AI coding agent forgets every session. wendkeep makes it remember — in the Obsidian vault you already use.**
+
+[![npm](https://img.shields.io/npm/v/wendkeep.svg)](https://www.npmjs.com/package/wendkeep)
 ![test](https://github.com/rogersialves/wendkeep/actions/workflows/test.yml/badge.svg)
+![zero deps](https://img.shields.io/badge/runtime%20deps-0-brightgreen)
+![node](https://img.shields.io/badge/node-%E2%89%A518-blue)
 
 **A persistent‑memory harness for AI coding agents, built on your Obsidian vault.** Every Claude Code / Codex session is captured turn‑by‑turn into local Markdown — with token/cost tracking, auto‑extracted decisions, bugs and learnings, and a curated memory layer injected back at the start of the next session. On top of that memory core sits a native, zero‑dependency **change lifecycle** (spec → change → TDD → sensor‑gated archive) that keeps intent, work and proof wikilinked in one graph. 100% local, open‑core.
+
+```bash
+npm i -D wendkeep && npx wendkeep init      # captures from the next session on
+npx wendkeep import                          # backfill past Claude + Codex sessions
+```
+
+<!-- SCREENSHOT: Obsidian graph of a wendkeep vault (sessions ↔ decisions ↔ bugs ↔ changes). Drop a PNG/GIF at docs/assets/graph.png and reference it here. -->
 
 > Extracted from a system in daily production use: the capture engine, cost tracking and graph wiring are battle‑tested; the cross‑platform installer (`wendkeep init`) and the native change loop are the newer parts. See [`docs/`](https://github.com/rogersialves/wendkeep/tree/main/docs) for the project's strategy and decision log.
 

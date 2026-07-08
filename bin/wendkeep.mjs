@@ -48,7 +48,9 @@ Usage:
   wendkeep spec <sub>          Living specs: list | show <capability>.
   wendkeep sensors <sub>       list | add <id> "<command>" [--severity --type --report].
   wendkeep cost [opts]         Aggregate AI-coding spend across the vault's sessions.
-                           --since <date> · --top [N] (priciest sessions) · --json.
+                           --since <date> · --top [N] (priciest) · --trend [day|week|month]
+                           (+ run-rate projection) · --write (generate 00-Custo.md) · --json.
+  wendkeep stats [--vault P]   One shareable line: sessions · prompts · spend · span · models (--json).
   wendkeep import [opts]       Backfill: import this project's past Claude + Codex sessions into
                            the vault (deduped by session_id). --source all|claude|codex (default
                            all) · --stamp-ids (backfill session_id in existing notes) ·
@@ -142,6 +144,11 @@ async function main() {
     case 'cost': {
       const { runCost } = await import('../src/cost.mjs');
       runCost(rest);
+      break;
+    }
+    case 'stats': {
+      const { runStats } = await import('../src/stats.mjs');
+      runStats(rest);
       break;
     }
     case 'import': {

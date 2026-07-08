@@ -1,12 +1,16 @@
 // `wendkeep cost` — aggregate AI-coding spend across every session note in the vault.
 // Each session note carries cost in its frontmatter (main + subagents since 0.10.0); this
 // rolls the whole vault up: total, by day, by model. Pure aggregation + a thin CLI.
-import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { isAbsolute, join, resolve } from 'node:path';
 import { getLocale } from '../hooks/locale.mjs';
 
 const round4 = (n) => Math.round((Number(n) || 0) * 10000) / 10000;
 const usd = (n) => `$${(Number(n) || 0).toFixed(4)}`;
+const today = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
 
 function fmValue(content, key) {
   const m = content.match(new RegExp(`^${key}:\\s*(.+)$`, 'm'));
@@ -24,6 +28,7 @@ export function parseSessionCost(content) {
     wasted: Number(fmValue(content, 'subagents_wasted_usd')) || 0,
     tokens: Number(fmValue(content, 'tokens_total')) || 0,
     subTokens: Number(fmValue(content, 'subagents_tokens_total')) || 0,
+    prompts: Number(fmValue(content, 'prompts')) || 0,
   };
 }
 
@@ -35,8 +40,9 @@ export function aggregateCosts(entries) {
   let wasted = 0;
   let tokens = 0;
   let subTokens = 0;
+  let prompts = 0;
   for (const e of entries) {
-    main += e.mainCost; sub += e.subCost; wasted += e.wasted || 0; tokens += e.tokens; subTokens += e.subTokens;
+    main += e.mainCost; sub += e.subCost; wasted += e.wasted || 0; tokens += e.tokens; subTokens += e.subTokens; prompts += e.prompts || 0;
     const d = e.date || '?';
     (byDay[d] = byDay[d] || { cost: 0, count: 0 }).cost += e.mainCost + e.subCost;
     byDay[d].count += 1;
@@ -48,10 +54,91 @@ export function aggregateCosts(entries) {
     count: entries.length,
     main: round4(main), sub: round4(sub), total: round4(total), wasted: round4(wasted),
     avg: round4(entries.length ? total / entries.length : 0),
-    tokens, subTokens,
+    tokens, subTokens, prompts,
     byDay: Object.entries(byDay).sort().map(([date, v]) => ({ date, cost: round4(v.cost), count: v.count })),
     byModel: Object.entries(byModel).sort((a, b) => b[1].cost - a[1].cost).map(([model, v]) => ({ model, cost: round4(v.cost), count: v.count })),
   };
+}
+
+// Shift a 'YYYY-MM-DD' string by `delta` days (UTC, pure).
+function shiftDate(dateStr, delta) {
+  const d = new Date(`${dateStr}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + delta);
+  return d.toISOString().slice(0, 10);
+}
+
+// ISO-ish week key 'YYYY-Www' for a 'YYYY-MM-DD' string (pure).
+function isoWeek(dateStr) {
+  const d = new Date(`${dateStr}T00:00:00Z`);
+  const day = (d.getUTCDay() + 6) % 7; // Mon=0
+  d.setUTCDate(d.getUTCDate() - day + 3); // nearest Thursday
+  const firstThu = new Date(Date.UTC(d.getUTCFullYear(), 0, 4));
+  const week = 1 + Math.round(((d - firstThu) / 86400000 - 3 + ((firstThu.getUTCDay() + 6) % 7)) / 7);
+  return `${d.getUTCFullYear()}-W${String(week).padStart(2, '0')}`;
+}
+
+// Group the per-day cost series (agg.byDay) into day|week|month buckets. Pure.
+export function trendBuckets(byDay, bucket = 'month') {
+  const keyOf = (date) => (bucket === 'day' ? date : bucket === 'week' ? isoWeek(date) : String(date).slice(0, 7));
+  const map = {};
+  for (const d of byDay || []) {
+    if (!d.date || d.date === '?') continue;
+    const k = keyOf(d.date);
+    (map[k] = map[k] || { period: k, cost: 0, count: 0 }).cost += d.cost;
+    map[k].count += d.count;
+  }
+  return Object.values(map).sort((a, b) => a.period.localeCompare(b.period)).map((b) => ({ ...b, cost: round4(b.cost) }));
+}
+
+// Run-rate projection from the last `windowDays` of activity. Pure; nowStr = 'YYYY-MM-DD'
+// (defaults to the latest day seen). Honest: a flat run-rate, not a fitted forecast.
+export function projectSpend(byDay, { nowStr, windowDays = 30, horizonDays = 30 } = {}) {
+  const days = (byDay || []).filter((d) => d.date && d.date !== '?');
+  if (!days.length) return { dailyRate: 0, projected: 0, windowDays, horizonDays, basisDays: 0, basisTotal: 0 };
+  const now = nowStr || days[days.length - 1].date;
+  const cutoff = shiftDate(now, -windowDays);
+  const recent = days.filter((d) => d.date > cutoff);
+  const basisTotal = recent.reduce((s, d) => s + d.cost, 0);
+  const dailyRate = basisTotal / windowDays;
+  return { dailyRate: round4(dailyRate), projected: round4(dailyRate * horizonDays), windowDays, horizonDays, basisDays: recent.length, basisTotal: round4(basisTotal) };
+}
+
+// A generated vault note: cost by month + projection + top models. Overwrites (it is generated).
+export function renderTrendNote(agg, proj, dateStr) {
+  const rows = trendBuckets(agg.byDay, 'month').map((b) => `| ${b.period} | ${usd(b.cost)} | ${b.count} |`).join('\n');
+  const models = agg.byModel.slice(0, 8).map((m) => `| ${m.model} | ${usd(m.cost)} | ${m.count} |`).join('\n');
+  return `---
+type: cost-trend
+date: ${dateStr}
+cssclasses:
+  - topic-dashboard
+tags:
+  - custo
+---
+
+# Custo — tendência
+
+> Gerado por \`wendkeep cost --write\`. ${agg.count} sessão(ões) · total ${usd(agg.total)} · ${usd(agg.avg)}/sessão.
+
+## Por mês
+
+| Mês | Custo | Sessões |
+|---|---|---|
+${rows || '| — | — | — |'}
+
+## Projeção (run-rate ${proj.windowDays}d)
+
+Base: ${usd(proj.basisTotal)} nos últimos ${proj.windowDays} dias (${proj.basisDays} dia(s) com atividade) → **${usd(proj.dailyRate)}/dia**.
+Projeção próximos ${proj.horizonDays} dias: **${usd(proj.projected)}**.
+
+> Run-rate simples (média diária × horizonte), não previsão ajustada.
+
+## Por modelo
+
+| Modelo | Custo | Sessões |
+|---|---|---|
+${models || '| — | — | — |'}
+`;
 }
 
 function walkNotes(dir) {
@@ -108,6 +195,24 @@ export function runCost(argv) {
     const n = Number(argv[topIdx + 1]) || 10;
     process.stdout.write(`Sessões mais caras (top ${n} de ${agg.count}):\n`);
     for (const s of agg.sessions.slice(0, n)) process.stdout.write(`  ${usd(s.cost).padStart(11)}  ${s.date || '?'}  ${s.file}\n`);
+    process.exit(0);
+  }
+
+  const trendIdx = argv.indexOf('--trend');
+  if (trendIdx >= 0) {
+    const bucket = ['day', 'week', 'month'].includes(argv[trendIdx + 1]) ? argv[trendIdx + 1] : 'month';
+    const proj = projectSpend(agg.byDay);
+    process.stdout.write(`Tendência de custo (por ${bucket}):\n`);
+    for (const b of trendBuckets(agg.byDay, bucket)) process.stdout.write(`  ${b.period}  ${usd(b.cost).padStart(11)}  (${b.count})\n`);
+    process.stdout.write(`\nRun-rate ${proj.windowDays}d: ${usd(proj.dailyRate)}/dia · projeção ${proj.horizonDays}d: ${usd(proj.projected)} (base ${usd(proj.basisTotal)} em ${proj.basisDays} dia(s))\n`);
+    process.exit(0);
+  }
+
+  if (argv.includes('--write')) {
+    const proj = projectSpend(agg.byDay);
+    const rel = '00-Custo.md';
+    writeFileSync(join(vaultBase, rel), renderTrendNote(agg, proj, today()), 'utf8');
+    process.stdout.write(`cost --write: ${rel} (nota de tendência gerada)\n`);
     process.exit(0);
   }
 

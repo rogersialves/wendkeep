@@ -4,6 +4,20 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.25.0] — 2026-07-08
+
+Cost trend/projection + shareable stats + launch assets.
+
+### Added
+- **`wendkeep cost --trend [day|week|month]`** — cost bucketed over time plus a run-rate
+  **projection** (recent-window daily average × horizon). `wendkeep cost --write` generates a
+  `00-Custo.md` trend note in the vault (by-month table + projection + top models). `src/cost.mjs`.
+- **`wendkeep stats`** — one shareable line: sessions · prompts · spend · date span · models
+  (`--json` too). For the npm page, a README badge line, or a post. `src/stats.mjs`.
+- **Launch assets** (`docs/`): README hero (tagline, badges, quickstart, screenshot slot),
+  Show HN / r/ObsidianMD / X post drafts (`docs/20-launch-posts.md`), and a repeatable
+  graph-screenshot guide (`docs/21-graph-screenshot.md`).
+
 ## [0.24.0] — 2026-07-08
 
 ### Changed
