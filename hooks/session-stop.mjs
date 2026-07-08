@@ -53,7 +53,11 @@ function shouldIgnoreUserText(text) {
     || /^# AGENTS\.md instructions/.test(trimmed)
     || trimmed.startsWith('<permissions instructions>')
     || trimmed.includes('You are Codex, a coding agent')
-    || trimmed.startsWith('## Memory');
+    || trimmed.startsWith('## Memory')
+    // Harness utility meta-prompts (title generation, classifiers) — not real user turns; they
+    // were leaking into note titles/summaries on import.
+    || /^Generate a concise( UI)? title/i.test(trimmed)
+    || /^You are a helpful assistant\. You will be presented with a user prompt/i.test(trimmed);
 }
 
 function addUnique(list, value) {
@@ -1086,12 +1090,18 @@ function main() {
     findLinkedDerivedNotes(vaultBase, sessionRel),
   );
   finalizeSessionFile(sessionPath, tx, created, endedAt);
-  // Link bidirecional sessão↔change ativa no grafo Obsidian. Fail-quiet: nunca derruba o Stop.
+  // Link durável sessão↔change: uma seção "Mudanças" ANTES de `## Encerramento`. O append antigo
+  // (após o Encerramento) era apagado a cada reopen por stripClosingSection, perdendo a aresta do
+  // grafo quando a change fechava antes do turno seguinte. Aqui sobrevive ao reopen e acumula toda
+  // change que passou pela sessão (upsertListSection deduplica). Fail-quiet: nunca derruba o Stop.
   try {
     const chgLink = activeChangeLink(vaultBase);
-    if (chgLink) {
-      const cur = readFileSync(sessionPath, 'utf8');
-      if (!cur.includes(chgLink)) writeFileSync(sessionPath, `${cur.trimEnd()}\n\n${chgLink}\n`, 'utf8');
+    const wl = (chgLink.match(/\[\[[^\]]+\]\]/) || [])[0];
+    if (wl) {
+      let cur = readFileSync(sessionPath, 'utf8');
+      cur = ensureSection(cur, 'Mudanças', '\n## Encerramento');
+      cur = upsertListSection(cur, 'Mudanças', [`- ${wl}`], null);
+      writeFileSync(sessionPath, cur, 'utf8');
     }
   } catch { /* nunca derruba o Stop */ }
   writeControl(vaultBase, {

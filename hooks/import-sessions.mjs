@@ -97,15 +97,39 @@ function readPrefix(path, bytes = 4096) {
   }
 }
 
+// Read the first physical line in full, growing the buffer until a newline is found (capped).
+// A fixed prefix truncated any rollout whose session_meta line exceeded the window, silently
+// dropping that session from discovery — Codex meta lines can be large (env, git, instructions).
+function readFirstLine(path, maxBytes = 4 * 1024 * 1024) {
+  let fd;
+  try {
+    fd = openSync(path, 'r');
+    const chunk = Buffer.alloc(65536);
+    let acc = '';
+    let pos = 0;
+    while (pos < maxBytes) {
+      const n = readSync(fd, chunk, 0, chunk.length, pos);
+      if (n <= 0) break;
+      acc += chunk.slice(0, n).toString('utf-8');
+      const nl = acc.indexOf('\n');
+      if (nl >= 0) return acc.slice(0, nl);
+      pos += n;
+    }
+    return acc; // single-line file, or gave up at the cap
+  } catch {
+    return '';
+  } finally {
+    if (fd !== undefined) { try { closeSync(fd); } catch { /* already closed */ } }
+  }
+}
+
 // Pull the session_meta payload (id + cwd). session_meta is line 1 of a rollout.
 function readSessionMeta(path) {
-  for (const line of readPrefix(path, 16384).split('\n')) {
-    if (!line.trim()) continue;
-    let e;
-    try { e = JSON.parse(line); } catch { return null; } // partial/oversized first line -> skip
-    return e.type === 'session_meta' ? (e.payload || {}) : null;
-  }
-  return null;
+  const line = readFirstLine(path);
+  if (!line.trim()) return null;
+  let e;
+  try { e = JSON.parse(line); } catch { return null; }
+  return e.type === 'session_meta' ? (e.payload || {}) : null;
 }
 
 // The `session_id` recorded in a note's frontmatter (empty when absent).

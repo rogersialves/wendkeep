@@ -1,7 +1,7 @@
 // .agent/hooks/brain-core.mjs
 // Camada fria do brain: indexa o frontmatter das notas de sessão (0 token LLM).
-import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { basename, join } from 'node:path';
 import { ensureDir, stripYamlQuotes, toVaultRelative } from './obsidian-common.mjs';
 import { getLocale } from './locale.mjs';
 
@@ -123,10 +123,26 @@ export function buildBrainDigest(vaultBase, rows = null) {
     return out;
   };
 
-  const decisions = pick('decisions', DIGEST_CAPS.decisions).sort((a, b) => adrNumber(b) - adrNumber(a));
+  // The digest is INJECTED into every session, so a dead wikilink is dead weight in the model's
+  // context. Keep only targets that resolve to a real note (by vault-relative path or basename)
+  // and drop placeholder paths (a truncated `…` from a summary line). `pick` collects extra so
+  // caps still fill after filtering.
+  const known = new Set();
+  for (const r of data) {
+    const rel = String(r.file || '').replace(/\.md$/i, '');
+    if (rel) { known.add(rel); known.add(basename(rel)); }
+  }
+  const resolves = (p) => {
+    const t = String(p || '').replace(/\.md$/i, '').trim();
+    if (!t || t.includes('...') || t.includes('…')) return false;
+    return known.has(t) || known.has(basename(t)) || existsSync(join(vaultBase, `${t}.md`));
+  };
+  const pickLive = (kind, max) => pick(kind, max * 4).filter(resolves).slice(0, max);
+
+  const decisions = pickLive('decisions', DIGEST_CAPS.decisions).sort((a, b) => adrNumber(b) - adrNumber(a));
   const sessions = byDateDesc.slice(0, DIGEST_CAPS.sessions);
-  const bugs = pick('bugs', DIGEST_CAPS.bugs);
-  const learnings = pick('learnings', DIGEST_CAPS.learnings);
+  const bugs = pickLive('bugs', DIGEST_CAPS.bugs);
+  const learnings = pickLive('learnings', DIGEST_CAPS.learnings);
 
   const lines = ['<!-- AUTO-GERADO por brain-core.mjs (0 token LLM). NÃO editar. Rebuild: node .agent/hooks/brain-reindex.mjs -->'];
   for (const d of decisions) lines.push(`- Decisão: [[${d}]]`);

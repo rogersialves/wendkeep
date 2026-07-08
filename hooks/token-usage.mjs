@@ -41,6 +41,13 @@ const DEFAULT_PRICE_REFERENCE = {
     cachedInput: 0.3,
     output: 15,
   },
+  'claude-sonnet-5': {
+    label: 'Claude Sonnet 5 API',
+    provider: 'anthropic',
+    input: 3,
+    cachedInput: 0.3,
+    output: 15,
+  },
   'claude-haiku-4.5': {
     label: 'Claude Haiku 4.5 API',
     provider: 'anthropic',
@@ -79,6 +86,14 @@ const MODEL_ALIASES = {
   'gpt-5.5': 'gpt-5.5',
   'gpt-5_5': 'gpt-5.5',
   'openai/gpt-5.5': 'gpt-5.5',
+  // Older/adjacent Codex model ids: priced approximately at the gpt-5.5 tier until confirmed
+  // (better a close estimate than a silent $0). Codex sessions surface these via session_meta.
+  'gpt-5.4': 'gpt-5.5',
+  'gpt-5-4': 'gpt-5.5',
+  'gpt-5.4-mini': 'gpt-5.5',
+  'gpt-5.3-codex': 'gpt-5.5',
+  'gpt-5.3': 'gpt-5.5',
+  'openai/gpt-5.4': 'gpt-5.5',
   'claude-opus-4.7': 'claude-opus-4.7',
   'claude-opus-4-7': 'claude-opus-4.7',
   'anthropic/claude-opus-4.7': 'claude-opus-4.7',
@@ -91,6 +106,9 @@ const MODEL_ALIASES = {
   'claude-sonnet-4-6': 'claude-sonnet-4.6',
   'anthropic/claude-sonnet-4.6': 'claude-sonnet-4.6',
   'anthropic/claude-sonnet-4-6': 'claude-sonnet-4.6',
+  'claude-sonnet-5': 'claude-sonnet-5',
+  'claude-sonnet-5-0': 'claude-sonnet-5',
+  'anthropic/claude-sonnet-5': 'claude-sonnet-5',
   'claude-haiku-4.5': 'claude-haiku-4.5',
   'claude-haiku-4-5': 'claude-haiku-4.5',
   'claude-haiku-4-5-20251001': 'claude-haiku-4.5',
@@ -191,7 +209,9 @@ export function addUsage(target, usage) {
 
 function normalizeModelName(model) {
   const clean = String(model || 'unknown').trim() || 'unknown';
-  const lower = clean.toLowerCase();
+  // Strip a trailing context-window tag (e.g. `claude-opus-4-8[1m]`, `claude-fable-5[1m]`) so the
+  // 1M variant of ANY model maps to its base price instead of falling through to $0.
+  const lower = clean.toLowerCase().replace(/\[[^\]]*\]$/, '');
   if (MODEL_ALIASES[lower]) return MODEL_ALIASES[lower];
   // Fallback: remove sufixo de data (ex.: claude-opus-4-8-20260528) e tenta de novo.
   const noDate = lower.replace(/-\d{8}$/, '');
@@ -280,7 +300,9 @@ function shouldIgnoreUserText(text) {
     || text.startsWith('<command-name>')
     || text.startsWith('<ide_')
     || text.startsWith('## Memory')
-    || text.includes('You are Codex, a coding agent');
+    || text.includes('You are Codex, a coding agent')
+    || /^Generate a concise( UI)? title/i.test(text)
+    || /^You are a helpful assistant\. You will be presented with a user prompt/i.test(text);
 }
 
 function emptyParseResult(transcriptPath) {

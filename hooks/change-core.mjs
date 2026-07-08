@@ -222,7 +222,15 @@ export function archiveChange(vaultBase, slug, { gate = gateGreen, dateStr, adrN
   if (!verdict.ok) return { ok: false, failing: verdict.failing || [] };
 
   const destRel = join(chDir, ARCHIVE_DIR, `${dateStr}-${slug}`);
+  const destAbs = join(vaultBase, destRel);
   const changeWikilink = wikilinkFromRel(join(destRel, 'proposta'));
+
+  // Atomicity guard: fail BEFORE promoting specs if the destination already exists (e.g. a slug
+  // reused after a same-day archive). Otherwise promoteSpecs would commit to 07-Specs and the
+  // later renameSync would fail, leaving a half-archived state.
+  if (existsSync(destAbs)) {
+    return { ok: false, failing: [`destino de arquivo já existe: ${destRel} — renomeie o slug ou remova o arquivo antigo`] };
+  }
 
   // Promote spec deltas into the living 07-Specs BEFORE moving (deltas live in src).
   let promoted = [];
@@ -240,7 +248,18 @@ export function archiveChange(vaultBase, slug, { gate = gateGreen, dateStr, adrN
   try { reqIds = [...new Set(parseTasks(readFileSync(join(src, 'tarefas.md'), 'utf8')).map((t) => t.req).filter(Boolean))]; } catch { /* sem tarefas */ }
 
   ensureDir(join(vaultBase, chDir, ARCHIVE_DIR));
-  renameSync(src, join(vaultBase, destRel));
+  try {
+    renameSync(src, destAbs);
+  } catch (error) {
+    return { ok: false, failing: [`falha ao mover a mudança para ${destRel}: ${error.message} (07-Specs pode ter sido promovido — verifique)`] };
+  }
+
+  // Flip the archived proposta's frontmatter status so it no longer reads as active.
+  try {
+    const pp = join(destAbs, 'proposta.md');
+    const c = readFileSync(pp, 'utf8').replace(/^status:\s*active\s*$/m, 'status: archived');
+    writeFileSync(pp, c, 'utf8');
+  } catch { /* proposta ilegível — segue */ }
 
   const [year] = String(dateStr).split('-');
   const adrDirRel = join(loc.folders.decisions, year);
@@ -268,6 +287,8 @@ tags:
 Mudança ${changeWikilink} concluída e arquivada.${capLine}${reqLine}
 `, 'utf8');
 
-  clearActiveChange(vaultBase);
+  // Only clear the pointer when the archived change IS the active one — archiving some other
+  // slug explicitly must not blank the pointer of a different, still-active change.
+  if (activeChange(vaultBase) === slug) clearActiveChange(vaultBase);
   return { ok: true, failing: [], archivedRel: destRel, adrRel, promoted, specWarnings };
 }

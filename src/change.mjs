@@ -171,6 +171,15 @@ export function runChange(argv) {
         return { ok: false, failing: [`${open.length} tarefa(s) aberta(s) (ex.: ${open[0].id} ${open[0].text}) — conclua ou use --force`] };
       }
       const required = requiredSensors(tasks);
+      // Evidence freshness: block if tarefas.md changed since verify sealed the evidence
+      // (e.g. a sensor task added/edited after the last green verify).
+      if (required.length) {
+        let evHash = '';
+        try { evHash = readFileSync(join(dir, '.evidence-hash'), 'utf8').trim(); } catch { /* pre-seal evidence */ }
+        if (evHash && evHash !== tasksHashOf(tarefasMd)) {
+          return { ok: false, failing: ['evidência stale (tarefas.md mudou desde o último verify) — rode `wendkeep verify` de novo'] };
+        }
+      }
       const reqIds = [...new Set(tasks.map((t) => t.req).filter(Boolean))];
       let evidence = [];
       try { evidence = JSON.parse(readFileSync(join(dir, 'evidencia.json'), 'utf8')); } catch { /* no evidence */ }

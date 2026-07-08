@@ -4,6 +4,41 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.22.0] — 2026-07-08
+
+Hardening — 10 audit-confirmed bugs fixed (each survived an adversarial refuter).
+
+### Fixed
+- **Archive trusted stale evidence**: `verify` now seals `evidencia.json` with a `.evidence-hash`
+  (the `tarefas.md` hash it ran against); the archive gate rejects evidence gone stale (a sensor
+  task added/edited after the last green verify). `src/verify.mjs`, `src/change.mjs`.
+- **Archiving a non-active change wiped the active pointer**: `archiveChange` now only clears
+  `CURRENT_CHANGE` when the archived slug IS the active one. `hooks/change-core.mjs`.
+- **Non-atomic archive**: a destination-exists guard fails BEFORE promoting specs (same-day slug
+  reuse no longer half-promotes `07-Specs` then errors on the move); `renameSync` wrapped.
+- **Archived proposta kept `status: active`** → flipped to `status: archived` on archive.
+- **Import dropped Codex sessions whose `session_meta` exceeded 16KB** (~31% in production): the
+  reader now grows the buffer to the first newline instead of a fixed prefix. `hooks/import-sessions.mjs`.
+- **Cost was silently $0 for untabled models**: `normalizeModelName` strips a `[1m]` context tag
+  generically (so `claude-opus-4-8[1m]` prices), `claude-sonnet-5` added, plus approximate Codex
+  `gpt-5.4`/`gpt-5.3-codex` aliases. `hooks/token-usage.mjs`, `hooks/pricing.json`.
+- **Imported session titles came from harness meta-prompts** ("Generate a concise title…"): those
+  utility prompts are now filtered in both parsers' `shouldIgnoreUserText`.
+- **Session↔change link died on reopen**: the change wikilink moved from an append after
+  `## Encerramento` (stripped every turn) to a durable `## Mudanças` section before it, which
+  accumulates every change the session touched. `hooks/session-stop.mjs`.
+- **`init --force` duplicated every hook group**: now refreshes the managed entry in place instead
+  of appending a second identical group. `src/init.mjs`.
+- **Injected DIGEST carried dead wikilinks**: `buildBrainDigest` now keeps only targets that
+  resolve to a real note and drops truncated placeholders. `hooks/brain-core.mjs`.
+
+### Changed
+- **Docs coherence**: `--help` moved `--top` from `import` to `cost`, gave `import` its real flags
+  (`--source`/`--stamp-ids`/`--from`/`--codex-from`/`--limit`/`--dry-run`, "Claude + Codex"), and
+  added `verify [--deep]`. README dropped the stale "v0.1" framing, fixed the 5→6 skill list
+  (adds `wk-verify`), made the `docs/` link absolute, and documented the `<wk_process>` router +
+  the G0 scaffold gate.
+
 ## [0.21.0] — 2026-07-08
 
 Process enforcement — fixes from a real planning failure (production session): the model planned

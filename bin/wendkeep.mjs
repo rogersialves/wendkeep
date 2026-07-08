@@ -48,9 +48,14 @@ Usage:
   wendkeep spec <sub>          Living specs: list | show <capability>.
   wendkeep sensors <sub>       list | add <id> "<command>" [--severity --type --report].
   wendkeep cost [opts]         Aggregate AI-coding spend across the vault's sessions.
-  wendkeep import [opts]       Backfill: import this project's past Claude sessions into the vault.
                            --since <date> · --top [N] (priciest sessions) · --json.
-  wendkeep verify [--change s] Run a change's task sensors + record evidence (the gate).
+  wendkeep import [opts]       Backfill: import this project's past Claude + Codex sessions into
+                           the vault (deduped by session_id). --source all|claude|codex (default
+                           all) · --stamp-ids (backfill session_id in existing notes) ·
+                           --from <dir> · --codex-from <dir> · --since <date> · --limit N ·
+                           --dry-run · --json.
+  wendkeep verify [--deep] [--change s]  Run a change's task sensors + record evidence (the gate);
+                           --deep assembles the verification package for the wk-verify pass.
   wendkeep lesson add "t" "l"   Record a project-local lesson (injected at SessionStart).
   wendkeep validate-memory [path]  Validate .brain/CORE.md against the compaction
                            protocol (cap 25, 3 sections, no secrets/PII). Uses

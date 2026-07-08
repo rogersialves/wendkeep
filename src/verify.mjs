@@ -38,6 +38,9 @@ export function runVerify(argv) {
   const sensors = loadSensors(projectRoot);
   const evidence = runSensors(sensors, ids, { cwd: projectRoot });
   writeFileSync(join(changeDir, 'evidencia.json'), `${JSON.stringify(evidence, null, 2)}\n`, 'utf8');
+  // Freshness seal: bind this evidence to the tarefas.md it was produced against, so the archive
+  // gate can reject evidence gone stale (a sensor task added after this verify run).
+  writeFileSync(join(changeDir, '.evidence-hash'), tasksHashOf(tarefas), 'utf8');
 
   // Mutation survivors -> fix tasks (Wave B), bounded at 3 rounds then escalate. A surviving
   // mutant always fails verify (exit 1): the suite does not discriminate yet. A clean report

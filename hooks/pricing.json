@@ -30,6 +30,13 @@
       "cachedInput": 0.3,
       "output": 15
     },
+    "claude-sonnet-5": {
+      "label": "Claude Sonnet 5 API",
+      "provider": "anthropic",
+      "input": 3,
+      "cachedInput": 0.3,
+      "output": 15
+    },
     "claude-haiku-4.5": {
       "label": "Claude Haiku 4.5 API",
       "provider": "anthropic",

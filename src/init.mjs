@@ -104,8 +104,17 @@ export function mergeSettings(existing, { vaultPath, withMcp, force, companions 
   for (const h of allSpecs) {
     const command = h.command ?? hookCommand(h.name);
     const groups = Array.isArray(s.hooks[h.event]) ? [...s.hooks[h.event]] : [];
-    const present = groups.some((g) => (g.hooks || []).some((x) => x.command === command));
-    if (present && !force) {
+    const owning = groups.find((g) => (g.hooks || []).some((x) => x.command === command));
+    if (owning) {
+      // Already wired: never add a duplicate group (the old `if (present && !force)` fell through
+      // under --force and appended a second identical group). Under --force, refresh the managed
+      // entry's fields in place — without disturbing any sibling hooks the user grouped with it.
+      if (force) {
+        const hk = owning.hooks.find((x) => x.command === command);
+        hk.timeout = h.timeout;
+        if (h.statusMessage) hk.statusMessage = h.statusMessage;
+        if (h.matcher && (owning.hooks || []).length === 1) owning.matcher = h.matcher;
+      }
       s.hooks[h.event] = groups;
       continue;
     }
