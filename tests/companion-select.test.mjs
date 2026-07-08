@@ -18,11 +18,11 @@ test('renderCompanionMenu: localized hint/header when labels passed; pt default'
   assert.doesNotMatch(en, /Espaço/);
 });
 
-test('initialCompanionMenu: defaults are pre-checked, cursor at top', () => {
+test('initialCompanionMenu: nothing pre-checked (neutral harness), cursor at top', () => {
   const s = initialCompanionMenu(COMPANIONS);
   assert.equal(s.cursor, 0);
   const checked = s.items.filter((i) => i.checked).map((i) => i.id);
-  assert.deepEqual(checked, ['context-mode']);
+  assert.deepEqual(checked, []);
 });
 
 test('reduceCompanionMenu: up/down move the cursor and wrap', () => {
@@ -34,11 +34,10 @@ test('reduceCompanionMenu: up/down move the cursor and wrap', () => {
 
 test('reduceCompanionMenu: space toggles the item under the cursor', () => {
   let s = initialCompanionMenu(COMPANIONS);
-  s = reduceCompanionMenu(s, 'space'); // toggle context-mode off
+  s = reduceCompanionMenu(s, 'space'); // toggle item 0 on (starts unchecked now)
+  assert.equal(s.items[0].checked, true);
+  s = reduceCompanionMenu(s, 'space'); // and back off
   assert.equal(s.items[0].checked, false);
-  s = reduceCompanionMenu(s, 'down');
-  s = reduceCompanionMenu(s, 'space'); // toggle item 1 on
-  assert.equal(s.items[1].checked, true);
 });
 
 test('reduceCompanionMenu: all/none check or clear everything', () => {
@@ -50,13 +49,14 @@ test('reduceCompanionMenu: all/none check or clear everything', () => {
 test('reduceCompanionMenu: enter finishes with selected ids in registry order', () => {
   const done = reduceCompanionMenu(initialCompanionMenu(COMPANIONS), 'enter');
   assert.equal(done.done, true);
-  assert.deepEqual(done.selected, ['context-mode']);
+  assert.deepEqual(done.selected, []); // nothing pre-checked -> empty unless the user selects
   const all = reduceCompanionMenu(reduceCompanionMenu(initialCompanionMenu(COMPANIONS), 'all'), 'enter');
   assert.deepEqual(all.selected, COMPANIONS.map((c) => c.id));
 });
 
 test('renderCompanionMenu: shows checkboxes, cursor and key hints', () => {
-  const out = renderCompanionMenu(initialCompanionMenu(COMPANIONS));
+  // toggle one on so both checkbox styles render (nothing is pre-checked now)
+  const out = renderCompanionMenu(reduceCompanionMenu(initialCompanionMenu(COMPANIONS), 'space'));
   assert.match(out, /\[x\]/);
   assert.match(out, /\[ \]/);
   assert.match(out, /Espaço/);

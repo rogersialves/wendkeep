@@ -24,16 +24,18 @@ test('selectableCompanions: hides legacy dotcontext from the picker, keeps it op
   assert.deepEqual(resolveCompanions({ companionsFlag: 'dotcontext' }), ['dotcontext']);
 });
 
-test('COMPANIONS: only context-mode is a pre-checked default (dotcontext de-recommended)', () => {
+test('COMPANIONS: none pre-checked by default (neutral harness, no presumed plugin)', () => {
   const byId = Object.fromEntries(COMPANIONS.map((c) => [c.id, c]));
-  assert.equal(byId['context-mode'].default, true);
-  assert.equal(byId['dotcontext'].default, false); // legacy — the native a2 loop replaces it
+  assert.equal(byId['context-mode'].default, false); // opt-in now, not a premise
+  assert.equal(byId['dotcontext'].default, false);
   assert.equal(byId['caveman'].default, false);
   assert.equal(byId['understand-anything'].default, false);
+  assert.ok(COMPANIONS.every((c) => c.default !== true), 'no companion is a default');
 });
 
-test('resolveCompanions: non-interactive default is context-mode only', () => {
-  assert.deepEqual(resolveCompanions({}), ['context-mode']);
+test('resolveCompanions: non-interactive default is empty (opt in explicitly)', () => {
+  assert.deepEqual(resolveCompanions({}), []);
+  assert.deepEqual(resolveCompanions({ companionsFlag: 'context-mode' }), ['context-mode']);
   // dotcontext still selectable when explicitly asked
   assert.deepEqual(resolveCompanions({ companionsFlag: 'dotcontext' }), ['dotcontext']);
 });

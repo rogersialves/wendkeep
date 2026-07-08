@@ -30,7 +30,7 @@ Usage:
     --project <path>       Project root to wire (default: current directory).
     --no-mcp               Do not add the mcpvault MCP server to .mcp.json.
     --companions <csv>     Companion plugins/MCP to pin: context-mode,caveman,understand-anything
-                           (default: context-mode). dotcontext is legacy — the native a2 loop replaces it.
+                           (default: none — opt in explicitly). dotcontext is legacy — the native a2 loop replaces it.
     --no-companions        Skip companion plugins/MCP entirely.
     --no-colors            Skip the Obsidian color system (.obsidian snippet + graph groups).
     --dotcontext-mcp <v>   dotcontext MCP placement: auto (default; skip project entry

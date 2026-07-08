@@ -207,13 +207,13 @@ function installVaultColors(vaultPath) {
 const PROMPTS = {
   'pt-BR': {
     vault: (f) => `Caminho do vault Obsidian (Enter aceita o padrão, ou digite outro)\n  [${f}]\n> `,
-    companionsHeader: '\nCompanions (plugins/MCP opcionais — context-mode é a principal):',
+    companionsHeader: '\nCompanions (plugins/MCP opcionais — nenhum vem pré-marcado):',
     companionsAsk: (def) => `Digite os ids separados por vírgula (Enter aceita [${def}], "none" p/ nenhum): `,
     menu: { hint: 'Espaço marca/desmarca · ↑/↓ move · a=todos · n=nenhum · Enter confirma', header: 'Companions' },
   },
   en: {
     vault: (f) => `Obsidian vault path (Enter for the default, or type another)\n  [${f}]\n> `,
-    companionsHeader: '\nCompanions (optional plugins/MCP — context-mode is the main one):',
+    companionsHeader: '\nCompanions (optional plugins/MCP — none pre-selected):',
     companionsAsk: (def) => `Enter ids comma-separated (Enter for [${def}], "none" for none): `,
     menu: { hint: 'Space toggles · ↑/↓ move · a=all · n=none · Enter confirms', header: 'Companions' },
   },

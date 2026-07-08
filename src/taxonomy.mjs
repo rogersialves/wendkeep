@@ -102,8 +102,10 @@ export function hookCommand(name) {
 export const COMPANIONS = [
   {
     id: 'context-mode',
-    label: 'context-mode — otimizador de contexto + memória FTS5 (principal)',
-    default: true,
+    label: 'context-mode — otimizador de contexto + memória FTS5 (opcional)',
+    // Not a default: wendkeep is a neutral harness and does not presume a third-party plugin.
+    // Opt in interactively or with `--companions context-mode`.
+    default: false,
     marketplace: { source: 'git', url: 'https://github.com/mksglu/context-mode.git' },
     plugin: 'context-mode',
     // Agent-agnostic: MCP server, self-updating via unpinned npx.

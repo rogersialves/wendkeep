@@ -4,6 +4,16 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.24.0] — 2026-07-08
+
+### Changed
+- **No companion is pre-selected anymore.** `context-mode` was pre-checked (and the
+  non-interactive default); wendkeep is a neutral harness and should not presume a third-party
+  plugin. The interactive picker now starts with **nothing checked**, `init --yes` (and any
+  non-interactive run) installs **no** companions, and `resolveCompanions({})` returns `[]`.
+  Opt in explicitly — interactively (Space) or `--companions context-mode`. `src/taxonomy.mjs`.
+- Prompt/help/README text updated to reflect the empty default.
+
 ## [0.23.0] — 2026-07-08
 
 Vault structure — generated views + housekeeping (audit wave 2).

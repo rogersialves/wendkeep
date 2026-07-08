@@ -65,7 +65,7 @@ npx wendkeep init --no-companions --no-mcp --yes              # zero companions,
 | `--vault <path>` | Vault folder. Default `<project>/.<project-name>-vault`; interactive init asks. Point it at an existing vault to install into it. |
 | `--project <path>` | Project root to wire (default: current directory). |
 | `--locale <pt-BR\|en>` | Vault language — folder names, scaffold, skills. Interactive init asks; locked at init. |
-| `--companions <csv>` | Companions to pin: `context-mode,caveman,understand-anything` (default: `context-mode`; `dotcontext` is legacy). |
+| `--companions <csv>` | Companions to pin: `context-mode,caveman,understand-anything` (default: **none** — opt in explicitly; `dotcontext` is legacy). |
 | `--no-companions` | Pin no companions. |
 | `--no-mcp` | Skip **wendkeep's own** vault MCP (`wendkeep-vault`). Companion MCPs still follow `--companions`. |
 | `--no-colors` | Skip the Obsidian color system (`.obsidian` snippet + graph groups). |
