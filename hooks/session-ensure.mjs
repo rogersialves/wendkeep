@@ -35,7 +35,7 @@ function sessionIdFromInput(input) {
   return input.session_id || input.sessionId || input.codex_session_id || '';
 }
 
-function buildSessionContent({ relPath, now, summary = 'session', reason = 'Sessão criada automaticamente pelo hook UserPromptSubmit.' }) {
+function buildSessionContent({ relPath, now, summary = 'session', sessionId = '', reason = 'Sessão criada automaticamente pelo hook UserPromptSubmit.' }) {
   const date = formatDate(now);
   const startedAt = formatLocalIso(now);
   const titleTime = formatTime(now).slice(0, 5);
@@ -48,6 +48,7 @@ date: ${date}
 started_at: ${startedAt}
 ended_at:
 provider: ${provider.id}
+session_id: ${sessionId ? yamlQuote(sessionId) : ''}
 status: active
 summary: ${yamlQuote(summary)}
 cssclasses:
@@ -267,7 +268,7 @@ function createSession({ vaultBase, sessionId, input, now }) {
   const summary = sessionSummaryFromInput(input);
   const { absPath, relPath } = allocateSessionPath(vaultBase, now, summary);
   const startedAt = formatLocalIso(now);
-  writeFileSync(absPath, buildSessionContent({ relPath, now, summary }), 'utf-8');
+  writeFileSync(absPath, buildSessionContent({ relPath, now, summary, sessionId }), 'utf-8');
   writeControl(vaultBase, {
     status: 'active',
     session_file: relPath,

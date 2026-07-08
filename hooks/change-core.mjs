@@ -53,6 +53,25 @@ ${en ? '(behaviour / scenarios)' : '(comportamento / cenários)'}
   return { proposta, design, tarefas, specDelta };
 }
 
+// Scaffold placeholder markers per file (pt + en, mirrors renderChangeScaffold). A change whose
+// proposta/design/tarefas still carry these was never actually planned — archiving it mints a
+// bogus ADR and pollutes _arquivo (seen in production). The archive gate blocks on them.
+const SCAFFOLD_MARKERS = [
+  ['proposta.md', ['(motivo da mudança)', '(escopo da mudança)', '(reason for the change)', '(scope of the change)']],
+  ['design.md', ['(abordagem técnica)', '(technical approach)']],
+  ['tarefas.md', ['(primeira tarefa)', '(first task)']],
+];
+
+export function scaffoldPlaceholders(dir) {
+  const found = [];
+  for (const [file, markers] of SCAFFOLD_MARKERS) {
+    let content = '';
+    try { content = readFileSync(join(dir, file), 'utf8'); } catch { continue; }
+    for (const m of markers) if (content.includes(m)) found.push(`${file}: ${m}`);
+  }
+  return found;
+}
+
 export function activeChange(vaultBase) {
   try {
     const m = readFileSync(join(vaultBase, POINTER), 'utf8').match(/^change:\s*(.+)$/m);

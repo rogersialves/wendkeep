@@ -4,6 +4,27 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.21.0] — 2026-07-08
+
+Process enforcement — fixes from a real planning failure (production session): the model planned
+in chat, never invoked the wk-* skills, left the change scaffold raw and archived it with
+`--force`, minting a bogus ADR.
+
+### Added
+- **`<wk_process>` router injected every session** (brain-inject): the enforcement layer the
+  skills were missing. Plan → wk-brainstorming + wk-planning; record → `change new` + FILL
+  proposta/design/tarefas; implement → wk-tdd; close → verify + wk-verify + archive. States
+  explicitly that `archive --force` is the user's call, never the agent's. Localized (pt-BR/en).
+- **G0 — anti-scaffold gate**: `change archive` now blocks when proposta/design/tarefas still
+  carry the scaffold placeholders (`(motivo da mudança)`, `(abordagem técnica)`,
+  `(primeira tarefa)` + en variants) — an unfilled scaffold is not a completed change.
+  `--force` still escapes (human hatch); new `scaffoldPlaceholders(dir)` in change-core.
+
+### Fixed
+- **session-ensure now stamps `session_id`** in the notes it creates — the 4th note-creation
+  path, missed in 0.18.0 (it has its own skeleton builder). Notes born from UserPromptSubmit
+  (no SessionStart, e.g. resumed windows) were coming out without identity.
+
 ## [0.20.1] — 2026-07-06
 
 ### Changed

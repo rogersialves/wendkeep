@@ -9,6 +9,36 @@ import { getVaultBase, readHookInput, writeHookOutput } from './obsidian-common.
 import { brainDir } from './brain-core.mjs';
 import { buildActiveChangeInjection } from './change-core.mjs';
 import { buildLessonsInjection } from './lessons-core.mjs';
+import { getLocale } from './locale.mjs';
+
+// The process ROUTER — the enforcement layer. The wk-* skills are passive files; without a
+// standing instruction the model plans in chat, leaves the change scaffold raw and forces the
+// gate (seen in production: change archived with `(primeira tarefa)` open, via --force). This
+// block is injected EVERY session so planning always routes through the a2 loop.
+function processRouter(localeId) {
+  if (localeId === 'en') {
+    return [
+      '<wk_process>',
+      'Spec-driven process (mandatory for any non-trivial task):',
+      '1. Plan: skill wk-brainstorming (approved design) → wk-planning (task plan).',
+      '2. Record: `wendkeep change new <slug>` and FILL 08-Changes/<slug>/ — proposta.md (why/what), design.md (the approved approach), tarefas.md (the plan\'s tasks, `- [ ] N.N` with [req:ID]/[sensor:id]). Never leave the scaffold placeholders.',
+      '3. Implement: wk-tdd per task; tick `- [x]` as you finish. Something broke? wk-debugging.',
+      '4. Close: `wendkeep verify` (+ `--deep` + skill wk-verify) → `wendkeep change archive`.',
+      'NEVER `archive --force` on your own — a red gate means pending work; --force is the user\'s call, not yours.',
+      '</wk_process>',
+    ].join('\n');
+  }
+  return [
+    '<wk_process>',
+    'Processo spec-driven (obrigatório em tarefa não-trivial):',
+    '1. Planejar: skill wk-brainstorming (design aprovado) → wk-planning (plano de tarefas).',
+    '2. Registrar: `wendkeep change new <slug>` e PREENCHA 08-Mudanças/<slug>/ — proposta.md (porquê/o quê), design.md (a abordagem aprovada), tarefas.md (as tarefas do plano, `- [ ] N.N` com [req:ID]/[sensor:id]). Nunca deixe os placeholders do scaffold.',
+    '3. Implementar: wk-tdd por tarefa; marque `- [x]` ao concluir. Quebrou algo? wk-debugging.',
+    '4. Fechar: `wendkeep verify` (+ `--deep` + skill wk-verify) → `wendkeep change archive`.',
+    'PROIBIDO `archive --force` por conta própria — gate vermelho significa trabalho pendente; --force é decisão do usuário, não sua.',
+    '</wk_process>',
+  ].join('\n');
+}
 
 const MAX_LINES = 45; // CORE ≤25 + DIGEST ≤15 + folga; salvaguarda se o CORE crescer à mão
 
@@ -26,9 +56,10 @@ export function buildInjection(vaultBase) {
     lines.push('*…truncado pelo budget — fonte completa: .brain/CORE.md + .brain/DIGEST.md*');
   }
   const brain = ['<brain_memory>', ...lines, pointer, '</brain_memory>'].join('\n');
+  const router = processRouter(getLocale(vaultBase).id);
   const change = buildActiveChangeInjection(vaultBase);
   const lessons = buildLessonsInjection(vaultBase);
-  return [brain, change, lessons].filter(Boolean).join('\n');
+  return [brain, router, change, lessons].filter(Boolean).join('\n');
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

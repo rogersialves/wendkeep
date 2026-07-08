@@ -84,6 +84,7 @@ test('en vault: change loop end-to-end (scaffold, requirement heading, ADR in 04
     assert.match(readFileSync(join(dir, 'specs', 'exemplo', 'spec.md'), 'utf8'), /### Requirement:/, 'en delta template');
     // promote an en spec + archive
     writeFileSync(join(dir, 'proposta.md'), '---\ntype: change\nstatus: active\nspecs: [auth]\n---\n# x\n');
+    writeFileSync(join(dir, 'design.md'), '# x — design\n\n## Approach\n\nTest approach.\n');
     writeFileSync(join(dir, 'tarefas.md'), '- [x] 1.1 done\n');
     mkdirSync(join(dir, 'specs', 'auth'), { recursive: true });
     writeFileSync(join(dir, 'specs', 'auth', 'spec.md'), '## ADDED Requirements\n### Requirement: AUTH-1 — login\nuser signs in\n');

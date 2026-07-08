@@ -8,6 +8,13 @@ import { fileURLToPath } from 'node:url';
 
 const BIN = join(dirname(fileURLToPath(import.meta.url)), '..', 'bin', 'wendkeep.mjs');
 
+// G0 (0.21.0): archive blocks unfilled scaffolds, so archive-path tests must fill
+// proposta/design like a real planned change would.
+function fillScaffold(vault, slug, dir = '08-Mudanças') {
+  writeFileSync(join(vault, dir, slug, 'proposta.md'), `# ${slug}\n\n## Por quê\n\nTeste.\n\n## O que muda\n\nTeste.\n`);
+  writeFileSync(join(vault, dir, slug, 'design.md'), `# ${slug} — design\n\n## Abordagem\n\nTeste.\n`);
+}
+
 test('change new: proposta links the active session from the control file (G2)', async () => {
   const { writeControl } = await import('../hooks/obsidian-common.mjs');
   const vault = mkdtempSync(join(tmpdir(), 'wk-src-'));
@@ -37,6 +44,7 @@ test('wendkeep change new then archive: moves + writes ADR', () => {
   try {
     const spawn = (args) => spawnSync(process.execPath, [BIN, 'change', ...args, '--vault', vault], { encoding: 'utf8' });
     assert.equal(spawn(['new', 'x']).status, 0);
+    fillScaffold(vault, 'x');
     writeFileSync(join(vault, '08-Mudanças', 'x', 'tarefas.md'), '- [x] 1.1 feito\n');
     const r = spawn(['archive', 'x']);
     assert.equal(r.status, 0, r.stderr);
@@ -70,6 +78,7 @@ test('archive blocked until verify green when a task declares a sensor', () => {
   try {
     mkdirSync(join(vault, '04-Decisões'), { recursive: true });
     assert.equal(spawn(['change', 'new', 'x']).status, 0);
+    fillScaffold(vault, 'x');
     writeFileSync(join(vault, '08-Mudanças', 'x', 'tarefas.md'), '- [x] 1.1 do it [sensor:ok]\n');
     writeFileSync(join(proj, 'wendkeep.sensors.json'), JSON.stringify({ version: 1, sensors: [{ id: 'ok', severity: 'critical', command: 'node -e "process.exit(0)"' }] }));
     const blocked = spawn(['change', 'archive', 'x']);
@@ -87,6 +96,7 @@ test('archive promotes spec deltas into 07-Specs (living contract)', () => {
   try {
     mkdirSync(join(vault, '04-Decisões'), { recursive: true });
     assert.equal(spawn(['new', 'x']).status, 0);
+    fillScaffold(vault, 'x');
     writeFileSync(join(vault, '08-Mudanças', 'x', 'proposta.md'), '---\ntype: change\nstatus: active\nspecs: [auth]\n---\n# x\n');
     writeFileSync(join(vault, '08-Mudanças', 'x', 'tarefas.md'), '- [x] 1.1 feito\n');
     mkdirSync(join(vault, '08-Mudanças', 'x', 'specs', 'auth'), { recursive: true });
@@ -106,6 +116,7 @@ test('warning sensor red does not block verify or archive', () => {
   try {
     mkdirSync(join(vault, '04-Decisões'), { recursive: true });
     assert.equal(spawn(['change', 'new', 'x']).status, 0);
+    fillScaffold(vault, 'x');
     writeFileSync(join(vault, '08-Mudanças', 'x', 'tarefas.md'), '- [x] 1.1 polish [sensor:style]\n');
     // style is a RED warning sensor (exit 1) — advisory, must NOT gate.
     writeFileSync(join(proj, 'wendkeep.sensors.json'), JSON.stringify({ version: 1, sensors: [{ id: 'style', severity: 'warning', command: 'exit 1' }] }));
@@ -121,6 +132,7 @@ test('archive requires a verdict when a task declares [req:]; ADR lists the req 
   try {
     mkdirSync(join(vault, '04-Decisões'), { recursive: true });
     assert.equal(spawn(['new', 'x']).status, 0);
+    fillScaffold(vault, 'x');
     writeFileSync(join(vault, '08-Mudanças', 'x', 'tarefas.md'), '- [x] 1.1 faz [req:X-1]\n');
     const blocked = spawn(['archive', 'x']);
     assert.equal(blocked.status, 1, 'blocked without verdict');
@@ -143,6 +155,7 @@ test('archive blocks a stale verdict when tarefas.md changed after verification 
     mkdirSync(join(vault, '.brain'), { recursive: true });
     writeFileSync(join(proj, 'wendkeep.sensors.json'), JSON.stringify({ version: 1, sensors: [] }));
     assert.equal(spawn(['change', 'new', 'x']).status, 0);
+    fillScaffold(vault, 'x');
     const tarefas = join(vault, '08-Mudanças', 'x', 'tarefas.md');
     writeFileSync(tarefas, '- [x] 1.1 faz [req:X-1]\n');
     assert.equal(spawn(['verify', '--deep']).status, 0);
@@ -166,6 +179,7 @@ test('archive blocks on open tasks; --force overrides (G1)', () => {
   try {
     mkdirSync(join(vault, '04-Decisões'), { recursive: true });
     assert.equal(spawn(['new', 'x']).status, 0);
+    fillScaffold(vault, 'x');
     writeFileSync(join(vault, '08-Mudanças', 'x', 'tarefas.md'), '- [ ] 1.1 pendente\n- [x] 1.2 feita\n');
     const blocked = spawn(['archive', 'x']);
     assert.equal(blocked.status, 1, 'open task blocks');
@@ -180,6 +194,7 @@ test('change status: one screen with tasks, sensors, verdict state (0.7.0)', () 
   const spawn = (a) => spawnSync(process.execPath, [BIN, 'change', ...a, '--vault', vault], { encoding: 'utf8' });
   try {
     assert.equal(spawn(['new', 'x']).status, 0);
+    fillScaffold(vault, 'x');
     writeFileSync(join(vault, '08-Mudanças', 'x', 'tarefas.md'), '- [x] 1.1 feita [req:X-1] [sensor:tests]\n- [ ] 1.2 aberta\n');
     writeFileSync(join(vault, '08-Mudanças', 'x', 'evidencia.json'), JSON.stringify([{ id: 'tests', status: 'green', severity: 'critical' }]));
     const r = spawn(['status']);
@@ -197,6 +212,7 @@ test('change done/undone: toggles a task from the CLI (0.7.0)', () => {
   const spawn = (a) => spawnSync(process.execPath, [BIN, 'change', ...a, '--vault', vault], { encoding: 'utf8' });
   try {
     assert.equal(spawn(['new', 'x']).status, 0);
+    fillScaffold(vault, 'x');
     writeFileSync(join(vault, '08-Mudanças', 'x', 'tarefas.md'), '- [ ] 1.1 faz\n');
     assert.equal(spawn(['done', '1.1']).status, 0);
     assert.match(readFileSync(join(vault, '08-Mudanças', 'x', 'tarefas.md'), 'utf8'), /- \[x\] 1\.1/);
@@ -211,6 +227,7 @@ test('change diff: previews the spec promotion without writing (0.7.0)', () => {
   const spawn = (a) => spawnSync(process.execPath, [BIN, 'change', ...a, '--vault', vault], { encoding: 'utf8' });
   try {
     assert.equal(spawn(['new', 'x']).status, 0);
+    fillScaffold(vault, 'x');
     writeFileSync(join(vault, '08-Mudanças', 'x', 'proposta.md'), '---\nspecs: [auth]\n---\n# x\n');
     mkdirSync(join(vault, '08-Mudanças', 'x', 'specs', 'auth'), { recursive: true });
     writeFileSync(join(vault, '08-Mudanças', 'x', 'specs', 'auth', 'spec.md'), '## ADDED Requirements\n### Requisito: AUTH-2 — logout\nsai\n\n## MODIFIED Requirements\n### Requisito: AUTH-1 — login\n2fa\n');

@@ -8,6 +8,7 @@ import {
   parseTasks,
   setTaskDone,
   archiveChange,
+  scaffoldPlaceholders,
 } from '../hooks/change-core.mjs';
 import { evaluateGate, requiredSensors } from '../hooks/sensors-core.mjs';
 import { evaluateVerdict, tasksHashOf, parseSpecsList, parseDelta, parseRequirements, applyDelta } from '../hooks/spec-core.mjs';
@@ -154,6 +155,13 @@ export function runChange(argv) {
     if (!slug) { process.stderr.write('wendkeep change archive: missing <slug> and no active change\n'); process.exit(2); }
     // Real gate (Pilar C): every sensor a task declared must be green in evidencia.json.
     const gate = (dir) => {
+      // G0: um scaffold nunca preenchido não é uma mudança concluída — arquivar geraria um
+      // ADR falso. Bloqueia antes de qualquer outro check (o --force ainda escapa, mas a
+      // regra injetada proíbe o agente de usá-lo sem o usuário pedir).
+      const placeholders = scaffoldPlaceholders(dir);
+      if (placeholders.length && !rest.includes('--force')) {
+        return { ok: false, failing: [`scaffold não preenchido (${placeholders.join('; ')}) — preencha proposta/design/tarefas com o design e o plano antes de arquivar`] };
+      }
       let tarefasMd = '';
       try { tarefasMd = readFileSync(join(dir, 'tarefas.md'), 'utf8'); } catch { /* no tasks */ }
       const tasks = parseTasks(tarefasMd);
