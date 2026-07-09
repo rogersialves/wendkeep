@@ -227,10 +227,15 @@ test('wendkeep init --companions wires plugin layer, UA hook and MCP server', ()
     const ssCmds = (settings.hooks.SessionStart || []).flatMap((g) => (g.hooks || []).map((h) => h.command));
     assert.ok(ssCmds.includes('npx wendkeep hook understand-inject'), 'UA hook wired');
 
-    // .mcp.json written for the context-mode server even under --no-mcp (no vault server).
-    const mcp = JSON.parse(readFileSync(join(projectDir, '.mcp.json'), 'utf8'));
-    assert.ok(mcp.mcpServers['context-mode'], 'context-mode MCP server present');
-    assert.equal(mcp.mcpServers['wendkeep-vault'], undefined, 'no vault server under --no-mcp');
+    // context-mode is plugin-only (its plugin ships its own MCP; wiring both double-registered
+    // it). Under --no-mcp with no MCP companion there is nothing to write to .mcp.json.
+    if (existsSync(join(projectDir, '.mcp.json'))) {
+      const mcp = JSON.parse(readFileSync(join(projectDir, '.mcp.json'), 'utf8'));
+      assert.equal(mcp.mcpServers['context-mode'], undefined, 'no double-registered context-mode MCP');
+      assert.equal(mcp.mcpServers['wendkeep-vault'], undefined, 'no vault server under --no-mcp');
+    }
+    // env: MCP_TIMEOUT headroom set for npx-based MCPs (non-destructive default).
+    assert.equal(settings.env.MCP_TIMEOUT, '60000');
   } finally {
     rmSync(parent, { recursive: true, force: true });
   }

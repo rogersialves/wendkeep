@@ -72,10 +72,11 @@ test('companionSettingsPatch: understand-anything uses github source', () => {
 });
 
 test('companionMcpPatch: only MCP-capable companions get an .mcp.json entry', () => {
-  assert.deepEqual(companionMcpPatch(['context-mode']), {
-    'context-mode': { type: 'stdio', command: 'npx', args: ['-y', 'context-mode'] },
-  });
+  // context-mode is plugin-only now: its plugin ships its OWN MCP server, so wiring an .mcp.json
+  // entry too double-registered it (two concurrent npx cold-starts -> both timed out).
+  assert.deepEqual(companionMcpPatch(['context-mode']), {});
   assert.deepEqual(companionMcpPatch(['caveman']), {});
+  assert.ok(companionMcpPatch(['dotcontext']).dotcontext, 'MCP-only companion still gets one');
 });
 
 test('companionHookSpecs: only companions with a wendkeep hook (understand-anything)', () => {
@@ -102,9 +103,8 @@ test('companionMcpPatch: dotcontext MCP server entry', () => {
 });
 
 test('companionMcpPatch: skip list omits a companion MCP (e.g. dotcontext already global)', () => {
-  assert.deepEqual(companionMcpPatch(['context-mode', 'dotcontext'], ['dotcontext']), {
-    'context-mode': { type: 'stdio', command: 'npx', args: ['-y', 'context-mode'] },
-  });
+  assert.deepEqual(companionMcpPatch(['context-mode', 'dotcontext'], ['dotcontext']), {});
+  assert.ok(companionMcpPatch(['dotcontext'], []).dotcontext, 'present without skip');
 });
 
 test('companionHookSpecs: dotcontextHookLevel light drops PostToolUse; none drops all', () => {

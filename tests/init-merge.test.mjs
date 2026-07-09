@@ -50,13 +50,14 @@ test('mergeSettings: wires understand-inject SessionStart hook when UA selected'
   assert.ok(cmds.includes(UA_CMD), 'understand-inject wired into SessionStart');
 });
 
-test('mergeSettings: enables companion MCP server in enabledMcpjsonServers', () => {
+test('mergeSettings: enables companion MCP server in enabledMcpjsonServers (dotcontext; context-mode is plugin-only)', () => {
   const { settings } = mergeSettings(null, {
     vaultPath: '/v',
     withMcp: true,
-    companions: ['context-mode'],
+    companions: ['context-mode', 'dotcontext'],
   });
-  assert.ok(settings.enabledMcpjsonServers.includes('context-mode'));
+  assert.ok(settings.enabledMcpjsonServers.includes('dotcontext'));
+  assert.ok(!settings.enabledMcpjsonServers.includes('context-mode'), 'context-mode MCP not double-registered');
   assert.ok(settings.enabledMcpjsonServers.includes(MCP_SERVER_KEY));
 });
 
@@ -76,9 +77,10 @@ test('mergeSettings: preserves unrelated existing enabledPlugins', () => {
 });
 
 test('mergeMcp: adds companion MCP servers alongside the vault server', () => {
-  const m = mergeMcp(null, { vaultPath: '/v', withVault: true, companions: ['context-mode'] });
+  const m = mergeMcp(null, { vaultPath: '/v', withVault: true, companions: ['context-mode', 'dotcontext'] });
   assert.ok(m.mcpServers[MCP_SERVER_KEY], 'vault server present');
-  assert.deepEqual(m.mcpServers['context-mode'], { type: 'stdio', command: 'npx', args: ['-y', 'context-mode'] });
+  assert.ok(m.mcpServers.dotcontext, 'MCP-only companion present');
+  assert.equal(m.mcpServers['context-mode'], undefined, 'context-mode is plugin-only (no double MCP)');
 });
 
 test('mergeSettings: dotcontext wires MCP + 3 lifecycle hooks, no plugin layer', () => {
@@ -132,8 +134,19 @@ test('mergeSettings: dotcontextHookLevel light omits dotcontext PostToolUse (kee
   assert.ok((settings.hooks.SessionStart || []).length >= 1, 'SessionStart still present');
 });
 
+test('startup-contention fixes: brain-inject timeout 45 + MCP_TIMEOUT default (never clobbered)', async () => {
+  const { SESSION_HOOKS } = await import('../src/taxonomy.mjs');
+  const bi = SESSION_HOOKS.find((h) => h.name === 'brain-inject');
+  assert.equal(bi.timeout, 45, 'brain-inject headroom for npx cold-start contention');
+
+  const fresh = mergeSettings(null, { vaultPath: '/v', withMcp: false, companions: [] }).settings;
+  assert.equal(fresh.env.MCP_TIMEOUT, '60000', 'MCP_TIMEOUT default set');
+  const user = mergeSettings({ env: { MCP_TIMEOUT: '15000' } }, { vaultPath: '/v', withMcp: false, companions: [] }).settings;
+  assert.equal(user.env.MCP_TIMEOUT, '15000', 'user value never clobbered');
+});
+
 test('mergeMcp: omits vault server when withVault is false', () => {
-  const m = mergeMcp(null, { vaultPath: '/v', withVault: false, companions: ['context-mode'] });
+  const m = mergeMcp(null, { vaultPath: '/v', withVault: false, companions: ['dotcontext'] });
   assert.equal(m.mcpServers[MCP_SERVER_KEY], undefined);
-  assert.ok(m.mcpServers['context-mode']);
+  assert.ok(m.mcpServers.dotcontext);
 });

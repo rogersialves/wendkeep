@@ -87,7 +87,10 @@ export const SESSION_HOOKS = [
   // Memory + active-change injection. Runs FIRST on SessionStart (order -10, folds before
   // session-start) so the agent gets CORE + DIGEST + the active change + lessons as context.
   // matcher 'startup|clear|compact' re-injects after a compaction/clear, not only cold startup.
-  { event: 'SessionStart', matcher: 'startup|clear|compact', name: 'brain-inject', timeout: 15, order: -10, statusMessage: 'wendkeep: injecting memory + active change' },
+  // timeout 45 (was 15): measured ~4s warm via npx, but Windows startup contention (several npx
+  // cold-starts at once — a sibling MCP took 26s in a real log) blew 15s and silently dropped the
+  // memory injection for the whole session.
+  { event: 'SessionStart', matcher: 'startup|clear|compact', name: 'brain-inject', timeout: 45, order: -10, statusMessage: 'wendkeep: injecting memory + active change' },
   { event: 'SessionStart', matcher: 'startup', name: 'session-start', timeout: 30, statusMessage: 'wendkeep: opening Obsidian session' },
   { event: 'Stop', matcher: null, name: 'session-stop', timeout: 60, statusMessage: 'wendkeep: writing session checkpoint' },
   { event: 'UserPromptSubmit', matcher: null, name: 'session-ensure', timeout: 30, statusMessage: 'wendkeep: ensuring active session' },
@@ -120,8 +123,10 @@ export const COMPANIONS = [
     default: false,
     marketplace: { source: 'git', url: 'https://github.com/mksglu/context-mode.git' },
     plugin: 'context-mode',
-    // Agent-agnostic: MCP server, self-updating via unpinned npx.
-    mcp: { key: 'context-mode', entry: { type: 'stdio', command: 'npx', args: ['-y', 'context-mode'] } },
+    // NO .mcp.json entry on purpose: the plugin ships its OWN MCP server, so wiring both
+    // double-registered it (two concurrent `npx context-mode` cold-starts at session start —
+    // both timed out in a real log). Plugin is the single source; on non-Claude agents add the
+    // MCP manually (`npx -y context-mode`).
   },
   {
     id: 'understand-anything',

@@ -126,6 +126,10 @@ export function mergeSettings(existing, { vaultPath, withMcp, force, companions 
     added += 1;
   }
   s.env = { ...(s.env || {}), OBSIDIAN_VAULT_PATH: vaultPath };
+  // npx-launched stdio MCPs (wendkeep-vault included) can cold-start near/over Claude Code's 30s
+  // default under Windows startup contention (26s observed in a real log). Give them headroom —
+  // but never clobber a value the user already set.
+  if (!('MCP_TIMEOUT' in s.env)) s.env.MCP_TIMEOUT = '60000';
 
   // Claude Code plugin layer for the selected companions (additive, non-clobbering).
   const cp = companionSettingsPatch(companions);

@@ -4,6 +4,28 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.28.1] — 2026-07-09
+
+Startup-contention fixes — root-caused from a real VSCode startup log where the memory injection
+silently dropped and MCPs timed out.
+
+### Fixed
+- **`brain-inject` timeout 15 → 45s.** The hook is healthy (~2.5s direct, ~4s via npx warm), but
+  Windows session startup runs several `npx` cold-starts at once (a sibling MCP took **26s** in the
+  log) and 15s silently killed the CORE+DIGEST injection for the whole session.
+- **context-mode double-registration eliminated.** Its plugin ships its **own** MCP server; wiring
+  an `.mcp.json` entry too registered it twice — two concurrent `npx context-mode` cold-starts,
+  both timing out. The companion is now **plugin-only** (on non-Claude agents add the MCP manually:
+  `npx -y context-mode`).
+- **`MCP_TIMEOUT=60000` default** added to the settings `env` by init (only when absent — a user
+  value is never clobbered), giving npx-launched stdio MCPs (wendkeep-vault included) headroom over
+  Claude Code's 30s default.
+
+### Upgrade
+- Existing installs: re-run `wendkeep init` (now recognizes your vault) to pick up the timeout +
+  `MCP_TIMEOUT`; remove a duplicated `context-mode` entry from `.mcp.json`/`enabledMcpjsonServers`
+  by hand if present.
+
 ## [0.28.0] — 2026-07-09
 
 Three new hooks: decisions, subagents, plan progress.
