@@ -22,7 +22,8 @@ export function statsFrom(agg) {
 }
 
 export function statsLine(s) {
-  const span = s.firstDay && s.lastDay ? ` · ${s.spanDays} dia(s) (${s.firstDay}→${s.lastDay})` : '';
+  // "dias ativos" = distinct days WITH activity, not the calendar span (shown in parens).
+  const span = s.firstDay && s.lastDay ? ` · ${s.spanDays} dias ativos (${s.firstDay}→${s.lastDay})` : '';
   return `wendkeep: ${num(s.sessions)} sessão(ões) · ${num(s.prompts)} prompts · ${usd(s.cost)} capturado${span} · ${s.models} modelo(s)`;
 }
 

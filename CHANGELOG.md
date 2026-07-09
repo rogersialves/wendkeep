@@ -4,6 +4,17 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.25.1] — 2026-07-08
+
+### Added
+- **Landing page in the repo**: a static SVG hero (`docs/assets/wendkeep-hero.svg`, the knowledge
+  graph) embedded at the top of the README, plus the self-contained interactive landing at
+  `docs/index.html` (live Canvas graph; serve `docs/` via GitHub Pages for a public URL).
+
+### Changed
+- `wendkeep stats` now says **"N dias ativos (first→last)"** — the count is distinct days *with
+  activity*, not the calendar span; the old "N dia(s)" read as calendar days.
+
 ## [0.25.0] — 2026-07-08
 
 Cost trend/projection + shareable stats + launch assets.

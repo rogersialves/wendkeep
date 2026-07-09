@@ -1,0 +1,393 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="wendkeep — persistent memory for AI coding agents, built on your Obsidian vault.">
+<title>wendkeep — persistent memory for AI coding agents</title>
+<style>
+  :root {
+    --ground: #0d0f16;
+    --panel: #141824;
+    --panel-2: #10131d;
+    --ink: #e7e9f0;
+    --muted: #8b90a3;
+    --line: #242938;
+    --accent: #e8b24a;
+    --accent-soft: rgba(232,178,74,.14);
+    --n-session: #4c8dff;
+    --n-decision: #a970ff;
+    --n-bug: #ff5c6c;
+    --n-learning: #3fb950;
+    --n-change: #e8b24a;
+    --mono: ui-monospace, "Cascadia Code", "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --maxw: 1080px;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --ground: #f5f6fb;
+      --panel: #ffffff;
+      --panel-2: #eef0f7;
+      --ink: #161824;
+      --muted: #59607a;
+      --line: #e0e3ef;
+      --accent: #9a6a12;
+      --accent-soft: rgba(154,106,18,.10);
+      --n-session: #2f6bd6;
+      --n-decision: #7d43d6;
+      --n-bug: #d63a4a;
+      --n-learning: #2b8f3f;
+      --n-change: #9a6a12;
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground: #0d0f16; --panel: #141824; --panel-2: #10131d; --ink: #e7e9f0; --muted: #8b90a3;
+    --line: #242938; --accent: #e8b24a; --accent-soft: rgba(232,178,74,.14);
+    --n-session: #4c8dff; --n-decision: #a970ff; --n-bug: #ff5c6c; --n-learning: #3fb950; --n-change: #e8b24a;
+  }
+  :root[data-theme="light"] {
+    --ground: #f5f6fb; --panel: #ffffff; --panel-2: #eef0f7; --ink: #161824; --muted: #59607a;
+    --line: #e0e3ef; --accent: #9a6a12; --accent-soft: rgba(154,106,18,.10);
+    --n-session: #2f6bd6; --n-decision: #7d43d6; --n-bug: #d63a4a; --n-learning: #2b8f3f; --n-change: #9a6a12;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--ground); color: var(--ink);
+    font-family: var(--sans); line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: var(--maxw); margin: 0 auto; padding: 0 24px; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 2px; }
+
+  .mono { font-family: var(--mono); }
+  .eyebrow {
+    font-family: var(--mono); font-size: 12px; letter-spacing: .18em; text-transform: uppercase;
+    color: var(--muted);
+  }
+
+  /* ---- hero ---- */
+  .hero { position: relative; overflow: hidden; border-bottom: 1px solid var(--line); }
+  #graph { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .hero-grad {
+    position: absolute; inset: 0; pointer-events: none;
+    background: radial-gradient(120% 80% at 78% 12%, transparent 30%, var(--ground) 82%);
+  }
+  .hero-inner { position: relative; z-index: 2; padding: 92px 0 84px; }
+  .brandline { display: flex; align-items: center; gap: 12px; margin-bottom: 30px; }
+  .mark {
+    width: 30px; height: 30px; flex: none; border: 1.5px solid var(--accent); border-radius: 7px;
+    display: grid; place-items: center; color: var(--accent);
+    font-family: var(--mono); font-weight: 700; font-size: 16px; background: var(--accent-soft);
+  }
+  .brandname { font-family: var(--mono); font-weight: 600; font-size: 18px; letter-spacing: -.01em; }
+  h1 {
+    font-family: var(--mono); font-weight: 600; letter-spacing: -.02em;
+    font-size: clamp(30px, 5.4vw, 56px); line-height: 1.08; margin: 0 0 22px;
+    text-wrap: balance; max-width: 15ch;
+  }
+  h1 .keep { color: var(--accent); }
+  .lede { font-size: clamp(16px, 2vw, 19px); color: var(--muted); max-width: 52ch; margin: 0 0 30px; }
+  .cmd {
+    display: inline-flex; align-items: center; gap: 12px; flex-wrap: wrap;
+    font-family: var(--mono); font-size: 14px;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 9px;
+    padding: 13px 16px; color: var(--ink); max-width: 100%;
+  }
+  .cmd .dollar { color: var(--accent); user-select: none; }
+  .cmd code { white-space: nowrap; overflow-x: auto; }
+  .cta-row { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 26px; align-items: center; }
+  .btn {
+    font-family: var(--mono); font-size: 13.5px; font-weight: 600;
+    padding: 11px 18px; border-radius: 8px; border: 1px solid var(--line);
+    background: var(--panel); color: var(--ink); cursor: pointer; transition: border-color .15s, transform .15s;
+  }
+  .btn:hover { text-decoration: none; border-color: var(--accent); transform: translateY(-1px); }
+  .btn-primary { background: var(--accent); color: #14110a; border-color: var(--accent); }
+  :root[data-theme="light"] .btn-primary { color: #fff; }
+  @media (prefers-color-scheme: light) { .btn-primary { color: #fff; } }
+  :root[data-theme="dark"] .btn-primary { color: #14110a; }
+  .badges { display: flex; gap: 18px; flex-wrap: wrap; margin-top: 26px; font-family: var(--mono); font-size: 12px; color: var(--muted); }
+  .badges b { color: var(--ink); font-weight: 600; }
+
+  /* ---- sections ---- */
+  section { padding: 76px 0; border-bottom: 1px solid var(--line); }
+  .sec-head { max-width: 60ch; margin-bottom: 40px; }
+  .sec-head h2 {
+    font-family: var(--mono); font-weight: 600; font-size: clamp(22px, 3vw, 30px);
+    letter-spacing: -.015em; margin: 12px 0 12px; text-wrap: balance;
+  }
+  .sec-head p { color: var(--muted); margin: 0; font-size: 16px; }
+
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+  .cell { background: var(--panel); padding: 24px; }
+  .cell h3 { font-family: var(--mono); font-size: 15px; font-weight: 600; margin: 0 0 8px; letter-spacing: -.01em; }
+  .cell p { margin: 0; color: var(--muted); font-size: 14.5px; }
+  .cell .tag { font-family: var(--mono); font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: var(--accent); display: block; margin-bottom: 12px; }
+
+  /* ---- a2 loop ---- */
+  .loop { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 14px; counter-reset: step; }
+  .step { background: var(--panel); border: 1px solid var(--line); border-radius: 11px; padding: 20px 18px; position: relative; }
+  .step::before {
+    counter-increment: step; content: counter(step, decimal-leading-zero);
+    font-family: var(--mono); font-size: 12px; color: var(--accent); letter-spacing: .1em;
+  }
+  .step h4 { font-family: var(--mono); font-size: 15px; margin: 8px 0 6px; font-weight: 600; }
+  .step p { margin: 0; font-size: 13.5px; color: var(--muted); }
+  .step code { font-family: var(--mono); font-size: 12.5px; color: var(--ink); background: var(--panel-2); padding: 1px 5px; border-radius: 4px; }
+  .gatehint { margin-top: 20px; font-size: 14px; color: var(--muted); }
+  .gatehint b { color: var(--ink); }
+
+  /* ---- stats ---- */
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+  .stat { background: var(--panel); padding: 26px 22px; }
+  .stat .num { font-family: var(--mono); font-size: clamp(26px, 4vw, 38px); font-weight: 600; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+  .stat .lbl { color: var(--muted); font-size: 13px; margin-top: 4px; }
+  .statline { margin-top: 22px; font-family: var(--mono); font-size: 13px; color: var(--muted); background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; overflow-x: auto; }
+  .statline .p { color: var(--muted); user-select: none; }
+  .statline b { color: var(--ink); font-weight: 600; }
+
+  .legend { display: flex; gap: 18px; flex-wrap: wrap; margin-top: 26px; font-family: var(--mono); font-size: 12px; color: var(--muted); }
+  .legend span { display: inline-flex; align-items: center; gap: 7px; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+
+  footer { padding: 60px 0 80px; text-align: center; }
+  footer .big { font-family: var(--mono); font-size: clamp(20px, 3vw, 26px); font-weight: 600; margin-bottom: 24px; letter-spacing: -.01em; }
+  footer .fineprint { color: var(--muted); font-size: 13px; margin-top: 28px; font-family: var(--mono); }
+
+  .theme-toggle { position: fixed; top: 16px; right: 16px; z-index: 10; font-family: var(--mono); font-size: 12px; padding: 7px 12px; border-radius: 7px; border: 1px solid var(--line); background: var(--panel); color: var(--muted); cursor: pointer; }
+  .theme-toggle:hover { color: var(--ink); border-color: var(--accent); }
+
+  @media (max-width: 560px) { .hero-inner { padding: 64px 0 60px; } section { padding: 56px 0; } }
+</style>
+</head>
+<body>
+<button class="theme-toggle mono" id="tt" aria-label="Toggle theme">◐ theme</button>
+
+<header class="hero">
+  <canvas id="graph" aria-hidden="true"></canvas>
+  <div class="hero-grad"></div>
+  <div class="wrap hero-inner">
+    <div class="brandline">
+      <div class="mark">wk</div>
+      <div class="brandname">wendkeep</div>
+    </div>
+    <div class="eyebrow">persistent memory · zero dependencies · local‑first</div>
+    <h1>Your coding agent forgets every session. <span class="keep">Make it keep.</span></h1>
+    <p class="lede">A memory harness for Claude Code &amp; Codex, built on the Obsidian vault you already use. Every session is captured as Markdown, wikilinked into one graph, and injected back at the start of the next one.</p>
+    <div class="cmd"><span class="dollar">$</span><code>npm i -D wendkeep &amp;&amp; npx wendkeep init</code></div>
+    <div class="cta-row">
+      <a class="btn btn-primary" href="https://www.npmjs.com/package/wendkeep">Install from npm</a>
+      <a class="btn" href="https://github.com/rogersialves/wendkeep">View on GitHub</a>
+    </div>
+    <div class="badges">
+      <span><b>0</b> runtime deps</span>
+      <span><b>100%</b> local Markdown</span>
+      <span>Node <b>≥18</b></span>
+      <span>Claude Code · Codex</span>
+    </div>
+  </div>
+</header>
+
+<main>
+  <section>
+    <div class="wrap">
+      <div class="sec-head">
+        <div class="eyebrow">the problem</div>
+        <h2>The context dies when the window closes.</h2>
+        <p>Decisions, dead ends, the reason you chose X over Y — gone next session. The pieces to fix that exist but are scattered. wendkeep ships them as one turnkey package that writes into a knowledge graph instead of a black box.</p>
+      </div>
+      <div class="grid">
+        <div class="cell"><span class="tag">capture</span><h3>Every turn, on disk</h3><p>SessionStart / Stop hooks write each session to a dated Markdown note — prompts, iterations, files touched, wikilinks. No snapshot to keep in sync.</p></div>
+        <div class="cell"><span class="tag">derive</span><h3>Decisions, bugs, learnings</h3><p>Pulled from the transcript into their own notes, backlinked to the session. Your history becomes navigable, not archival.</p></div>
+        <div class="cell"><span class="tag">recall</span><h3>Injected back</h3><p>A budget‑capped CORE + DIGEST and the active change are fed to the agent at the next SessionStart. It resumes where it left off.</p></div>
+        <div class="cell"><span class="tag">cost</span><h3>What it all cost</h3><p>Per‑model, cache‑aware token pricing per session — plus <code class="mono">cost --trend</code> with a run‑rate projection across the whole vault.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="wrap">
+      <div class="sec-head">
+        <div class="eyebrow">the a2 loop · spec‑driven, native</div>
+        <h2>Beyond memory: a change loop that keeps intent, work and proof together.</h2>
+        <p>A native, zero‑dependency pipeline. Every step is a note in the graph; the archive is gated on real proof, not vibes.</p>
+      </div>
+      <div class="loop">
+        <div class="step"><h4>Explore</h4><p>Understand the problem before proposing.</p></div>
+        <div class="step"><h4>Propose</h4><p><code>change new</code> scaffolds proposal, design &amp; tasks.</p></div>
+        <div class="step"><h4>Apply</h4><p>Implement each task test‑first (TDD).</p></div>
+        <div class="step"><h4>Verify</h4><p>Run task sensors + an independent read‑only pass.</p></div>
+        <div class="step"><h4>Archive</h4><p>Gated: green sensors, fresh verdict, no open tasks. Mints an ADR.</p></div>
+      </div>
+      <p class="gatehint">The gate blocks unless the scaffold is filled, evidence is fresh, and every declared requirement is covered. <b>--force is the human's call — never the agent's.</b></p>
+    </div>
+  </section>
+
+  <section>
+    <div class="wrap">
+      <div class="sec-head">
+        <div class="eyebrow">retroactive</div>
+        <h2>Install today, remember yesterday.</h2>
+        <p>One command backfills your project's past Claude&nbsp;&amp;&nbsp;Codex sessions into the vault — deduped, dated, with cost — so the graph starts full, not empty.</p>
+      </div>
+      <div class="cmd"><span class="dollar">$</span><code>npx wendkeep import &nbsp;·&nbsp; npx wendkeep stats</code></div>
+      <div class="statline"><span class="p">→ </span>wendkeep: <b>142</b> sessions · <b>4.7k</b> prompts · <b>$4,701</b> captured · <b>151</b> days · <b>5</b> models</div>
+      <div class="legend" aria-hidden="true">
+        <span><i class="dot" style="background:var(--n-session)"></i>session</span>
+        <span><i class="dot" style="background:var(--n-decision)"></i>decision</span>
+        <span><i class="dot" style="background:var(--n-bug)"></i>bug</span>
+        <span><i class="dot" style="background:var(--n-learning)"></i>learning</span>
+        <span><i class="dot" style="background:var(--n-change)"></i>change</span>
+      </div>
+      <p class="gatehint" style="margin-top:14px;font-size:12.5px">Illustrative figures from one production vault. Your numbers come from <code class="mono">wendkeep stats</code>.</p>
+    </div>
+  </section>
+
+  <footer class="wrap">
+    <div class="big">Stop re‑explaining your codebase every morning.</div>
+    <div class="cmd"><span class="dollar">$</span><code>npm i -D wendkeep &amp;&amp; npx wendkeep init</code></div>
+    <div class="cta-row" style="justify-content:center">
+      <a class="btn btn-primary" href="https://www.npmjs.com/package/wendkeep">npm</a>
+      <a class="btn" href="https://github.com/rogersialves/wendkeep">GitHub</a>
+    </div>
+    <div class="fineprint">MIT · open‑core · your data never leaves your disk</div>
+  </footer>
+</main>
+
+<script>
+  // Theme toggle — stamps data-theme, overriding the media query in both directions.
+  (function () {
+    var root = document.documentElement, tt = document.getElementById('tt');
+    tt.addEventListener('click', function () {
+      var cur = root.getAttribute('data-theme');
+      if (!cur) cur = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+      root.setAttribute('data-theme', cur === 'dark' ? 'light' : 'dark');
+    });
+  })();
+
+  // Living knowledge graph — the product's own output as the hero. Force-directed drift over a
+  // small fixed set of typed nodes (session ↔ decision/bug/learning/change), colours = the real
+  // vault folders. Freezes to a composed still under prefers-reduced-motion.
+  (function () {
+    var canvas = document.getElementById('graph'), ctx = canvas.getContext('2d');
+    var reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+    var css = getComputedStyle(document.documentElement);
+    function col(v) { return css.getPropertyValue(v).trim(); }
+
+    var TYPES = ['session', 'decision', 'bug', 'learning', 'change'];
+    function typeColor(t) { return col('--n-' + t); }
+
+    // Build: a handful of session hubs, each with a few derived/linked satellites.
+    var nodes = [], links = [];
+    function add(type, r) { var n = { type: type, r: r, x: 0, y: 0, vx: 0, vy: 0, ph: Math.random() * 6.28 }; nodes.push(n); return nodes.length - 1; }
+    var sessions = [];
+    for (var s = 0; s < 5; s++) sessions.push(add('session', 9));
+    var sat = ['decision', 'bug', 'learning', 'change', 'decision', 'learning'];
+    for (var i = 0; i < sessions.length; i++) {
+      var k = 2 + (i % 3);
+      for (var j = 0; j < k; j++) {
+        var t = sat[(i + j) % sat.length];
+        var idx = add(t, 5.5);
+        links.push([sessions[i], idx]);
+      }
+      if (i > 0) links.push([sessions[i - 1], sessions[i]]); // session timeline
+    }
+    // a couple of cross-links (a change referenced by two sessions)
+    links.push([sessions[0], nodes.length - 2 >= 0 ? sessions[2] : sessions[0]]);
+
+    var W = 0, H = 0, dpr = Math.min(window.devicePixelRatio || 1, 2);
+    function resize() {
+      var rect = canvas.parentElement.getBoundingClientRect();
+      W = rect.width; H = rect.height;
+      canvas.width = W * dpr; canvas.height = H * dpr;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      // seed positions clustered right-of-centre so the copy (left) stays clean
+      if (!seeded) {
+        for (var n = 0; n < nodes.length; n++) {
+          nodes[n].x = W * (0.55 + Math.random() * 0.4);
+          nodes[n].y = H * (0.15 + Math.random() * 0.7);
+        }
+        seeded = true;
+      }
+    }
+    var seeded = false;
+
+    function step() {
+      // repulsion
+      for (var a = 0; a < nodes.length; a++) {
+        for (var b = a + 1; b < nodes.length; b++) {
+          var dx = nodes[a].x - nodes[b].x, dy = nodes[a].y - nodes[b].y;
+          var d2 = dx * dx + dy * dy || 1; var d = Math.sqrt(d2);
+          var f = 900 / d2; var ux = dx / d, uy = dy / d;
+          nodes[a].vx += ux * f; nodes[a].vy += uy * f;
+          nodes[b].vx -= ux * f; nodes[b].vy -= uy * f;
+        }
+      }
+      // springs
+      for (var l = 0; l < links.length; l++) {
+        var na = nodes[links[l][0]], nb = nodes[links[l][1]];
+        var dx2 = nb.x - na.x, dy2 = nb.y - na.y, dd = Math.sqrt(dx2 * dx2 + dy2 * dy2) || 1;
+        var target = 74, fs = (dd - target) * 0.008; var vx = dx2 / dd * fs, vy = dy2 / dd * fs;
+        na.vx += vx; na.vy += vy; nb.vx -= vx; nb.vy -= vy;
+      }
+      // centre pull toward right-of-frame + damping + integrate
+      var cx = W * 0.72, cy = H * 0.5;
+      for (var m = 0; m < nodes.length; m++) {
+        var nd = nodes[m];
+        nd.vx += (cx - nd.x) * 0.0016; nd.vy += (cy - nd.y) * 0.0016;
+        nd.vx *= 0.86; nd.vy *= 0.86;
+        nd.x += nd.vx; nd.y += nd.vy;
+        var pad = 16; nd.x = Math.max(pad, Math.min(W - pad, nd.x)); nd.y = Math.max(pad, Math.min(H - pad, nd.y));
+      }
+    }
+
+    var t = 0;
+    function draw() {
+      ctx.clearRect(0, 0, W, H);
+      // edges
+      ctx.lineWidth = 1;
+      for (var l = 0; l < links.length; l++) {
+        var na = nodes[links[l][0]], nb = nodes[links[l][1]];
+        ctx.strokeStyle = col('--line');
+        ctx.globalAlpha = 0.9;
+        ctx.beginPath(); ctx.moveTo(na.x, na.y); ctx.lineTo(nb.x, nb.y); ctx.stroke();
+      }
+      ctx.globalAlpha = 1;
+      // nodes
+      for (var n = 0; n < nodes.length; n++) {
+        var nd = nodes[n], c = typeColor(nd.type);
+        var pulse = reduce ? 0 : Math.sin(t * 0.03 + nd.ph) * 0.5 + 0.5;
+        var r = nd.r + (nd.type === 'session' ? pulse * 1.6 : 0);
+        // glow
+        ctx.beginPath(); ctx.fillStyle = c; ctx.globalAlpha = 0.16 + pulse * 0.12;
+        ctx.arc(nd.x, nd.y, r + 7, 0, 6.2832); ctx.fill();
+        // core
+        ctx.globalAlpha = 1; ctx.beginPath(); ctx.fillStyle = c;
+        ctx.arc(nd.x, nd.y, r, 0, 6.2832); ctx.fill();
+        // ring on session hubs
+        if (nd.type === 'session') { ctx.globalAlpha = 0.9; ctx.lineWidth = 1.5; ctx.strokeStyle = col('--ground'); ctx.stroke(); }
+      }
+      ctx.globalAlpha = 1;
+    }
+
+    function loop() { step(); t++; draw(); if (t < 100000) requestAnimationFrame(loop); }
+
+    function start() {
+      resize();
+      if (reduce) { for (var i = 0; i < 220; i++) step(); draw(); }
+      else loop();
+    }
+    window.addEventListener('resize', function () { seeded = false; resize(); if (reduce) { for (var i = 0; i < 220; i++) step(); draw(); } });
+    // recolour live on theme change
+    var mo = new MutationObserver(function () { css = getComputedStyle(document.documentElement); if (reduce) draw(); });
+    mo.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+    start();
+  })();
+</script>
+
+</body>
+</html>

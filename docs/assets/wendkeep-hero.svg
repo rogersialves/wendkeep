@@ -1,0 +1,90 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 520" width="1200" height="520" font-family="ui-monospace, 'Cascadia Code', 'JetBrains Mono', Menlo, Consolas, monospace" role="img" aria-label="wendkeep — persistent memory for AI coding agents, shown as a knowledge graph of sessions, decisions, bugs, learnings and changes">
+  <defs>
+    <radialGradient id="vig" cx="72%" cy="30%" r="75%">
+      <stop offset="30%" stop-color="#141824" stop-opacity="0"/>
+      <stop offset="100%" stop-color="#0d0f16"/>
+    </radialGradient>
+    <filter id="soft" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="6"/>
+    </filter>
+  </defs>
+
+  <rect width="1200" height="520" rx="0" fill="#0d0f16"/>
+  <rect width="1200" height="520" fill="url(#vig)"/>
+
+  <!-- ============ graph (right) ============ -->
+  <g stroke="#242938" stroke-width="1.4" opacity="0.95">
+    <line x1="770" y1="160" x2="880" y2="96"/>
+    <line x1="770" y1="160" x2="678" y2="96"/>
+    <line x1="770" y1="160" x2="712" y2="250"/>
+    <line x1="770" y1="160" x2="880" y2="212"/>
+    <line x1="770" y1="160" x2="910" y2="272"/>
+    <line x1="910" y1="272" x2="880" y2="212"/>
+    <line x1="910" y1="272" x2="1036" y2="230"/>
+    <line x1="910" y1="272" x2="1010" y2="352"/>
+    <line x1="910" y1="272" x2="742" y2="366"/>
+    <line x1="742" y1="366" x2="632" y2="322"/>
+    <line x1="742" y1="366" x2="662" y2="446"/>
+    <line x1="742" y1="366" x2="836" y2="430"/>
+    <line x1="742" y1="366" x2="880" y2="212"/>
+  </g>
+
+  <!-- glows -->
+  <g filter="url(#soft)" opacity="0.5">
+    <circle cx="770" cy="160" r="16" fill="#4c8dff"/>
+    <circle cx="910" cy="272" r="16" fill="#4c8dff"/>
+    <circle cx="742" cy="366" r="16" fill="#4c8dff"/>
+    <circle cx="880" cy="96" r="10" fill="#a970ff"/>
+    <circle cx="678" cy="96" r="10" fill="#ff5c6c"/>
+    <circle cx="712" cy="250" r="10" fill="#3fb950"/>
+    <circle cx="880" cy="212" r="10" fill="#e8b24a"/>
+    <circle cx="1036" cy="230" r="10" fill="#a970ff"/>
+    <circle cx="1010" cy="352" r="10" fill="#3fb950"/>
+    <circle cx="632" cy="322" r="10" fill="#ff5c6c"/>
+    <circle cx="662" cy="446" r="10" fill="#3fb950"/>
+    <circle cx="836" cy="430" r="10" fill="#e8b24a"/>
+  </g>
+
+  <!-- nodes -->
+  <g>
+    <circle cx="880" cy="96" r="6.5" fill="#a970ff"/>
+    <circle cx="678" cy="96" r="6.5" fill="#ff5c6c"/>
+    <circle cx="712" cy="250" r="6.5" fill="#3fb950"/>
+    <circle cx="880" cy="212" r="7" fill="#e8b24a"/>
+    <circle cx="1036" cy="230" r="6.5" fill="#a970ff"/>
+    <circle cx="1010" cy="352" r="6.5" fill="#3fb950"/>
+    <circle cx="632" cy="322" r="6.5" fill="#ff5c6c"/>
+    <circle cx="662" cy="446" r="6.5" fill="#3fb950"/>
+    <circle cx="836" cy="430" r="7" fill="#e8b24a"/>
+    <circle cx="770" cy="160" r="10" fill="#4c8dff" stroke="#0d0f16" stroke-width="2"/>
+    <circle cx="910" cy="272" r="10" fill="#4c8dff" stroke="#0d0f16" stroke-width="2"/>
+    <circle cx="742" cy="366" r="10" fill="#4c8dff" stroke="#0d0f16" stroke-width="2"/>
+  </g>
+  <g fill="#8b90a3" font-size="12" opacity="0.9">
+    <text x="786" y="150">session</text>
+    <text x="926" y="262">session</text>
+    <text x="600" y="384">session</text>
+  </g>
+
+  <!-- ============ copy (left) ============ -->
+  <g>
+    <rect x="64" y="64" width="34" height="34" rx="8" fill="none" stroke="#e8b24a" stroke-width="1.6"/>
+    <text x="81" y="87" fill="#e8b24a" font-size="17" font-weight="700" text-anchor="middle">wk</text>
+    <text x="116" y="87" fill="#e7e9f0" font-size="19" font-weight="600">wendkeep</text>
+  </g>
+
+  <text x="66" y="150" fill="#8b90a3" font-size="12.5" letter-spacing="3">PERSISTENT MEMORY · ZERO DEPENDENCIES · LOCAL</text>
+
+  <text x="64" y="212" fill="#e7e9f0" font-size="40" font-weight="600">Your coding agent</text>
+  <text x="64" y="262" fill="#e7e9f0" font-size="40" font-weight="600">forgets every session.</text>
+  <text x="64" y="326" fill="#e8b24a" font-size="40" font-weight="600">Make it keep.</text>
+
+  <text x="66" y="386" fill="#8b90a3" font-size="15">Sessions, decisions, bugs, learnings &amp; changes —</text>
+  <text x="66" y="408" fill="#8b90a3" font-size="15">captured as Markdown, wikilinked into one graph.</text>
+
+  <g>
+    <rect x="64" y="440" width="342" height="42" rx="9" fill="#141824" stroke="#242938"/>
+    <text x="82" y="467" fill="#e8b24a" font-size="14">$</text>
+    <text x="100" y="467" fill="#e7e9f0" font-size="14">npm i -D wendkeep &amp;&amp; npx wendkeep init</text>
+  </g>
+</svg>
