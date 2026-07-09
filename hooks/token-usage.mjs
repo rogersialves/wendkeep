@@ -966,7 +966,7 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   try {
     runCli();
   } catch (error) {
-    process.stderr.write(`[codex-obsidian] Token usage falhou: ${error.message}\n`);
+    process.stderr.write(`[wendkeep] Token usage falhou: ${error.message}\n`);
     process.exitCode = 1;
   }
 }

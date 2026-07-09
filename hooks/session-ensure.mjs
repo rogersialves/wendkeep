@@ -387,6 +387,6 @@ function main() {
 try {
   main();
 } catch (error) {
-  process.stderr.write(`[codex-obsidian] UserPromptSubmit falhou: ${error.message}\n`);
+  process.stderr.write(`[wendkeep] UserPromptSubmit falhou: ${error.message}\n`);
   writeHookOutput({});
 }

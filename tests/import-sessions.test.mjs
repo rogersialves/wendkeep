@@ -65,8 +65,8 @@ test('importSession builds a full dated note from a transcript', () => {
   assert.match(r.relPath, /2026/);
 
   // Both turns memorialized (dedup markers present).
-  assert.ok(note.includes('<!-- codex-turn: t1 -->'), 'turn 1 marker');
-  assert.ok(note.includes('<!-- codex-turn: t2 -->'), 'turn 2 marker');
+  assert.ok(note.includes('<!-- wk-turn: t1 -->'), 'turn 1 marker');
+  assert.ok(note.includes('<!-- wk-turn: t2 -->'), 'turn 2 marker');
   assert.ok(note.includes('Primeira pergunta'), 'first prompt captured');
   assert.ok(note.includes('Segunda pergunta'), 'second prompt captured');
 
@@ -148,8 +148,8 @@ test('importSession tags a Codex note with provider: codex', () => {
   assert.match(note, /^session_id:\s*["']?cdx-alpha["']?\s*$/m);
   assert.match(note, /^\s+- codex\s*$/m); // tag
   assert.match(note, /^date:\s*2026-05-10\s*$/m);
-  assert.ok(note.includes('<!-- codex-turn: turn-1 -->'));
-  assert.ok(note.includes('<!-- codex-turn: turn-2 -->'));
+  assert.ok(note.includes('<!-- wk-turn: turn-1 -->'));
+  assert.ok(note.includes('<!-- wk-turn: turn-2 -->'));
 });
 
 test('capturedSessionIds + import skip a session whose note exists but the registry was lost', () => {

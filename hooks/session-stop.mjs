@@ -30,6 +30,9 @@ import {
   wikilinkFromRel,
   writeControl,
   writeHookOutput,
+  turnMarker,
+  hasTurnMarker,
+  normalizeTurnMarkers,
 } from './obsidian-common.mjs';
 
 function extractContentText(content) {
@@ -596,7 +599,7 @@ export function buildIterationBlock(tx, input) {
   // inclui recortes da conversa do turno, sem despejar outputs brutos.
   return `
 ### ${formatTimeForHeading(now)} - ${heading}
-<!-- codex-turn: ${turnId} -->
+${turnMarker(turnId)}
 
 **Pedido:** ${compactText(promptText, 1000)}
 
@@ -609,7 +612,7 @@ ${formatConversation(turn)}
 
 **Arquivos detectados no turno:** ${formatInlineList(files, 'Nenhum arquivo detectado automaticamente.')}
 
-**Estado ao final do turno:** ${compactText(latestAssistant || 'Checkpoint registrado pelo hook Stop do Codex.', 900)}
+**Estado ao final do turno:** ${compactText(latestAssistant || 'Checkpoint registrado automaticamente ao final do turno.', 900)}
 `;
 }
 
@@ -751,17 +754,19 @@ function relocateOrphanIterations(content) {
 }
 
 export function insertIteration(sessionPath, block, turnId, tx) {
-  let content = readFileSync(sessionPath, 'utf-8');
-  if (content.includes(`<!-- codex-turn: ${turnId} -->`)) {
+  const original = readFileSync(sessionPath, 'utf-8');
+  // Self-heal: migrate any legacy `codex-turn` markers to the neutral name on this write.
+  let content = normalizeTurnMarkers(original);
+  if (hasTurnMarker(content, turnId)) {
     // Turno já registrado: ainda assim repara órfãos e seções dedicadas.
     const repaired = applyDedicatedSections(relocateOrphanIterations(content), tx);
-    if (repaired !== content) writeFileSync(sessionPath, repaired, 'utf-8');
+    if (repaired !== original) writeFileSync(sessionPath, repaired, 'utf-8');
     return false;
   }
   content = relocateOrphanIterations(content);
   content = insertIntoIteracoes(content, block);
   content = applyDedicatedSections(content, tx);
-  writeFileSync(sessionPath, content, 'utf-8');
+  if (content !== original) writeFileSync(sessionPath, content, 'utf-8');
   return true;
 }
 
@@ -1037,7 +1042,7 @@ function main() {
   try {
     applyLinearLinks(sessionPath, tx, vaultBase, sessionRel);
   } catch (error) {
-    process.stderr.write(`[codex-obsidian] Linear link falhou: ${error.message}\n`);
+    process.stderr.write(`[wendkeep] Linear link falhou: ${error.message}\n`);
   }
 
   try {
@@ -1048,7 +1053,7 @@ function main() {
       transcriptPath,
     });
   } catch (error) {
-    process.stderr.write(`[codex-obsidian] Token usage falhou: ${error.message}\n`);
+    process.stderr.write(`[wendkeep] Token usage falhou: ${error.message}\n`);
   }
 
   // Subagent/workflow telemetry (0.10.0): fold sibling subagent transcripts into the note.
@@ -1056,7 +1061,7 @@ function main() {
   try {
     upsertSubagentUsage(sessionPath, transcriptPath);
   } catch (error) {
-    process.stderr.write(`[codex-obsidian] Subagent usage falhou: ${error.message}\n`);
+    process.stderr.write(`[wendkeep] Subagent usage falhou: ${error.message}\n`);
   }
 
   if (!shouldFinalizeSession()) {
@@ -1127,7 +1132,7 @@ function main() {
     const rows = buildBrainIndex(vaultBase);
     buildBrainDigest(vaultBase, rows);
   } catch (error) {
-    process.stderr.write(`[codex-obsidian] brain index/digest falhou: ${error.message}\n`);
+    process.stderr.write(`[wendkeep] brain index/digest falhou: ${error.message}\n`);
   }
 
   pingObsidianVault(input.obsidian_api_key);
@@ -1138,7 +1143,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   try {
     main();
   } catch (error) {
-    process.stderr.write(`[codex-obsidian] Stop falhou: ${error.message}\n`);
+    process.stderr.write(`[wendkeep] Stop falhou: ${error.message}\n`);
     writeHookOutput({});
   }
 }

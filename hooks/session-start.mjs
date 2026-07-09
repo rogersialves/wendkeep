@@ -161,7 +161,7 @@ function main() {
   try {
     sweepStaleSessionsFile(vaultBase, now, undefined, input.transcript_path || input.transcriptPath || '');
   } catch (error) {
-    process.stderr.write(`[codex-obsidian] sweep de sessões falhou: ${error.message}\n`);
+    process.stderr.write(`[wendkeep] sweep de sessões falhou: ${error.message}\n`);
   }
 
   // Reuso da nota apontada pelo CURRENT_SESSION só quando é a MESMA conversa
@@ -309,9 +309,9 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   try {
     main();
   } catch (error) {
-    process.stderr.write(`[codex-obsidian] SessionStart falhou: ${error.message}\n`);
+    process.stderr.write(`[wendkeep] SessionStart falhou: ${error.message}\n`);
     writeHookOutput({
-      systemMessage: `[codex-obsidian] Não foi possível criar a sessão Obsidian: ${error.message}`,
+      systemMessage: `[wendkeep] Não foi possível criar a sessão Obsidian: ${error.message}`,
     });
   }
 }

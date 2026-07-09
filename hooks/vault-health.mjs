@@ -39,7 +39,7 @@ function parseArgs(argv) {
 function findDuplicateTurnMarkers(content) {
   const seen = new Set();
   const duplicated = new Set();
-  const regex = /<!-- codex-turn: ([^>]+) -->/g;
+  const regex = /<!-- (?:wk-turn|codex-turn): ([^>]+) -->/g;
   let match;
   while ((match = regex.exec(content)) !== null) {
     const turnId = match[1].trim();
@@ -104,10 +104,10 @@ function checkSession({ vaultBase, sessionRel, control, registry }) {
 
   const content = readFileSync(sessionPath, 'utf-8');
   const duplicates = findDuplicateTurnMarkers(content);
-  metrics.turnMarkers = (content.match(/<!-- codex-turn:/g) || []).length;
+  metrics.turnMarkers = (content.match(/<!-- (?:wk-turn|codex-turn):/g) || []).length;
   metrics.duplicateTurnMarkers = duplicates.length;
 
-  if (duplicates.length) failures.push(`Marcadores codex-turn duplicados: ${duplicates.join(', ')}`);
+  if (duplicates.length) failures.push(`Marcadores de turno duplicados: ${duplicates.join(', ')}`);
   if (hasHeadingAfterClosing(content)) failures.push('Há headings/iterações após ## Encerramento.');
   if (!usageSectionIsPlaced(content)) failures.push('## Uso de tokens e custos está fora da posição esperada.');
   if (hasDefaultPending(content)) warnings.push('Pendências ainda contém placeholders padrão.');
@@ -197,7 +197,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   try {
     main();
   } catch (error) {
-    process.stderr.write(`[codex-obsidian] Vault health falhou: ${error.message}\n`);
+    process.stderr.write(`[wendkeep] Vault health falhou: ${error.message}\n`);
     process.exitCode = 1;
   }
 }

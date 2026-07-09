@@ -4,6 +4,19 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.29.2] — 2026-07-09
+
+### Fixed
+- **Iteration turn marker renamed `codex-turn` → `wk-turn`** (provider-neutral). A **Claude**
+  session's iterations carried `<!-- codex-turn: … -->` — a legacy name from when this was a
+  Codex-only tool, confusing in the note source. The marker is a dedup key, so the change is
+  backward-compatible: `hasTurnMarker` still recognizes the legacy name, and `insertIteration`
+  **self-migrates** any `codex-turn` → `wk-turn` on the next write (backfill re-processes older
+  notes). Shared helpers `turnMarker` / `hasTurnMarker` / `normalizeTurnMarkers` in obsidian-common;
+  `vault-health` recognizes both.
+- Note-visible fallback text "Checkpoint registrado pelo hook Stop do **Codex**" → provider-neutral.
+- Stderr log prefix `[codex-obsidian]` → `[wendkeep]` across the hooks.
+
 ## [0.29.1] — 2026-07-09
 
 ### Added

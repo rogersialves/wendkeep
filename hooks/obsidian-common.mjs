@@ -557,6 +557,27 @@ export function wikilinkFromRel(relPath) {
   return `[[${relPath.replace(/\.md$/i, '').replaceAll('\\', '/')}]]`;
 }
 
+// Per-iteration dedup marker (an invisible HTML comment). Provider-neutral name `wk-turn`; the
+// old `codex-turn` (legacy, from when this was a Codex-only tool) is still RECOGNIZED so notes
+// written by older versions keep deduping, and normalizeTurnMarkers migrates them on the next write.
+export const TURN_MARKER = 'wk-turn';
+export const LEGACY_TURN_MARKERS = ['codex-turn'];
+
+export function turnMarker(id) {
+  return `<!-- ${TURN_MARKER}: ${id} -->`;
+}
+
+export function hasTurnMarker(content, id) {
+  return [TURN_MARKER, ...LEGACY_TURN_MARKERS].some((m) => String(content || '').includes(`<!-- ${m}: ${id} -->`));
+}
+
+// Rewrite any legacy turn markers in a note to the current name (self-healing migration).
+export function normalizeTurnMarkers(content) {
+  let c = String(content || '');
+  for (const m of LEGACY_TURN_MARKERS) c = c.replaceAll(`<!-- ${m}: `, `<!-- ${TURN_MARKER}: `);
+  return c;
+}
+
 export function listMarkdownFiles(dir) {
   try {
     return readdirSync(dir).filter((f) => f.endsWith('.md'));

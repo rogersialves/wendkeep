@@ -36,7 +36,9 @@ function parseArgs(argv) {
 }
 
 function hasTurnMarker(content, turnId) {
-  return content.includes(`<!-- codex-turn: ${turnId} -->`);
+  // recognize both the current `wk-turn` and the legacy `codex-turn`
+  return content.includes(`<!-- wk-turn: ${turnId} -->`)
+    || content.includes(`<!-- codex-turn: ${turnId} -->`);
 }
 
 function sessionEntries(vaultBase, args) {
@@ -135,7 +137,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   try {
     main();
   } catch (error) {
-    process.stderr.write(`[codex-obsidian] Backfill falhou: ${error.message}\n`);
+    process.stderr.write(`[wendkeep] Backfill falhou: ${error.message}\n`);
     process.exitCode = 1;
   }
 }
