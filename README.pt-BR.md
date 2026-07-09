@@ -9,7 +9,7 @@
 ![zero deps](https://img.shields.io/badge/deps%20de%20runtime-0-brightgreen)
 ![node](https://img.shields.io/badge/node-%E2%89%A518-blue)
 
-[![wendkeep — memória persistente para agentes de código, mostrada como um grafo de sessões, decisões, bugs, aprendizados e mudanças](docs/assets/wendkeep-hero.pt.svg)](docs/index.html)
+[![wendkeep — memória persistente para agentes de código, mostrada como um grafo de sessões, decisões, bugs, aprendizados e mudanças](docs/assets/wendkeep-hero.pt.svg)](docs/index.pt.html)
 
 **No grafo:** 🔵 sessão · 🟣 decisão · 🔴 bug · 🟢 aprendizado · 🟡 mudança — cada nota, com backlink.
 
@@ -20,7 +20,7 @@ npm i -D wendkeep && npx wendkeep init      # captura a partir da próxima sess�
 npx wendkeep import                          # importa sessões passadas do Claude + Codex
 ```
 
-**▶ Demo interativo:** [`docs/index.html`](docs/index.html) — uma página autocontida com o herói de grafo vivo. Abra local (ou sirva `docs/` em qualquer host estático). A imagem acima é um render estático dele.
+**▶ Demo interativo:** [`docs/index.pt.html`](docs/index.pt.html) — uma página autocontida com o herói de grafo vivo. Abra local (ou sirva `docs/` em qualquer host estático). A imagem acima é um render estático dele.
 
 > **De um cofre de produção real** (`npx wendkeep stats`): **308** sessões · **1.696** prompts · **US$ 4.836** capturados em **46 dias ativos** (jan–jul 2026) · **15** modelos — cada uma delas uma nota no grafo.
 

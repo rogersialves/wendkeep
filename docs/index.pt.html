@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="description" content="wendkeep — persistent memory for AI coding agents, built on your Obsidian vault.">
-<title>wendkeep — persistent memory for AI coding agents</title>
+<meta name="description" content="wendkeep — memória persistente para agentes de código, sobre o seu cofre Obsidian.">
+<title>wendkeep — memória persistente para agentes de código</title>
 <style>
   :root {
     --ground: #0d0f16;
@@ -165,8 +165,8 @@
 </style>
 </head>
 <body>
-<a class="theme-toggle mono" href="index.pt.html" style="right:96px" aria-label="Português">PT</a>
-<button class="theme-toggle mono" id="tt" aria-label="Toggle theme">◐ theme</button>
+<a class="theme-toggle mono" href="index.html" style="right:96px" aria-label="English">EN</a>
+<button class="theme-toggle mono" id="tt" aria-label="Alternar tema">◐ tema</button>
 
 <header class="hero">
   <canvas id="graph" aria-hidden="true"></canvas>
@@ -176,17 +176,17 @@
       <div class="mark">wk</div>
       <div class="brandname">wendkeep</div>
     </div>
-    <div class="eyebrow">persistent memory · zero dependencies · local‑first</div>
-    <h1>Your coding agent forgets every session. <span class="keep">Make it keep.</span></h1>
-    <p class="lede">A memory harness for Claude Code &amp; Codex, built on the Obsidian vault you already use. Every session is captured as Markdown, wikilinked into one graph, and injected back at the start of the next one.</p>
+    <div class="eyebrow">memória persistente · zero dependências · local‑first</div>
+    <h1>Seu agente de código esquece cada sessão. <span class="keep">Faça ele guardar.</span></h1>
+    <p class="lede">Um harness de memória para Claude Code &amp; Codex, sobre o cofre Obsidian que você já usa. Cada sessão é capturada em Markdown, wikilinkada num só grafo e injetada de volta no início da próxima.</p>
     <div class="cmd"><span class="dollar">$</span><code>npm i -D wendkeep &amp;&amp; npx wendkeep init</code></div>
     <div class="cta-row">
-      <a class="btn btn-primary" href="https://www.npmjs.com/package/wendkeep">Install from npm</a>
-      <a class="btn" href="https://github.com/rogersialves/wendkeep">View on GitHub</a>
+      <a class="btn btn-primary" href="https://www.npmjs.com/package/wendkeep">Instalar do npm</a>
+      <a class="btn" href="https://github.com/rogersialves/wendkeep">Ver no GitHub</a>
     </div>
     <div class="badges">
-      <span><b>0</b> runtime deps</span>
-      <span><b>100%</b> local Markdown</span>
+      <span><b>0</b> dependências</span>
+      <span><b>100%</b> Markdown local</span>
       <span>Node <b>≥18</b></span>
       <span>Claude Code · Codex</span>
     </div>
@@ -197,15 +197,15 @@
   <section>
     <div class="wrap">
       <div class="sec-head">
-        <div class="eyebrow">the problem</div>
-        <h2>The context dies when the window closes.</h2>
-        <p>Decisions, dead ends, the reason you chose X over Y — gone next session. The pieces to fix that exist but are scattered. wendkeep ships them as one turnkey package that writes into a knowledge graph instead of a black box.</p>
+        <div class="eyebrow">o problema</div>
+        <h2>O contexto morre quando a janela fecha.</h2>
+        <p>Decisões, becos sem saída, o motivo de você ter escolhido X em vez de Y — some na próxima sessão. As peças pra resolver existem, mas espalhadas. O wendkeep entrega tudo num pacote turnkey que escreve num grafo de conhecimento, não numa caixa-preta.</p>
       </div>
       <div class="grid">
-        <div class="cell"><span class="tag">capture</span><h3>Every turn, on disk</h3><p>SessionStart / Stop hooks write each session to a dated Markdown note — prompts, iterations, files touched, wikilinks. No snapshot to keep in sync.</p></div>
-        <div class="cell"><span class="tag">derive</span><h3>Decisions, bugs, learnings</h3><p>Pulled from the transcript into their own notes, backlinked to the session. Your history becomes navigable, not archival.</p></div>
-        <div class="cell"><span class="tag">recall</span><h3>Injected back</h3><p>A budget‑capped CORE + DIGEST and the active change are fed to the agent at the next SessionStart. It resumes where it left off.</p></div>
-        <div class="cell"><span class="tag">cost</span><h3>What it all cost</h3><p>Per‑model, cache‑aware token pricing per session — plus <code class="mono">cost --trend</code> with a run‑rate projection across the whole vault.</p></div>
+        <div class="cell"><span class="tag">captura</span><h3>Cada turno, no disco</h3><p>Os hooks SessionStart / Stop escrevem cada sessão numa nota Markdown datada — prompts, iterações, arquivos tocados, wikilinks. Sem snapshot pra sincronizar.</p></div>
+        <div class="cell"><span class="tag">deriva</span><h3>Decisões, bugs, aprendizados</h3><p>Puxados do transcript pra notas próprias, com backlink pra sessão. Seu histórico fica navegável, não arquivístico.</p></div>
+        <div class="cell"><span class="tag">recall</span><h3>Injetado de volta</h3><p>Um CORE + DIGEST com budget capado e a change ativa são injetados no agente no próximo SessionStart. Ele retoma de onde parou.</p></div>
+        <div class="cell"><span class="tag">custo</span><h3>Quanto tudo custou</h3><p>Preço por modelo, ciente de cache, por sessão — mais <code class="mono">cost --trend</code> com projeção run‑rate no cofre inteiro.</p></div>
       </div>
     </div>
   </section>
@@ -213,49 +213,49 @@
   <section>
     <div class="wrap">
       <div class="sec-head">
-        <div class="eyebrow">the a2 loop · spec‑driven, native</div>
-        <h2>Beyond memory: a change loop that keeps intent, work and proof together.</h2>
-        <p>A native, zero‑dependency pipeline. Every step is a note in the graph; the archive is gated on real proof, not vibes.</p>
+        <div class="eyebrow">o loop a2 · spec‑driven, nativo</div>
+        <h2>Além da memória: um loop de mudança que mantém intenção, trabalho e prova juntos.</h2>
+        <p>Um pipeline nativo e sem dependências. Cada passo é uma nota no grafo; o archive tem gate em prova real, não em vibe.</p>
       </div>
       <div class="loop">
-        <div class="step"><h4>Explore</h4><p>Understand the problem before proposing.</p></div>
-        <div class="step"><h4>Propose</h4><p><code>change new</code> scaffolds proposal, design &amp; tasks.</p></div>
-        <div class="step"><h4>Apply</h4><p>Implement each task test‑first (TDD).</p></div>
-        <div class="step"><h4>Verify</h4><p>Run task sensors + an independent read‑only pass.</p></div>
-        <div class="step"><h4>Archive</h4><p>Gated: green sensors, fresh verdict, no open tasks. Mints an ADR.</p></div>
+        <div class="step"><h4>Explorar</h4><p>Entenda o problema antes de propor.</p></div>
+        <div class="step"><h4>Propor</h4><p><code>change new</code> faz o scaffold de proposta, design &amp; tarefas.</p></div>
+        <div class="step"><h4>Aplicar</h4><p>Implemente cada tarefa test‑first (TDD).</p></div>
+        <div class="step"><h4>Verificar</h4><p>Roda os sensores + um passe independente read‑only.</p></div>
+        <div class="step"><h4>Arquivar</h4><p>Com gate: sensores verdes, verdict fresco, zero tarefa aberta. Cunha um ADR.</p></div>
       </div>
-      <p class="gatehint">The gate blocks unless the scaffold is filled, evidence is fresh, and every declared requirement is covered. <b>--force is the human's call — never the agent's.</b></p>
+      <p class="gatehint">O gate bloqueia a não ser que o scaffold esteja preenchido, a evidência fresca e todo requisito declarado coberto. <b>--force é decisão do humano — nunca do agente.</b></p>
     </div>
   </section>
 
   <section>
     <div class="wrap">
       <div class="sec-head">
-        <div class="eyebrow">retroactive</div>
-        <h2>Install today, remember yesterday.</h2>
-        <p>One command backfills your project's past Claude&nbsp;&amp;&nbsp;Codex sessions into the vault — deduped, dated, with cost — so the graph starts full, not empty.</p>
+        <div class="eyebrow">retroativo</div>
+        <h2>Instale hoje, lembre de ontem.</h2>
+        <p>Um comando importa as sessões passadas de Claude&nbsp;&amp;&nbsp;Codex do projeto pro cofre — dedup, datadas, com custo — então o grafo começa cheio, não vazio.</p>
       </div>
       <div class="cmd"><span class="dollar">$</span><code>npx wendkeep import &nbsp;·&nbsp; npx wendkeep stats</code></div>
-      <div class="statline"><span class="p">→ </span>wendkeep: <b>142</b> sessions · <b>4.7k</b> prompts · <b>$4,701</b> captured · <b>151</b> days · <b>5</b> models</div>
+      <div class="statline"><span class="p">→ </span>wendkeep: <b>142</b> sessões · <b>4.7k</b> prompts · <b>$4.701</b> capturados · <b>151</b> dias · <b>5</b> modelos</div>
       <div class="legend" aria-hidden="true">
-        <span><i class="dot" style="background:var(--n-session)"></i>session</span>
-        <span><i class="dot" style="background:var(--n-decision)"></i>decision</span>
+        <span><i class="dot" style="background:var(--n-session)"></i>sessão</span>
+        <span><i class="dot" style="background:var(--n-decision)"></i>decisão</span>
         <span><i class="dot" style="background:var(--n-bug)"></i>bug</span>
-        <span><i class="dot" style="background:var(--n-learning)"></i>learning</span>
-        <span><i class="dot" style="background:var(--n-change)"></i>change</span>
+        <span><i class="dot" style="background:var(--n-learning)"></i>aprendizado</span>
+        <span><i class="dot" style="background:var(--n-change)"></i>mudança</span>
       </div>
-      <p class="gatehint" style="margin-top:14px;font-size:12.5px">Illustrative figures from one production vault. Your numbers come from <code class="mono">wendkeep stats</code>.</p>
+      <p class="gatehint" style="margin-top:14px;font-size:12.5px">Números ilustrativos de um cofre de produção. Os seus vêm do <code class="mono">wendkeep stats</code>.</p>
     </div>
   </section>
 
   <footer class="wrap">
-    <div class="big">Stop re‑explaining your codebase every morning.</div>
+    <div class="big">Pare de reexplicar seu código toda manhã.</div>
     <div class="cmd"><span class="dollar">$</span><code>npm i -D wendkeep &amp;&amp; npx wendkeep init</code></div>
     <div class="cta-row" style="justify-content:center">
       <a class="btn btn-primary" href="https://www.npmjs.com/package/wendkeep">npm</a>
       <a class="btn" href="https://github.com/rogersialves/wendkeep">GitHub</a>
     </div>
-    <div class="fineprint">MIT · open‑core · your data never leaves your disk</div>
+    <div class="fineprint">MIT · open‑core · seus dados nunca saem do seu disco</div>
   </footer>
 </main>
 
