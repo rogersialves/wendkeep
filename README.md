@@ -11,6 +11,8 @@
 
 [![wendkeep — persistent memory for AI coding agents, shown as a knowledge graph of sessions, decisions, bugs, learnings and changes](docs/assets/wendkeep-hero.svg)](docs/index.html)
 
+**In the graph:** 🔵 session · 🟣 decision · 🔴 bug · 🟢 learning · 🟡 change — every note, backlinked.
+
 **A persistent‑memory harness for AI coding agents, built on your Obsidian vault.** Every Claude Code / Codex session is captured turn‑by‑turn into local Markdown — with token/cost tracking, auto‑extracted decisions, bugs and learnings, and a curated memory layer injected back at the start of the next session. On top of that memory core sits a native, zero‑dependency **change lifecycle** (spec → change → TDD → sensor‑gated archive) that keeps intent, work and proof wikilinked in one graph. 100% local, open‑core.
 
 ```bash
@@ -28,18 +30,18 @@ npx wendkeep import                          # backfill past Claude + Codex sess
 
 ---
 
-## Why
+## The problem: the context dies when the window closes
 
-The pieces to give a coding agent durable memory exist, but fragmented (qmd‑sessions, memsearch, Nexus, hand‑written hooks). wendkeep ships them as one turnkey package that lands the memory **inside the Obsidian graph you already use** — no manual setup, no snapshot to keep in sync.
+Decisions, dead ends, the reason you chose X over Y — gone next session. The pieces to fix that exist but are scattered (qmd‑sessions, memsearch, Nexus, hand‑written hooks). wendkeep ships them as one turnkey package that writes into a knowledge graph **inside the Obsidian vault you already use** — no manual setup, no snapshot to keep in sync.
 
-## What you get
-
-- **Automatic session capture** — `SessionStart` / `UserPromptSubmit` / `Stop` hooks write each session to `02-Sessões/<year>/<month>/DIA <dd>/` as Markdown with YAML frontmatter, turn‑by‑turn iterations, and wikilinks.
-- **Multi‑agent** — detects the real provider (Claude Code, Codex, Copilot) at runtime; one install covers all.
-- **Token & cost tracking** — per‑model, cache‑aware pricing (`pricing.json`) with a per‑session usage table.
-- **Auto‑extracted derived notes** — decisions (ADR‑style), bugs and learnings pulled from the transcript into `04-Decisões/`, `05-Bugs/`, `06-Aprendizados/`, backlinked to the session.
-- **Curated memory** — a cold frontmatter index (`.brain/`) plus a budget‑capped `CORE` + `DIGEST` injected at the next `SessionStart`.
-- **Local‑first** — everything is plain Markdown on your disk. The optional MCP server (`@bitbonsai/mcpvault`) lets the agent read/write the vault; no cloud, no account.
+| | |
+|---|---|
+| **Capture** — every turn, on disk | `SessionStart` / `Stop` hooks write each session to a dated Markdown note: prompts, iterations, files touched, wikilinks. |
+| **Derive** — decisions, bugs, learnings | Pulled from the transcript into their own notes, backlinked to the session. Your history becomes navigable, not archival. |
+| **Recall** — injected back | A budget‑capped `CORE` + `DIGEST` and the active change are fed to the agent at the next `SessionStart`. It resumes where it left off. |
+| **Cost** — what it all cost | Per‑model, cache‑aware token pricing per session — plus `cost --trend` with a run‑rate projection across the whole vault. |
+| **Multi‑agent** — one install, all agents | Detects the real provider (Claude Code, Codex, Copilot) at runtime. |
+| **Local‑first** — no cloud, no account | Everything is plain Markdown on your disk. An optional MCP server (`@bitbonsai/mcpvault`) lets the agent read/write the vault. |
 
 ## Requirements
 
@@ -122,9 +124,9 @@ No re‑copying, no snapshot to re‑sync — the package is the single source o
 | `wendkeep doctor [--vault P]` | Run a vault health check (integrity of sessions, registry, links). |
 | `wendkeep --version` / `--help` | Version / usage. |
 
-## Retroactive memory (`import`)
+## Retroactive memory (`import`) — install today, remember yesterday
 
-Install wendkeep into an existing project and it only remembers sessions **from now on**. `wendkeep import` fixes that: it reads the project's past **Claude Code and Codex** transcripts and rebuilds each one as a full session note in its **real** date folder — frontmatter (tagged with the transcript's real provider), one iteration block per turn, cost + subagent telemetry, derived decision/bug/learning notes, finalized closing. It is an offline replay of the live capture flow, so an imported note is indistinguishable from a captured one.
+Install wendkeep into an existing project and it only remembers sessions **from now on**. `wendkeep import` fixes that: one command backfills your project's past **Claude & Codex** sessions into the vault — deduped, dated, with cost — so the graph starts full, not empty. It rebuilds each transcript as a full session note in its **real** date folder — frontmatter (tagged with the transcript's real provider), one iteration block per turn, cost + subagent telemetry, derived decision/bug/learning notes, finalized closing. An offline replay of the live capture flow, so an imported note is indistinguishable from a captured one.
 
 ```bash
 wendkeep import --vault .myproject-vault --dry-run   # preview what would be imported (both agents)
@@ -150,6 +152,8 @@ explore → propose → apply (TDD) → verify → archive
 - **Apply** — implement each `tarefas.md` task. Tag a task that needs machine proof with `[sensor:<id>]`.
 - **Verify** — `wendkeep verify` runs the sensors your tasks declared (from `wendkeep.sensors.json` at the project root) and records `evidencia.json`. A critical red fails the gate; a `warning` red is advisory.
 - **Archive** — `wendkeep change archive <slug>` **gates** on the evidence (blocks unless every declared critical sensor is green), promotes each capability's spec delta (`ADDED`/`MODIFIED`/`REMOVED`) into the living `07-Specs/<capability>.md`, moves the change to `_arquivo/`, and mints an ADR in `04-Decisões/`.
+
+> The gate blocks unless the scaffold is filled, no task is open, evidence is fresh, and every declared requirement is covered. **`--force` is the human's call — never the agent's.**
 
 `wendkeep init` also seeds **native process skills** (`wk-workflow`, `wk-tdd`, `wk-debugging`, `wk-brainstorming`, `wk-planning`, `wk-verify`) into `.brain/skills` and delivers them to `.claude/skills` — the *how* layer, zero‑dep. Optional companions (`context-mode`, `dotcontext`, `understand-anything`, `caveman`) remain an opt‑in extra layer.
 

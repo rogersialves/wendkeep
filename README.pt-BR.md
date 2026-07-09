@@ -11,6 +11,8 @@
 
 [![wendkeep — memória persistente para agentes de código, mostrada como um grafo de sessões, decisões, bugs, aprendizados e mudanças](docs/assets/wendkeep-hero.pt.svg)](docs/index.html)
 
+**No grafo:** 🔵 sessão · 🟣 decisão · 🔴 bug · 🟢 aprendizado · 🟡 mudança — cada nota, com backlink.
+
 **Um harness de memória persistente para agentes de código, construído sobre o seu cofre Obsidian.** Cada sessão do Claude Code / Codex é capturada turno a turno em Markdown local — com rastreio de tokens/custo, decisões, bugs e aprendizados extraídos automaticamente, e uma camada de memória curada injetada de volta no início da próxima sessão. Sobre esse núcleo de memória fica um **ciclo de mudança** nativo e sem dependências (spec → change → TDD → archive com gate por sensor) que mantém intenção, trabalho e prova wikilinkados num só grafo. 100% local, open‑core.
 
 ```bash
@@ -26,18 +28,18 @@ npx wendkeep import                          # importa sessões passadas do Clau
 
 ---
 
-## Por quê
+## O problema: o contexto morre quando a janela fecha
 
-As peças para dar memória durável a um agente de código existem, mas fragmentadas (qmd‑sessions, memsearch, Nexus, hooks feitos à mão). O wendkeep entrega tudo num pacote turnkey que aterrissa a memória **dentro do grafo Obsidian que você já usa** — sem setup manual, sem snapshot pra manter sincronizado.
+Decisões, becos sem saída, o motivo de você ter escolhido X em vez de Y — some na próxima sessão. As peças pra resolver existem, mas espalhadas (qmd‑sessions, memsearch, Nexus, hooks feitos à mão). O wendkeep entrega tudo num pacote turnkey que escreve num grafo de conhecimento **dentro do cofre Obsidian que você já usa** — sem setup manual, sem snapshot pra manter sincronizado.
 
-## O que você ganha
-
-- **Captura automática de sessão** — os hooks `SessionStart` / `UserPromptSubmit` / `Stop` escrevem cada sessão em `02-Sessões/<ano>/<mês>/DIA <dd>/` como Markdown com frontmatter YAML, iterações turno a turno e wikilinks.
-- **Multi‑agente** — detecta o provedor real (Claude Code, Codex, Copilot) em runtime; uma instalação cobre todos.
-- **Rastreio de tokens & custo** — preço por modelo, ciente de cache (`pricing.json`), com uma tabela de uso por sessão.
-- **Notas derivadas automáticas** — decisões (estilo ADR), bugs e aprendizados puxados do transcript pra `04-Decisões/`, `05-Bugs/`, `06-Aprendizados/`, com backlink pra sessão.
-- **Memória curada** — um índice frio de frontmatter (`.brain/`) mais um `CORE` + `DIGEST` com budget capado, injetados no próximo `SessionStart`.
-- **Local‑first** — tudo é Markdown puro no seu disco. O servidor MCP opcional (`@bitbonsai/mcpvault`) deixa o agente ler/escrever o cofre; sem nuvem, sem conta.
+| | |
+|---|---|
+| **Captura** — cada turno, no disco | Os hooks `SessionStart` / `Stop` escrevem cada sessão numa nota Markdown datada: prompts, iterações, arquivos tocados, wikilinks. |
+| **Deriva** — decisões, bugs, aprendizados | Puxados do transcript pra notas próprias, com backlink pra sessão. Seu histórico fica navegável, não arquivístico. |
+| **Recall** — injetado de volta | Um `CORE` + `DIGEST` com budget capado e a change ativa são injetados no agente no próximo `SessionStart`. Ele retoma de onde parou. |
+| **Custo** — quanto tudo custou | Preço por modelo, ciente de cache, por sessão — mais `cost --trend` com projeção run‑rate no cofre inteiro. |
+| **Multi‑agente** — uma instalação, todos os agentes | Detecta o provedor real (Claude Code, Codex, Copilot) em runtime. |
+| **Local‑first** — sem nuvem, sem conta | Tudo é Markdown puro no seu disco. Um MCP opcional (`@bitbonsai/mcpvault`) deixa o agente ler/escrever o cofre. |
 
 ## Requisitos
 
@@ -122,9 +124,9 @@ Sem recopiar, sem snapshot pra re‑sincronizar — o pacote é a única fonte d
 | `wendkeep doctor [--vault P]` | Roda um check de saúde do cofre (integridade de sessões, registry, links). |
 | `wendkeep --version` / `--help` | Versão / uso. |
 
-## Memória retroativa (`import`)
+## Memória retroativa (`import`) — instale hoje, lembre de ontem
 
-Instale o wendkeep num projeto existente e ele só lembra sessões **a partir de agora**. O `wendkeep import` conserta isso: lê os transcripts passados de **Claude Code e Codex** do projeto e reconstrói cada um como uma nota de sessão completa na pasta datada **real** — frontmatter (taggeado com o provedor real do transcript), um bloco de iteração por turno, custo + telemetria de subagents, notas derivadas de decisão/bug/aprendizado, encerramento finalizado. É um replay offline do fluxo de captura vivo, então uma nota importada é indistinguível de uma capturada.
+Instale o wendkeep num projeto existente e ele só lembra sessões **a partir de agora**. O `wendkeep import` conserta isso: um comando importa as sessões passadas de **Claude & Codex** do projeto pro cofre — dedup, datadas, com custo — então o grafo começa cheio, não vazio. Reconstrói cada transcript como uma nota de sessão completa na pasta datada **real** — frontmatter (taggeado com o provedor real), um bloco de iteração por turno, custo + telemetria de subagents, notas derivadas de decisão/bug/aprendizado, encerramento finalizado. Um replay offline do fluxo de captura vivo, então uma nota importada é indistinguível de uma capturada.
 
 ```bash
 wendkeep import --vault .meuprojeto-vault --dry-run   # prévia do que seria importado (os dois agentes)
@@ -149,6 +151,8 @@ explore → propose → apply (TDD) → verify → archive
 - **Apply** — implemente cada tarefa de `tarefas.md`. Taggeie a tarefa que precisa de prova de máquina com `[sensor:<id>]`.
 - **Verify** — `wendkeep verify` roda os sensores que suas tarefas declararam (do `wendkeep.sensors.json` na raiz do projeto) e grava `evidencia.json`. Um vermelho crítico falha o gate; um vermelho `warning` é aviso.
 - **Archive** — `wendkeep change archive <slug>` faz **gate** na evidência (bloqueia a não ser que todo sensor crítico declarado esteja verde), promove o delta de cada capability (`ADDED`/`MODIFIED`/`REMOVED`) pro `07-Specs/<capability>.md` vivo, move a change pro `_arquivo/` e cunha um ADR em `04-Decisões/`.
+
+> O gate bloqueia a não ser que o scaffold esteja preenchido, nenhuma tarefa aberta, evidência fresca e todo requisito declarado coberto. **`--force` é decisão do humano — nunca do agente.**
 
 O `wendkeep init` também semeia **skills de processo nativas** (`wk-workflow`, `wk-tdd`, `wk-debugging`, `wk-brainstorming`, `wk-planning`, `wk-verify`) em `.brain/skills` e as entrega em `.claude/skills` — a camada do *como*, zero‑dep. Companions opcionais (`context-mode`, `dotcontext`, `understand-anything`, `caveman`) ficam como camada extra opt‑in.
 
