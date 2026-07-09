@@ -4,6 +4,14 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.26.0] — 2026-07-08
+
+### Fixed
+- **`wendkeep init` output now follows the chosen vault language.** Picking Português left the
+  whole summary + `[n/4]` steps + "Next steps" block in English; only the interactive prompts were
+  localized. All init output is now driven by a locale message set (pt-BR / en) resolved from the
+  language answer — "Próximos passos", "taxonomia do vault", "sensores semeados", etc. `src/init.mjs`.
+
 ## [0.25.1] — 2026-07-08
 
 ### Added

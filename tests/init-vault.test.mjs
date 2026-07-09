@@ -8,9 +8,30 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { deriveVaultDirName, VAULT_FOLDERS } from '../src/taxonomy.mjs';
 import { renderVaultReadme } from '../src/vault-readme.mjs';
-import { parseLocaleAnswer, promptStrings } from '../src/init.mjs';
+import { parseLocaleAnswer, promptStrings, initMessages } from '../src/init.mjs';
 
 const BIN = join(dirname(fileURLToPath(import.meta.url)), '..', 'bin', 'wendkeep.mjs');
+
+test('init output follows the vault locale (summary, steps, next-steps)', () => {
+  assert.match(initMessages('pt-BR').nextSteps, /Próximos passos/);
+  assert.match(initMessages('en').nextSteps, /Next steps/);
+  assert.match(initMessages('pt-BR').step1('/v'), /Abra o vault/);
+  assert.match(initMessages('en').step1('/v'), /Open the vault/);
+
+  const pt = mkdtempSync(join(tmpdir(), 'wk-i18n-pt-'));
+  const en = mkdtempSync(join(tmpdir(), 'wk-i18n-en-'));
+  try {
+    const run = (dir, loc) => spawnSync(process.execPath, [BIN, 'init', '--project', dir, '--vault', join(dir, '.v'), '--no-companions', '--no-colors', '--no-mcp', '--yes', '--locale', loc], { encoding: 'utf8' });
+    const rpt = run(pt, 'pt-BR');
+    assert.equal(rpt.status, 0, rpt.stderr);
+    assert.match(rpt.stdout, /taxonomia do vault/);
+    assert.match(rpt.stdout, /Próximos passos/);
+    assert.doesNotMatch(rpt.stdout, /Next steps/);
+    const ren = run(en, 'en');
+    assert.match(ren.stdout, /vault taxonomy/);
+    assert.match(ren.stdout, /Next steps/);
+  } finally { rmSync(pt, { recursive: true, force: true }); rmSync(en, { recursive: true, force: true }); }
+});
 
 test('parseLocaleAnswer: 1/pt/empty -> pt-BR; 2/en -> en; unknown -> pt-BR', () => {
   for (const a of ['', '1', 'pt', 'pt-BR', 'PT', 'português', 'xyz']) assert.equal(parseLocaleAnswer(a), 'pt-BR', `"${a}"`);

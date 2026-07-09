@@ -223,6 +223,63 @@ export function promptStrings(localeId) {
   return PROMPTS[localeId] || PROMPTS['pt-BR'];
 }
 
+// Output messages by locale — the summary, the [n/4] steps and the next-steps block follow the
+// chosen vault language (before this, a pt-BR install still printed English output).
+const MESSAGES = {
+  'pt-BR': {
+    header: '\nwendkeep init',
+    lProject: '  projeto    ', lVault: '  vault      ', lMcp: '  mcp        ',
+    lCompanions: '  companions ', lColors: '  cores      ',
+    skipped: 'ignorado', none: 'nenhum',
+    colorsOn: 'wendkeep-colors (snippet + grupos do grafo)',
+    taxonomy: (n, c, loc, readme, views) => `  [1/4] taxonomia do vault: ${n} pastas (${c} criadas, locale ${loc})${readme}, .brain + change/spec + sensores semeados${views}`,
+    readmeCreated: ', README.md criado', viewsNote: (n) => `, ${n} view(s) + dashboard`,
+    defs: (s, a) => `        defs entregues: ${s} skill(s) -> .claude/skills, ${a} agent(s) -> .codex/agents`,
+    settingsBadJson: (p) => `  [2/4] settings.json existe mas não é JSON válido -> escrevi ${p}.new (mescle à mão)`,
+    settings: (verb, added, bak) => `  [2/4] settings.json ${verb} (${added} hook(s) wirados, OBSIDIAN_VAULT_PATH setado${bak})`,
+    mcpBadJson: (p) => `  [3/4] .mcp.json existe mas não é JSON válido -> escrevi ${p}.new (mescle à mão)`,
+    mcp: (verb, names, bak) => `  [3/4] .mcp.json ${verb} (${names}${bak})`,
+    mcpSkipped: '  [3/4] .mcp.json ignorado (--no-mcp, sem companions MCP)',
+    colorsSkipped: '  [4/4] cores ignoradas (--no-colors)',
+    colors: (r) => `  [4/4] cores: ${r}`,
+    merged: 'mesclado', created: 'criado', bakSaved: ', .bak salvo',
+    nextSteps: '\nPróximos passos:',
+    step1: (v) => `  1. Abra o vault no Obsidian: "Abrir pasta como cofre" -> ${v}`,
+    step2: '  2. Garanta que o wendkeep está instalado onde o agente roda (npm i -D wendkeep, ou -g).',
+    step3: '  3. Abra o Claude Code neste projeto e envie um prompt de teste.',
+    step4: '  4. Confirme que uma nota aparece em 02-Sessões/<ano>/<mês>/DIA <dd>/ no vault.',
+    updateLater: '  Atualize depois com: npm update wendkeep  (sem recopiar — os hooks vivem no pacote).\n',
+  },
+  en: {
+    header: '\nwendkeep init',
+    lProject: '  project    ', lVault: '  vault      ', lMcp: '  mcp        ',
+    lCompanions: '  companions ', lColors: '  colors     ',
+    skipped: 'skipped', none: 'none',
+    colorsOn: 'wendkeep-colors (snippet + graph groups)',
+    taxonomy: (n, c, loc, readme, views) => `  [1/4] vault taxonomy: ${n} folders (${c} created, locale ${loc})${readme}, .brain + change/spec + sensors seeded${views}`,
+    readmeCreated: ', README.md created', viewsNote: (n) => `, ${n} view(s) + dashboard`,
+    defs: (s, a) => `        defs delivered: ${s} skill(s) -> .claude/skills, ${a} agent(s) -> .codex/agents`,
+    settingsBadJson: (p) => `  [2/4] settings.json exists but is not valid JSON -> wrote ${p}.new (merge by hand)`,
+    settings: (verb, added, bak) => `  [2/4] settings.json ${verb} (${added} hook(s) wired, OBSIDIAN_VAULT_PATH set${bak})`,
+    mcpBadJson: (p) => `  [3/4] .mcp.json exists but is not valid JSON -> wrote ${p}.new (merge by hand)`,
+    mcp: (verb, names, bak) => `  [3/4] .mcp.json ${verb} (${names}${bak})`,
+    mcpSkipped: '  [3/4] .mcp.json skipped (--no-mcp, no MCP companions)',
+    colorsSkipped: '  [4/4] colors skipped (--no-colors)',
+    colors: (r) => `  [4/4] colors: ${r}`,
+    merged: 'merged', created: 'created', bakSaved: ', .bak saved',
+    nextSteps: '\nNext steps:',
+    step1: (v) => `  1. Open the vault in Obsidian: "Open folder as vault" -> ${v}`,
+    step2: '  2. Make sure wendkeep is installed where the agent runs (npm i -D wendkeep, or -g).',
+    step3: '  3. Open Claude Code in this project and send a test prompt.',
+    step4: '  4. Confirm a note appears under 02-Sessões/<year>/<month>/DIA <dd>/ in the vault.',
+    updateLater: '  Update later with: npm update wendkeep  (no re-copying — hooks live in the package).\n',
+  },
+};
+
+export function initMessages(localeId) {
+  return MESSAGES[localeId] || MESSAGES['pt-BR'];
+}
+
 // Map the language answer to a locale id. 2/en → en; 1/pt/empty/unknown → pt-BR.
 export function parseLocaleAnswer(ans) {
   const a = String(ans || '').trim().toLowerCase();
@@ -243,7 +300,9 @@ export async function runInit(argv) {
     rl.close();
     args.locale = parseLocaleAnswer(ans);
   }
-  const P = promptStrings(args.locale && LOCALES[args.locale] ? args.locale : DEFAULT_LOCALE);
+  const resolvedLocale = args.locale && LOCALES[args.locale] ? args.locale : DEFAULT_LOCALE;
+  const P = promptStrings(resolvedLocale);
+  const M = initMessages(resolvedLocale);
 
   let vaultPath = args.vault;
   if (!vaultPath) {
@@ -285,12 +344,12 @@ export async function runInit(argv) {
     companions = resolveCompanions({});
   }
 
-  log('\nwendkeep init');
-  log(`  project    : ${projectPath}`);
-  log(`  vault      : ${vaultPath}`);
-  log(`  mcp        : ${args.mcp ? 'mcpvault (wendkeep-vault)' : 'skipped'}`);
-  log(`  companions : ${companions.length ? companions.join(', ') : 'none'}`);
-  log(`  colors     : ${args.noColors ? 'skipped' : 'wendkeep-colors (snippet + graph groups)'}\n`);
+  log(M.header);
+  log(`${M.lProject}: ${projectPath}`);
+  log(`${M.lVault}: ${vaultPath}`);
+  log(`${M.lMcp}: ${args.mcp ? 'mcpvault (wendkeep-vault)' : M.skipped}`);
+  log(`${M.lCompanions}: ${companions.length ? companions.join(', ') : M.none}`);
+  log(`${M.lColors}: ${args.noColors ? M.skipped : M.colorsOn}\n`);
 
   // dotcontext controls (only relevant when selected): hook level + MCP placement.
   // Skip the project MCP entry when dotcontext is already global (avoids a duplicate
@@ -329,7 +388,7 @@ export async function runInit(argv) {
   let readmeNote = '';
   if (!existsSync(readmePath)) {
     writeFileSync(readmePath, renderVaultReadme({ projectName: basename(projectPath), vaultPath, withMcp: args.mcp, locale: loc.id }), 'utf8');
-    readmeNote = ', README.md created';
+    readmeNote = M.readmeCreated;
   }
   // Seed the curated memory layer (CORE.md) + the compaction-protocol doc. The
   // DIGEST/index are auto-generated by the hooks; CORE is hand-curated, so we
@@ -369,14 +428,14 @@ export async function runInit(argv) {
   let viewsNote = '';
   try {
     const views = seedVaultViews(vaultPath);
-    if (views.length) viewsNote = `, ${views.length} view(s) + dashboard`;
+    if (views.length) viewsNote = M.viewsNote(views.length);
   } catch { /* views são bônus — nunca derrubam o init */ }
-  log(`  [1/4] vault taxonomy: ${folders.length} folders (${created} created, locale ${loc.id})${readmeNote}, .brain + change/spec + sensors seeded${viewsNote}`);
+  log(M.taxonomy(folders.length, created, loc.id, readmeNote, viewsNote));
   // Deliver the seeded defs (agents + wk process skills) to the project so they're
   // usable immediately — no separate `wendkeep sync-defs` step needed.
   const synced = syncDefs(vaultPath, projectPath);
   if (synced.skills.length || synced.agents.length) {
-    log(`        defs delivered: ${synced.skills.length} skill(s) -> .claude/skills, ${synced.agents.length} agent(s) -> .codex/agents`);
+    log(M.defs(synced.skills.length, synced.agents.length));
   }
 
   // 2. .claude/settings.json --------------------------------------------------
@@ -386,13 +445,13 @@ export async function runInit(argv) {
     // Unparseable existing file — never clobber. Drop a .new for manual merge.
     const fresh = mergeSettings(null, { vaultPath, withMcp: args.mcp, force: true, companions, skipMcp, dotcontextHookLevel }).settings;
     writeJson(`${settingsPath}.new`, fresh);
-    log(`  [2/4] settings.json exists but is not valid JSON -> wrote ${settingsPath}.new (merge by hand)`);
+    log(M.settingsBadJson(settingsPath));
   } else {
     const hadFile = settingsRead.data !== null;
     const { settings, added } = mergeSettings(settingsRead.data, { vaultPath, withMcp: args.mcp, force: args.force, companions, skipMcp, dotcontextHookLevel });
     if (hadFile) backup(settingsPath);
     writeJson(settingsPath, settings);
-    log(`  [2/4] settings.json ${hadFile ? 'merged' : 'created'} (${added} hook(s) wired, OBSIDIAN_VAULT_PATH set${hadFile ? ', .bak saved' : ''})`);
+    log(M.settings(hadFile ? M.merged : M.created, added, hadFile ? M.bakSaved : ''));
   }
 
   // 3. .mcp.json --------------------------------------------------------------
@@ -405,22 +464,22 @@ export async function runInit(argv) {
     const names = [args.mcp && MCP_SERVER_KEY, ...Object.keys(companionMcp)].filter(Boolean).join(', ');
     if (!mcpRead.ok) {
       writeJson(`${mcpPath}.new`, mergeMcp(null, mcpOpts));
-      log(`  [3/4] .mcp.json exists but is not valid JSON -> wrote ${mcpPath}.new (merge by hand)`);
+      log(M.mcpBadJson(mcpPath));
     } else {
       const hadFile = mcpRead.data !== null;
       if (hadFile) backup(mcpPath);
       writeJson(mcpPath, mergeMcp(mcpRead.data, mcpOpts));
-      log(`  [3/4] .mcp.json ${hadFile ? 'merged' : 'created'} (${names}${hadFile ? ', .bak saved' : ''})`);
+      log(M.mcp(hadFile ? M.merged : M.created, names, hadFile ? M.bakSaved : ''));
     }
   } else {
-    log('  [3/4] .mcp.json skipped (--no-mcp, no MCP companions)');
+    log(M.mcpSkipped);
   }
 
   // 4. Vault color system (.obsidian) -----------------------------------------
   if (args.noColors) {
-    log('  [4/4] colors skipped (--no-colors)');
+    log(M.colorsSkipped);
   } else {
-    log(`  [4/4] colors: ${installVaultColors(vaultPath)}`);
+    log(M.colors(installVaultColors(vaultPath)));
   }
 
   // caveman has no MCP / agnostic-hook path: on non-Claude agents its skills come
@@ -437,10 +496,10 @@ export async function runInit(argv) {
     log(`  [!] add to .gitignore (wendkeep não toca git): ${DOTCONTEXT_GITIGNORE.join(' ')}`);
   }
 
-  log('\nNext steps:');
-  log(`  1. Open the vault in Obsidian: "Open folder as vault" -> ${vaultPath}`);
-  log('  2. Make sure wendkeep is installed where the agent runs (npm i -D wendkeep, or -g).');
-  log('  3. Open Claude Code in this project and send a test prompt.');
-  log('  4. Confirm a note appears under 02-Sessões/<year>/<month>/DIA <dd>/ in the vault.');
-  log('  Update later with: npm update wendkeep  (no re-copying — hooks live in the package).\n');
+  log(M.nextSteps);
+  log(M.step1(vaultPath));
+  log(M.step2);
+  log(M.step3);
+  log(M.step4);
+  log(M.updateLater);
 }
