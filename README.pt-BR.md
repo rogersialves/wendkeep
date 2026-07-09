@@ -174,6 +174,16 @@ O **gate** do archive bloqueia a não ser que: o scaffold da change esteja preen
 - **Formatos de transcript são internos ao agente** e podem mudar entre versões; o parsing é isolado mas pode precisar de atualizações.
 - O instalador wira settings do **Claude Code** + `.mcp.json`. Os hooks do Codex rodam nos mesmos scripts mas ainda não são auto‑wirados (o import já cobre sessões Codex passadas via `--source codex`).
 
+---
+
+## Pare de reexplicar seu código toda manhã
+
+```bash
+npm i -D wendkeep && npx wendkeep init
+```
+
+**[Instalar do npm](https://www.npmjs.com/package/wendkeep)** · **[Deixar uma star no GitHub](https://github.com/rogersialves/wendkeep)** — MIT · open‑core · seus dados nunca saem do seu disco.
+
 ## Licença
 
 MIT

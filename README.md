@@ -205,6 +205,16 @@ The archive **gate** blocks unless: the change scaffold is filled (G0), no task 
 - **Transcript formats are agent‑internal** and can change between agent versions; parsing is isolated but may need updates.
 - Installer wires **Claude Code** settings + `.mcp.json`. Codex hooks run on the same scripts but are not auto‑wired yet (import already covers past Codex sessions via `--source codex`).
 
+---
+
+## Stop re‑explaining your codebase every morning
+
+```bash
+npm i -D wendkeep && npx wendkeep init
+```
+
+**[Install from npm](https://www.npmjs.com/package/wendkeep)** · **[Star on GitHub](https://github.com/rogersialves/wendkeep)** — MIT · open‑core · your data never leaves your disk.
+
 ## License
 
 MIT
