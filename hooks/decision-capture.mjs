@@ -68,6 +68,59 @@ ${blocks}
 `;
 }
 
+// --- agnostic prose decisions (Codex parity) ---------------------------------
+// Codex has no AskUserQuestion-style tool: the agent asks in PROSE and the user answers in the
+// next message. Conservative extraction (validated on real rollouts): an assistant message with
+// >=2 enumerated options that ends in a question, followed by a SHORT user reply (a choice, not a
+// new instruction). Works over the turn conversations both parsers already build — so it covers
+// Claude and Codex, live and import, without depending on any hook event.
+export function extractProseDecisions(tx) {
+  const flat = [];
+  for (const t of tx?.turns || []) for (const c of t.conversation || []) flat.push(c);
+  const out = [];
+  for (let i = 0; i < flat.length - 1; i++) {
+    const q = flat[i]; const a = flat[i + 1];
+    if (q.role !== 'Assistente' || a.role !== 'Usuário') continue;
+    const text = String(q.text || '');
+    const answer = String(a.text || '').trim();
+    if (!answer || answer.length > 200) continue; // long reply = new instruction, not a choice
+    // question: the message's last non-empty lines must end with '?'
+    const lines = text.trim().split('\n').map((l) => l.trim()).filter(Boolean);
+    const lastLine = lines[lines.length - 1] || '';
+    if (!/\?\s*$/.test(lastLine)) continue;
+    // options: numbered/lettered lines, or bulleted bold labels
+    let options = [...text.matchAll(/^\s*(?:\d+[\).]|[a-cA-C][\)])\s+(.{3,140})$/gm)].map((m) => m[1].trim());
+    if (options.length < 2) options = [...text.matchAll(/^\s*[-*]\s+\*\*(.{2,90}?)\*\*/gm)].map((m) => m[1].trim());
+    if (options.length < 2) continue;
+    const question = lines.filter((l) => /\?\s*$/.test(l)).pop() || lastLine;
+    out.push({ question: question.slice(0, 200), options: options.slice(0, 6), answer });
+  }
+  return out;
+}
+
+// Write one decision note per extracted prose decision (same shape as the hook capture).
+// Deduped by filename (day + question slug). Returns the vault-relative paths written.
+export function captureProseDecisions(vaultBase, { tx, dateStr, sessionRel, provider, localeId }) {
+  const written = [];
+  const decisions = extractProseDecisions(tx);
+  if (!decisions.length) return written;
+  const loc = getLocale(vaultBase);
+  const dir = join(vaultBase, monthFolderRelFromDateStr(loc.folders.decisions, dateStr, vaultBase));
+  for (const d of decisions) {
+    ensureDir(dir);
+    const filePath = join(dir, `${dateStr}-escolha-${slugify(d.question, 'decisao', 50)}.md`);
+    if (existsSync(filePath)) continue;
+    writeFileSync(filePath, buildDecisionCaptureNote({
+      questions: [{ question: d.question, multiSelect: false, options: d.options.map((label) => ({ label, description: '' })) }],
+      answers: { [d.question]: d.answer },
+      dateStr, startedAt: `${dateStr}T00:00:00`, sessionRel,
+      provider: provider || providerMeta(tx?.provider), localeId: localeId || loc.id,
+    }), 'utf-8');
+    written.push(toVaultRelative(vaultBase, filePath));
+  }
+  return written;
+}
+
 export function captureDecision(vaultBase, input) {
   const toolIn = input.tool_input || input.toolInput || {};
   const questions = Array.isArray(toolIn.questions) ? toolIn.questions : [];

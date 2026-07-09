@@ -13,6 +13,7 @@ import {
   wikilinkFromRel,
 } from './obsidian-common.mjs';
 import { getLocale } from './locale.mjs';
+import { captureProseDecisions } from './decision-capture.mjs';
 
 function yamlQuote(value) {
   return `"${String(value || '').replaceAll('"', '\\"')}"`;
@@ -567,6 +568,14 @@ export function createLinkedNotes(vaultBase, dateStr, sessionRel, tx, options = 
       existingKeys.decisions.push(decisionKey);
     }
   }
+
+  // Agnostic prose decisions (Codex parity): options-in-prose + short answer -> decision note.
+  // One integration point covers live Stop, import and backfill, for every provider. Fail-quiet.
+  try {
+    for (const rel of captureProseDecisions(vaultBase, { tx, dateStr, sessionRel, provider, localeId: loc.id })) {
+      linked.decisions.push(rel);
+    }
+  } catch { /* prose capture é bônus — nunca derruba a captura principal */ }
 
   const learnings = extractLearningDetails(tx, bugDetails);
   if (learnings) {

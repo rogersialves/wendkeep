@@ -4,6 +4,26 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.29.0] — 2026-07-09
+
+Codex decision parity — agnostic prose-decision capture.
+
+### Added
+- **Prose-decision capture** (`extractProseDecisions` / `captureProseDecisions` in
+  `hooks/decision-capture.mjs`, wired inside `createLinkedNotes`): Codex has no
+  `AskUserQuestion`-style tool — the agent asks in **prose**. A conservative pattern (assistant
+  message with ≥2 enumerated options ending in a question + a SHORT user reply) now produces the
+  **same decision note** the Claude hook writes (options + the user's choice, in `04-Decisões/`,
+  wikilinked to the session). One integration point covers **live Stop, `import` and backfill,
+  for every provider**. Validated on 144 real Codex rollouts: 6 genuine decisions extracted, no
+  visible false positives.
+
+### Notes (investigated, decided against)
+- **Codex subagent telemetry**: real rollouts contain **no** subagent/parallel structure — nothing
+  to map; documented as not applicable.
+- **Codex structured events** (`thread_goal_updated`, `task_complete`): goal payload ≈ the initial
+  prompt; task events are turn markers already parsed. No extra capture worth the noise.
+
 ## [0.28.1] — 2026-07-09
 
 Startup-contention fixes — root-caused from a real VSCode startup log where the memory injection
