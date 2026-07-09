@@ -4,6 +4,30 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.30.0] — 2026-07-09
+
+### Changed
+- **Decision notes follow the ADR convention: `ADR-<NNNN>-<slug>`.** Every decision note now carries
+  a 4-digit, zero-padded sequential number assigned in the order decisions are made (`ADR-0001`,
+  `ADR-0002`, …) — replacing the old `YYYY-MM-DD-escolha-<slug>` filenames from the interactive and
+  prose captures. The number goes in the filename, in an `adr:` frontmatter field, and as an
+  `# ADR-NNNN — <title>` H1 prefix. The native `wendkeep change archive` ADR and the
+  `createLinkedNotes` heuristic ADR widen from 3 to 4 digits (`ADR-007` → `ADR-0007`) to match.
+- **Decision capture dedups by `content_key`, not by filename.** Because the filename now carries a
+  fresh ADR number it can't dedup, so a decision already recorded in the target folder (same
+  normalized question) is skipped by content — both the AskUserQuestion hook (`captureDecision`) and
+  the agnostic prose capture (`captureProseDecisions`). New `decisionKeyExists` / `padAdr` helpers.
+
+### Added
+- **`wendkeep renumber-decisions`** — retroactive fix for vaults that accumulated the three historical
+  naming eras (`ADR-NNN`, dated `escolha`, hand-written). Renumbers **every** note in 04-Decisões to
+  `ADR-<NNNN>-<slug>` in strict chronological order, renames the files in place, and **rewrites every
+  wikilink to them across the whole vault** (full-path, basename, and `|ADR-006` display aliases).
+  Normalizes each note's `type: decision` / `adr:` / H1. Preview by default (writes nothing); pass
+  `--apply` to commit the renames. Idempotent — a second run on a canonical vault is a no-op.
+  `--vault P` / `--json`. New `hooks/renumber-decisions.mjs` (`planRenumber`, `renumberDecisions`,
+  `slugFromDecisionName`, `decisionSortKey`, `normalizeDecisionContent`, `rewriteLinks`).
+
 ## [0.29.2] — 2026-07-09
 
 ### Fixed

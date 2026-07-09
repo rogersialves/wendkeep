@@ -265,7 +265,7 @@ export function archiveChange(vaultBase, slug, { gate = gateGreen, dateStr, adrN
   // — not the year root — so all ADRs sit together in the vault's convention.
   const adrDirRel = monthFolderRelFromDateStr(loc.folders.decisions, dateStr, vaultBase);
   ensureDir(join(vaultBase, adrDirRel));
-  const num = String(adrNum).padStart(3, '0');
+  const num = String(adrNum).padStart(4, '0');
   const adrRel = join(adrDirRel, `ADR-${num}-${slug}.md`);
   const capLine = promoted.length
     ? `\n\nCapabilities: ${promoted.map((c) => wikilinkFromRel(join(loc.folders.specs, c))).join(', ')}.`

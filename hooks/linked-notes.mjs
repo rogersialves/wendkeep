@@ -38,7 +38,7 @@ function normalizeInline(text, max = 0) {
 
 function adrFileExistsBySlug(dir, slug) {
   try {
-    return readdirSync(dir).find((file) => /^ADR-\d{3}-.+\.md$/i.test(file) && file.includes(`-${slug}`));
+    return readdirSync(dir).find((file) => /^ADR-\d+-.+\.md$/i.test(file) && file.includes(`-${slug}`));
   } catch {
     return '';
   }
@@ -333,7 +333,7 @@ export function extractDecisionDetails(tx) {
 
 export function buildDecisionNoteContent(decision, adrNum, dateStr, sessionRel, provider = providerMeta(), contentKey = derivedContentKey(decision.title), localeId = 'pt-BR') {
   const L = noteLabels(localeId);
-  const adrId = `ADR-${String(adrNum).padStart(3, '0')}`;
+  const adrId = `ADR-${String(adrNum).padStart(4, '0')}`;
   return `---
 type: decision
 date: ${dateStr}
@@ -558,7 +558,7 @@ export function createLinkedNotes(vaultBase, dateStr, sessionRel, tx, options = 
     if (!alreadyHasKey(existingKeys.decisions, decisionKey)) {
       const titleSlug = slugify(decisionDetails.title, 'decisao', 40);
       const existing = adrFileExistsBySlug(decisionsDir, titleSlug);
-      const fileName = existing || `ADR-${String(getNextAdrNumber(vaultBase)).padStart(3, '0')}-${titleSlug}.md`;
+      const fileName = existing || `ADR-${String(getNextAdrNumber(vaultBase)).padStart(4, '0')}-${titleSlug}.md`;
       const filePath = join(decisionsDir, fileName);
       if (!existsSync(filePath)) {
         const adrNum = Number(fileName.match(/^ADR-(\d+)/i)?.[1]) || getNextAdrNumber(vaultBase);

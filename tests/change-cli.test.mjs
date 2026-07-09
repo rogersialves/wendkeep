@@ -145,11 +145,11 @@ test('archive requires a verdict when a task declares [req:]; ADR lists the req 
       for (const e of readdirSync(d, { withFileTypes: true })) {
         const p = join(d, e.name);
         if (e.isDirectory()) { const hit = find(p); if (hit) return hit; }
-        else if (e.name === 'ADR-001-x.md') return p;
+        else if (e.name === 'ADR-0001-x.md') return p;
       }
       return '';
     })(join(vault, '04-Decisões'));
-    assert.ok(adrPath, 'ADR-001-x.md found under 04-Decisões');
+    assert.ok(adrPath, 'ADR-0001-x.md found under 04-Decisões');
     assert.match(readFileSync(adrPath, 'utf8'), /X-1/);
   } finally { rmSync(vault, { recursive: true, force: true }); }
 });

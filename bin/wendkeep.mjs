@@ -60,6 +60,9 @@ Usage:
   wendkeep verify [--deep] [--change s]  Run a change's task sensors + record evidence (the gate);
                            --deep assembles the verification package for the wk-verify pass.
   wendkeep dashboard [--force]  (Re)generate the vault's folder-filtered Bases + 00-Dashboard MOC.
+  wendkeep renumber-decisions   Renumber 04-Decisões to ADR-<NNNN>-<slug> in chronological order,
+                           renaming files + rewriting every wikilink. Preview by default; --apply to
+                           write. --vault P · --json.
   wendkeep lesson add "t" "l"   Record a project-local lesson (injected at SessionStart).
   wendkeep validate-memory [path]  Validate .brain/CORE.md against the compaction
                            protocol (cap 25, 3 sections, no secrets/PII). Uses
@@ -160,6 +163,11 @@ async function main() {
     case 'dashboard': {
       const { runDashboard } = await import('../src/vault-views.mjs');
       runDashboard(rest);
+      break;
+    }
+    case 'renumber-decisions': {
+      const { runRenumberDecisions } = await import('../src/renumber.mjs');
+      runRenumberDecisions(rest);
       break;
     }
     case '--version':

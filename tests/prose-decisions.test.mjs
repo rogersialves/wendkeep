@@ -90,7 +90,7 @@ test('import of a Codex rollout with a prose Q&A captures the decision', async (
     assert.ok(r, 'imported');
     // decision note exists under 04-Decisões
     const found = [];
-    (function walk(d) { if (!existsSync(d)) return; for (const e of readdirSync(d, { withFileTypes: true })) { const p = join(d, e.name); if (e.isDirectory()) walk(p); else if (/escolha/.test(e.name)) found.push(p); } })(join(vault, '04-Decisões'));
+    (function walk(d) { if (!existsSync(d)) return; for (const e of readdirSync(d, { withFileTypes: true })) { const p = join(d, e.name); if (e.isDirectory()) walk(p); else if (/^ADR-\d+-/.test(e.name)) found.push(p); } })(join(vault, '04-Decisões'));
     assert.equal(found.length, 1, 'prose decision note created by import');
     assert.match(readFileSync(found[0], 'utf8'), /`as duas`/);
 
