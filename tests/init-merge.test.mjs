@@ -120,11 +120,15 @@ test('mergeSettings/mergeMcp: skipMcp omits dotcontext server but keeps hooks', 
   assert.equal(m.mcpServers.dotcontext, undefined, 'no project MCP entry');
 });
 
-test('mergeSettings: dotcontextHookLevel light omits PostToolUse', () => {
+test('mergeSettings: dotcontextHookLevel light omits dotcontext PostToolUse (keeps wendkeep\'s)', () => {
   const { settings } = mergeSettings(null, {
     vaultPath: '/v', withMcp: false, companions: ['dotcontext'], dotcontextHookLevel: 'light',
   });
-  assert.equal(settings.hooks.PostToolUse, undefined, 'no PostToolUse hook in light mode');
+  const post = (settings.hooks.PostToolUse || []).flatMap((g) => (g.hooks || []).map((h) => h.command));
+  // dotcontext's per-tool trace hook (Write|Edit|Bash dispatch) is dropped in light mode…
+  assert.ok(!post.some((c) => c.includes('@dotcontext/cli')), 'no dotcontext PostToolUse in light mode');
+  // …but wendkeep's own decision-capture PostToolUse (AskUserQuestion) is always wired.
+  assert.ok(post.includes('npx wendkeep hook decision-capture'), 'decision-capture still present');
   assert.ok((settings.hooks.SessionStart || []).length >= 1, 'SessionStart still present');
 });
 

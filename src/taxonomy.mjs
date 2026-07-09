@@ -44,6 +44,9 @@ export const HOOK_FILES = [
   'brain-reindex.mjs',
   'session-backfill.mjs',
   'import-sessions.mjs',
+  'decision-capture.mjs',
+  'subagent-stop.mjs',
+  'task-log.mjs',
   'vault-health.mjs',
   'understand-inject.mjs',
 ];
@@ -56,6 +59,9 @@ export const RUNNABLE_HOOKS = [
   'session-ensure',
   'session-stop',
   'session-backfill',
+  'decision-capture',
+  'subagent-stop',
+  'task-log',
   'brain-inject',
   'brain-recall',
   'brain-reindex',
@@ -85,6 +91,12 @@ export const SESSION_HOOKS = [
   { event: 'SessionStart', matcher: 'startup', name: 'session-start', timeout: 30, statusMessage: 'wendkeep: opening Obsidian session' },
   { event: 'Stop', matcher: null, name: 'session-stop', timeout: 60, statusMessage: 'wendkeep: writing session checkpoint' },
   { event: 'UserPromptSubmit', matcher: null, name: 'session-ensure', timeout: 30, statusMessage: 'wendkeep: ensuring active session' },
+  // Capture an interactive decision (AskUserQuestion) — options + the user's choice — into 04-Decisões.
+  { event: 'PostToolUse', matcher: 'AskUserQuestion', name: 'decision-capture', timeout: 15, statusMessage: 'wendkeep: recording decision' },
+  // Refresh subagent/workflow telemetry as each subagent finishes (resilient to a missed Stop).
+  { event: 'SubagentStop', matcher: null, name: 'subagent-stop', timeout: 20, statusMessage: 'wendkeep: subagent telemetry' },
+  // Log plan/task progress into the active session note when a task is marked complete.
+  { event: 'TaskCompleted', matcher: null, name: 'task-log', timeout: 10, statusMessage: 'wendkeep: plan progress' },
 ];
 
 export function hookCommand(name) {

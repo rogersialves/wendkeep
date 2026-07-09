@@ -4,6 +4,27 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.28.0] — 2026-07-09
+
+Three new hooks: decisions, subagents, plan progress.
+
+### Added
+- **Decision capture** (`PostToolUse` / `AskUserQuestion` → `hooks/decision-capture.mjs`): when the
+  agent asks the user to choose between options, the decision is recorded in `04-Decisões/` — the
+  question, **every** option (label + description), the user's choice (✅), and a wikilink to the
+  session. Explicit, high-signal decisions get full traceability in the graph. Shape validated
+  against real transcripts.
+- **Live subagent telemetry** (`SubagentStop` → `hooks/subagent-stop.mjs`): refreshes the session's
+  subagent/workflow cost notes the moment each subagent finishes (reuses `upsertSubagentUsage`), so
+  a session that never reaches `Stop` still has its telemetry. *Model choice stays the harness's
+  job — wendkeep observes, it does not impose a routing rule.*
+- **Plan progress log** (`TaskCompleted` → `hooks/task-log.mjs`): when a task is marked complete,
+  appends it to a durable `## Progresso do plano` section in the active session note (before
+  `## Encerramento`, so reopen can't strip it). A progress trail, not a fuzzy map to `tarefas.md`.
+
+All three are wired by `wendkeep init`, are fail-open, and localize (pt-BR / en). `--force`-free —
+they only read + append.
+
 ## [0.27.0] — 2026-07-08
 
 ### Fixed
