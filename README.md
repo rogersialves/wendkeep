@@ -1,5 +1,7 @@
 # wendkeep
 
+[Português](README.pt-BR.md) · **English**
+
 > **Your AI coding agent forgets every session. wendkeep makes it remember — in the Obsidian vault you already use.**
 
 [![npm](https://img.shields.io/npm/v/wendkeep.svg)](https://www.npmjs.com/package/wendkeep)
