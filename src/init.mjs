@@ -9,9 +9,12 @@ import { createInterface } from 'node:readline/promises';
 import {
   VAULT_FOLDERS,
   SESSION_HOOKS,
+  CHANGE_NUDGE_HOOKS,
+  CHANGE_GATE_HOOKS,
   MCP_SERVER_KEY,
   mcpServerEntry,
   hookCommand,
+  hookCommandLocal,
   deriveVaultDirName,
   selectableCompanions,
   resolveCompanions,
@@ -91,27 +94,45 @@ function backup(path) {
 
 // --- merges -----------------------------------------------------------------
 
-export function mergeSettings(existing, { vaultPath, withMcp, force, companions = [], skipMcp = [], dotcontextHookLevel = 'full' }) {
+// Comando preferido para um hook: node-direto quando o projeto tem o pacote local (alta
+// frequência sem cold-start de npx — ver R3 do design 0.31.0); senão o npx portátil.
+export function hookCommandFor(name, projectPath) {
+  try {
+    if (projectPath && existsSync(join(projectPath, 'node_modules', 'wendkeep', 'hooks', `${name}.mjs`))) {
+      return hookCommandLocal(name);
+    }
+  } catch { /* fs indisponível — npx */ }
+  return hookCommand(name);
+}
+
+export function mergeSettings(existing, { vaultPath, withMcp, force, companions = [], skipMcp = [], dotcontextHookLevel = 'full', projectPath = '' }) {
   const s = existing && typeof existing === 'object' ? { ...existing } : {};
   s.hooks = { ...(s.hooks || {}) };
   let added = 0;
-  // wendkeep's own session hooks + any companion-authored hooks. Stable-sort by
-  // `order` (default 0) so higher-order companion hooks (e.g. dotcontext's order 100)
-  // fold AFTER wendkeep's own within each event. A spec may carry its own `command`
-  // (dotcontext dispatch) instead of a wendkeep hook `name`.
-  const allSpecs = [...SESSION_HOOKS, ...companionHookSpecs(companions, { dotcontextHookLevel })].sort(
-    (a, b) => (a.order ?? 0) - (b.order ?? 0),
-  );
+  // wendkeep's own session hooks + the change-lifecycle hooks (0.31.0, default) + any
+  // companion-authored hooks. Stable-sort by `order` (default 0) so higher-order companion
+  // hooks (e.g. dotcontext's order 100) fold AFTER wendkeep's own within each event. A spec
+  // may carry its own `command` (dotcontext dispatch) instead of a wendkeep hook `name`.
+  const allSpecs = [
+    ...SESSION_HOOKS,
+    ...CHANGE_NUDGE_HOOKS,
+    ...CHANGE_GATE_HOOKS,
+    ...companionHookSpecs(companions, { dotcontextHookLevel }),
+  ].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
   for (const h of allSpecs) {
-    const command = h.command ?? hookCommand(h.name);
+    const command = h.command ?? (h.preferLocal ? hookCommandFor(h.name, projectPath) : hookCommand(h.name));
+    // Dual-recognition: um hook nomeado é reconhecido tanto na forma npx quanto na node-direta,
+    // para que trocar a forma preferida (ou re-initar noutra máquina) nunca duplique o grupo.
+    const candidates = h.command ? [h.command] : [hookCommand(h.name), hookCommandLocal(h.name)];
     const groups = Array.isArray(s.hooks[h.event]) ? [...s.hooks[h.event]] : [];
-    const owning = groups.find((g) => (g.hooks || []).some((x) => x.command === command));
+    const owning = groups.find((g) => (g.hooks || []).some((x) => candidates.includes(x.command)));
     if (owning) {
       // Already wired: never add a duplicate group (the old `if (present && !force)` fell through
       // under --force and appended a second identical group). Under --force, refresh the managed
       // entry's fields in place — without disturbing any sibling hooks the user grouped with it.
       if (force) {
-        const hk = owning.hooks.find((x) => x.command === command);
+        const hk = owning.hooks.find((x) => candidates.includes(x.command));
+        hk.command = command;
         hk.timeout = h.timeout;
         if (h.statusMessage) hk.statusMessage = h.statusMessage;
         if (h.matcher && (owning.hooks || []).length === 1) owning.matcher = h.matcher;
@@ -477,12 +498,12 @@ export async function runInit(argv) {
   const settingsRead = readJsonSafe(settingsPath);
   if (!settingsRead.ok) {
     // Unparseable existing file — never clobber. Drop a .new for manual merge.
-    const fresh = mergeSettings(null, { vaultPath, withMcp: args.mcp, force: true, companions, skipMcp, dotcontextHookLevel }).settings;
+    const fresh = mergeSettings(null, { vaultPath, withMcp: args.mcp, force: true, companions, skipMcp, dotcontextHookLevel, projectPath }).settings;
     writeJson(`${settingsPath}.new`, fresh);
     log(M.settingsBadJson(settingsPath));
   } else {
     const hadFile = settingsRead.data !== null;
-    const { settings, added } = mergeSettings(settingsRead.data, { vaultPath, withMcp: args.mcp, force: args.force, companions, skipMcp, dotcontextHookLevel });
+    const { settings, added } = mergeSettings(settingsRead.data, { vaultPath, withMcp: args.mcp, force: args.force, companions, skipMcp, dotcontextHookLevel, projectPath });
     if (hadFile) backup(settingsPath);
     writeJson(settingsPath, settings);
     log(M.settings(hadFile ? M.merged : M.created, added, hadFile ? M.bakSaved : ''));

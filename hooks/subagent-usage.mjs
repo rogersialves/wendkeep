@@ -208,7 +208,9 @@ function upsertSection(content, heading, body) {
   const esc = heading.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const re = new RegExp(`${esc}\\n[\\s\\S]*?(?=\\n## |$)`);
   if (re.test(content)) return content.replace(re, `${body}\n`);
-  for (const anchor of ['\n## Encerramento', '\n## Issues Linear', '\n## Pendências']) {
+  // Âncora ANTES de '## Pendências': o finalize do Stop reescreve o span Pendências→Encerramento
+  // inteiro, então qualquer seção inserida lá dentro seria apagada (visto em produção).
+  for (const anchor of ['\n## Pendências', '\n## Issues Linear', '\n## Encerramento']) {
     const i = content.indexOf(anchor);
     if (i >= 0) return `${content.slice(0, i)}\n\n${body}\n${content.slice(i)}`;
   }

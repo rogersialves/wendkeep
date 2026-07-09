@@ -50,6 +50,11 @@ export const HOOK_FILES = [
   'task-log.mjs',
   'vault-health.mjs',
   'understand-inject.mjs',
+  'change-context.mjs',
+  'change-warn.mjs',
+  'change-guard.mjs',
+  'change-nag.mjs',
+  'plan-capture.mjs',
 ];
 
 // Hook scripts that are safe to invoke directly via `wendkeep hook <name>`.
@@ -68,6 +73,11 @@ export const RUNNABLE_HOOKS = [
   'brain-reindex',
   'vault-health',
   'understand-inject',
+  'change-context',
+  'change-warn',
+  'change-guard',
+  'change-nag',
+  'plan-capture',
 ];
 
 // The MCP server entry wendkeep wires into .mcp.json so the agent can read/write the
@@ -106,6 +116,27 @@ export const SESSION_HOOKS = [
 export function hookCommand(name) {
   return `npx wendkeep hook ${name}`;
 }
+
+// Forma node-direta do comando de hook: 1 processo (~100-250ms) em vez dos 3 do npx (cold-start
+// de segundos no Windows). Usada pelos hooks de ALTA FREQUÊNCIA (por prompt / por tool-call)
+// quando o projeto tem wendkeep instalado localmente; o init decide (hookCommandFor).
+export function hookCommandLocal(name) {
+  return `node node_modules/wendkeep/hooks/${name}.mjs`;
+}
+
+// Hooks do lifecycle de change (0.31.0) — enforcement do loop a2. Nudges (contexto/aviso/
+// cobrança/captura de plano) e gate (deny/ask no Bash). Separados em dois grupos para
+// preservar a opção futura de gates opt-in; hoje o init wira TODOS por default.
+// preferLocal: alta frequência → invocação node-direta quando houver instalação local.
+export const CHANGE_NUDGE_HOOKS = [
+  { event: 'UserPromptSubmit', matcher: null, name: 'change-context', timeout: 15, order: 10, preferLocal: true, statusMessage: 'wendkeep: change ping' },
+  { event: 'PostToolUse', matcher: 'Edit|Write|MultiEdit', name: 'change-warn', timeout: 10, order: 10, preferLocal: true, statusMessage: 'wendkeep: change warn' },
+  { event: 'PostToolUse', matcher: 'ExitPlanMode', name: 'plan-capture', timeout: 15, order: 10, preferLocal: true, statusMessage: 'wendkeep: capturing approved plan' },
+  { event: 'Stop', matcher: null, name: 'change-nag', timeout: 15, order: 10, preferLocal: true, statusMessage: 'wendkeep: open tasks check' },
+];
+export const CHANGE_GATE_HOOKS = [
+  { event: 'PreToolUse', matcher: 'Bash', name: 'change-guard', timeout: 10, order: 10, preferLocal: true, statusMessage: 'wendkeep: change gate' },
+];
 
 // --- companion plugins / MCP --------------------------------------------------
 // Optional tools wendkeep init can pin alongside the vault. Each is wired through

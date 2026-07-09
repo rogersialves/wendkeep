@@ -46,6 +46,8 @@ test('wendkeep change new then archive: moves + writes ADR', () => {
     assert.equal(spawn(['new', 'x']).status, 0);
     fillScaffold(vault, 'x');
     writeFileSync(join(vault, '08-Mudanças', 'x', 'tarefas.md'), '- [x] 1.1 feito\n');
+    // 0.31.0: verdict sempre exigido — trivial destrava com o auto-verdict do verify --deep.
+    writeFileSync(join(vault, '08-Mudanças', 'x', 'verdict.json'), JSON.stringify({ slug: 'x', ok: true, coverage: [] }));
     const r = spawn(['archive', 'x']);
     assert.equal(r.status, 0, r.stderr);
     assert.ok(existsSync(join(vault, '08-Mudanças', '_arquivo')), 'archived dir exists');
@@ -84,7 +86,8 @@ test('archive blocked until verify green when a task declares a sensor', () => {
     const blocked = spawn(['change', 'archive', 'x']);
     assert.equal(blocked.status, 1, 'archive blocked without evidence');
     assert.match(blocked.stderr, /BLOCKED/);
-    assert.equal(spawn(['verify']).status, 0);
+    // 0.31.0: --deep também grava o auto-verdict (agora sempre exigido pelo gate)
+    assert.equal(spawn(['verify', '--deep']).status, 0);
     const ok = spawn(['change', 'archive', 'x']);
     assert.equal(ok.status, 0, ok.stderr);
   } finally { rmSync(vault, { recursive: true, force: true }); rmSync(proj, { recursive: true, force: true }); }
@@ -99,6 +102,7 @@ test('archive promotes spec deltas into 07-Specs (living contract)', () => {
     fillScaffold(vault, 'x');
     writeFileSync(join(vault, '08-Mudanças', 'x', 'proposta.md'), '---\ntype: change\nstatus: active\nspecs: [auth]\n---\n# x\n');
     writeFileSync(join(vault, '08-Mudanças', 'x', 'tarefas.md'), '- [x] 1.1 feito\n');
+    writeFileSync(join(vault, '08-Mudanças', 'x', 'verdict.json'), JSON.stringify({ slug: 'x', ok: true, coverage: [] }));
     mkdirSync(join(vault, '08-Mudanças', 'x', 'specs', 'auth'), { recursive: true });
     writeFileSync(join(vault, '08-Mudanças', 'x', 'specs', 'auth', 'spec.md'), '## ADDED Requirements\n### Requisito: Login\nusuário faz login\n');
     const r = spawn(['archive', 'x']);
@@ -120,7 +124,7 @@ test('warning sensor red does not block verify or archive', () => {
     writeFileSync(join(vault, '08-Mudanças', 'x', 'tarefas.md'), '- [x] 1.1 polish [sensor:style]\n');
     // style is a RED warning sensor (exit 1) — advisory, must NOT gate.
     writeFileSync(join(proj, 'wendkeep.sensors.json'), JSON.stringify({ version: 1, sensors: [{ id: 'style', severity: 'warning', command: 'exit 1' }] }));
-    assert.equal(spawn(['verify']).status, 0, 'red warning still passes verify');
+    assert.equal(spawn(['verify', '--deep']).status, 0, 'red warning still passes verify (--deep grava o auto-verdict)');
     const arch = spawn(['change', 'archive', 'x']);
     assert.equal(arch.status, 0, `red warning does not block archive; stderr=${arch.stderr}`);
   } finally { rmSync(vault, { recursive: true, force: true }); rmSync(proj, { recursive: true, force: true }); }
@@ -189,6 +193,7 @@ test('archive blocks on open tasks; --force overrides (G1)', () => {
     assert.equal(spawn(['new', 'x']).status, 0);
     fillScaffold(vault, 'x');
     writeFileSync(join(vault, '08-Mudanças', 'x', 'tarefas.md'), '- [ ] 1.1 pendente\n- [x] 1.2 feita\n');
+    writeFileSync(join(vault, '08-Mudanças', 'x', 'verdict.json'), JSON.stringify({ slug: 'x', ok: true, coverage: [] }));
     const blocked = spawn(['archive', 'x']);
     assert.equal(blocked.status, 1, 'open task blocks');
     assert.match(blocked.stderr, /aberta/i);
@@ -358,6 +363,135 @@ test('verify: 3rd round escalates with an auto-lesson instead of new fix tasks',
     assert.ok(existsSync(lessons), 'auto-lesson dir');
     assert.ok(readdirSync(lessons).some((f) => /mutantes-persistentes/.test(f)), 'auto-lesson written');
   } finally { rmSync(vault, { recursive: true, force: true }); rmSync(proj, { recursive: true, force: true }); }
+});
+
+// --- 0.31.0: gate endurecido + abandon + specs união ---------------------------
+
+test('archive exige verdict SEMPRE (mesmo sem [req:]); verify --deep destrava', () => {
+  const vault = mkdtempSync(join(tmpdir(), 'wk-vall-'));
+  const proj = mkdtempSync(join(tmpdir(), 'wk-vallp-'));
+  const spawn = (a) => spawnSync(process.execPath, [BIN, ...a, '--vault', vault, '--project', proj], { encoding: 'utf8' });
+  try {
+    mkdirSync(join(vault, '04-Decisões'), { recursive: true });
+    writeFileSync(join(proj, 'wendkeep.sensors.json'), JSON.stringify({ version: 1, sensors: [] }));
+    assert.equal(spawn(['change', 'new', 'x']).status, 0);
+    fillScaffold(vault, 'x');
+    writeFileSync(join(vault, '08-Mudanças', 'x', 'tarefas.md'), '- [x] 1.1 feito\n');
+    const blocked = spawn(['change', 'archive', 'x']);
+    assert.equal(blocked.status, 1, 'sem verdict bloqueia mesmo sem [req:]');
+    assert.match(blocked.stderr, /verdict.*verify --deep/i);
+    assert.equal(spawn(['verify', '--deep']).status, 0, 'auto-verdict trivial');
+    assert.equal(spawn(['change', 'archive', 'x']).status, 0, 'com verdict passa');
+  } finally { rmSync(vault, { recursive: true, force: true }); rmSync(proj, { recursive: true, force: true }); }
+});
+
+test('G0 inescapável: scaffold cru bloqueia mesmo com --force', () => {
+  const vault = mkdtempSync(join(tmpdir(), 'wk-g0f-'));
+  const spawn = (a) => spawnSync(process.execPath, [BIN, 'change', ...a, '--vault', vault], { encoding: 'utf8' });
+  try {
+    mkdirSync(join(vault, '04-Decisões'), { recursive: true });
+    assert.equal(spawn(['new', 'x']).status, 0);
+    const forced = spawn(['archive', 'x', '--force']);
+    assert.equal(forced.status, 1, '--force não pula G0');
+    assert.match(forced.stderr, /scaffold/i);
+    assert.match(forced.stderr, /abandon/i, 'mensagem aponta a saída legítima');
+  } finally { rmSync(vault, { recursive: true, force: true }); }
+});
+
+test('--force rastreável: ADR ganha forced: true + aviso; trivial ganha trivial: true', () => {
+  const vault = mkdtempSync(join(tmpdir(), 'wk-fflag-'));
+  const spawn = (a) => spawnSync(process.execPath, [BIN, 'change', ...a, '--vault', vault], { encoding: 'utf8' });
+  const findAdr = (name) => (function find(d) {
+    for (const e of readdirSync(d, { withFileTypes: true })) {
+      const p = join(d, e.name);
+      if (e.isDirectory()) { const hit = find(p); if (hit) return hit; }
+      else if (e.name === name) return p;
+    }
+    return '';
+  })(join(vault, '04-Decisões'));
+  try {
+    mkdirSync(join(vault, '04-Decisões'), { recursive: true });
+    // forced: tarefa aberta + verdict trivial válido + --force
+    assert.equal(spawn(['new', 'f1']).status, 0);
+    fillScaffold(vault, 'f1');
+    writeFileSync(join(vault, '08-Mudanças', 'f1', 'tarefas.md'), '- [ ] 1.1 pendente\n');
+    writeFileSync(join(vault, '08-Mudanças', 'f1', 'verdict.json'), JSON.stringify({ slug: 'f1', ok: true, coverage: [] }));
+    const forced = spawn(['archive', 'f1', '--force']);
+    assert.equal(forced.status, 0, forced.stderr);
+    const adr1 = readFileSync(findAdr('ADR-0001-f1.md'), 'utf8');
+    assert.match(adr1, /^forced: true$/m, 'frontmatter forced');
+    assert.match(adr1, /⚠️/, 'aviso no corpo');
+    assert.match(adr1, /^trivial: true$/m, 'sem req/sensor também é trivial');
+    assert.match(forced.stderr, /trivial/i, 'stderr avisa trivial');
+    // não-forced e não-trivial: nada de flags
+    assert.equal(spawn(['new', 'f2']).status, 0);
+    fillScaffold(vault, 'f2');
+    writeFileSync(join(vault, '08-Mudanças', 'f2', 'tarefas.md'), '- [x] 1.1 feito [req:F-1]\n');
+    writeFileSync(join(vault, '08-Mudanças', 'f2', 'verdict.json'), JSON.stringify({ slug: 'f2', ok: true, coverage: [{ req: 'F-1', covered: true }] }));
+    assert.equal(spawn(['archive', 'f2']).status, 0);
+    const adr2 = readFileSync(findAdr('ADR-0002-f2.md'), 'utf8');
+    assert.doesNotMatch(adr2, /forced: true/);
+    assert.doesNotMatch(adr2, /trivial: true/);
+  } finally { rmSync(vault, { recursive: true, force: true }); }
+});
+
+test('change abandon: move sem ADR, sem promoção, limpa ponteiro só da ativa', () => {
+  const vault = mkdtempSync(join(tmpdir(), 'wk-aband-'));
+  const spawn = (a) => spawnSync(process.execPath, [BIN, 'change', ...a, '--vault', vault], { encoding: 'utf8' });
+  try {
+    mkdirSync(join(vault, '04-Decisões'), { recursive: true });
+    assert.equal(spawn(['new', 'x']).status, 0);
+    // delta REAL no disco — abandono NÃO pode promover
+    mkdirSync(join(vault, '08-Mudanças', 'x', 'specs', 'auth'), { recursive: true });
+    writeFileSync(join(vault, '08-Mudanças', 'x', 'specs', 'auth', 'spec.md'), '## ADDED Requirements\n### Requisito: Login\nreal\n');
+    const r = spawn(['abandon', 'x']);
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stdout, /abandoned/);
+    const arch = readdirSync(join(vault, '08-Mudanças', '_arquivo')).find((d) => d.endsWith('-x-abandonada'));
+    assert.ok(arch, 'movida para _arquivo/<data>-x-abandonada');
+    assert.match(readFileSync(join(vault, '08-Mudanças', '_arquivo', arch, 'proposta.md'), 'utf8'), /^status: abandoned$/m);
+    assert.ok(!existsSync(join(vault, '07-Specs', 'auth.md')), '07-Specs intocado');
+    // nenhum ADR
+    const adrs = (function walk(d) {
+      let out = [];
+      for (const e of readdirSync(d, { withFileTypes: true })) {
+        const p = join(d, e.name);
+        if (e.isDirectory()) out = out.concat(walk(p));
+        else if (/^ADR-/.test(e.name)) out.push(p);
+      }
+      return out;
+    })(join(vault, '04-Decisões'));
+    assert.equal(adrs.length, 0, 'abandono não gera ADR');
+    // ponteiro limpo (era a ativa)
+    assert.match(readFileSync(join(vault, '.brain', 'CURRENT_CHANGE.md'), 'utf8'), /^change:\s*$/m);
+    // abandonar não-ativa preserva o ponteiro da ativa
+    assert.equal(spawn(['new', 'a']).status, 0);
+    assert.equal(spawn(['new', 'b']).status, 0); // b vira a ativa
+    assert.equal(spawn(['abandon', 'a']).status, 0);
+    assert.match(readFileSync(join(vault, '.brain', 'CURRENT_CHANGE.md'), 'utf8'), /^change: b$/m);
+    // slug inexistente
+    assert.equal(spawn(['abandon', 'nao-existe']).status, 2);
+  } finally { rmSync(vault, { recursive: true, force: true }); }
+});
+
+test('specs união: delta real no disco promove mesmo com specs: [] (warning); placeholder não', () => {
+  const vault = mkdtempSync(join(tmpdir(), 'wk-union-'));
+  const spawn = (a) => spawnSync(process.execPath, [BIN, 'change', ...a, '--vault', vault], { encoding: 'utf8' });
+  try {
+    mkdirSync(join(vault, '04-Decisões'), { recursive: true });
+    assert.equal(spawn(['new', 'x']).status, 0); // scaffold cria specs/exemplo placeholder
+    fillScaffold(vault, 'x');
+    writeFileSync(join(vault, '08-Mudanças', 'x', 'tarefas.md'), '- [x] 1.1 feito\n');
+    writeFileSync(join(vault, '08-Mudanças', 'x', 'verdict.json'), JSON.stringify({ slug: 'x', ok: true, coverage: [] }));
+    // proposta ficou com specs: [] (fillScaffold não mexe) — delta REAL só no disco
+    mkdirSync(join(vault, '08-Mudanças', 'x', 'specs', 'auth'), { recursive: true });
+    writeFileSync(join(vault, '08-Mudanças', 'x', 'specs', 'auth', 'spec.md'), '## ADDED Requirements\n### Requisito: Login\nusuário faz login\n');
+    const r = spawn(['archive', 'x']);
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(readFileSync(join(vault, '07-Specs', 'auth.md'), 'utf8'), /Requisito: Login/, 'delta do disco promovido');
+    assert.match(r.stderr, /não listada[^\n]*auth/i, 'warning da cap não listada');
+    assert.ok(!existsSync(join(vault, '07-Specs', 'exemplo.md')), 'placeholder exemplo filtrado');
+  } finally { rmSync(vault, { recursive: true, force: true }); }
 });
 
 test('verify --deep: trivial auto-writes verdict; a change with [req:] only writes the package', () => {

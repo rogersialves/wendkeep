@@ -1,7 +1,7 @@
 // hooks/spec-core.mjs — living spec (07-Specs) + change delta merge (OpenSpec native).
 // Pure parsing/merge + promoteSpecs (fs). No import from change-core (avoids a cycle).
 import { createHash } from 'node:crypto';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { ensureDir } from './obsidian-common.mjs';
 import { getLocale } from './locale.mjs';
@@ -85,6 +85,30 @@ export function parseSpecsList(propostaMd) {
   const block = text.match(/^specs:\s*\n((?:[ \t]+-[ \t]*.+\n?)+)/m);
   if (block) return block[1].split('\n').map((l) => l.replace(/^[ \t]*-[ \t]*/, '').trim().replace(/['"]/g, '')).filter(Boolean);
   return [];
+}
+
+// Um delta ainda no estado do scaffold (só o requisito "(nome)"/"(name)", nada removido) não é
+// contrato — a promoção o filtra. Um delta com REMOVED é sempre intenção real.
+export function isPlaceholderDelta(md) {
+  const d = parseDelta(md);
+  if (d.removed.length) return false;
+  const all = [...d.added, ...d.modified];
+  if (!all.length) return true;
+  return all.every((r) => /^\((?:nome|name)\)$/.test(r.name));
+}
+
+// Capabilities com delta REAL no disco (<change>/specs/<cap>/spec.md), independente do
+// frontmatter `specs:` da proposta — o scaffold deixa `specs: []` e o buraco engolia deltas
+// preenchidos mas não listados (visto em produção: 07-Specs vazio com delta real no disco).
+export function discoverSpecDeltas(changeDir) {
+  let names = [];
+  try { names = readdirSync(join(changeDir, 'specs')); } catch { return []; }
+  const caps = [];
+  for (const cap of names) {
+    try { if (!isPlaceholderDelta(readFileSync(join(changeDir, 'specs', cap, 'spec.md'), 'utf8'))) caps.push(cap); }
+    catch { /* sem spec.md */ }
+  }
+  return caps;
 }
 
 // Merge each capability's delta (in the change) into the living spec in 07-Specs.

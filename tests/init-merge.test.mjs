@@ -2,10 +2,61 @@
 // idempotently and without clobbering unrelated keys.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mergeSettings, mergeMcp } from '../src/init.mjs';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { mergeSettings, mergeMcp, hookCommandFor } from '../src/init.mjs';
 import { MCP_SERVER_KEY } from '../src/taxonomy.mjs';
 
 const UA_CMD = 'npx wendkeep hook understand-inject';
+
+// --- 0.31.0: hooks de lifecycle default + invocação node-direta -----------------
+
+test('mergeSettings: wira os 5 hooks de lifecycle nos eventos certos, por default', () => {
+  const { settings } = mergeSettings(null, { vaultPath: '/v', withMcp: true, companions: [] });
+  const cmdsOf = (ev) => (settings.hooks[ev] || []).flatMap((g) => (g.hooks || []).map((h) => h.command));
+  assert.ok(cmdsOf('UserPromptSubmit').some((c) => c.includes('change-context')), 'change-context em UserPromptSubmit');
+  assert.ok(cmdsOf('Stop').some((c) => c.includes('change-nag')), 'change-nag em Stop');
+  assert.ok(cmdsOf('PreToolUse').some((c) => c.includes('change-guard')), 'change-guard em PreToolUse');
+  const post = settings.hooks.PostToolUse || [];
+  assert.ok(post.some((g) => g.matcher === 'Edit|Write|MultiEdit' && g.hooks.some((h) => h.command.includes('change-warn'))), 'change-warn matcher Edit|Write');
+  assert.ok(post.some((g) => g.matcher === 'ExitPlanMode' && g.hooks.some((h) => h.command.includes('plan-capture'))), 'plan-capture matcher ExitPlanMode');
+  const guard = settings.hooks.PreToolUse.find((g) => g.hooks.some((h) => h.command.includes('change-guard')));
+  assert.equal(guard.matcher, 'Bash', 'guard só em Bash');
+  // sem instalação local no projeto → forma npx
+  assert.ok(cmdsOf('PreToolUse').some((c) => c === 'npx wendkeep hook change-guard'), 'fallback npx');
+});
+
+test('hookCommandFor: node-direto quando o pacote existe localmente; senão npx', () => {
+  const proj = mkdtempSync(join(tmpdir(), 'wk-hcf-'));
+  try {
+    assert.equal(hookCommandFor('change-guard', proj), 'npx wendkeep hook change-guard');
+    mkdirSync(join(proj, 'node_modules', 'wendkeep', 'hooks'), { recursive: true });
+    writeFileSync(join(proj, 'node_modules', 'wendkeep', 'hooks', 'change-guard.mjs'), '// stub');
+    assert.equal(hookCommandFor('change-guard', proj), 'node node_modules/wendkeep/hooks/change-guard.mjs');
+    assert.equal(hookCommandFor('x', ''), 'npx wendkeep hook x', 'sem projeto = npx');
+  } finally { rmSync(proj, { recursive: true, force: true }); }
+});
+
+test('mergeSettings: dual-recognition não duplica ao alternar npx ↔ node-direto', () => {
+  const proj = mkdtempSync(join(tmpdir(), 'wk-dual-'));
+  try {
+    // 1ª passada sem instalação local → npx
+    const one = mergeSettings(null, { vaultPath: '/v', withMcp: true, companions: [] }).settings;
+    // instala o pacote localmente e re-inita COM force → mesma entrada, comando atualizado
+    mkdirSync(join(proj, 'node_modules', 'wendkeep', 'hooks'), { recursive: true });
+    for (const n of ['change-context', 'change-warn', 'change-guard', 'change-nag', 'plan-capture']) {
+      writeFileSync(join(proj, 'node_modules', 'wendkeep', 'hooks', `${n}.mjs`), '// stub');
+    }
+    const two = mergeSettings(one, { vaultPath: '/v', withMcp: true, companions: [], force: true, projectPath: proj }).settings;
+    const guards = (two.hooks.PreToolUse || []).filter((g) => g.hooks.some((h) => h.command.includes('change-guard')));
+    assert.equal(guards.length, 1, 'sem grupo duplicado');
+    assert.equal(guards[0].hooks[0].command, 'node node_modules/wendkeep/hooks/change-guard.mjs', 'force migra pro node-direto');
+    // re-init de novo (idempotente)
+    const three = mergeSettings(two, { vaultPath: '/v', withMcp: true, companions: [], projectPath: proj }).settings;
+    assert.equal((three.hooks.PreToolUse || []).filter((g) => g.hooks.some((h) => h.command.includes('change-guard'))).length, 1);
+  } finally { rmSync(proj, { recursive: true, force: true }); }
+});
 
 test('mergeSettings: adds companion marketplaces + enabledPlugins', () => {
   const { settings } = mergeSettings(null, {

@@ -1,9 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, existsSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { WK_SKILLS, seedWkSkills } from '../src/skills-seed.mjs';
+import { WK_SKILLS, seedWkSkills, wkSkills } from '../src/skills-seed.mjs';
 
 test('WK_SKILLS: the process skills, each valid SKILL.md with matching name', () => {
   const names = WK_SKILLS.map((s) => s.name);
@@ -65,5 +65,32 @@ test('seedWkSkills: writes each SKILL.md + bundled templates, non-destructive', 
     const before = readFileSync(join(brain, 'skills', 'wk-verify', 'spec-reviewer-prompt.md'), 'utf8');
     assert.equal(seedWkSkills(brain).length, 0); // non-destructive
     assert.equal(readFileSync(join(brain, 'skills', 'wk-verify', 'spec-reviewer-prompt.md'), 'utf8'), before);
+  } finally { rmSync(brain, { recursive: true, force: true }); }
+});
+
+// --- 0.31.0: ativação da skill (paridade Superpowers) --------------------------
+
+test('wk-workflow: description com gatilhos concretos + "antes de editar"; HARD-GATE no corpo (pt+en)', () => {
+  for (const localeId of ['pt-BR', 'en']) {
+    const wf = wkSkills(localeId).find((s) => s.name === 'wk-workflow');
+    assert.match(wf.body, /<HARD-GATE>/, `${localeId}: HARD-GATE presente`);
+    const desc = (wf.body.match(/^description:\s*(.+)$/m) || [])[1];
+    assert.match(desc, /implement/i, `${localeId}: gatilho implementar`);
+    assert.match(desc, /refator|refactor/i, `${localeId}: gatilho refatorar`);
+    assert.match(desc, /ANTES de editar|BEFORE editing/i, `${localeId}: imperativo pré-edição`);
+  }
+});
+
+test('seedWkSkills refresh: sobrescreve SKILL.md existente (re-seed de vault antigo)', () => {
+  const brain = mkdtempSync(join(tmpdir(), 'wk-reseed-'));
+  try {
+    seedWkSkills(brain);
+    const f = join(brain, 'skills', 'wk-workflow', 'SKILL.md');
+    // simula a skill de uma versão antiga (conteúdo divergente)
+    writeFileSync(f, '---\nname: wk-workflow\ndescription: velha\n---\ncorpo velho\n', 'utf8');
+    assert.equal(seedWkSkills(brain).length, 0, 'sem refresh não sobrescreve');
+    const n = seedWkSkills(brain, 'pt-BR', { refresh: true });
+    assert.ok(n.length > 0, 'refresh reescreve');
+    assert.match(readFileSync(f, 'utf8'), /<HARD-GATE>/, 'conteúdo novo no lugar');
   } finally { rmSync(brain, { recursive: true, force: true }); }
 });

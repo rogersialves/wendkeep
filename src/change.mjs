@@ -8,6 +8,7 @@ import {
   parseTasks,
   setTaskDone,
   archiveChange,
+  abandonChange,
   scaffoldPlaceholders,
 } from '../hooks/change-core.mjs';
 import { evaluateGate, requiredSensors } from '../hooks/sensors-core.mjs';
@@ -104,8 +105,8 @@ export function runChange(argv) {
     const reqIds = [...new Set(tasks.map((t) => t.req).filter(Boolean))];
     let verdict = null;
     try { verdict = JSON.parse(readFileSync(join(dir, 'verdict.json'), 'utf8')); } catch { /* sem verdict */ }
-    if (!reqIds.length) process.stdout.write('verdict: não exigido (sem [req:])\n');
-    else if (!verdict) process.stdout.write('verdict: ausente — rode `wendkeep verify --deep` + wk-verify\n');
+    if (!verdict) process.stdout.write(`verdict: ausente — rode \`wendkeep verify --deep\`${reqIds.length ? ' + wk-verify' : ' (verdict trivial automático)'}\n`);
+    else if (!reqIds.length) process.stdout.write(`verdict: ${verdict.ok === true ? 'ok (trivial)' : 'não-ok — re-verifique'}\n`);
     else {
       const v = evaluateVerdict(verdict, reqIds, { tasksHash: tasksHashOf(tarefasMd) });
       process.stdout.write(`verdict: ${v.ok ? 'ok' : v.stale ? 'stale — re-verifique' : `incompleto: falta ${v.missing.join(', ')}`}\n`);
@@ -156,11 +157,11 @@ export function runChange(argv) {
     // Real gate (Pilar C): every sensor a task declared must be green in evidencia.json.
     const gate = (dir) => {
       // G0: um scaffold nunca preenchido não é uma mudança concluída — arquivar geraria um
-      // ADR falso. Bloqueia antes de qualquer outro check (o --force ainda escapa, mas a
-      // regra injetada proíbe o agente de usá-lo sem o usuário pedir).
+      // ADR falso. INESCAPÁVEL desde 0.31.0 (--force não pula — visto em produção: change
+      // 100% placeholder arquivada via --force mintou ADR falso). Saída legítima: abandon.
       const placeholders = scaffoldPlaceholders(dir);
-      if (placeholders.length && !rest.includes('--force')) {
-        return { ok: false, failing: [`scaffold não preenchido (${placeholders.join('; ')}) — preencha proposta/design/tarefas com o design e o plano antes de arquivar`] };
+      if (placeholders.length) {
+        return { ok: false, failing: [`scaffold não preenchido (${placeholders.join('; ')}) — preencha proposta/design/tarefas antes de arquivar, ou \`wendkeep change abandon ${slug}\` se a change não vai adiante (--force não pula este check)`] };
       }
       let tarefasMd = '';
       try { tarefasMd = readFileSync(join(dir, 'tarefas.md'), 'utf8'); } catch { /* no tasks */ }
@@ -185,17 +186,38 @@ export function runChange(argv) {
       try { evidence = JSON.parse(readFileSync(join(dir, 'evidencia.json'), 'utf8')); } catch { /* no evidence */ }
       const s = evaluateGate(evidence, required);
       if (!s.ok) return s;
-      // Independent verdict (Wave A): required only when the change declares [req:] tasks.
+      // Verdict SEMPRE exigido (0.31.0) — a exigência universal vive AQUI no gate; a semântica
+      // reqless→ok de evaluateVerdict (spec-core) não muda porque `verify --deep` e `change
+      // status` dependem dela. Change sem [req:] destrava com o auto-verdict do verify --deep.
       let verdict = null;
       try { verdict = JSON.parse(readFileSync(join(dir, 'verdict.json'), 'utf8')); } catch { /* none */ }
-      const v = evaluateVerdict(verdict, reqIds, { tasksHash: tasksHashOf(tarefasMd) });
-      if (!v.ok) {
-        if (v.stale) return { ok: false, failing: ['verdict stale (tarefas.md mudou depois da verificação) — re-verifique: `wendkeep verify --deep` + wk-verify'] };
-        return { ok: false, failing: verdict ? [`verdict incompleto: falta ${v.missing.join(', ')}`] : ['sem verdict — rode `wendkeep verify --deep` + skill wk-verify'] };
+      const hash = tasksHashOf(tarefasMd);
+      if (!verdict) {
+        return { ok: false, failing: [reqIds.length
+          ? 'sem verdict — rode `wendkeep verify --deep` + skill wk-verify'
+          : 'sem verdict — rode `wendkeep verify --deep` (verdict trivial automático)'] };
+      }
+      if (verdict.ok !== true) return { ok: false, failing: ['verdict não-ok — re-verifique a change antes de arquivar'] };
+      if (verdict.tasksHash && verdict.tasksHash !== hash) {
+        return { ok: false, failing: [`verdict stale (tarefas.md mudou depois da verificação) — re-verifique: \`wendkeep verify --deep\`${reqIds.length ? ' + wk-verify' : ''}`] };
+      }
+      if (reqIds.length) {
+        const v = evaluateVerdict(verdict, reqIds, { tasksHash: hash });
+        if (!v.ok) {
+          if (v.stale) return { ok: false, failing: ['verdict stale (tarefas.md mudou depois da verificação) — re-verifique: `wendkeep verify --deep` + wk-verify'] };
+          return { ok: false, failing: [`verdict incompleto: falta ${v.missing.join(', ')}`] };
+        }
       }
       return { ok: true, failing: [] };
     };
-    const r = archiveChange(vaultBase, slug, { dateStr: today(), adrNum: getNextAdrNumber(vaultBase), gate });
+    // Rastro auditável: forced só quando o --force de fato pulou G1 (tarefa aberta); trivial
+    // quando a change não declarou nenhuma prova ([req:]/[sensor:]).
+    let tasks = [];
+    try { tasks = parseTasks(readFileSync(join(vaultBase, getLocale(vaultBase).folders.changes, slug, 'tarefas.md'), 'utf8')); } catch { /* sem tarefas */ }
+    const forced = rest.includes('--force') && tasks.some((t) => !t.done);
+    const trivial = !tasks.some((t) => t.req) && !tasks.some((t) => t.sensor);
+    if (trivial) process.stderr.write('aviso: change trivial (sem [req:]/[sensor:]) — ADR marcado trivial: true\n');
+    const r = archiveChange(vaultBase, slug, { dateStr: today(), adrNum: getNextAdrNumber(vaultBase), gate, adrFlags: { forced, trivial } });
     if (!r.ok) {
       process.stderr.write(`change archive BLOCKED (gate): ${r.failing.join('; ')}\n`);
       process.exit(1);
@@ -206,6 +228,15 @@ export function runChange(argv) {
     process.exit(0);
   }
 
-  process.stderr.write(`wendkeep change: unknown subcommand "${sub}". Known: new, list, show, status, done, undone, diff, archive.\n`);
+  if (sub === 'abandon') {
+    const slug = slugArg() || activeChange(vaultBase);
+    if (!slug) { process.stderr.write('wendkeep change abandon: missing <slug> and no active change\n'); process.exit(2); }
+    const r = abandonChange(vaultBase, slug, { dateStr: today() });
+    if (!r.ok) { process.stderr.write(`wendkeep change abandon: ${r.failing.join('; ')}\n`); process.exit(2); }
+    process.stdout.write(`abandoned: ${r.archivedRel}\n`);
+    process.exit(0);
+  }
+
+  process.stderr.write(`wendkeep change: unknown subcommand "${sub}". Known: new, list, show, status, done, undone, diff, archive, abandon.\n`);
   process.exit(2);
 }

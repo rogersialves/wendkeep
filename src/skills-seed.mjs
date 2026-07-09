@@ -16,6 +16,12 @@ const WORKFLOW = `# Loop a2 — o ciclo de trabalho do wendkeep
 Use ao começar qualquer mudança não-trivial. O loop mantém memória (vault) e prova
 (sensores) juntas, tudo linkado no grafo do Obsidian.
 
+<HARD-GATE>
+NÃO edite arquivos de código antes do passo 2 (Propose / \`wendkeep change new\`).
+Toda tarefa não-trivial passa pelo loop — planejar no chat e sair editando deixa o
+vault cego. Exceção única: mudança trivial (typo, 1 linha).
+</HARD-GATE>
+
 ## Os passos
 
 1. **Explore** — entenda o problema antes de propor. Leia o código/contexto relevante.
@@ -221,6 +227,12 @@ const WORKFLOW_EN = `# The a2 loop — wendkeep's work cycle
 
 Use it when starting any non-trivial change. The loop keeps memory (vault) and proof
 (sensors) together, wikilinked in the Obsidian graph.
+
+<HARD-GATE>
+Do NOT edit code files before step 2 (Propose / \`wendkeep change new\`).
+Every non-trivial task goes through the loop — planning in chat and editing right away
+leaves the vault blind. Single exception: a trivial change (typo, one line).
+</HARD-GATE>
 
 ## Steps
 
@@ -518,21 +530,24 @@ size of the problem>
 <verifiable criteria: for each requirement, the test that fails → passes>
 `;
 
+// As descriptions são o gatilho de ativação: o harness casa a description com o PEDIDO do
+// usuário ("implementa X", "corrige Y"), não com abstrações ("mudança não-trivial"). Gatilhos
+// concretos + instrução imperativa = a skill dispara sozinha (paridade Superpowers).
 const WK_SKILLS_PT = [
-  skill('wk-workflow', 'Use ao começar qualquer mudança não-trivial — orquestra o loop a2 (explore, propose, apply, verify, archive) nos comandos wendkeep.', WORKFLOW),
+  skill('wk-workflow', 'Use SEMPRE que o usuário pedir para implementar, criar, corrigir, refatorar, adicionar ou alterar código — qualquer tarefa de código não-trivial. Invoque ANTES de editar qualquer arquivo: orquestra o loop a2 (wendkeep change new → tarefas → verify → archive) e registra tudo no vault.', WORKFLOW),
   skill('wk-tdd', 'Use ao implementar qualquer comportamento — Red/Green/Refactor com testes que discriminam (derivados do spec, litmus não-raso, adequação).', TDD),
-  skill('wk-debugging', 'Use quando algo falha ou quebra — depuração sistemática por hipótese antes de corrigir.', DEBUGGING),
-  skill('wk-brainstorming', 'Use quando a ideia ainda é vaga — vira design aprovado, com closure gate e tabela out-of-scope, antes de código.', BRAINSTORMING, [{ name: 'design-template.md', content: DESIGN_TEMPLATE_PT }]),
-  skill('wk-planning', 'Use após um design aprovado — decompõe em plano de tarefas TDD bite-sized.', PLANNING, [{ name: 'plan-template.md', content: PLAN_TEMPLATE_PT }]),
+  skill('wk-debugging', 'Use quando algo falha, quebra, dá erro ou regride — depuração sistemática por hipótese antes de corrigir.', DEBUGGING),
+  skill('wk-brainstorming', 'Use quando a ideia ainda é vaga ou o usuário quer discutir/planejar uma feature (inclusive em plan mode) — vira design aprovado, com closure gate e tabela out-of-scope, antes de código.', BRAINSTORMING, [{ name: 'design-template.md', content: DESIGN_TEMPLATE_PT }]),
+  skill('wk-planning', 'Use após um design aprovado ou um plano aceito (inclusive plan mode) — decompõe em plano de tarefas TDD bite-sized e registra na change ativa.', PLANNING, [{ name: 'plan-template.md', content: PLAN_TEMPLATE_PT }]),
   skill('wk-verify', 'Use no verify deep — passe independente read-only (autor≠verificador) que re-deriva a cobertura do spec e grava verdict.json.', VERIFY, [{ name: 'spec-reviewer-prompt.md', content: REVIEWER_PROMPT_PT }, { name: 'verdict-template.json', content: VERDICT_TEMPLATE }]),
 ];
 
 const WK_SKILLS_EN = [
-  skill('wk-workflow', 'Use when starting any non-trivial change — orchestrates the a2 loop (explore, propose, apply, verify, archive) over the wendkeep commands.', WORKFLOW_EN),
+  skill('wk-workflow', 'Use WHENEVER the user asks to implement, create, fix, refactor, add or change code — any non-trivial coding task. Invoke BEFORE editing any file: it orchestrates the a2 loop (wendkeep change new → tasks → verify → archive) and records everything in the vault.', WORKFLOW_EN),
   skill('wk-tdd', 'Use when implementing any behaviour — Red/Green/Refactor with tests that discriminate (spec-derived, non-shallow litmus, adequacy).', TDD_EN),
-  skill('wk-debugging', 'Use when something fails or breaks — systematic hypothesis-driven debugging before fixing.', DEBUGGING_EN),
-  skill('wk-brainstorming', 'Use when the idea is still vague — turns it into an approved design, with a closure gate and out-of-scope table, before code.', BRAINSTORMING_EN, [{ name: 'design-template.md', content: DESIGN_TEMPLATE_EN }]),
-  skill('wk-planning', 'Use after an approved design — decomposes it into a bite-sized TDD task plan.', PLANNING_EN, [{ name: 'plan-template.md', content: PLAN_TEMPLATE_EN }]),
+  skill('wk-debugging', 'Use when something fails, breaks, errors or regresses — systematic hypothesis-driven debugging before fixing.', DEBUGGING_EN),
+  skill('wk-brainstorming', 'Use when the idea is still vague or the user wants to discuss/plan a feature (plan mode included) — turns it into an approved design, with a closure gate and out-of-scope table, before code.', BRAINSTORMING_EN, [{ name: 'design-template.md', content: DESIGN_TEMPLATE_EN }]),
+  skill('wk-planning', 'Use after an approved design or an accepted plan (plan mode included) — decomposes it into a bite-sized TDD task plan recorded in the active change.', PLANNING_EN, [{ name: 'plan-template.md', content: PLAN_TEMPLATE_EN }]),
   skill('wk-verify', 'Use in verify deep — an independent read-only pass (author≠verifier) that re-derives spec coverage and writes verdict.json.', VERIFY_EN, [{ name: 'spec-reviewer-prompt.md', content: REVIEWER_PROMPT_EN }, { name: 'verdict-template.json', content: VERDICT_TEMPLATE }]),
 ];
 
@@ -545,20 +560,22 @@ export const WK_SKILLS = WK_SKILLS_PT;
 // Seed each skill into <brainDir>/skills/<name>/ if absent (non-destructive): SKILL.md plus any
 // bundled template/prompt files. Existing files are never overwritten, so re-seeding an older
 // install just fills in the new template files alongside its SKILL.md.
-export function seedWkSkills(brainDir, localeId = 'pt-BR') {
+// { refresh: true } (sync-defs --reseed) SOBRESCREVE as wk-* com os seeds atuais — é como um
+// vault existente recebe descriptions/HARD-GATE novos (edições manuais nas wk-* são perdidas).
+export function seedWkSkills(brainDir, localeId = 'pt-BR', { refresh = false } = {}) {
   const created = [];
   for (const s of wkSkills(localeId)) {
     const dir = join(brainDir, 'skills', s.name);
     mkdirSync(dir, { recursive: true });
-    const writeIfAbsent = (name, content) => {
+    const write = (name, content) => {
       const f = join(dir, name);
-      if (!existsSync(f)) {
+      if (refresh || !existsSync(f)) {
         writeFileSync(f, content, 'utf8');
         created.push(f);
       }
     };
-    writeIfAbsent('SKILL.md', s.body);
-    for (const file of s.files || []) writeIfAbsent(file.name, file.content);
+    write('SKILL.md', s.body);
+    for (const file of s.files || []) write(file.name, file.content);
   }
   return created;
 }

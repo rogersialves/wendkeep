@@ -4,6 +4,71 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.31.0] — 2026-07-09
+
+### Added — enforcement do loop a2 (o loop deixa de ser opcional na prática)
+
+- **5 hooks de lifecycle novos**, wired por default pelo `wendkeep init` (invocação **node-direta**
+  `node node_modules/wendkeep/hooks/<name>.mjs` quando o pacote está instalado no projeto —
+  ~100-250ms vs segundos do npx no Windows; fallback npx):
+  - **`change-context`** (UserPromptSubmit) — re-injeta a change ativa (`<active_change_ping>`:
+    slug + tarefas abertas) SÓ quando o estado mudou desde a última injeção (hash em sentinela por
+    sessão). Sem change ativa: prompt com cara de tarefa ganha `<wk_skill_gate>` mandando invocar
+    a Skill wk-workflow ANTES de editar — 1x por sessão.
+  - **`change-warn`** (PostToolUse `Edit|Write|MultiEdit`) — edição de código sem change ativa
+    gera aviso 1x/sessão (nunca bloqueia; ignora vault/.claude/.agent/.brain e não-código).
+  - **`change-guard`** (PreToolUse `Bash`) — `wendkeep change archive --force` vindo do agente é
+    **negado** (deny; escape: `WENDKEEP_ALLOW_FORCE=1` no ambiente); `git commit` com change ativa
+    E (`--no-verify` OU sensor crítico vermelho) vira **ask** (o usuário decide). Fast-path sem
+    I/O para comandos comuns.
+  - **`change-nag`** (Stop) — change ativa com tarefas abertas bloqueia o encerramento 1x/sessão
+    cobrando fechamento honesto (done / verify / **ou informar a pendência ao usuário**).
+    Anti-loop absoluto via `stop_hook_active`.
+  - **`plan-capture`** (PostToolUse `ExitPlanMode`) — **a ponte determinística plan-mode → vault**:
+    plano aprovado no plan mode do Claude Code vira change no vault (proposta do Contexto, design
+    do corpo, tarefas dos checkboxes) ou anexa `plano-aprovado.md` à change ativa. Não depende de
+    a LLM lembrar do processo.
+- **`wendkeep change abandon [slug]`** — a saída legítima para change que não vai adiante: move
+  para `_arquivo/<data>-<slug>-abandonada` com `status: abandoned`, SEM ADR, SEM promoção de
+  specs; limpa o ponteiro só se era a ativa. Elimina o motivo real de `--force` em scaffold.
+- **`quickGateState(vaultBase)`** + sentinelas por sessão (`.brain/.change-*-<sid>`, GC >7 dias no
+  Stop) em change-core — fonte única do estado do gate para hooks e CLI.
+- **`wendkeep sync-defs --reseed`** — re-semeia as skills wk-* de `.brain/skills` com os seeds da
+  versão instalada (é como um vault existente recebe as descriptions/HARD-GATE novos).
+
+### Changed — gate endurecido + ativação da skill
+
+- **Verdict SEMPRE exigido no archive** (breaking-ish): sem `verdict.json` o archive bloqueia,
+  mesmo sem `[req:]` — `wendkeep verify --deep` grava o verdict trivial automático (1 comando).
+  Changes em andamento criadas antes de 0.31.0 precisam de um `verify --deep` antes do archive.
+- **G0 inescapável**: `--force` deixa de pular o check de scaffold — um scaffold cru NUNCA é
+  arquivável (era o buraco que mintou ADR falso em produção).
+- **`--force` e trivialidade rastreáveis**: ADR ganha `forced: true` (+ aviso ⚠️ no corpo) quando
+  `--force` pulou tarefa aberta, e `trivial: true` quando a change não declarou `[req:]`/`[sensor:]`.
+- **Promoção de specs = união frontmatter + disco**: o archive promove também os deltas REAIS
+  achados em `specs/*/spec.md` mesmo com `specs: []` na proposta (warning por cap não listada;
+  o `exemplo` placeholder do scaffold é filtrado). Fecha o buraco que deixava 07-Specs vazio com
+  delta preenchido no disco.
+- **Ativação da skill (paridade Superpowers)**: descriptions das wk-* reescritas com gatilhos
+  concretos ("Use SEMPRE que o usuário pedir para implementar/criar/corrigir/refatorar…
+  Invoque ANTES de editar qualquer arquivo"); `<HARD-GATE>` no corpo da wk-workflow; o
+  `<wk_process>` do brain-inject agora manda **invocar a Skill** (verbo de skill) e cita `abandon`.
+
+### Fixed
+
+- **Seções apagadas pelo Stop (classe de bug, visto em produção)**: qualquer seção inserida entre
+  `## Pendências` e `## Encerramento` era descartada pelo finalize (`replacePendingSection`
+  reconstruía o span inteiro) — atingia `## Subagents & Workflows` (frontmatter sobrevivia, corpo
+  sumia), `## Progresso do plano` e `## Mudanças`. Duas camadas: `upsertSection` agora ancora
+  ANTES de `## Pendências`, e o finalize preserva seções desconhecidas dentro do span. Notas
+  antigas se autocuram no próximo Stop/backfill (os dados persistem em `subagents/`).
+
+### Known limitation (aceita e documentada)
+
+- Hooks do mesmo evento rodam em **paralelo** no Claude Code: quando o `change-nag` bloqueia o
+  Stop, o `session-stop` já finalizou a nota — o turno de continuação não é logado nela
+  (recuperável via `session-backfill`/`import`; perda máx. de 1 turno, 1x por sessão).
+
 ## [0.30.0] — 2026-07-09
 
 ### Changed

@@ -68,6 +68,7 @@ test('archiving a non-active change preserves the active pointer (item 2)', asyn
     assert.equal(spawn(['new', 'aaa']).status, 0);
     fill(vault, 'aaa');
     writeFileSync(join(vault, '08-Mudanças', 'aaa', 'tarefas.md'), '- [x] 1.1 feito\n');
+    writeFileSync(join(vault, '08-Mudanças', 'aaa', 'verdict.json'), JSON.stringify({ slug: 'aaa', ok: true, coverage: [] }));
     assert.equal(spawn(['new', 'bbb']).status, 0); // bbb is now the active pointer
     fill(vault, 'bbb');
     assert.equal(activeChange(vault), 'bbb');
@@ -85,6 +86,7 @@ test('archive is guarded against a pre-existing destination (item 3) + flips sta
     assert.equal(spawn(['new', 'x']).status, 0);
     fill(vault, 'x');
     writeFileSync(join(vault, '08-Mudanças', 'x', 'tarefas.md'), '- [x] 1.1 feito\n');
+    writeFileSync(join(vault, '08-Mudanças', 'x', 'verdict.json'), JSON.stringify({ slug: 'x', ok: true, coverage: [] }));
     const a1 = spawn(['archive', 'x']);
     assert.equal(a1.status, 0, a1.stderr);
     // archived proposta flipped to status: archived (item 4)
@@ -96,6 +98,7 @@ test('archive is guarded against a pre-existing destination (item 3) + flips sta
     assert.equal(spawn(['new', 'x']).status, 0);
     fill(vault, 'x');
     writeFileSync(join(vault, '08-Mudanças', 'x', 'tarefas.md'), '- [x] 1.1 de novo\n');
+    writeFileSync(join(vault, '08-Mudanças', 'x', 'verdict.json'), JSON.stringify({ slug: 'x', ok: true, coverage: [] }));
     const a2 = spawn(['archive', 'x']);
     assert.notEqual(a2.status, 0, 'second same-day archive of x is blocked by the dest guard');
     assert.match(a2.stderr, /já existe|exists/i);
@@ -122,8 +125,8 @@ test('archive blocks stale evidence after tarefas.md changed post-verify (item 1
     const blocked = spawn(['change', 'archive', 'x']);
     assert.equal(blocked.status, 1, 'stale evidence blocks archive');
     assert.match(blocked.stderr, /stale/i);
-    // re-verify -> fresh -> archive passes
-    assert.equal(spawn(['verify']).status, 0);
+    // re-verify -> fresh (--deep grava o auto-verdict, agora sempre exigido) -> archive passes
+    assert.equal(spawn(['verify', '--deep']).status, 0);
     assert.equal(spawn(['change', 'archive', 'x']).status, 0);
   } finally { rmSync(vault, { recursive: true, force: true }); rmSync(proj, { recursive: true, force: true }); }
 });

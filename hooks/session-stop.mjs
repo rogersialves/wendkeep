@@ -6,7 +6,7 @@ import { pathToFileURL } from 'url';
 import { createLinkedNotes } from './linked-notes.mjs';
 import { addUsage, costBreakdown, emptyTokenUsage, normalizeClaudeUsage, normalizeCodexUsage, priceForModel, updateSessionUsage } from './token-usage.mjs';
 import { buildBrainDigest, buildBrainIndex } from './brain-core.mjs';
-import { activeChangeLink } from './change-core.mjs';
+import { activeChangeLink, pruneChangeSentinels } from './change-core.mjs';
 import { getLocale } from './locale.mjs';
 import { upsertSubagentUsage } from './subagent-usage.mjs';
 import {
@@ -855,12 +855,19 @@ function replacePendingSection(content, pending) {
   const end = content.indexOf(closingMarker, start + marker.length);
   if (end === -1) return content;
 
+  // Preserva seções que outros writers inseriram dentro do span (## Subagents & Workflows,
+  // ## Progresso do plano, ## Mudanças…) — só o texto das Pendências em si é regenerado.
+  const span = content.slice(start + marker.length, end);
+  const innerIdx = span.indexOf('\n## ');
+  const preserved = innerIdx === -1 ? '' : span.slice(innerIdx).trimEnd();
+
   return [
     content.slice(0, start).trimEnd(),
     '',
     '## Pendências',
     '',
     formatPendingSection(pending),
+    ...(preserved ? [preserved] : []),
     content.slice(end),
   ].join('\n');
 }
@@ -1134,6 +1141,9 @@ function main() {
   } catch (error) {
     process.stderr.write(`[wendkeep] brain index/digest falhou: ${error.message}\n`);
   }
+
+  // GC das sentinelas dos hooks de lifecycle (>7 dias) — fail-quiet, nunca derruba o Stop.
+  try { pruneChangeSentinels(vaultBase); } catch { /* bônus */ }
 
   pingObsidianVault(input.obsidian_api_key);
   writeHookOutput({});

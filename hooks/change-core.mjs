@@ -1,10 +1,10 @@
 // hooks/change-core.mjs
 // Native change/spec lifecycle in the vault (Pilar B). Vault-facing lib consumed by
 // the `wendkeep change` CLI (src/change.mjs) and the brain-inject hook. No external deps.
-import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { ensureDir, wikilinkFromRel, monthFolderRelFromDateStr } from './obsidian-common.mjs';
-import { parseSpecsList, promoteSpecs } from './spec-core.mjs';
+import { parseSpecsList, promoteSpecs, discoverSpecDeltas, tasksHashOf } from './spec-core.mjs';
 import { getLocale } from './locale.mjs';
 
 export const ARCHIVE_DIR = '_arquivo';
@@ -183,6 +183,79 @@ export function activeChangeLink(vaultBase) {
   return slug ? `Change ativa: [[${getLocale(vaultBase).folders.changes}/${slug}/proposta]]` : '';
 }
 
+// --- Estado rápido do gate + sentinelas por sessão (0.31.0) --------------------
+// Fonte única e barata (só leituras, tudo fail-open) do estado do gate, consumida pelos hooks
+// de lifecycle (change-guard/change-nag/change-context) e pelo CLI. null sem change ativa.
+export function quickGateState(vaultBase) {
+  const slug = activeChange(vaultBase);
+  if (!slug) return null;
+  const dir = join(vaultBase, getLocale(vaultBase).folders.changes, slug);
+  let tarefasMd = '';
+  try { tarefasMd = readFileSync(join(dir, 'tarefas.md'), 'utf8'); } catch { /* sem tarefas */ }
+  const openTasks = parseTasks(tarefasMd).filter((t) => !t.done).length;
+  let redCritical = false;
+  try {
+    const ev = JSON.parse(readFileSync(join(dir, 'evidencia.json'), 'utf8'));
+    redCritical = (Array.isArray(ev) ? ev : []).some((e) => e.status !== 'green' && (e.severity || 'critical') !== 'warning');
+  } catch { /* sem/ilegível = não conta contra o nudge */ }
+  let evidenceStale = false;
+  try {
+    const h = readFileSync(join(dir, '.evidence-hash'), 'utf8').trim();
+    evidenceStale = Boolean(h) && h !== tasksHashOf(tarefasMd);
+  } catch { /* nunca selada */ }
+  return { slug, openTasks, redCritical, evidenceStale, placeholders: scaffoldPlaceholders(dir).length };
+}
+
+// Sentinelas por sessão em .brain/ — memória "já avisei/injetei nesta sessão" dos hooks de
+// lifecycle. kind: 'ctx' | 'warn' | 'nag' | 'gate'. session_id sanitizado para nome de arquivo.
+const sanitizeSid = (sid) => String(sid || 'nosession').replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 64);
+
+export function sentinelPath(vaultBase, kind, sid) {
+  return join(vaultBase, '.brain', `.change-${kind}-${sanitizeSid(sid)}`);
+}
+
+export function readSentinel(vaultBase, kind, sid) {
+  try { return readFileSync(sentinelPath(vaultBase, kind, sid), 'utf8').trim(); } catch { return ''; }
+}
+
+export function writeSentinel(vaultBase, kind, sid, value = '1') {
+  try {
+    mkdirSync(join(vaultBase, '.brain'), { recursive: true });
+    writeFileSync(sentinelPath(vaultBase, kind, sid), value, 'utf8');
+  } catch { /* fail-open: pior caso = aviso repetido */ }
+}
+
+// Estado da change ativa para o ping do change-context: hash inclui o slug para que trocar de
+// change com tarefas idênticas ainda re-pingue.
+export function changeCtxState(vaultBase, { maxTasks = 5 } = {}) {
+  const slug = activeChange(vaultBase);
+  if (!slug) return null;
+  let md = '';
+  try { md = readFileSync(join(vaultBase, getLocale(vaultBase).folders.changes, slug, 'tarefas.md'), 'utf8'); } catch { /* sem tarefas */ }
+  return { slug, hash: tasksHashOf(`${slug}\n${md}`), openTasks: parseTasks(md).filter((t) => !t.done).slice(0, maxTasks) };
+}
+
+// GC das sentinelas (>7 dias) — seleção pura separada da execução (testável sem depender de
+// unlink funcionar no sandbox). Roda no finalize do session-stop, fail-quiet.
+const SENTINEL_RE = /^\.change-(?:ctx|warn|nag|gate)-/;
+
+export function staleSentinelNames(entries, now = Date.now(), maxAgeMs = 7 * 86400000) {
+  return (entries || []).filter((e) => SENTINEL_RE.test(e.name) && now - e.mtimeMs > maxAgeMs).map((e) => e.name);
+}
+
+export function pruneChangeSentinels(vaultBase, { now = Date.now() } = {}) {
+  const dir = join(vaultBase, '.brain');
+  let entries = [];
+  try {
+    entries = readdirSync(dir)
+      .map((name) => { try { return { name, mtimeMs: statSync(join(dir, name)).mtimeMs }; } catch { return null; } })
+      .filter(Boolean);
+  } catch { return []; }
+  const stale = staleSentinelNames(entries, now);
+  for (const name of stale) { try { unlinkSync(join(dir, name)); } catch { /* fail-quiet */ } }
+  return stale;
+}
+
 // Append fix tasks for surviving mutants to a change's tarefas.md (Wave B). Deduped by
 // file:line, numbered M.<n> continuing from any existing fix tasks. Returns count added.
 export function appendFixTasks(changeDir, mutants, sensorId) {
@@ -214,7 +287,7 @@ export function gateGreen() {
   return { ok: true, failing: [] };
 }
 
-export function archiveChange(vaultBase, slug, { gate = gateGreen, dateStr, adrNum }) {
+export function archiveChange(vaultBase, slug, { gate = gateGreen, dateStr, adrNum, adrFlags = {} }) {
   const loc = getLocale(vaultBase);
   const chDir = loc.folders.changes;
   const src = join(vaultBase, chDir, slug);
@@ -233,16 +306,25 @@ export function archiveChange(vaultBase, slug, { gate = gateGreen, dateStr, adrN
   }
 
   // Promote spec deltas into the living 07-Specs BEFORE moving (deltas live in src).
+  // UNIÃO frontmatter + disco (0.31.0): o scaffold deixa `specs: []`, então um delta real
+  // preenchido em specs/<cap>/ mas não listado era silenciosamente ignorado. Deltas ainda em
+  // placeholder (o `exemplo` do scaffold) são filtrados por discoverSpecDeltas.
   let promoted = [];
   let specWarnings = [];
   try {
-    const specs = parseSpecsList(readFileSync(join(src, 'proposta.md'), 'utf8'));
-    if (specs.length) {
-      const res = promoteSpecs(vaultBase, src, specs, { changeWikilink, dateStr });
+    let listed = [];
+    try { listed = parseSpecsList(readFileSync(join(src, 'proposta.md'), 'utf8')); } catch { /* proposta ilegível */ }
+    const onDisk = discoverSpecDeltas(src);
+    const union = [...new Set([...listed, ...onDisk])];
+    if (union.length) {
+      const res = promoteSpecs(vaultBase, src, union, { changeWikilink, dateStr });
       promoted = res.promoted;
-      specWarnings = res.warnings;
+      specWarnings = [
+        ...onDisk.filter((c) => !listed.includes(c)).map((c) => `spec no disco não listada no frontmatter da proposta: ${c} — promovida assim mesmo`),
+        ...res.warnings,
+      ];
     }
-  } catch { /* proposta ilegível — segue só com ADR */ }
+  } catch { /* promoção falhou — segue só com ADR */ }
 
   let reqIds = [];
   try { reqIds = [...new Set(parseTasks(readFileSync(join(src, 'tarefas.md'), 'utf8')).map((t) => t.req).filter(Boolean))]; } catch { /* sem tarefas */ }
@@ -271,10 +353,13 @@ export function archiveChange(vaultBase, slug, { gate = gateGreen, dateStr, adrN
     ? `\n\nCapabilities: ${promoted.map((c) => wikilinkFromRel(join(loc.folders.specs, c))).join(', ')}.`
     : '';
   const reqLine = reqIds.length ? `\n\nRequisitos: ${reqIds.join(', ')}.` : '';
+  // Rastro auditável (0.31.0): um archive forçado ou sem prova declarada fica marcado no ADR.
+  const flagLines = `${adrFlags.forced ? '\nforced: true' : ''}${adrFlags.trivial ? '\ntrivial: true' : ''}`;
+  const forcedNote = adrFlags.forced ? '\n\n> ⚠️ Arquivada com --force — havia tarefa(s) aberta(s) pulada(s) no gate.' : '';
   writeFileSync(join(vaultBase, adrRel), `---
 type: decision
 status: accepted
-date: ${dateStr}
+date: ${dateStr}${flagLines}
 cssclasses:
   - topic-decision
 tags:
@@ -285,11 +370,31 @@ tags:
 
 ## Decisão
 
-Mudança ${changeWikilink} concluída e arquivada.${capLine}${reqLine}
+Mudança ${changeWikilink} concluída e arquivada.${capLine}${reqLine}${forcedNote}
 `, 'utf8');
 
   // Only clear the pointer when the archived change IS the active one — archiving some other
   // slug explicitly must not blank the pointer of a different, still-active change.
   if (activeChange(vaultBase) === slug) clearActiveChange(vaultBase);
   return { ok: true, failing: [], archivedRel: destRel, adrRel, promoted, specWarnings };
+}
+
+// Abandono (0.31.0): a saída legítima para uma change que não vai adiante — o que antes só o
+// `archive --force` "resolvia", minting um ADR falso. Sem ADR, sem promoteSpecs (abandono não é
+// decisão arquitetural nem promove contrato); move para _arquivo com sufixo -abandonada.
+export function abandonChange(vaultBase, slug, { dateStr }) {
+  const chDir = getLocale(vaultBase).folders.changes;
+  const src = join(vaultBase, chDir, slug);
+  if (!existsSync(join(src, 'proposta.md'))) return { ok: false, failing: [`change não encontrada: ${slug}`] };
+  const destRel = join(chDir, ARCHIVE_DIR, `${dateStr}-${slug}-abandonada`);
+  const destAbs = join(vaultBase, destRel);
+  if (existsSync(destAbs)) return { ok: false, failing: [`destino já existe: ${destRel}`] };
+  ensureDir(join(vaultBase, chDir, ARCHIVE_DIR));
+  try { renameSync(src, destAbs); } catch (e) { return { ok: false, failing: [`falha ao mover: ${e.message}`] }; }
+  try {
+    const pp = join(destAbs, 'proposta.md');
+    writeFileSync(pp, readFileSync(pp, 'utf8').replace(/^status:\s*active\s*$/m, 'status: abandoned'), 'utf8');
+  } catch { /* proposta sem frontmatter — segue */ }
+  if (activeChange(vaultBase) === slug) clearActiveChange(vaultBase);
+  return { ok: true, failing: [], archivedRel: destRel };
 }

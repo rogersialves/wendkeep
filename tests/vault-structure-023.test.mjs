@@ -92,6 +92,7 @@ test('archive writes the ADR under the dated month folder, not the year root', (
     writeFileSync(join(vault, '08-Mudanças', 'x', 'proposta.md'), '---\ntype: change\nstatus: active\nspecs: []\n---\n\n# x\n\n## Por quê\n\nA.\n\n## O que muda\n\nB.\n');
     writeFileSync(join(vault, '08-Mudanças', 'x', 'design.md'), '# x — design\n\n## Abordagem\n\nC.\n');
     writeFileSync(join(vault, '08-Mudanças', 'x', 'tarefas.md'), '- [x] 1.1 feito\n');
+    writeFileSync(join(vault, '08-Mudanças', 'x', 'verdict.json'), JSON.stringify({ slug: 'x', ok: true, coverage: [] }));
     const r = spawn(['archive', 'x']);
     assert.equal(r.status, 0, r.stderr);
     // ADR path: 04-Decisões/<year>/<MM-MMM>/ADR-...  (month folder present, not year root)

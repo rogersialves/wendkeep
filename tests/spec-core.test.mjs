@@ -3,7 +3,30 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { parseRequirements, parseDelta, applyDelta, renderSpec, parseSpecsList, promoteSpecs, evaluateVerdict, tasksHashOf } from '../hooks/spec-core.mjs';
+import { parseRequirements, parseDelta, applyDelta, renderSpec, parseSpecsList, promoteSpecs, evaluateVerdict, tasksHashOf, isPlaceholderDelta, discoverSpecDeltas } from '../hooks/spec-core.mjs';
+
+test('isPlaceholderDelta: scaffold puro true; delta real/REMOVED false; bilíngue', () => {
+  const scaffoldPt = '## ADDED Requirements\n### Requisito: (nome)\n(comportamento / cenários)\n\n## MODIFIED Requirements\n\n## REMOVED Requirements\n';
+  const scaffoldEn = '## ADDED Requirements\n### Requirement: (name)\n(behaviour / scenarios)\n\n## MODIFIED Requirements\n\n## REMOVED Requirements\n';
+  assert.equal(isPlaceholderDelta(scaffoldPt), true);
+  assert.equal(isPlaceholderDelta(scaffoldEn), true);
+  assert.equal(isPlaceholderDelta('## ADDED Requirements\n\n## MODIFIED Requirements\n'), true, 'delta vazio = placeholder');
+  assert.equal(isPlaceholderDelta('## ADDED Requirements\n### Requisito: Login\nreal\n'), false);
+  assert.equal(isPlaceholderDelta('## REMOVED Requirements\n### Requisito: Velho\nx\n'), false, 'REMOVED é intenção real');
+});
+
+test('discoverSpecDeltas: lista caps com delta real; ignora placeholder; [] sem specs/', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'wk-disc-'));
+  try {
+    assert.deepEqual(discoverSpecDeltas(dir), [], 'sem specs/');
+    mkdirSync(join(dir, 'specs', 'exemplo'), { recursive: true });
+    writeFileSync(join(dir, 'specs', 'exemplo', 'spec.md'), '## ADDED Requirements\n### Requisito: (nome)\n(comportamento / cenários)\n');
+    mkdirSync(join(dir, 'specs', 'auth'), { recursive: true });
+    writeFileSync(join(dir, 'specs', 'auth', 'spec.md'), '## ADDED Requirements\n### Requisito: Login\nreal\n');
+    mkdirSync(join(dir, 'specs', 'vazio'), { recursive: true }); // sem spec.md
+    assert.deepEqual(discoverSpecDeltas(dir), ['auth']);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
 
 test('evaluateVerdict: tasksHash mismatch = stale; sem hash no verdict = retrocompat', () => {
   const v = { ok: true, coverage: [{ req: 'A-1', covered: true }], tasksHash: 'abc123' };

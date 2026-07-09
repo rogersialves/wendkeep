@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { getVaultBase, readHookInput, writeHookOutput } from './obsidian-common.mjs';
 import { brainDir } from './brain-core.mjs';
-import { buildActiveChangeInjection } from './change-core.mjs';
+import { buildActiveChangeInjection, changeCtxState, writeSentinel } from './change-core.mjs';
 import { buildLessonsInjection } from './lessons-core.mjs';
 import { getLocale } from './locale.mjs';
 
@@ -19,23 +19,23 @@ function processRouter(localeId) {
   if (localeId === 'en') {
     return [
       '<wk_process>',
-      'Spec-driven process (mandatory for any non-trivial task):',
-      '1. Plan: skill wk-brainstorming (approved design) → wk-planning (task plan).',
+      'Spec-driven process (mandatory for any non-trivial task): INVOKE the wk-workflow Skill BEFORE editing any file.',
+      '1. Plan: invoke the wk-brainstorming Skill (approved design) → wk-planning (task plan).',
       '2. Record: `wendkeep change new <slug>` and FILL 08-Changes/<slug>/ — proposta.md (why/what), design.md (the approved approach), tarefas.md (the plan\'s tasks, `- [ ] N.N` with [req:ID]/[sensor:id]). Never leave the scaffold placeholders.',
       '3. Implement: wk-tdd per task; tick `- [x]` as you finish. Something broke? wk-debugging.',
-      '4. Close: `wendkeep verify` (+ `--deep` + skill wk-verify) → `wendkeep change archive`.',
-      'NEVER `archive --force` on your own — a red gate means pending work; --force is the user\'s call, not yours.',
+      '4. Close: `wendkeep verify` (+ `--deep` + the wk-verify Skill) → `wendkeep change archive`.',
+      'NEVER `archive --force` on your own — a red gate means pending work; --force is the user\'s call, not yours. Dead end? `wendkeep change abandon`.',
       '</wk_process>',
     ].join('\n');
   }
   return [
     '<wk_process>',
-    'Processo spec-driven (obrigatório em tarefa não-trivial):',
-    '1. Planejar: skill wk-brainstorming (design aprovado) → wk-planning (plano de tarefas).',
+    'Processo spec-driven (obrigatório em tarefa não-trivial): INVOQUE a Skill wk-workflow ANTES de editar qualquer arquivo.',
+    '1. Planejar: invoque a Skill wk-brainstorming (design aprovado) → wk-planning (plano de tarefas).',
     '2. Registrar: `wendkeep change new <slug>` e PREENCHA 08-Mudanças/<slug>/ — proposta.md (porquê/o quê), design.md (a abordagem aprovada), tarefas.md (as tarefas do plano, `- [ ] N.N` com [req:ID]/[sensor:id]). Nunca deixe os placeholders do scaffold.',
     '3. Implementar: wk-tdd por tarefa; marque `- [x]` ao concluir. Quebrou algo? wk-debugging.',
-    '4. Fechar: `wendkeep verify` (+ `--deep` + skill wk-verify) → `wendkeep change archive`.',
-    'PROIBIDO `archive --force` por conta própria — gate vermelho significa trabalho pendente; --force é decisão do usuário, não sua.',
+    '4. Fechar: `wendkeep verify` (+ `--deep` + Skill wk-verify) → `wendkeep change archive`.',
+    'PROIBIDO `archive --force` por conta própria — gate vermelho significa trabalho pendente; --force é decisão do usuário, não sua. Beco sem saída? `wendkeep change abandon`.',
     '</wk_process>',
   ].join('\n');
 }
@@ -65,12 +65,19 @@ export function buildInjection(vaultBase) {
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   try {
     const input = readHookInput();
+    const vaultBase = getVaultBase(input);
     writeHookOutput({
       hookSpecificOutput: {
         hookEventName: 'SessionStart',
-        additionalContext: buildInjection(getVaultBase(input)),
+        additionalContext: buildInjection(vaultBase),
       },
     });
+    // Sentinela do change-context: a change ativa acabou de ser injetada aqui, então o hook de
+    // UserPromptSubmit não precisa re-pingar no 1º prompt. Bônus — nunca derruba a injeção.
+    try {
+      const st = changeCtxState(vaultBase);
+      if (st) writeSentinel(vaultBase, 'ctx', input.session_id || input.sessionId || '', st.hash);
+    } catch { /* sentinela é bônus */ }
   } catch (error) {
     process.stderr.write(`[brain] inject falhou: ${error.message}\n`);
     writeHookOutput({});

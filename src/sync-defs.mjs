@@ -7,6 +7,8 @@
 // cross-platform robustness.
 import { copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { isAbsolute, join, resolve } from 'node:path';
+import { seedWkSkills } from './skills-seed.mjs';
+import { getLocale } from '../hooks/locale.mjs';
 
 // Managed AGENTS.md section (0.8.0): the agent-agnostic distribution channel. Codex, Amp,
 // Cursor, Zed et al. read AGENTS.md — one file covers them all. Only the content between
@@ -114,6 +116,12 @@ export function runSyncDefs(argv) {
   }
   const vaultBase = isAbsolute(base) ? base : resolve(process.cwd(), base);
   const projectPath = resolve(project || process.cwd());
+  // --reseed (0.31.0): sobrescreve as wk-* de .brain/skills com os seeds da versão instalada
+  // ANTES de copiar — é como um vault existente recebe descriptions/HARD-GATE novos.
+  if (argv.includes('--reseed')) {
+    const n = seedWkSkills(join(vaultBase, '.brain'), getLocale(vaultBase).id, { refresh: true });
+    process.stdout.write(`wendkeep sync-defs: ${n.length} arquivo(s) de skill re-semeados em .brain/skills\n`);
+  }
   const r = syncDefs(vaultBase, projectPath);
   process.stdout.write(
     `wendkeep sync-defs: ${r.agents.length} agent(s) -> .codex/agents, ${r.skills.length} skill(s) -> .claude/skills\n`,

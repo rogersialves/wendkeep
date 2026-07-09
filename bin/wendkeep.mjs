@@ -44,7 +44,8 @@ Usage:
 
   wendkeep doctor [--vault P]  Run a vault health check.
   wendkeep change <sub>        Change lifecycle: new [--simple] | list | show | status |
-                           done <id> | undone <id> | diff | archive [--force].
+                           done <id> | undone <id> | diff | archive [--force] | abandon [slug].
+                           archive exige verdict (rode verify --deep); abandon descarta sem ADR.
   wendkeep spec <sub>          Living specs: list | show <capability>.
   wendkeep sensors <sub>       list | add <id> "<command>" [--severity --type --report].
   wendkeep cost [opts]         Aggregate AI-coding spend across the vault's sessions.
@@ -70,6 +71,8 @@ Usage:
   wendkeep sync-defs [opts]    Copy versioned defs from the vault's .brain into the
                            project: .brain/agents/*.toml -> .codex/agents,
                            .brain/skills/<name> -> .claude/skills. --vault P --project P.
+                           --reseed re-semeia as skills wk-* com os seeds da versão instalada
+                           (sobrescreve edições manuais nas wk-*) antes de copiar.
   wendkeep --version           Print version.
   wendkeep --help              Show this help.
 `;
