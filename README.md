@@ -16,7 +16,7 @@ npm i -D wendkeep && npx wendkeep init      # captures from the next session on
 npx wendkeep import                          # backfill past Claude + Codex sessions
 ```
 
-**▶ [Live demo](http://rsa-automation.me/wendkeep/)** — the interactive knowledge‑graph hero (also at [`docs/index.html`](docs/index.html) to run locally). The image above is a static render of it.
+**▶ Interactive demo:** [`docs/index.html`](docs/index.html) — a self-contained page with the live knowledge‑graph hero. Open it locally (or serve `docs/` on any static host). The image above is a static render of it.
 
 > **From one real production vault** (`npx wendkeep stats`): **308** sessions · **1,696** prompts · **$4,836** captured across **46 active days** (Jan–Jul 2026) · **15** models — every one a note in the graph.
 
