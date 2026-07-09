@@ -4,6 +4,22 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.27.0] — 2026-07-08
+
+### Fixed
+- **Re-running `wendkeep init` no longer re-asks for the vault (or language) — and can't split your
+  data.** On a project already set up, init now reads the registered vault from
+  `.claude/settings.json` (`OBSIDIAN_VAULT_PATH`) and the locked locale from the vault's
+  `.brain/config.json`, reuses both, and skips the prompts. Previously a re-run (e.g. after
+  `npm i -D wendkeep@latest`) offered the *derived* default (`.<project>-vault`); accepting it — or
+  mistyping the name — created a **second, divergent vault**. `--vault` / `--locale` still override.
+  New exported `detectRegisteredVault()` / `readVaultLocale()`. `src/init.mjs`.
+
+### Note
+- You do **not** need `wendkeep init` for a routine update: the hooks live in the package
+  (`settings.json` calls `npx wendkeep hook …`), so `npm i -D wendkeep@latest` updates them.
+  Re-run `init` only when a release adds new wiring (the CHANGELOG says so); it's idempotent.
+
 ## [0.26.0] — 2026-07-08
 
 ### Fixed

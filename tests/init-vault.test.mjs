@@ -8,9 +8,32 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { deriveVaultDirName, VAULT_FOLDERS } from '../src/taxonomy.mjs';
 import { renderVaultReadme } from '../src/vault-readme.mjs';
-import { parseLocaleAnswer, promptStrings, initMessages } from '../src/init.mjs';
+import { parseLocaleAnswer, promptStrings, initMessages, detectRegisteredVault, readVaultLocale } from '../src/init.mjs';
 
 const BIN = join(dirname(fileURLToPath(import.meta.url)), '..', 'bin', 'wendkeep.mjs');
+
+test('re-init recognizes the registered vault + locale and never creates a divergent one', () => {
+  const proj = mkdtempSync(join(tmpdir(), 'wk-reinit-'));
+  const run = (extra) => spawnSync(process.execPath, [BIN, 'init', '--project', proj, ...extra, '--no-companions', '--no-colors', '--yes'], { encoding: 'utf8' });
+  try {
+    // first install into a NON-default vault name
+    const first = run(['--vault', join(proj, '.CustomVault'), '--locale', 'pt-BR']);
+    assert.equal(first.status, 0, first.stderr);
+    // it's now registered where a prior init would read it
+    assert.equal(detectRegisteredVault(proj), join(proj, '.CustomVault'));
+    assert.equal(readVaultLocale(join(proj, '.CustomVault')), 'pt-BR');
+
+    // re-run WITHOUT --vault / --locale (as after `npm i -D wendkeep@latest`)
+    const second = run([]);
+    assert.equal(second.status, 0, second.stderr);
+    assert.match(second.stdout, /registrado|registered/);
+    assert.match(second.stdout, /\.CustomVault/);
+    // the derived default vault (.<project>-vault) was NOT created — no data split
+    const derived = join(proj, `.${dirname(proj) ? proj.split(/[\\/]/).pop() : 'x'}-vault`);
+    assert.ok(!existsSync(derived), 'no divergent default vault created');
+    assert.ok(existsSync(join(proj, '.CustomVault', '02-Sessões')), 'reused the registered vault');
+  } finally { rmSync(proj, { recursive: true, force: true }); }
+});
 
 test('init output follows the vault locale (summary, steps, next-steps)', () => {
   assert.match(initMessages('pt-BR').nextSteps, /Próximos passos/);

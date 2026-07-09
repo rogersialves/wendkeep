@@ -249,6 +249,7 @@ const MESSAGES = {
     step3: '  3. Abra o Claude Code neste projeto e envie um prompt de teste.',
     step4: '  4. Confirme que uma nota aparece em 02-Sessões/<ano>/<mês>/DIA <dd>/ no vault.',
     updateLater: '  Atualize depois com: npm update wendkeep  (sem recopiar — os hooks vivem no pacote).\n',
+    vaultRegistered: (v, loc) => `\n  cofre já registrado neste projeto: ${v} (locale ${loc}) — pergunta pulada. Use --vault para mudar.`,
   },
   en: {
     header: '\nwendkeep init',
@@ -273,6 +274,7 @@ const MESSAGES = {
     step3: '  3. Open Claude Code in this project and send a test prompt.',
     step4: '  4. Confirm a note appears under 02-Sessões/<year>/<month>/DIA <dd>/ in the vault.',
     updateLater: '  Update later with: npm update wendkeep  (no re-copying — hooks live in the package).\n',
+    vaultRegistered: (v, loc) => `\n  vault already registered for this project: ${v} (locale ${loc}) — prompt skipped. Use --vault to change.`,
   },
 };
 
@@ -287,13 +289,39 @@ export function parseLocaleAnswer(ans) {
   return 'pt-BR';
 }
 
+// The vault path this project was set up with — read from .claude/settings.json's
+// OBSIDIAN_VAULT_PATH (written by a prior init). Empty when the project isn't configured yet.
+export function detectRegisteredVault(projectPath) {
+  try {
+    const s = JSON.parse(readFileSync(join(projectPath, '.claude', 'settings.json'), 'utf8'));
+    const v = s && s.env && s.env.OBSIDIAN_VAULT_PATH;
+    return typeof v === 'string' && v ? v : '';
+  } catch { return ''; }
+}
+
+// The locale locked in a vault's .brain/config.json (empty if absent/invalid).
+export function readVaultLocale(vaultPath) {
+  try {
+    const c = JSON.parse(readFileSync(join(vaultPath, '.brain', 'config.json'), 'utf8'));
+    return c && LOCALES[c.locale] ? c.locale : '';
+  } catch { return ''; }
+}
+
 export async function runInit(argv) {
   const args = parseArgs(argv);
   const projectPath = resolve(args.project || process.cwd());
   const log = (s) => process.stdout.write(`${s}\n`);
 
-  // Language first (i18n): an interactive TTY without --locale is asked the vault language;
-  // folders, prompts and scaffold all follow the answer.
+  // Recognize an already-configured project: the vault is registered in the project's
+  // settings.json (OBSIDIAN_VAULT_PATH) and its locale is locked in the vault's config.json.
+  // On re-run (e.g. after `npm i -D wendkeep@latest`) we reuse both and SKIP the language + vault
+  // prompts — asking again risks a divergent vault from a mistyped name. `--vault` / `--locale`
+  // override; the vault question is a once-per-project thing.
+  const registeredVault = args.vault ? '' : detectRegisteredVault(projectPath);
+  if (registeredVault && !args.locale) args.locale = readVaultLocale(registeredVault) || args.locale;
+
+  // Language first (i18n): an interactive TTY without --locale (and not already registered) is
+  // asked the vault language; folders, prompts and scaffold all follow the answer.
   if (!args.locale && process.stdin.isTTY && !args.yes) {
     const rl = createInterface({ input: process.stdin, output: process.stdout });
     const ans = await rl.question('Idioma do vault / Vault language:\n  [1] Português (pt-BR)   [2] English (en)\n> ');
@@ -304,8 +332,10 @@ export async function runInit(argv) {
   const P = promptStrings(resolvedLocale);
   const M = initMessages(resolvedLocale);
 
-  let vaultPath = args.vault;
-  if (!vaultPath) {
+  let vaultPath = args.vault || registeredVault;
+  if (registeredVault) {
+    log(M.vaultRegistered(registeredVault, resolvedLocale));
+  } else if (!vaultPath) {
     const fallback = join(projectPath, deriveVaultDirName(projectPath));
     if (process.stdin.isTTY && !args.yes) {
       const rl = createInterface({ input: process.stdin, output: process.stdout });
