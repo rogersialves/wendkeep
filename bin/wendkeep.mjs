@@ -54,6 +54,7 @@ Usage:
   wendkeep import [opts]       Backfill: import this project's past Claude + Codex sessions into
                            the vault (deduped by session_id). --source all|claude|codex (default
                            all) · --stamp-ids (backfill session_id in existing notes) ·
+                           --rescan-decisions (capture prose decisions from already-imported transcripts) ·
                            --from <dir> · --codex-from <dir> · --since <date> · --limit N ·
                            --dry-run · --json.
   wendkeep verify [--deep] [--change s]  Run a change's task sensors + record evidence (the gate);

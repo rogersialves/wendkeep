@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { extractProseDecisions, captureProseDecisions } from '../hooks/decision-capture.mjs';
 import { createLinkedNotes } from '../hooks/linked-notes.mjs';
-import { importSession } from '../hooks/import-sessions.mjs';
+import { importSession, rescanDecisions } from '../hooks/import-sessions.mjs';
 
 function turnWith(conv) { return { turnId: 't', timestamp: '', userPrompts: [], assistantMessages: [], tools: [], consultedFiles: [], changedFiles: [], conversation: conv, usage: {} }; }
 
@@ -70,7 +70,7 @@ test('captureProseDecisions writes the decision note; createLinkedNotes links it
   } finally { rmSync(vault, { recursive: true, force: true }); }
 });
 
-test('import of a Codex rollout with a prose Q&A captures the decision', () => {
+test('import of a Codex rollout with a prose Q&A captures the decision', async () => {
   const src = mkdtempSync(join(tmpdir(), 'wk-cdx-prose-'));
   const vault = mkdtempSync(join(tmpdir(), 'wk-vault-prose-'));
   try {
@@ -93,5 +93,23 @@ test('import of a Codex rollout with a prose Q&A captures the decision', () => {
     (function walk(d) { if (!existsSync(d)) return; for (const e of readdirSync(d, { withFileTypes: true })) { const p = join(d, e.name); if (e.isDirectory()) walk(p); else if (/escolha/.test(e.name)) found.push(p); } })(join(vault, '04-Decisões'));
     assert.equal(found.length, 1, 'prose decision note created by import');
     assert.match(readFileSync(found[0], 'utf8'), /`as duas`/);
+
+    // --- rescan-decisions: recovers decisions for sessions imported BEFORE 0.29 ---
+    // True pre-0.29 state: the registry knows the transcript, but no decision note was ever
+    // written. Simulated with a FRESH vault + a hand-written registry entry (no deletion — file
+    // deletion is unreliable in this sandbox).
+    const { upsertSessionRegistry } = await import('../hooks/obsidian-common.mjs');
+    const vaultB = mkdtempSync(join(tmpdir(), 'wk-rescan-'));
+    try {
+      upsertSessionRegistry(vaultB, 'cdx-d1', {
+        session_file: '02-Sessões/2026/07-JUL/DIA 01/07-00-s.md', status: 'done',
+        started_at: '2026-07-01T10:00:01', transcript_path: join(day, 'rollout-2026-07-01T10-00-00-cdx-d1.jsonl'),
+      });
+      const r1 = rescanDecisions(vaultB);
+      assert.equal(r1.scanned, 1);
+      assert.equal(r1.decisions, 1, 'rescan captured the never-captured decision');
+      const r2 = rescanDecisions(vaultB);
+      assert.equal(r2.decisions, 0, 'rescan is idempotent (note now exists)');
+    } finally { rmSync(vaultB, { recursive: true, force: true }); }
   } finally { rmSync(src, { recursive: true, force: true }); rmSync(vault, { recursive: true, force: true }); }
 });

@@ -3,7 +3,7 @@
 // by session_id). One command backfills your whole history: cost, subagents, iterations.
 import { existsSync } from 'node:fs';
 import { isAbsolute, resolve } from 'node:path';
-import { runImport, stampSessionIds } from '../hooks/import-sessions.mjs';
+import { runImport, stampSessionIds, rescanDecisions } from '../hooks/import-sessions.mjs';
 
 function opt(argv, name) {
   const i = argv.indexOf(name);
@@ -17,6 +17,16 @@ export function runImportCli(argv) {
   if (!vaultRaw) { process.stderr.write('wendkeep import: no vault (--vault or OBSIDIAN_VAULT_PATH).\n'); process.exit(2); }
   const vaultBase = isAbsolute(vaultRaw) ? vaultRaw : resolve(process.cwd(), vaultRaw);
   if (!existsSync(vaultBase)) { process.stderr.write(`wendkeep import: vault not found: ${vaultBase}\n`); process.exit(2); }
+
+  // Repair mode: re-scan already-imported transcripts for prose decisions only, then stop.
+  if (argv.includes('--rescan-decisions')) {
+    const r = rescanDecisions(vaultBase, { limit: Number(opt(argv, '--limit')) || 0 });
+    if (argv.includes('--json')) { process.stdout.write(`${JSON.stringify(r, null, 2)}\n`); process.exit(0); }
+    process.stdout.write(`${r.scanned} transcript(s) varridos · ${r.decisions} decisão(ões) capturadas\n`);
+    for (const s of r.sessions) for (const n of s.notes) process.stdout.write(`  → ${n}\n`);
+    if (r.errors.length) for (const e of r.errors) process.stderr.write(`  erro ${e.sessionId}: ${e.error}\n`);
+    process.exit(0);
+  }
 
   // Repair mode: backfill session_id into existing notes from the registry, then stop.
   if (argv.includes('--stamp-ids')) {

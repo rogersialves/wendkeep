@@ -18,8 +18,9 @@ import { buildSessionContent, allocateSessionPath } from './session-start.mjs';
 import { createLinkedNotes } from './linked-notes.mjs';
 import { updateSessionUsage } from './token-usage.mjs';
 import { upsertSubagentUsage } from './subagent-usage.mjs';
-import { readSessionRegistry, upsertSessionRegistry, formatLocalIso, formatDate } from './obsidian-common.mjs';
+import { readSessionRegistry, upsertSessionRegistry, formatLocalIso, formatDate, providerMeta } from './obsidian-common.mjs';
 import { getLocale } from './locale.mjs';
+import { captureProseDecisions } from './decision-capture.mjs';
 
 // Claude encodes a project's absolute path as its `.claude/projects` dir name by replacing each
 // path separator and the drive colon with '-'. `C:\GitHub\WendKeep` -> `C--GitHub-WendKeep`.
@@ -235,6 +236,37 @@ export function importSession(vaultBase, txPath, opts = {}) {
   });
 
   return { sessionId, relPath, turns: turns.length };
+}
+
+// Re-scan ALREADY-imported/captured transcripts for prose decisions only (no session re-import).
+// For sessions imported before 0.29.0, whose transcripts carry options-in-prose choices that were
+// never captured. Walks the registry (session_file + transcript_path), parses each transcript and
+// runs captureProseDecisions — filename-deduped, so re-running is a no-op. Fail-soft per session.
+export function rescanDecisions(vaultBase, { limit = 0 } = {}) {
+  const sessions = readSessionRegistry(vaultBase).sessions || {};
+  const report = { scanned: 0, decisions: 0, errors: [], sessions: [] };
+  let done = 0;
+  for (const [sessionId, entry] of Object.entries(sessions)) {
+    if (!entry?.transcript_path || !entry.session_file) continue;
+    if (!existsSync(entry.transcript_path)) continue;
+    if (limit && done >= limit) break;
+    report.scanned += 1;
+    done += 1;
+    try {
+      const tx = parseTranscript(entry.transcript_path);
+      const dateStr = String(entry.started_at || entry.ended_at || '').slice(0, 10) || formatDate(new Date());
+      const written = captureProseDecisions(vaultBase, {
+        tx, dateStr, sessionRel: entry.session_file, provider: providerMeta(tx.provider),
+      });
+      if (written.length) {
+        report.decisions += written.length;
+        report.sessions.push({ sessionId, notes: written });
+      }
+    } catch (error) {
+      report.errors.push({ sessionId, error: error.message });
+    }
+  }
+  return report;
 }
 
 // Stamp a missing/empty `session_id` into a note's frontmatter (only within the frontmatter

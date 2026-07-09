@@ -4,6 +4,15 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.29.1] — 2026-07-09
+
+### Added
+- **`wendkeep import --rescan-decisions`** — re-scan **already-imported/captured** transcripts for
+  prose decisions only (no session re-import). For sessions imported before 0.29.0 whose rollouts
+  carry options-in-prose choices that were never captured. Walks the registry
+  (`session_file` + `transcript_path`), runs the same conservative extraction, dedupes by filename
+  — re-running is a no-op. `--limit N` / `--json` supported. New `rescanDecisions()` export.
+
 ## [0.29.0] — 2026-07-09
 
 Codex decision parity — agnostic prose-decision capture.
