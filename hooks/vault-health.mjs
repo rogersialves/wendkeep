@@ -71,14 +71,14 @@ function hasDefaultPending(content) {
     .some((line) => DEFAULT_PENDING_PATTERNS.some((pattern) => pattern.test(line.trim())));
 }
 
-function usageSectionIsPlaced(content) {
+function usageSectionIsPlaced(content, { active = false } = {}) {
   const usage = content.indexOf('\n## Uso de tokens e custos');
   if (usage === -1) return true;
   const changed = content.indexOf('\n## Arquivos criados ou alterados');
   const pending = content.indexOf('\n## Pendências');
   const closing = content.indexOf('\n## Encerramento');
-  if (pending === -1 || closing === -1) return false;
-  return usage < pending && usage < closing && (changed === -1 || usage > changed);
+  if (pending === -1 || (!active && closing === -1)) return false;
+  return usage < pending && (active || usage < closing) && (changed === -1 || usage > changed);
 }
 
 function linkedNotesFromSession(content) {
@@ -103,13 +103,14 @@ function checkSession({ vaultBase, sessionRel, control, registry }) {
   }
 
   const content = readFileSync(sessionPath, 'utf-8');
+  const activeSession = control.status === 'active' && control.session_file === sessionRel;
   const duplicates = findDuplicateTurnMarkers(content);
   metrics.turnMarkers = (content.match(/<!-- (?:wk-turn|codex-turn):/g) || []).length;
   metrics.duplicateTurnMarkers = duplicates.length;
 
   if (duplicates.length) failures.push(`Marcadores de turno duplicados: ${duplicates.join(', ')}`);
   if (hasHeadingAfterClosing(content)) failures.push('Há headings/iterações após ## Encerramento.');
-  if (!usageSectionIsPlaced(content)) failures.push('## Uso de tokens e custos está fora da posição esperada.');
+  if (!usageSectionIsPlaced(content, { active: activeSession })) failures.push('## Uso de tokens e custos está fora da posição esperada.');
   if (hasDefaultPending(content)) warnings.push('Pendências ainda contém placeholders padrão.');
 
   const registryEntry = registry.sessions?.[control.session_id];

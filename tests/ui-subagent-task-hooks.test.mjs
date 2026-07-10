@@ -27,6 +27,19 @@ test('parseAnswers extracts the "Q"="answer" pairs', () => {
   assert.equal(a['Scope?'], 'Just X');
 });
 
+test('parseAnswers extracts structured Claude Code tool_response answers', () => {
+  const a = parseAnswers({
+    questions: [{ question: 'Qual direção?', options: [] }],
+    answers: {
+      'Qual direção?': 'A — Cockpit Soft',
+      'Quais módulos?': ['Home', 'Alunos'],
+    },
+  });
+  assert.equal(a['Qual direção?'], 'A — Cockpit Soft');
+  assert.equal(a['Quais módulos?'], 'Home,Alunos');
+  assert.equal(a.questions, undefined);
+});
+
 test('buildDecisionCaptureNote lists every option and marks the chosen one', () => {
   const note = buildDecisionCaptureNote({
     questions: [{ question: 'What next?', multiSelect: true, options: [{ label: 'Option A', description: 'do A' }, { label: 'Option B', description: 'do B' }] }],
@@ -44,8 +57,8 @@ test('buildDecisionCaptureNote lists every option and marks the chosen one', () 
   assert.match(note, /\[\[02-Sessões\/2026\/07-JUL\/DIA 09\/10-00-demo\]\]/); // session link
 });
 
-test('captureDecision writes a decision note to 04-Decisões', () => {
-  const { vault } = vaultWithSession();
+test('captureDecision writes a decision note to 04-Decisões and links the live session', () => {
+  const { vault, rel } = vaultWithSession();
   try {
     const r = captureDecision(vault, {
       tool_name: 'AskUserQuestion',
@@ -58,9 +71,26 @@ test('captureDecision writes a decision note to 04-Decisões', () => {
     const c = readFileSync(path, 'utf8');
     assert.match(c, /Deploy agora\?/);
     assert.match(c, /✅ \| Sim/);
+    assert.match(readFileSync(join(vault, rel), 'utf8'), /04-Decisões\/.+ADR-/);
     // idempotent same day+question
     const again = captureDecision(vault, { tool_name: 'AskUserQuestion', tool_input: { questions: [{ question: 'Deploy agora?', options: [] }] }, tool_output: '"Deploy agora?"="Sim"' });
     assert.ok(again.skipped, 'second capture same day is a no-op');
+  } finally { rmSync(vault, { recursive: true, force: true }); }
+});
+
+test('captureDecision records the chosen option from structured tool_response', () => {
+  const { vault } = vaultWithSession();
+  try {
+    const question = 'Qual direção visual?';
+    const r = captureDecision(vault, {
+      tool_name: 'AskUserQuestion',
+      tool_input: { questions: [{ question, options: [{ label: 'A — Cockpit Soft', description: 'tema suave' }] }] },
+      tool_response: { answers: { [question]: 'A — Cockpit Soft' } },
+    });
+    const note = readFileSync(join(vault, r.rel), 'utf8');
+    assert.match(note, /✅ \| A — Cockpit Soft/);
+    assert.match(note, /\*\*Escolhido:\*\* `A — Cockpit Soft`/);
+    assert.doesNotMatch(note, /não registrado/);
   } finally { rmSync(vault, { recursive: true, force: true }); }
 });
 

@@ -1,7 +1,7 @@
 // hooks/spec-core.mjs — living spec (07-Specs) + change delta merge (OpenSpec native).
 // Pure parsing/merge + promoteSpecs (fs). No import from change-core (avoids a cycle).
 import { createHash } from 'node:crypto';
-import { readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { ensureDir } from './obsidian-common.mjs';
 import { getLocale } from './locale.mjs';
@@ -87,6 +87,49 @@ export function parseSpecsList(propostaMd) {
   return [];
 }
 
+function yamlScalar(text, key) {
+  const m = String(text).match(new RegExp(`^${key}:\\s*(.*)$`, 'm'));
+  return m ? m[1].trim().replace(/^['"]|['"]$/g, '') : '';
+}
+
+export function parseSpecImpact(propostaMd) {
+  const text = String(propostaMd || '');
+  const status = yamlScalar(text, 'spec_impact') || yamlScalar(text, 'spec-impact');
+  const reason = yamlScalar(text, 'spec_impact_reason') || yamlScalar(text, 'spec-impact-reason');
+  return { status, reason };
+}
+
+export function validateSpecImpact(changeDir) {
+  let proposta = '';
+  try { proposta = readFileSync(join(changeDir, 'proposta.md'), 'utf8'); }
+  catch { return { ok: false, errors: ['proposta.md ausente'], warnings: [], status: '', listed: [], onDisk: [] }; }
+
+  const { status, reason } = parseSpecImpact(proposta);
+  const listed = parseSpecsList(proposta);
+  const onDisk = discoverSpecDeltas(changeDir);
+  const enforced = existsSync(join(changeDir, '.spec-impact-v1'));
+  const errors = [];
+  const warnings = [];
+
+  if (!status) {
+    if (enforced) errors.push('spec_impact ausente — classifique como required ou none');
+    else warnings.push('change legada sem spec_impact — migre para required ou none antes do próximo ciclo');
+    return { ok: errors.length === 0, errors, warnings, status: '', listed, onDisk, legacy: !enforced };
+  }
+  if (!['pending', 'required', 'none'].includes(status)) errors.push(`spec_impact inválido: ${status}`);
+  if (status === 'pending') errors.push('spec_impact pending — classifique o impacto antes de arquivar');
+  if (status === 'none') {
+    if (!reason) errors.push('spec_impact none exige justificativa em spec_impact_reason');
+    if (listed.length || onDisk.length) errors.push('spec_impact none contradiz specs/deltas declarados');
+  }
+  if (status === 'required') {
+    if (!listed.length) errors.push('spec_impact required exige ao menos uma capability em specs');
+    for (const cap of listed) if (!onDisk.includes(cap)) errors.push(`delta real ausente para capability ${cap}`);
+    for (const cap of onDisk) if (!listed.includes(cap)) errors.push(`delta ${cap} existe no disco mas não está listado em specs`);
+  }
+  return { ok: errors.length === 0, errors, warnings, status, reason, listed, onDisk, legacy: false };
+}
+
 // Um delta ainda no estado do scaffold (só o requisito "(nome)"/"(name)", nada removido) não é
 // contrato — a promoção o filtra. Um delta com REMOVED é sempre intenção real.
 export function isPlaceholderDelta(md) {
@@ -118,9 +161,11 @@ export function promoteSpecs(vaultBase, changeDir, specs, { changeWikilink, date
   const promoted = [];
   const warnings = [];
   for (const cap of specs) {
-    let delta;
-    try { delta = parseDelta(readFileSync(join(changeDir, 'specs', cap, 'spec.md'), 'utf8')); }
-    catch { warnings.push(`sem delta para ${cap}`); continue; }
+    let deltaMd;
+    try { deltaMd = readFileSync(join(changeDir, 'specs', cap, 'spec.md'), 'utf8'); }
+    catch { throw new Error(`delta ausente para ${cap}`); }
+    if (isPlaceholderDelta(deltaMd)) throw new Error(`delta placeholder para ${cap}`);
+    const delta = parseDelta(deltaMd);
     const livePath = join(vaultBase, specsDir, `${cap}.md`);
     let current = [];
     try { current = parseRequirements(readFileSync(livePath, 'utf8')); } catch { /* nova capability */ }

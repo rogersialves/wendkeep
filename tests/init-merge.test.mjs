@@ -27,13 +27,13 @@ test('mergeSettings: wira os 5 hooks de lifecycle nos eventos certos, por defaul
   assert.ok(cmdsOf('PreToolUse').some((c) => c === 'npx wendkeep hook change-guard'), 'fallback npx');
 });
 
-test('hookCommandFor: node-direto quando o pacote existe localmente; senão npx', () => {
+test('hookCommandFor: node-direto ancorado no projeto quando o pacote existe; senão npx', () => {
   const proj = mkdtempSync(join(tmpdir(), 'wk-hcf-'));
   try {
     assert.equal(hookCommandFor('change-guard', proj), 'npx wendkeep hook change-guard');
     mkdirSync(join(proj, 'node_modules', 'wendkeep', 'hooks'), { recursive: true });
     writeFileSync(join(proj, 'node_modules', 'wendkeep', 'hooks', 'change-guard.mjs'), '// stub');
-    assert.equal(hookCommandFor('change-guard', proj), 'node node_modules/wendkeep/hooks/change-guard.mjs');
+    assert.equal(hookCommandFor('change-guard', proj), 'node "${CLAUDE_PROJECT_DIR}/node_modules/wendkeep/hooks/change-guard.mjs"');
     assert.equal(hookCommandFor('x', ''), 'npx wendkeep hook x', 'sem projeto = npx');
   } finally { rmSync(proj, { recursive: true, force: true }); }
 });
@@ -49,12 +49,30 @@ test('mergeSettings: dual-recognition não duplica ao alternar npx ↔ node-dire
       writeFileSync(join(proj, 'node_modules', 'wendkeep', 'hooks', `${n}.mjs`), '// stub');
     }
     const two = mergeSettings(one, { vaultPath: '/v', withMcp: true, companions: [], force: true, projectPath: proj }).settings;
-    const guards = (two.hooks.PreToolUse || []).filter((g) => g.hooks.some((h) => h.command.includes('change-guard')));
+    const guards = (two.hooks.PreToolUse || []).filter((g) => g.hooks.some((h) => `${h.command} ${(h.args || []).join(' ')}`.includes('change-guard')));
     assert.equal(guards.length, 1, 'sem grupo duplicado');
-    assert.equal(guards[0].hooks[0].command, 'node node_modules/wendkeep/hooks/change-guard.mjs', 'force migra pro node-direto');
+    assert.equal(guards[0].hooks[0].command, 'node', 'force migra pro exec node-direto');
+    assert.deepEqual(guards[0].hooks[0].args, ['${CLAUDE_PROJECT_DIR}/node_modules/wendkeep/hooks/change-guard.mjs']);
     // re-init de novo (idempotente)
     const three = mergeSettings(two, { vaultPath: '/v', withMcp: true, companions: [], projectPath: proj }).settings;
-    assert.equal((three.hooks.PreToolUse || []).filter((g) => g.hooks.some((h) => h.command.includes('change-guard'))).length, 1);
+    assert.equal((three.hooks.PreToolUse || []).filter((g) => g.hooks.some((h) => `${h.command} ${(h.args || []).join(' ')}`.includes('change-guard'))).length, 1);
+  } finally { rmSync(proj, { recursive: true, force: true }); }
+});
+
+test('mergeSettings migra comando node relativo quebrado sem duplicar, mesmo sem force', () => {
+  const proj = mkdtempSync(join(tmpdir(), 'wk-relative-'));
+  try {
+    mkdirSync(join(proj, 'node_modules', 'wendkeep', 'hooks'), { recursive: true });
+    writeFileSync(join(proj, 'node_modules', 'wendkeep', 'hooks', 'change-guard.mjs'), '// stub');
+    const existing = {
+      hooks: {
+        PreToolUse: [{ matcher: 'Bash', hooks: [{ type: 'command', command: 'node node_modules/wendkeep/hooks/change-guard.mjs' }] }],
+      },
+    };
+    const { settings } = mergeSettings(existing, { vaultPath: '/v', withMcp: true, companions: [], projectPath: proj });
+    const guards = settings.hooks.PreToolUse.filter((g) => g.hooks.some((h) => h.command === 'node' && h.args?.[0]?.includes('change-guard')));
+    assert.equal(guards.length, 1);
+    assert.equal(settings.hooks.PreToolUse.length, 1, 'grupo legado foi migrado, não duplicado');
   } finally { rmSync(proj, { recursive: true, force: true }); }
 });
 

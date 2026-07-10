@@ -12,7 +12,7 @@ import {
   scaffoldPlaceholders,
 } from '../hooks/change-core.mjs';
 import { evaluateGate, requiredSensors } from '../hooks/sensors-core.mjs';
-import { evaluateVerdict, tasksHashOf, parseSpecsList, parseDelta, parseRequirements, applyDelta } from '../hooks/spec-core.mjs';
+import { evaluateVerdict, tasksHashOf, parseSpecsList, parseDelta, parseRequirements, applyDelta, validateSpecImpact } from '../hooks/spec-core.mjs';
 import { getNextAdrNumber, readControl } from '../hooks/obsidian-common.mjs';
 import { getLocale } from '../hooks/locale.mjs';
 
@@ -163,6 +163,9 @@ export function runChange(argv) {
       if (placeholders.length) {
         return { ok: false, failing: [`scaffold não preenchido (${placeholders.join('; ')}) — preencha proposta/design/tarefas antes de arquivar, ou \`wendkeep change abandon ${slug}\` se a change não vai adiante (--force não pula este check)`] };
       }
+      const impact = validateSpecImpact(dir);
+      for (const warning of impact.warnings) process.stderr.write(`aviso spec: ${warning}\n`);
+      if (!impact.ok) return { ok: false, failing: impact.errors };
       let tarefasMd = '';
       try { tarefasMd = readFileSync(join(dir, 'tarefas.md'), 'utf8'); } catch { /* no tasks */ }
       const tasks = parseTasks(tarefasMd);

@@ -24,6 +24,7 @@ test('buildInjection always carries the wk_process router (pt-BR default)', () =
     assert.match(out, /wendkeep change new/);
     assert.match(out, /wk-tdd/);
     assert.match(out, /wk-verify/);
+    assert.match(out, /spec_impact/);
     assert.match(out, /--force/); // the forbidden-force rule is stated
     assert.match(out, /PROIBIDO|NUNCA/i);
   } finally { rmSync(vault, { recursive: true, force: true }); }

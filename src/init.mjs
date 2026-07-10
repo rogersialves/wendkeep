@@ -15,6 +15,7 @@ import {
   mcpServerEntry,
   hookCommand,
   hookCommandLocal,
+  hookCommandLocalLegacy,
   deriveVaultDirName,
   selectableCompanions,
   resolveCompanions,
@@ -105,6 +106,16 @@ export function hookCommandFor(name, projectPath) {
   return hookCommand(name);
 }
 
+function localHookAvailable(name, projectPath) {
+  try {
+    return !!projectPath && existsSync(join(projectPath, 'node_modules', 'wendkeep', 'hooks', `${name}.mjs`));
+  } catch { return false; }
+}
+
+function localHookArg(name) {
+  return `${'${CLAUDE_PROJECT_DIR}'}/node_modules/wendkeep/hooks/${name}.mjs`;
+}
+
 export function mergeSettings(existing, { vaultPath, withMcp, force, companions = [], skipMcp = [], dotcontextHookLevel = 'full', projectPath = '' }) {
   const s = existing && typeof existing === 'object' ? { ...existing } : {};
   s.hooks = { ...(s.hooks || {}) };
@@ -120,19 +131,26 @@ export function mergeSettings(existing, { vaultPath, withMcp, force, companions 
     ...companionHookSpecs(companions, { dotcontextHookLevel }),
   ].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
   for (const h of allSpecs) {
-    const command = h.command ?? (h.preferLocal ? hookCommandFor(h.name, projectPath) : hookCommand(h.name));
+    const useLocal = !h.command && h.preferLocal && localHookAvailable(h.name, projectPath);
+    const command = h.command ?? (useLocal ? 'node' : hookCommand(h.name));
+    const args = useLocal ? [localHookArg(h.name)] : undefined;
     // Dual-recognition: um hook nomeado é reconhecido tanto na forma npx quanto na node-direta,
     // para que trocar a forma preferida (ou re-initar noutra máquina) nunca duplique o grupo.
-    const candidates = h.command ? [h.command] : [hookCommand(h.name), hookCommandLocal(h.name)];
+    const candidates = h.command ? [h.command] : [hookCommand(h.name), hookCommandLocal(h.name), hookCommandLocalLegacy(h.name)];
+    const ownsHook = (x) => candidates.includes(x.command)
+      || (x.command === 'node' && Array.isArray(x.args) && x.args[0] === localHookArg(h.name));
     const groups = Array.isArray(s.hooks[h.event]) ? [...s.hooks[h.event]] : [];
-    const owning = groups.find((g) => (g.hooks || []).some((x) => candidates.includes(x.command)));
+    const owning = groups.find((g) => (g.hooks || []).some(ownsHook));
     if (owning) {
       // Already wired: never add a duplicate group (the old `if (present && !force)` fell through
       // under --force and appended a second identical group). Under --force, refresh the managed
       // entry's fields in place — without disturbing any sibling hooks the user grouped with it.
-      if (force) {
-        const hk = owning.hooks.find((x) => candidates.includes(x.command));
+      const hk = owning.hooks.find(ownsHook);
+      const brokenRelative = hk?.command === hookCommandLocalLegacy(h.name);
+      if (force || brokenRelative) {
         hk.command = command;
+        if (args) hk.args = args;
+        else delete hk.args;
         hk.timeout = h.timeout;
         if (h.statusMessage) hk.statusMessage = h.statusMessage;
         if (h.matcher && (owning.hooks || []).length === 1) owning.matcher = h.matcher;
@@ -141,6 +159,7 @@ export function mergeSettings(existing, { vaultPath, withMcp, force, companions 
       continue;
     }
     const entry = { type: 'command', command, timeout: h.timeout, statusMessage: h.statusMessage };
+    if (args) entry.args = args;
     const group = h.matcher ? { matcher: h.matcher, hooks: [entry] } : { hooks: [entry] };
     groups.push(group);
     s.hooks[h.event] = groups;
@@ -529,6 +548,8 @@ export async function runInit(argv) {
   } else {
     log(M.mcpSkipped);
   }
+
+  log('  [!] ignore runtime do wendkeep no Git quando o vault for versionado: .brain/.change-*');
 
   // 4. Vault color system (.obsidian) -----------------------------------------
   if (args.noColors) {

@@ -4,6 +4,50 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.32.0] — 2026-07-09
+
+### Added
+
+- **Contrato explícito `spec_impact`** para changes novas: `pending`, `required` ou `none`.
+  Changes materiais (`required`) precisam listar a capability e manter um delta real em
+  `specs/<capability>/spec.md`; `none` exige justificativa em `spec_impact_reason`.
+- **Snapshots imutáveis de planos aprovados** em `planos/<sha256-12>.md`, deduplicados por
+  conteúdo. `plano-aprovado.md` passa a ser o índice dos snapshots, sem sobrescrever planos
+  anteriores da mesma change.
+- Diagnósticos de `spec_impact` no `wendkeep doctor`, incluindo estado pendente, delta ausente e
+  divergência entre `specs:` e o conteúdo real no disco.
+
+### Changed
+
+- Hooks Claude de alta frequência usam `node` com caminho ancorado em
+  `${CLAUDE_PROJECT_DIR}`. O `init` migra automaticamente os comandos relativos de 0.31.0 sem
+  duplicar grupos, inclusive quando o agente muda o `cwd` para um subprojeto.
+- `wk-workflow`, `wk-brainstorming`, `wk-planning` e o roteador de SessionStart agora exigem a
+  classificação do impacto, o delta da capability e a rastreabilidade `[req:ID]` antes do archive.
+- O archive passa a ser **fail-closed** para specs: placeholder, arquivo ausente ou falha de
+  promoção bloqueiam o move e a criação do ADR.
+- Ao arquivar, links da sessão para a change ativa são reescritos para o caminho em `_arquivo`.
+  Decisões capturadas também entram imediatamente na seção de decisões da sessão ativa.
+
+### Fixed
+
+- **Planos aprovados descartados no Claude Code atual**: `plan-capture` agora lê
+  `tool_response.plan` no payload estruturado de `PostToolUse:ExitPlanMode`, mantendo os formatos
+  textuais legados e rejeições como no-op.
+- **52 falhas `MODULE_NOT_FOUND` observadas em produção** quando `change-warn`/`change-guard`
+  rodavam a partir de `mobile-app` ou `backend-core`.
+- A criação automática de change por plano aprovado agora preserva o backlink da sessão resolvido
+  pelo `transcript_path`/registry.
+- `vault-health` não exige `## Encerramento` de uma sessão ainda ativa; continua validando a ordem
+  completa quando a sessão está finalizada.
+
+### Migration
+
+- Rode `wendkeep init --force` para migrar hooks relativos instalados pela 0.31.0.
+- Rode `wendkeep sync-defs --reseed` para atualizar as skills wk-* em vaults existentes.
+- Changes antigas sem `spec_impact` continuam legíveis e são diagnosticadas como legadas; antes do
+  próximo archive, classifique-as explicitamente como `required` ou `none`.
+
 ## [0.31.0] — 2026-07-09
 
 ### Added — enforcement do loop a2 (o loop deixa de ser opcional na prática)

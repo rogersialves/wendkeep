@@ -89,7 +89,7 @@ test('archive writes the ADR under the dated month folder, not the year root', (
   try {
     mkdirSync(join(vault, '04-Decisões'), { recursive: true });
     assert.equal(spawn(['new', 'x']).status, 0);
-    writeFileSync(join(vault, '08-Mudanças', 'x', 'proposta.md'), '---\ntype: change\nstatus: active\nspecs: []\n---\n\n# x\n\n## Por quê\n\nA.\n\n## O que muda\n\nB.\n');
+    writeFileSync(join(vault, '08-Mudanças', 'x', 'proposta.md'), '---\ntype: change\nstatus: active\nspec_impact: none\nspec_impact_reason: "Fixture sem impacto de contrato"\nspecs: []\n---\n\n# x\n\n## Por quê\n\nA.\n\n## O que muda\n\nB.\n');
     writeFileSync(join(vault, '08-Mudanças', 'x', 'design.md'), '# x — design\n\n## Abordagem\n\nC.\n');
     writeFileSync(join(vault, '08-Mudanças', 'x', 'tarefas.md'), '- [x] 1.1 feito\n');
     writeFileSync(join(vault, '08-Mudanças', 'x', 'verdict.json'), JSON.stringify({ slug: 'x', ok: true, coverage: [] }));

@@ -31,6 +31,8 @@ test('wk-workflow references the wendkeep loop commands', () => {
   assert.match(wf, /wendkeep change new/);
   assert.match(wf, /wendkeep verify/);
   assert.match(wf, /\[sensor:/);
+  assert.match(wf, /spec_impact/);
+  assert.match(wf, /specs\/<capability>\/spec\.md|specs\/<capability>/);
 });
 
 test('skills carry bundled templates that their SKILL.md references', () => {
@@ -43,6 +45,7 @@ test('skills carry bundled templates that their SKILL.md references', () => {
   // planning + brainstorming each bundle their template and point at it.
   assert.deepEqual((by['wk-planning'].files || []).map((f) => f.name), ['plan-template.md']);
   assert.match(by['wk-planning'].body, /plan-template\.md/);
+  assert.match(by['wk-planning'].body, /spec_impact/);
   assert.deepEqual((by['wk-brainstorming'].files || []).map((f) => f.name), ['design-template.md']);
   assert.match(by['wk-brainstorming'].body, /design-template\.md/);
   // the verdict template is valid JSON with the gate-relevant fields.

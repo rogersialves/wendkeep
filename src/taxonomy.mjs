@@ -121,6 +121,10 @@ export function hookCommand(name) {
 // de segundos no Windows). Usada pelos hooks de ALTA FREQUÊNCIA (por prompt / por tool-call)
 // quando o projeto tem wendkeep instalado localmente; o init decide (hookCommandFor).
 export function hookCommandLocal(name) {
+  return `node "${'${CLAUDE_PROJECT_DIR}'}/node_modules/wendkeep/hooks/${name}.mjs"`;
+}
+
+export function hookCommandLocalLegacy(name) {
   return `node node_modules/wendkeep/hooks/${name}.mjs`;
 }
 

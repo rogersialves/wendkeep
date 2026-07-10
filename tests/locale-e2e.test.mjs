@@ -83,7 +83,7 @@ test('en vault: change loop end-to-end (scaffold, requirement heading, ADR in 04
     assert.match(readFileSync(join(dir, 'proposta.md'), 'utf8'), /## Why/, 'en scaffold');
     assert.match(readFileSync(join(dir, 'specs', 'exemplo', 'spec.md'), 'utf8'), /### Requirement:/, 'en delta template');
     // promote an en spec + archive
-    writeFileSync(join(dir, 'proposta.md'), '---\ntype: change\nstatus: active\nspecs: [auth]\n---\n# x\n');
+    writeFileSync(join(dir, 'proposta.md'), '---\ntype: change\nstatus: active\nspec_impact: required\nspec_impact_reason: ""\nspecs: [auth]\n---\n# x\n');
     writeFileSync(join(dir, 'design.md'), '# x — design\n\n## Approach\n\nTest approach.\n');
     writeFileSync(join(dir, 'tarefas.md'), '- [x] 1.1 done\n');
     writeFileSync(join(dir, 'verdict.json'), JSON.stringify({ slug: 'x', ok: true, coverage: [] }));

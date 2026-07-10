@@ -38,3 +38,17 @@ test('checkHarness: flags an orphan [req:]; clean vault has no errors', () => {
     assert.equal(r2.errors.length, 0, `clean: ${r2.errors.join('; ')}`);
   } finally { rmSync(vault, { recursive: true, force: true }); rmSync(proj, { recursive: true, force: true }); }
 });
+
+test('checkHarness diagnostica spec_impact pendente na change ativa', () => {
+  const vault = mkdtempSync(join(tmpdir(), 'wk-doc-impact-'));
+  const proj = mkdtempSync(join(tmpdir(), 'wk-doc-impactp-'));
+  try {
+    mkdirSync(join(vault, '.brain'), { recursive: true });
+    mkdirSync(join(vault, '08-Mudanças', 'x'), { recursive: true });
+    writeFileSync(join(vault, '.brain', 'CURRENT_CHANGE.md'), 'change: x\n');
+    writeFileSync(join(vault, '08-Mudanças', 'x', '.spec-impact-v1'), '1\n');
+    writeFileSync(join(vault, '08-Mudanças', 'x', 'proposta.md'), '---\nspec_impact: pending\nspec_impact_reason: ""\nspecs: []\n---\n');
+    const r = checkHarness(vault, proj);
+    assert.ok(r.errors.some((e) => /spec_impact.*pending/i.test(e)));
+  } finally { rmSync(vault, { recursive: true, force: true }); rmSync(proj, { recursive: true, force: true }); }
+});

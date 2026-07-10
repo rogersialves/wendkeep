@@ -76,6 +76,9 @@ test('newChange --simple: only proposta + tarefas, no design/specs (auto-sizing)
     assert.ok(existsSync(join(dir, 'tarefas.md')));
     assert.ok(!existsSync(join(dir, 'design.md')), 'no design.md');
     assert.ok(!existsSync(join(dir, 'specs')), 'no specs scaffold');
+    const proposta = readFileSync(join(dir, 'proposta.md'), 'utf8');
+    assert.match(proposta, /spec_impact: none/);
+    assert.match(proposta, /spec_impact_reason: ".+"/);
   } finally { rmSync(vault, { recursive: true, force: true }); }
 });
 
@@ -87,6 +90,7 @@ test('renderChangeScaffold: frontmatter + session wikilink + task line', () => {
   assert.match(proposta, /type: change/);
   assert.match(proposta, /status: active/);
   assert.match(proposta, /topic-change/);
+  assert.match(proposta, /spec_impact: pending/);
   assert.match(proposta, /\[\[02-Sessões\/2026\/07-JUL\/DIA 05\/10-00-x\]\]/);
   assert.match(design, /# dark-mode/);
   assert.match(tarefas, /- \[ \] 1\.1/);
@@ -102,6 +106,7 @@ test('newChange: creates the 3 files + active pointer, non-destructive', () => {
       assert.ok(existsSync(join(vault, '08-Mudanças', 'dark-mode', f)), `${f} created`);
     }
     assert.equal(activeChange(vault), 'dark-mode');
+    assert.ok(existsSync(join(vault, '08-Mudanças', 'dark-mode', '.spec-impact-v1')));
     const again = newChange(vault, 'dark-mode', { sessionRel: '02-Sessões/x', dateStr: '2026-07-05' });
     assert.equal(again.created, false);
   } finally {
@@ -157,13 +162,19 @@ test('archiveChange: moves to _arquivo, mints ADR, clears active (gate ok); gate
     mkdirSync(join(vault, '.brain'), { recursive: true });
     mkdirSync(join(vault, '04-Decisões'), { recursive: true });
     mkdirSync(join(vault, '08-Mudanças', 'dark-mode'), { recursive: true });
-    writeFileSync(join(vault, '08-Mudanças', 'dark-mode', 'proposta.md'), '---\ntype: change\n---\n# dark-mode\n');
+    const sessionRel = '02-Sessões/2026/07-JUL/DIA 05/sessao.md';
+    mkdirSync(join(vault, '02-Sessões', '2026', '07-JUL', 'DIA 05'), { recursive: true });
+    writeFileSync(join(vault, sessionRel), '# Sessão\n\n## Mudanças\n\n- [[08-Mudanças/dark-mode/proposta]]\n');
+    writeFileSync(join(vault, '08-Mudanças', 'dark-mode', 'proposta.md'), `---\ntype: change\nsource:\n  - "[[${sessionRel.replaceAll('\\\\', '/').replace(/\.md$/, '')}]]"\n---\n# dark-mode\n`);
     writeFileSync(join(vault, '.brain', 'CURRENT_CHANGE.md'), 'change: dark-mode\n');
     const r = archiveChange(vault, 'dark-mode', { dateStr: '2026-07-05', adrNum: 20 });
     assert.equal(r.ok, true);
     assert.ok(existsSync(join(vault, '08-Mudanças', '_arquivo', '2026-07-05-dark-mode', 'proposta.md')));
     assert.ok(!existsSync(join(vault, '08-Mudanças', 'dark-mode')), 'original moved');
     assert.match(readFileSync(join(vault, r.adrRel), 'utf8'), /dark-mode/);
+    const session = readFileSync(join(vault, sessionRel), 'utf8');
+    assert.match(session, /08-Mudanças\/_arquivo\/2026-07-05-dark-mode\/proposta/);
+    assert.doesNotMatch(session, /\[\[08-Mudanças\/dark-mode\/proposta\]\]/);
     assert.equal(activeChange(vault), '');
 
     mkdirSync(join(vault, '08-Mudanças', 'x'), { recursive: true });

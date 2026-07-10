@@ -11,7 +11,7 @@ const BIN = join(dirname(fileURLToPath(import.meta.url)), '..', 'bin', 'wendkeep
 // G0 (0.21.0): archive blocks unfilled scaffolds, so archive-path tests must fill
 // proposta/design like a real planned change would.
 function fillScaffold(vault, slug, dir = '08-Mudanças') {
-  writeFileSync(join(vault, dir, slug, 'proposta.md'), `# ${slug}\n\n## Por quê\n\nTeste.\n\n## O que muda\n\nTeste.\n`);
+  writeFileSync(join(vault, dir, slug, 'proposta.md'), `---\nspec_impact: none\nspec_impact_reason: "Sem alteração de contrato neste fixture"\nspecs: []\n---\n\n# ${slug}\n\n## Por quê\n\nTeste.\n\n## O que muda\n\nTeste.\n`);
   writeFileSync(join(vault, dir, slug, 'design.md'), `# ${slug} — design\n\n## Abordagem\n\nTeste.\n`);
 }
 
@@ -24,6 +24,26 @@ test('change new: proposta links the active session from the control file (G2)',
     assert.equal(r.status, 0, r.stderr);
     const proposta = readFileSync(join(vault, '08-Mudanças', 'x', 'proposta.md'), 'utf8');
     assert.match(proposta, /\[\[02-Sessões\/2026\/07-JUL\/DIA 05\/10-00-demo\]\]/, 'session wikilink in source:');
+  } finally { rmSync(vault, { recursive: true, force: true }); }
+});
+
+test('archive bloqueia spec_impact pendente ou required sem delta', () => {
+  const vault = mkdtempSync(join(tmpdir(), 'wk-impact-gate-'));
+  const spawn = (args) => spawnSync(process.execPath, [BIN, 'change', ...args, '--vault', vault], { encoding: 'utf8' });
+  try {
+    assert.equal(spawn(['new', 'x']).status, 0);
+    writeFileSync(join(vault, '08-Mudanças', 'x', 'proposta.md'), '---\nspec_impact: pending\nspec_impact_reason: ""\nspecs: []\n---\n# x\n## Por quê\nreal\n## O que muda\nreal\n');
+    writeFileSync(join(vault, '08-Mudanças', 'x', 'design.md'), '# x — design\n## Abordagem\nreal\n');
+    writeFileSync(join(vault, '08-Mudanças', 'x', 'tarefas.md'), '- [x] 1.1 feito\n');
+    writeFileSync(join(vault, '08-Mudanças', 'x', 'verdict.json'), JSON.stringify({ ok: true, coverage: [] }));
+    let r = spawn(['archive', 'x']);
+    assert.equal(r.status, 1);
+    assert.match(r.stderr, /spec_impact.*pending/i);
+
+    writeFileSync(join(vault, '08-Mudanças', 'x', 'proposta.md'), '---\nspec_impact: required\nspec_impact_reason: ""\nspecs: [auth]\n---\n# x\n## Por quê\nreal\n## O que muda\nreal\n');
+    r = spawn(['archive', 'x']);
+    assert.equal(r.status, 1);
+    assert.match(r.stderr, /auth|delta/i);
   } finally { rmSync(vault, { recursive: true, force: true }); }
 });
 
@@ -100,7 +120,7 @@ test('archive promotes spec deltas into 07-Specs (living contract)', () => {
     mkdirSync(join(vault, '04-Decisões'), { recursive: true });
     assert.equal(spawn(['new', 'x']).status, 0);
     fillScaffold(vault, 'x');
-    writeFileSync(join(vault, '08-Mudanças', 'x', 'proposta.md'), '---\ntype: change\nstatus: active\nspecs: [auth]\n---\n# x\n');
+    writeFileSync(join(vault, '08-Mudanças', 'x', 'proposta.md'), '---\ntype: change\nstatus: active\nspec_impact: required\nspec_impact_reason: ""\nspecs: [auth]\n---\n# x\n');
     writeFileSync(join(vault, '08-Mudanças', 'x', 'tarefas.md'), '- [x] 1.1 feito\n');
     writeFileSync(join(vault, '08-Mudanças', 'x', 'verdict.json'), JSON.stringify({ slug: 'x', ok: true, coverage: [] }));
     mkdirSync(join(vault, '08-Mudanças', 'x', 'specs', 'auth'), { recursive: true });
@@ -479,8 +499,10 @@ test('specs união: delta real no disco promove mesmo com specs: [] (warning); p
   const spawn = (a) => spawnSync(process.execPath, [BIN, 'change', ...a, '--vault', vault], { encoding: 'utf8' });
   try {
     mkdirSync(join(vault, '04-Decisões'), { recursive: true });
-    assert.equal(spawn(['new', 'x']).status, 0); // scaffold cria specs/exemplo placeholder
-    fillScaffold(vault, 'x');
+    mkdirSync(join(vault, '08-Mudanças', 'x', 'specs', 'exemplo'), { recursive: true });
+    writeFileSync(join(vault, '08-Mudanças', 'x', 'design.md'), '# x — design\n\n## Abordagem\n\nLegado.\n');
+    writeFileSync(join(vault, '08-Mudanças', 'x', 'specs', 'exemplo', 'spec.md'), '## ADDED Requirements\n### Requisito: (nome)\n(comportamento)\n');
+    writeFileSync(join(vault, '08-Mudanças', 'x', 'proposta.md'), '# x\n\n## Por quê\n\nLegado.\n\n## O que muda\n\nLegado.\n');
     writeFileSync(join(vault, '08-Mudanças', 'x', 'tarefas.md'), '- [x] 1.1 feito\n');
     writeFileSync(join(vault, '08-Mudanças', 'x', 'verdict.json'), JSON.stringify({ slug: 'x', ok: true, coverage: [] }));
     // proposta ficou com specs: [] (fillScaffold não mexe) — delta REAL só no disco

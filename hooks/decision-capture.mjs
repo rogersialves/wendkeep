@@ -33,9 +33,20 @@ export function decisionKeyExists(dir, key) {
   return false;
 }
 
-// The AskUserQuestion tool_output reads: `... "Question"="chosen labels"  "Q2"="..."`.
+// Claude Code >= 2.1 returns `{ answers: { Question: choice } }` in tool_response.
+// Older releases expose a text tool_output: `... "Question"="chosen labels"  "Q2"="..."`.
 export function parseAnswers(output) {
   const map = {};
+  if (output && typeof output === 'object') {
+    const answers = output.answers && typeof output.answers === 'object'
+      ? output.answers
+      : output;
+    for (const [question, answer] of Object.entries(answers)) {
+      if (typeof answer === 'string') map[clean(question)] = clean(answer);
+      else if (Array.isArray(answer)) map[clean(question)] = answer.map(clean).filter(Boolean).join(',');
+    }
+    if (Object.keys(map).length) return map;
+  }
   const re = /"([^"]+)"\s*=\s*"([^"]*)"/g;
   let m;
   while ((m = re.exec(String(output || '')))) map[m[1].trim()] = m[2].trim();
@@ -172,7 +183,35 @@ export function captureDecision(vaultBase, input) {
   writeFileSync(filePath, buildDecisionCaptureNote({
     questions, answers, dateStr, startedAt: formatLocalIso(now), sessionRel, provider, localeId: loc.id, adrNum, contentKey,
   }), 'utf-8');
-  return { rel: toVaultRelative(vaultBase, filePath), skipped: false };
+  const rel = toVaultRelative(vaultBase, filePath);
+  if (sessionRel) {
+    try {
+      const sessionPath = join(vaultBase, sessionRel);
+      let session = readFileSync(sessionPath, 'utf8');
+      const wikilink = wikilinkFromRel(rel);
+      const link = `- ${wikilink}`;
+      if (!session.includes(wikilink)) {
+        const heading = '\n## Decisões geradas nesta sessão\n';
+        const at = session.indexOf(heading);
+        if (at !== -1) {
+          const bodyStart = at + heading.length;
+          const nextRel = session.slice(bodyStart).search(/\n## /);
+          const bodyEnd = nextRel === -1 ? session.length : bodyStart + nextRel;
+          const body = session.slice(bodyStart, bodyEnd)
+            .replace(/\n?Nenhuma decisão registrada ainda\.\s*/i, '\n')
+            .trim();
+          const merged = [body, link].filter(Boolean).join('\n');
+          session = `${session.slice(0, bodyStart)}\n${merged}\n\n${session.slice(bodyEnd).replace(/^\n+/, '')}`;
+        } else {
+          const anchor = session.indexOf('\n## Encerramento');
+          const section = `\n## Decisões geradas nesta sessão\n\n${link}\n`;
+          session = anchor === -1 ? `${session.trimEnd()}${section}` : `${session.slice(0, anchor).trimEnd()}${section}${session.slice(anchor)}`;
+        }
+        writeFileSync(sessionPath, session, 'utf8');
+      }
+    } catch { /* backlink auxiliar nunca derruba a captura */ }
+  }
+  return { rel, skipped: false };
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

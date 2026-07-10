@@ -13,7 +13,7 @@ import { discoverCodexTranscripts } from '../hooks/import-sessions.mjs';
 const BIN = join(dirname(fileURLToPath(import.meta.url)), '..', 'bin', 'wendkeep.mjs');
 
 function fill(vault, slug) {
-  writeFileSync(join(vault, '08-Mudanças', slug, 'proposta.md'), `---\ntype: change\nstatus: active\ndate: 2026-05-01\nspecs: []\n---\n\n# ${slug}\n\n## Por quê\n\nX.\n\n## O que muda\n\nY.\n`);
+  writeFileSync(join(vault, '08-Mudanças', slug, 'proposta.md'), `---\ntype: change\nstatus: active\ndate: 2026-05-01\nspec_impact: none\nspec_impact_reason: "Fixture sem impacto de contrato"\nspecs: []\n---\n\n# ${slug}\n\n## Por quê\n\nX.\n\n## O que muda\n\nY.\n`);
   writeFileSync(join(vault, '08-Mudanças', slug, 'design.md'), `# ${slug} — design\n\n## Abordagem\n\nZ.\n`);
 }
 

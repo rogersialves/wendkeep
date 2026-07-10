@@ -14,9 +14,13 @@ export function changeDirRel(slug, vaultBase) {
   return join(getLocale(vaultBase).folders.changes, slug);
 }
 
-export function renderChangeScaffold({ slug, sessionRel, dateStr, locale = 'pt-BR' }) {
+export function renderChangeScaffold({ slug, sessionRel, dateStr, locale = 'pt-BR', simple = false }) {
   const en = locale === 'en';
   const source = sessionRel ? `\n  - "${wikilinkFromRel(sessionRel)}"` : ' []';
+  const impact = simple ? 'none' : 'pending';
+  const impactReason = simple
+    ? (en ? 'Simple change with no product-contract impact.' : 'Mudança simples sem impacto no contrato do produto.')
+    : '';
   const proposta = `---
 type: change
 status: active
@@ -26,6 +30,8 @@ cssclasses:
 tags:
   - mudanca
 source:${source}
+spec_impact: ${impact}
+spec_impact_reason: ${JSON.stringify(impactReason)}
 specs: []
 ---
 
@@ -96,13 +102,14 @@ export function newChange(vaultBase, slug, { sessionRel = '', dateStr, simple = 
   const dir = join(vaultBase, loc.folders.changes, slug);
   const existed = existsSync(join(dir, 'proposta.md'));
   mkdirSync(dir, { recursive: true });
-  const files = renderChangeScaffold({ slug, sessionRel, dateStr, locale: loc.id });
+  const files = renderChangeScaffold({ slug, sessionRel, dateStr, locale: loc.id, simple });
   const write = (name, content) => {
     const f = join(dir, name);
     if (!existsSync(f)) writeFileSync(f, content, 'utf8');
   };
   write('proposta.md', files.proposta);
   write('tarefas.md', files.tarefas);
+  if (!existed) write('.spec-impact-v1', '1\n');
   // Auto-sizing (Wave B): a --simple change skips the design + spec-delta scaffold.
   if (!simple) {
     write('design.md', files.design);
@@ -291,6 +298,12 @@ export function archiveChange(vaultBase, slug, { gate = gateGreen, dateStr, adrN
   const loc = getLocale(vaultBase);
   const chDir = loc.folders.changes;
   const src = join(vaultBase, chDir, slug);
+  let sourceSessionRel = '';
+  try {
+    const proposal = readFileSync(join(src, 'proposta.md'), 'utf8');
+    const m = proposal.match(/\[\[((?:02-Sessões|02-Sessions)\/[^\]|]+?)(?:\|[^\]]+)?\]\]/);
+    if (m) sourceSessionRel = m[1].endsWith('.md') ? m[1] : `${m[1]}.md`;
+  } catch { /* sem source */ }
   const verdict = gate(src);
   if (!verdict.ok) return { ok: false, failing: verdict.failing || [] };
 
@@ -324,7 +337,9 @@ export function archiveChange(vaultBase, slug, { gate = gateGreen, dateStr, adrN
         ...res.warnings,
       ];
     }
-  } catch { /* promoção falhou — segue só com ADR */ }
+  } catch (error) {
+    return { ok: false, failing: [`falha ao promover specs: ${error.message}`] };
+  }
 
   let reqIds = [];
   try { reqIds = [...new Set(parseTasks(readFileSync(join(src, 'tarefas.md'), 'utf8')).map((t) => t.req).filter(Boolean))]; } catch { /* sem tarefas */ }
@@ -342,6 +357,17 @@ export function archiveChange(vaultBase, slug, { gate = gateGreen, dateStr, adrN
     const c = readFileSync(pp, 'utf8').replace(/^status:\s*active\s*$/m, 'status: archived');
     writeFileSync(pp, c, 'utf8');
   } catch { /* proposta ilegível — segue */ }
+
+  // A sessão guardava o link da change ativa; após o move, reescreva para o caminho arquivado.
+  if (sourceSessionRel) {
+    try {
+      const sessionPath = join(vaultBase, sourceSessionRel);
+      const oldLink = wikilinkFromRel(join(chDir, slug, 'proposta'));
+      const archivedLink = wikilinkFromRel(join(destRel, 'proposta'));
+      const current = readFileSync(sessionPath, 'utf8');
+      if (current.includes(oldLink)) writeFileSync(sessionPath, current.replaceAll(oldLink, archivedLink), 'utf8');
+    } catch { /* backlink é reparo auxiliar; archive já está íntegro */ }
+  }
 
   // ADR goes in the same dated month folder as session-derived decisions (04-Decisões/ano/MM-MMM/)
   // — not the year root — so all ADRs sit together in the vault's convention.

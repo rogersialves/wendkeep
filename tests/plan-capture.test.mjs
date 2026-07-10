@@ -3,9 +3,10 @@
 // sem depender de a LLM lembrar do processo. Rejeição = no-op.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { spawnSync } from 'node:child_process';
 import { capturePlan, extractPlan, planSlug } from '../hooks/plan-capture.mjs';
 import { activeChange, setActiveChange } from '../hooks/change-core.mjs';
 
@@ -34,6 +35,19 @@ test('extractPlan: tool_input.plan (legado), marcador Approved Plan, e rejeiçã
   assert.equal(extractPlan({ tool_input: {}, tool_response: 'algo qualquer' }), null);
 });
 
+test('extractPlan: payload estruturado atual do PostToolUse ExitPlanMode', () => {
+  const input = {
+    tool_input: { plan: PLAN },
+    tool_response: {
+      plan: PLAN,
+      filePath: 'C:/Users/test/.claude/plans/auth.md',
+      isAgent: false,
+      planWasEdited: true,
+    },
+  };
+  assert.equal(extractPlan(input), PLAN);
+});
+
 test('planSlug: slug do H1 do plano', () => {
   assert.match(planSlug(PLAN), /^plano-auth-com-refresh-token|^auth-com-refresh-token/);
   assert.equal(planSlug('sem título nenhum aqui'), 'plano-aprovado');
@@ -55,7 +69,57 @@ test('capturePlan sem change ativa: auto-cria a change preenchida a partir do pl
     assert.match(tarefas, /- \[ \] 1\.1 criar tabela refresh_tokens/, 'checkboxes viram tarefas numeradas');
     assert.match(tarefas, /- \[x\] 1\.3 spike de rotação validado/, 'estado do checkbox preservado');
     assert.ok(existsSync(join(dir, 'plano-aprovado.md')), 'plano bruto preservado');
+    const snapshots = readdirSync(join(dir, 'planos'));
+    assert.equal(snapshots.length, 1, 'snapshot imutável criado');
+    capturePlan(vault, { tool_input: { plan: PLAN }, tool_response: { plan: PLAN, filePath: 'x.md' } });
+    assert.equal(readdirSync(join(dir, 'planos')).length, 1, 'mesmo plano deduplicado por hash');
     assert.match(r.context, /registrada no vault/, 'additionalContext confirma');
+  } finally { rmSync(vault, { recursive: true, force: true }); }
+});
+
+test('capturePlan usa registry do transcript como source da change', () => {
+  const vault = mkdtempSync(join(tmpdir(), 'wk-pc-reg-'));
+  try {
+    mkdirSync(join(vault, '.brain'), { recursive: true });
+    writeFileSync(join(vault, '.brain', 'SESSION_REGISTRY.json'), JSON.stringify({
+      version: 1,
+      sessions: {
+        s1: {
+          status: 'active',
+          session_file: '02-Sessões/2026/07-JUL/DIA 09/sessao.md',
+          transcript_path: 'C:/Users/test/.claude/projects/p/s1.jsonl',
+          started_at: '2026-07-09T10:00:00',
+        },
+      },
+    }));
+    const r = capturePlan(vault, {
+      transcript_path: 'c:\\users\\test\\.claude\\projects\\p\\s1.jsonl',
+      tool_input: { plan: PLAN },
+      tool_response: { plan: PLAN, filePath: 'x.md' },
+    });
+    const proposta = readFileSync(join(vault, '08-Mudanças', r.slug, 'proposta.md'), 'utf8');
+    assert.match(proposta, /02-Sessões\/2026\/07-JUL\/DIA 09\/sessao/);
+  } finally { rmSync(vault, { recursive: true, force: true }); }
+});
+
+test('plan-capture entrypoint via stdin persiste e emite contexto', () => {
+  const vault = mkdtempSync(join(tmpdir(), 'wk-pc-e2e-'));
+  try {
+    const hook = join(process.cwd(), 'hooks', 'plan-capture.mjs');
+    const input = JSON.stringify({
+      tool_input: { plan: PLAN },
+      tool_response: { plan: PLAN, filePath: 'C:/tmp/plan.md', planWasEdited: true, isAgent: false },
+      obsidian_vault_path: vault,
+    });
+    const r = spawnSync(process.execPath, [hook], {
+      input,
+      encoding: 'utf8',
+      env: { ...process.env, OBSIDIAN_VAULT_PATH: vault },
+    });
+    assert.equal(r.status, 0, r.stderr);
+    const output = JSON.parse(r.stdout);
+    assert.match(output.hookSpecificOutput?.additionalContext || '', /plan_captured/);
+    assert.ok(existsSync(join(vault, '08-Mudanças')), `${r.stdout}\n${r.stderr}`);
   } finally { rmSync(vault, { recursive: true, force: true }); }
 });
 

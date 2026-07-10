@@ -3,7 +3,7 @@
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { activeChange, parseTasks } from './change-core.mjs';
-import { parseRequirements, parseSpecsList, parseDelta, evaluateVerdict } from './spec-core.mjs';
+import { parseRequirements, parseSpecsList, parseDelta, evaluateVerdict, validateSpecImpact } from './spec-core.mjs';
 import { getLocale } from './locale.mjs';
 
 export function checkHarness(vaultBase, projectRoot) {
@@ -43,6 +43,9 @@ export function checkHarness(vaultBase, projectRoot) {
     let entries;
     try { entries = readdirSync(dir); } catch { continue; } // a file, not a change dir
     if (!entries.includes('proposta.md')) { errors.push(`change sem proposta.md: ${name}`); continue; }
+    const impact = validateSpecImpact(dir);
+    errors.push(...impact.errors.map((e) => `${name}: ${e}`));
+    warnings.push(...impact.warnings.map((w) => `${name}: ${w}`));
     if (name === active) {
       try {
         for (const cap of parseSpecsList(readFileSync(join(dir, 'proposta.md'), 'utf8'))) {

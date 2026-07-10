@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { parseRequirements, parseDelta, applyDelta, renderSpec, parseSpecsList, promoteSpecs, evaluateVerdict, tasksHashOf, isPlaceholderDelta, discoverSpecDeltas } from '../hooks/spec-core.mjs';
+import { parseRequirements, parseDelta, applyDelta, renderSpec, parseSpecsList, promoteSpecs, evaluateVerdict, tasksHashOf, isPlaceholderDelta, discoverSpecDeltas, parseSpecImpact, validateSpecImpact } from '../hooks/spec-core.mjs';
 
 test('isPlaceholderDelta: scaffold puro true; delta real/REMOVED false; bilíngue', () => {
   const scaffoldPt = '## ADDED Requirements\n### Requisito: (nome)\n(comportamento / cenários)\n\n## MODIFIED Requirements\n\n## REMOVED Requirements\n';
@@ -26,6 +26,36 @@ test('discoverSpecDeltas: lista caps com delta real; ignora placeholder; [] sem 
     mkdirSync(join(dir, 'specs', 'vazio'), { recursive: true }); // sem spec.md
     assert.deepEqual(discoverSpecDeltas(dir), ['auth']);
   } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('parseSpecImpact + validateSpecImpact: pending/required/none e legado', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'wk-impact-'));
+  try {
+    writeFileSync(join(dir, '.spec-impact-v1'), '1\n');
+    writeFileSync(join(dir, 'proposta.md'), '---\nspec_impact: pending\nspec_impact_reason: ""\nspecs: []\n---\n');
+    assert.equal(parseSpecImpact(readFileSync(join(dir, 'proposta.md'), 'utf8')).status, 'pending');
+    assert.equal(validateSpecImpact(dir).ok, false);
+
+    writeFileSync(join(dir, 'proposta.md'), '---\nspec_impact: none\nspec_impact_reason: ""\nspecs: []\n---\n');
+    assert.match(validateSpecImpact(dir).errors.join(' '), /justificativa/i);
+    writeFileSync(join(dir, 'proposta.md'), '---\nspec_impact: none\nspec_impact_reason: "Refactor interno"\nspecs: []\n---\n');
+    assert.equal(validateSpecImpact(dir).ok, true);
+
+    writeFileSync(join(dir, 'proposta.md'), '---\nspec_impact: required\nspec_impact_reason: ""\nspecs: [auth]\n---\n');
+    assert.match(validateSpecImpact(dir).errors.join(' '), /auth/);
+    mkdirSync(join(dir, 'specs', 'auth'), { recursive: true });
+    writeFileSync(join(dir, 'specs', 'auth', 'spec.md'), '## ADDED Requirements\n### Requisito: AUTH-1 — Login\nUsuário entra.\n');
+    assert.equal(validateSpecImpact(dir).ok, true);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+
+  const legacy = mkdtempSync(join(tmpdir(), 'wk-impact-legacy-'));
+  try {
+    writeFileSync(join(legacy, 'proposta.md'), '---\nspecs: []\n---\n');
+    const state = validateSpecImpact(legacy);
+    assert.equal(state.ok, true);
+    assert.equal(state.legacy, true);
+    assert.match(state.warnings.join(' '), /legad/i);
+  } finally { rmSync(legacy, { recursive: true, force: true }); }
 });
 
 test('evaluateVerdict: tasksHash mismatch = stale; sem hash no verdict = retrocompat', () => {
@@ -108,6 +138,18 @@ test('promoteSpecs: applies delta to a fresh living spec, then modifies in place
     writeFileSync(join(changeDir, 'specs', 'auth', 'spec.md'), '## MODIFIED Requirements\n### Requisito: Login\nlogin com 2FA\n');
     promoteSpecs(vault, changeDir, ['auth'], { changeWikilink: '[[arq2/proposta]]', dateStr: '2026-07-06' });
     assert.match(readFileSync(join(vault, '07-Specs', 'auth.md'), 'utf8'), /login com 2FA/);
+  } finally { rmSync(vault, { recursive: true, force: true }); }
+});
+
+test('promoteSpecs: delta ausente/placeholder falha fechado', () => {
+  const vault = mkdtempSync(join(tmpdir(), 'wk-promo-fail-'));
+  try {
+    const changeDir = join(vault, '08-Mudanças', 'x');
+    mkdirSync(changeDir, { recursive: true });
+    assert.throws(() => promoteSpecs(vault, changeDir, ['auth']), /delta/i);
+    mkdirSync(join(changeDir, 'specs', 'auth'), { recursive: true });
+    writeFileSync(join(changeDir, 'specs', 'auth', 'spec.md'), '## ADDED Requirements\n### Requisito: (nome)\n(comportamento)\n');
+    assert.throws(() => promoteSpecs(vault, changeDir, ['auth']), /placeholder/i);
   } finally { rmSync(vault, { recursive: true, force: true }); }
 });
 

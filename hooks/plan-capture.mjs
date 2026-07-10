@@ -3,10 +3,20 @@
 // Code e o vault: quando o usuário APROVA um plano, o plano vira registro — anexado à change
 // ativa, ou uma change nova criada e preenchida a partir dele (proposta do Contexto, design do
 // corpo, tarefas dos checkboxes). Não depende de a LLM lembrar do processo. Rejeição = no-op.
-import { readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { formatDate, getVaultBase, readHookInput, slugify, writeHookOutput } from './obsidian-common.mjs';
+import {
+  findActiveSessionByTranscript,
+  formatDate,
+  getVaultBase,
+  readControl,
+  readHookInput,
+  slugify,
+  wikilinkFromRel,
+  writeHookOutput,
+} from './obsidian-common.mjs';
 import { activeChange, newChange } from './change-core.mjs';
 import { getLocale } from './locale.mjs';
 
@@ -17,14 +27,45 @@ export function extractPlan(input) {
   const tr = input?.tool_response ?? input?.toolResponse ?? '';
   const resp = typeof tr === 'string' ? tr : JSON.stringify(tr || '');
   if (/doesn'?t want to proceed|user rejected|rejected the plan/i.test(resp)) return null;
-  if (!/approved (your |the )?plan|Approved Plan/i.test(resp)) return null;
   const direct = input?.tool_input?.plan ?? input?.toolInput?.plan;
+  // Claude Code atual entrega o plano aprovado como objeto estruturado no PostToolUse.
+  // Esse evento só ocorre após sucesso; flags negativas explícitas continuam no-op.
+  if (tr && typeof tr === 'object') {
+    if (tr.approved === false || tr.rejected === true || tr.cancelled === true) return null;
+    const structured = tr.plan ?? direct;
+    if (structured && String(structured).trim()) return String(structured);
+    const structuredPath = tr.filePath ?? tr.planFilePath;
+    if (structuredPath) { try { return readFileSync(String(structuredPath), 'utf8'); } catch { /* inacessível */ } }
+    return null;
+  }
+  if (!/approved (your |the )?plan|Approved Plan/i.test(resp)) return null;
   if (direct && String(direct).trim()) return String(direct);
   const marker = resp.match(/## Approved Plan[^\n]*:\s*\n([\s\S]+)$/);
   if (marker && marker[1].trim()) return marker[1].trim();
   const path = resp.match(/saved to:\s*([^\n]+\.md)/i);
   if (path) { try { return readFileSync(path[1].trim(), 'utf8'); } catch { /* arquivo inacessível */ } }
   return null;
+}
+
+function planIndex(slug) {
+  return `---\ntype: plan-index\ntags:\n  - plano\n---\n\n# ${slug} — planos aprovados\n`;
+}
+
+export function persistApprovedPlan(dir, slug, rawNote, plan, dateStr) {
+  const hash = createHash('sha256').update(String(plan)).digest('hex').slice(0, 12);
+  const snapshotsDir = join(dir, 'planos');
+  mkdirSync(snapshotsDir, { recursive: true });
+  const snapshot = join(snapshotsDir, `${hash}.md`);
+  if (!existsSync(snapshot)) writeFileSync(snapshot, rawNote, 'utf8');
+
+  const indexPath = join(dir, 'plano-aprovado.md');
+  let index = existsSync(indexPath) ? readFileSync(indexPath, 'utf8') : planIndex(slug);
+  const entry = `- [[planos/${hash}|${dateStr} — ${hash}]]`;
+  if (!index.includes(`[[planos/${hash}|`)) {
+    index = `${index.trimEnd()}\n\n${entry}\n`;
+    writeFileSync(indexPath, index, 'utf8');
+  }
+  return { hash, snapshot };
 }
 
 export function planSlug(plan) {
@@ -53,11 +94,15 @@ export function capturePlan(vaultBase, input) {
   const en = loc.id === 'en';
   const dateStr = formatDate(new Date());
   const rawNote = `---\ntype: plan\ndate: ${dateStr}\ntags:\n  - plano\n---\n\n${plan.trim()}\n`;
+  const transcriptPath = input?.transcript_path ?? input?.transcriptPath ?? '';
+  const sessionRel = findActiveSessionByTranscript(vaultBase, transcriptPath)?.session_file
+    || readControl(vaultBase).session_file
+    || '';
 
   const active = activeChange(vaultBase);
   if (active) {
     const dir = join(vaultBase, loc.folders.changes, active);
-    writeFileSync(join(dir, 'plano-aprovado.md'), rawNote, 'utf8');
+    persistApprovedPlan(dir, active, rawNote, plan, dateStr);
     return {
       slug: active, created: false,
       context: `<plan_captured>\n${en
@@ -67,9 +112,10 @@ export function capturePlan(vaultBase, input) {
   }
 
   const slug = planSlug(plan);
-  newChange(vaultBase, slug, { dateStr });
+  newChange(vaultBase, slug, { dateStr, sessionRel });
   const dir = join(vaultBase, loc.folders.changes, slug);
   const ctx = sectionBody(plan, ['Contexto', 'Context']) || plan.trim().split('\n').slice(0, 6).join('\n');
+  const source = sessionRel ? `\n  - "${wikilinkFromRel(sessionRel)}"` : ' []';
   writeFileSync(join(dir, 'proposta.md'), `---
 type: change
 status: active
@@ -78,7 +124,9 @@ cssclasses:
   - topic-change
 tags:
   - mudanca
-source: []
+source:${source}
+spec_impact: pending
+spec_impact_reason: ""
 specs: []
 ---
 
@@ -95,7 +143,7 @@ ${en ? 'See design.md and plano-aprovado.md (captured from the approved plan-mod
   writeFileSync(join(dir, 'design.md'), `# ${slug} — design\n\n${plan.trim()}\n`, 'utf8');
   const tasks = planTasks(plan);
   if (tasks.length) writeFileSync(join(dir, 'tarefas.md'), `# ${slug} — ${en ? 'tasks' : 'tarefas'}\n\n${tasks.join('\n')}\n`, 'utf8');
-  writeFileSync(join(dir, 'plano-aprovado.md'), rawNote, 'utf8');
+  persistApprovedPlan(dir, slug, rawNote, plan, dateStr);
   return {
     slug, created: true,
     context: `<plan_captured>\n${en
@@ -110,7 +158,11 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     const r = capturePlan(getVaultBase(input), input);
     if (!r) { writeHookOutput({}); }
     else writeHookOutput({ hookSpecificOutput: { hookEventName: 'PostToolUse', additionalContext: r.context } });
-  } catch {
-    writeHookOutput({});
+  } catch (error) {
+    process.stderr.write(`[wendkeep] plan-capture falhou: ${error.message}\n`);
+    writeHookOutput({ hookSpecificOutput: {
+      hookEventName: 'PostToolUse',
+      additionalContext: `<plan_capture_error>O plano aprovado não foi persistido: ${error.message}</plan_capture_error>`,
+    } });
   }
 }

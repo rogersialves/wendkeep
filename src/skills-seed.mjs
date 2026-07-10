@@ -31,6 +31,11 @@ vault cego. Exceção única: mudança trivial (typo, 1 linha).
    - \`tarefas.md\` — a lista de tarefas \`- [ ] N.N descrição\`.
    A mudança vira a *ativa* (ponteiro \`.brain/CURRENT_CHANGE.md\`) e é injetada no
    próximo SessionStart, então você retoma o trabalho em curso automaticamente.
+   Antes de implementar, resolva \`spec_impact\` na proposta:
+   - \`required\`: liste a capability em \`specs:\` e preencha
+     \`specs/<capability>/spec.md\` com ADDED/MODIFIED/REMOVED; ligue tarefas com \`[req:ID]\`.
+   - \`none\`: registre uma justificativa real em \`spec_impact_reason\`.
+   \`pending\` nunca é estado pronto para implementação ou archive.
 3. **Apply** — implemente cada tarefa de \`tarefas.md\` com disciplina **wk-tdd**
    (teste vermelho antes do código). Marque \`- [x]\` ao concluir. Declare nas tarefas:
    - \`[sensor:<id>]\` — a prova automatizada (roda no verify).
@@ -139,6 +144,7 @@ qualquer código.
 Antes de fechar o design, resolva cada zona cinza: decide com o usuário, ou registra como
 **assumption assinada** ("assumo X porque Y — corrija se errado"). Cinza declinado pelo
 usuário é *registrado*, não descartado no silêncio. Nada sai do design silenciosamente ambíguo.
+Declare também a capability e se o design tem \`spec_impact: required\` ou \`none\`.
 
 ## Tabela out-of-scope
 
@@ -169,6 +175,10 @@ consiga executar.
 Mapeie os arquivos: quais criar/modificar e a responsabilidade de cada um. Arquivos que
 mudam juntos ficam juntos; um arquivo, uma responsabilidade. É aqui que a decomposição
 trava.
+
+Resolva o contrato antes de decompor: \`spec_impact: required\` exige capability + delta real em
+\`specs/<capability>/spec.md\`; \`spec_impact: none\` exige justificativa. Cada comportamento do
+delta recebe ID e as tarefas correspondentes usam \`[req:ID]\`.
 
 ## Tarefas bite-sized (TDD)
 
@@ -240,6 +250,9 @@ leaves the vault blind. Single exception: a trivial change (typo, one line).
 2. **Propose** — \`wendkeep change new <slug>\` scaffolds \`08-Changes/<slug>/\`
    (proposta/design/tarefas + a \`specs/\` delta). The change becomes *active* and is
    injected at the next SessionStart.
+   Before implementation, resolve \`spec_impact\`: \`required\` needs the capability listed in
+   \`specs:\` plus a real \`specs/<capability>/spec.md\` delta and \`[req:ID]\` links; \`none\`
+   needs a real \`spec_impact_reason\`. \`pending\` is never ready for implementation/archive.
 3. **Apply** — implement each task in tarefas.md with **wk-tdd** (red test first). Tag tasks:
    \`[sensor:<id>]\` (automated proof) and \`[req:<ID>]\` (the spec requirement it satisfies).
 4. **Verify** — \`wendkeep verify\` runs the sensors; then \`wendkeep verify --deep\` builds
@@ -310,6 +323,7 @@ Use it when the idea is still vague. Turn it into an approved design BEFORE writ
 ## Closure gate — no dangling ambiguity
 Resolve every gray area: decide with the user, or log a **signed-off assumption** ("assuming X
 because Y — correct me if wrong"). A declined gray area is recorded, not silently dropped.
+Also declare the capability and whether the design has \`spec_impact: required\` or \`none\`.
 
 ## Out-of-scope table
 List explicitly what the change does **not** do. Undeclared scope becomes creep.
@@ -330,6 +344,10 @@ Use it after an approved design. Produce a plan an engineer with no project cont
 ## Before tasks
 Map the files: what to create/modify and each one's responsibility. Files that change together
 live together; one file, one responsibility.
+
+Resolve the contract first: \`spec_impact: required\` needs a capability and a real delta at
+\`specs/<capability>/spec.md\`; \`spec_impact: none\` needs a reason. Give each behaviour an ID
+and link the corresponding tasks with \`[req:ID]\`.
 
 ## Bite-sized tasks (TDD)
 Each task ends in an independently testable deliverable. Each step is a 2–5 min action:
@@ -434,6 +452,10 @@ comes from the package (freshness seal; edit a task later and the gate rejects i
 
 const PLAN_TEMPLATE_PT = `# Template — plano de tarefas (TDD, bite-sized)
 
+## Impacto em specs
+- \`spec_impact\`: \`required\` | \`none\`
+- Capability/delta: \`specs/<capability>/spec.md\` ou justificativa de \`none\`
+
 ## Arquivos
 - Criar: \`caminho/exato.mjs\`
 - Modificar: \`caminho/existente.mjs:120-140\`
@@ -456,6 +478,10 @@ tarefas (uma função é \`x()\` em toda parte). Cada tarefa termina num entreg�
 `;
 
 const PLAN_TEMPLATE_EN = `# Template — task plan (TDD, bite-sized)
+
+## Spec impact
+- \`spec_impact\`: \`required\` | \`none\`
+- Capability/delta: \`specs/<capability>/spec.md\` or the \`none\` rationale
 
 ## Files
 - Create: \`exact/path.mjs\`
