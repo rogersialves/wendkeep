@@ -72,14 +72,19 @@ test('collectSubagentUsage: aggregates subagents, maps workflow name + cost', ()
     assert.equal(r.workflows[0].name, 'my-audit');
     assert.equal(r.workflows[0].agents, 2);
 
-    // render: aggregate line + collapsible per-subagent table
+    // render: aggregate line + per-subagent table como markdown PURO. O Obsidian (reading view)
+    // trata <details> como HTML cru e não renderiza tabela markdown lá dentro — virava uma sopa
+    // de pipes numa linha só (visto em produção). Sub-heading ### é foldável nativamente.
     const md = renderSubagentSection(r);
     assert.match(md, /## Subagents & Workflows/);
     assert.match(md, /\*\*Subagents:\*\* 2 · 3 chamadas/);
     assert.match(md, /completed · 2 agentes · fases: Classify, Synthesize · 42s/);
     assert.match(md, /\*\*Tools \(subagents\):\*\* .*Read/);
-    assert.match(md, /<details>/);
-    assert.match(md, /\| aaa111 \| Explore \| my-audit \|/);
+    assert.doesNotMatch(md, /<details>|<summary>/, 'sem HTML cru — Obsidian não renderiza markdown dentro');
+    assert.match(md, /### Por subagent \(2\)/, 'sub-heading foldável');
+    assert.match(md, /\n\| Agent \| Tipo \| Workflow \|/, 'header da tabela em linha própria');
+    assert.match(md, /\n\|---\|/, 'separador em linha própria');
+    assert.match(md, /\n\| aaa111 \| Explore \| my-audit \|/, 'linha de dado em linha própria');
   } finally { rmSync(sd, { recursive: true, force: true }); }
 });
 

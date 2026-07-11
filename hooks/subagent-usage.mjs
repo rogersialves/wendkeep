@@ -181,13 +181,11 @@ export function renderSubagentSection(c) {
 - **Workflows:** ${wf}
 - **Tools (subagents):** ${tools}${wasteLine}
 
-<details><summary>Por subagent (${a.count})</summary>
+### Por subagent (${a.count})
 
 | Agent | Tipo | Workflow | Modelo | Tools | Tokens | Custo |
 |---|---|---|---|---:|---:|---:|
-${rows}
-
-</details>`;
+${rows}`;
 }
 
 function setFrontmatterField(content, key, value) {

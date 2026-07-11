@@ -4,6 +4,17 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.34.1] — 2026-07-11
+
+### Fixed
+
+- **Tabela "Por subagent" ilegível na nota de sessão**: a tabela markdown vivia dentro de
+  `<details>` e o Obsidian (reading view) trata o bloco como HTML cru — sem renderizar a
+  tabela, tudo virava uma linha só de pipes embaralhados (visto em produção). A seção agora usa
+  um sub-heading `### Por subagent (N)` + tabela markdown pura: renderiza correto e continua
+  colapsável via fold nativo de heading. Notas existentes se autocuram no próximo Stop/refresh
+  (a seção inteira é regenerada pelo upsert).
+
 ## [0.34.0] — 2026-07-11
 
 ### Added
