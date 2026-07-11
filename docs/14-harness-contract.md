@@ -42,13 +42,15 @@ usuário. Cobre Codex/Amp/Cursor/Zed e todo agente que leia AGENTS.md.
   na change ativa: `- [ ] M.<n> mata mutante <file>:<line> (<mutator>) [sensor:<id>]` (bounded, teto 3).
 - Roda no root do projeto; `exit 0` = verde.
 
-## Requisito — `07-Specs/<capability>.md` (spec vivo)
+## Requisito — `07-Specs/<capability>.md` (contrato consolidado gerado)
 ```markdown
 ### Requisito: GATE-1 — archive trava sem sensor crítico verde
 (comportamento / cenários)
 ```
-- ID = `^[A-Z][A-Z0-9]*-\d+$` (ex.: `GATE-1`, `AUTH-2`). **Identidade = o ID**; ` — <nome>` é display.
+- ID = `^[A-Z][A-Z0-9]*(?:-[A-Z0-9]+)*-\d+$` (ex.: `GATE-1`, `LOGIN-ORBIT-4`). **Identidade = o ID**; ` — <nome>` é display.
 - Heading sem ID (`### Requisito: <nome>`) é válido (retrocompat); identidade cai pro nome.
+- Somente leitura para humanos/LLMs. Toda autoria ocorre no delta da change em `08-Mudanças`.
+- `.brain/SPECS_STATE.json` registra hashes; `doctor` detecta edição direta.
 
 ## Delta de spec — `08-Mudanças/<slug>/specs/<capability>/spec.md`
 ```markdown
@@ -61,7 +63,8 @@ usuário. Cobre Codex/Amp/Cursor/Zed e todo agente que leia AGENTS.md.
 ## REMOVED Requirements
 ### Requisito: GATE-3 — a remover
 ```
-No `archive`, funde no spec vivo (ADDED/MODIFIED = upsert por ID; REMOVED = deleta).
+`spec effective --change <slug>` combina contrato + somente este delta. No `archive`, funde no
+contrato gerado; baseline por requisito bloqueia conflito real entre changes concorrentes.
 
 ## Tarefa — `tarefas.md`
 ```markdown
@@ -81,12 +84,14 @@ source: ["[[02-Sessões/…]]"]
 ## Pacote de verificação — `08-Mudanças/<slug>/verificacao.json`
 Escrito por `wendkeep verify --deep`; consumido pela skill `wk-verify`.
 ```json
-{ "slug": "x", "tasksHash": "a1b2c3d4e5f6",
-  "requirements": [{ "id": "GATE-1" }],
+{ "slug": "x", "tasksHash": "a1b2c3d4e5f6", "effectiveSpecHash": "<sha256>",
+  "requirements": [{ "id": "GATE-1", "capability": "gate", "operation": "MODIFIED",
+    "source": "change", "body": "comportamento completo" }],
   "tasks": [{ "id": "3.2", "text": "...", "req": "GATE-1", "done": false }],
   "sensors": [{ "id": "tests", "status": "green", "severity": "critical" }] }
 ```
-`tasksHash` = sha1 curto de `tarefas.md` — o selo de frescor. A skill copia pro verdict.
+`tasksHash` e `effectiveSpecHash` são selos de frescor. A skill copia ambos pro verdict e julga
+somente o pacote autocontido; não relê `07-Specs`.
 
 ## Veredito — `08-Mudanças/<slug>/verdict.json`
 Escrito pela skill `wk-verify` (autor≠verificador). O gate do `archive` exige `ok:true`
@@ -110,7 +115,8 @@ description: <quando usar — usado pra roteamento>
 ---
 <corpo>
 ```
-Distribuída por `wendkeep sync-defs` (e pelo `init`) pra `.claude/skills/<name>/`.
+Distribuída por `wendkeep sync-defs` (e pelo `init`) para `.claude/skills/<name>/` e
+`.agents/skills/<name>/`, com metadata de versão/hash. `sync-defs --check` detecta drift.
 
 ## Lesson — `.brain/lessons/[<data>-]<slug>.md`
 Falha de verificação destilada em lição project-local, injetada como bloco `<lessons>` no

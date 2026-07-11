@@ -11,6 +11,14 @@ export function tasksHashOf(md) {
   return createHash('sha1').update(String(md)).digest('hex').slice(0, 12);
 }
 
+export function contentHashOf(value) {
+  return createHash('sha256').update(String(value)).digest('hex');
+}
+
+export const SPECS_STATE_FILE = '.brain/SPECS_STATE.json';
+export const SPEC_BASELINE_FILE = '.spec-base.json';
+export const MANAGED_SPEC_MARKER = '<!-- wendkeep:managed-spec — generated from 08-Mudanças; do not edit directly -->';
+
 // Parse is BILINGUAL always (mixed vaults never break); rendering follows the vault locale.
 const REQ_RE = /^### (?:Requisito|Requirement):\s*(.+)$/gm;
 
@@ -21,7 +29,7 @@ export function parseRequirements(md) {
   for (let i = 0; i < matches.length; i += 1) {
     const raw = matches[i][1].trim();
     // Identity is the ID (e.g. GATE-1) when the heading is "<ID> — <nome>"; else the whole text.
-    const idM = raw.match(/^([A-Z][A-Z0-9]*-\d+)\s*—\s*(.+)$/);
+    const idM = raw.match(/^([A-Z][A-Z0-9]*(?:-[A-Z0-9]+)*-\d+)\s*—\s*(.+)$/);
     const id = idM ? idM[1] : null;
     const name = idM ? idM[2].trim() : raw;
     const start = matches[i].index + matches[i][0].length;
@@ -75,7 +83,148 @@ export function applyDelta(reqs, delta) {
 export function renderSpec(capability, reqs, { footer, reqHeading = 'Requisito' } = {}) {
   const blocks = reqs.map((r) => `### ${reqHeading}: ${r.id ? `${r.id} — ${r.name}` : r.name}\n${r.body}`).join('\n\n');
   const foot = footer ? `\n\n> ${footer}\n` : '\n';
-  return `---\ntype: spec\ncssclasses:\n  - topic-spec\ntags:\n  - spec\n---\n\n# ${capability}\n\n## Requisitos\n\n${blocks}${foot}`;
+  return `${MANAGED_SPEC_MARKER}\n---\ntype: spec\ncssclasses:\n  - topic-spec\ntags:\n  - spec\n---\n\n# ${capability}\n\n## Requisitos\n\n${blocks}${foot}`;
+}
+
+function readLivingSpecs(vaultBase) {
+  const specsDir = join(vaultBase, getLocale(vaultBase).folders.specs);
+  const specs = {};
+  let files = [];
+  try { files = readdirSync(specsDir).filter((f) => f.endsWith('.md') && f !== 'README.md'); } catch { return specs; }
+  for (const file of files) {
+    const capability = file.replace(/\.md$/, '');
+    const md = readFileSync(join(specsDir, file), 'utf8');
+    specs[capability] = {
+      hash: contentHashOf(md),
+      requirements: Object.fromEntries(parseRequirements(md).map((r) => [r.id || r.name, contentHashOf(JSON.stringify(r))])),
+    };
+  }
+  return specs;
+}
+
+export function livingSpecCapabilities(vaultBase) {
+  return Object.keys(readLivingSpecs(vaultBase));
+}
+
+export function adoptSpecsState(vaultBase) {
+  const state = { version: 1, generatedAt: new Date().toISOString(), specs: readLivingSpecs(vaultBase) };
+  ensureDir(join(vaultBase, '.brain'));
+  writeFileSync(join(vaultBase, SPECS_STATE_FILE), `${JSON.stringify(state, null, 2)}\n`, 'utf8');
+  return state;
+}
+
+export function readSpecsState(vaultBase) {
+  try { return JSON.parse(readFileSync(join(vaultBase, SPECS_STATE_FILE), 'utf8')); } catch { return null; }
+}
+
+export function checkSpecsState(vaultBase) {
+  const recorded = readSpecsState(vaultBase);
+  if (!recorded) return { ok: false, missing: true, changed: [] };
+  const current = readLivingSpecs(vaultBase);
+  const names = new Set([...Object.keys(recorded.specs || {}), ...Object.keys(current)]);
+  const changed = [...names].filter((name) => recorded.specs?.[name]?.hash !== current[name]?.hash);
+  return { ok: changed.length === 0, missing: false, changed, current, recorded };
+}
+
+function recordPromotedSpecs(vaultBase, capabilities) {
+  const existing = readSpecsState(vaultBase);
+  if (!existing) return adoptSpecsState(vaultBase);
+  const current = readLivingSpecs(vaultBase);
+  const specs = { ...(existing.specs || {}) };
+  for (const capability of capabilities) {
+    if (current[capability]) specs[capability] = current[capability];
+    else delete specs[capability];
+  }
+  const state = { version: 1, generatedAt: new Date().toISOString(), specs };
+  writeFileSync(join(vaultBase, SPECS_STATE_FILE), `${JSON.stringify(state, null, 2)}\n`, 'utf8');
+  return state;
+}
+
+export function captureSpecBaseline(vaultBase, changeDir, { refresh = false } = {}) {
+  const path = join(changeDir, SPEC_BASELINE_FILE);
+  if (!refresh && existsSync(path)) {
+    try { return JSON.parse(readFileSync(path, 'utf8')); } catch { /* rebuild malformed baseline */ }
+  }
+  const baseline = { version: 1, capturedAt: new Date().toISOString(), specs: readLivingSpecs(vaultBase) };
+  writeFileSync(path, `${JSON.stringify(baseline, null, 2)}\n`, 'utf8');
+  return baseline;
+}
+
+export function specConflicts(vaultBase, changeDir, capabilities = discoverSpecDeltas(changeDir)) {
+  let baseline = null;
+  try { baseline = JSON.parse(readFileSync(join(changeDir, SPEC_BASELINE_FILE), 'utf8')); } catch { /* legacy change */ }
+  if (!baseline) return [];
+  const current = readLivingSpecs(vaultBase);
+  const conflicts = [];
+  for (const capability of capabilities) {
+    let delta;
+    try { delta = parseDelta(readFileSync(join(changeDir, 'specs', capability, 'spec.md'), 'utf8')); } catch { continue; }
+    const baseReqs = baseline.specs?.[capability]?.requirements || {};
+    const currentReqs = current[capability]?.requirements || {};
+    for (const req of delta.added || []) {
+      const key = req.id || req.name;
+      if (!(key in baseReqs) && key in currentReqs) conflicts.push(`${capability}:${key} foi adicionado por outra change`);
+    }
+    for (const req of delta.modified || []) {
+      const key = req.id || req.name;
+      if (baseReqs[key] !== currentReqs[key]) conflicts.push(`${capability}:${key} mudou desde a abertura da change`);
+    }
+    for (const key of delta.removed || []) {
+      if (baseReqs[key] !== currentReqs[key]) conflicts.push(`${capability}:${key} mudou desde a abertura da change`);
+    }
+  }
+  return conflicts;
+}
+
+export function resolveEffectiveSpecs(vaultBase, changeDir, capabilities = discoverSpecDeltas(changeDir)) {
+  const specsDir = join(vaultBase, getLocale(vaultBase).folders.specs);
+  const result = [];
+  const warnings = [];
+  const errors = [];
+  for (const capability of capabilities) {
+    let living = [];
+    try { living = parseRequirements(readFileSync(join(specsDir, `${capability}.md`), 'utf8')); } catch { /* new capability */ }
+    let deltaMd = '';
+    try { deltaMd = readFileSync(join(changeDir, 'specs', capability, 'spec.md'), 'utf8'); } catch { /* unchanged living capability */ }
+    if (deltaMd && isPlaceholderDelta(deltaMd)) deltaMd = '';
+    const delta = deltaMd ? parseDelta(deltaMd) : { added: [], modified: [], removed: [] };
+    const operations = new Map(living.map((r) => [r.id || r.name, { operation: 'BASE', source: 'living' }]));
+    for (const r of delta.added) operations.set(r.id || r.name, { operation: 'ADDED', source: 'change' });
+    for (const r of delta.modified) operations.set(r.id || r.name, { operation: 'MODIFIED', source: 'change' });
+    for (const key of delta.removed) operations.delete(key);
+    const applied = applyDelta(living, delta);
+    warnings.push(...applied.warnings.map((w) => `${capability}: ${w}`));
+    for (const warning of applied.warnings) {
+      if (/^(ADDED já existe|MODIFIED inexistente|REMOVED inexistente)/.test(warning)) errors.push(`${capability}: ${warning}`);
+    }
+    result.push({
+      capability,
+      requirements: applied.reqs.map((r) => ({ ...r, capability, ...(operations.get(r.id || r.name) || { operation: 'BASE', source: 'living' }) })),
+    });
+  }
+  const serializable = result.map((s) => ({ capability: s.capability, requirements: s.requirements }));
+  return { specs: result, requirements: result.flatMap((s) => s.requirements), warnings, errors, hash: contentHashOf(JSON.stringify(serializable)) };
+}
+
+export function buildEffectiveRequirementPackage(vaultBase, changeDir, reqIds = []) {
+  let listed = [];
+  try { listed = parseSpecsList(readFileSync(join(changeDir, 'proposta.md'), 'utf8')); } catch { /* caller validates change */ }
+  const changed = [...new Set([...listed, ...discoverSpecDeltas(changeDir)])];
+  const capabilities = [...new Set([...livingSpecCapabilities(vaultBase), ...changed])];
+  const effective = resolveEffectiveSpecs(vaultBase, changeDir, capabilities);
+  const byId = new Map(effective.requirements.filter((r) => r.id).map((r) => [r.id, r]));
+  const missing = reqIds.filter((id) => !byId.has(id));
+  const requirements = reqIds.map((id) => byId.get(id)).filter(Boolean);
+  const relevantCaps = new Set([...changed, ...requirements.map((r) => r.capability)]);
+  const relevant = effective.specs.filter((spec) => relevantCaps.has(spec.capability));
+  return {
+    ...effective,
+    specs: relevant,
+    requirements,
+    missing,
+    changedCapabilities: changed,
+    hash: contentHashOf(JSON.stringify(relevant)),
+  };
 }
 
 export function parseSpecsList(propostaMd) {
@@ -160,6 +309,13 @@ export function promoteSpecs(vaultBase, changeDir, specs, { changeWikilink, date
   const specsDir = loc.folders.specs;
   const promoted = [];
   const warnings = [];
+  const state = checkSpecsState(vaultBase);
+  const unmanaged = state.missing ? [] : state.changed.filter((capability) => specs.includes(capability));
+  if (unmanaged.length) {
+    throw new Error(`07-Specs alterado fora do WendKeep: ${unmanaged.join(', ')} — mova o delta para 08-Mudanças/<change>/specs`);
+  }
+  const conflicts = specConflicts(vaultBase, changeDir, specs);
+  if (conflicts.length) throw new Error(`conflito de spec: ${conflicts.join('; ')} — reconcilie o delta e rode \`wendkeep spec rebase --change <slug> --accept-current\``);
   for (const cap of specs) {
     let deltaMd;
     try { deltaMd = readFileSync(join(changeDir, 'specs', cap, 'spec.md'), 'utf8'); }
@@ -176,19 +332,23 @@ export function promoteSpecs(vaultBase, changeDir, specs, { changeWikilink, date
     writeFileSync(livePath, renderSpec(cap, applied.reqs, { footer, reqHeading: loc.reqHeading }), 'utf8');
     promoted.push(cap);
   }
+  recordPromotedSpecs(vaultBase, promoted);
   return { promoted, warnings };
 }
 
 // Gate check for the independent verdict (Wave A). A requirement-bearing change must have
 // a verdict that is ok and covers every declared req id. A requirement-less change passes:
 // nothing for an independent verifier to check — the sensor gate is already the proof.
-export function evaluateVerdict(verdict, reqIds, { tasksHash } = {}) {
+export function evaluateVerdict(verdict, reqIds, { tasksHash, effectiveSpecHash } = {}) {
   const ids = reqIds || [];
   if (ids.length === 0) return { ok: true, missing: [] };
   if (!verdict || verdict.ok !== true) return { ok: false, missing: [] };
   // Freshness (G3/#6): a verdict minted against a different tarefas.md is stale. Verdicts
   // without a hash (pre-0.6.1) are accepted for backward compat.
   if (tasksHash && verdict.tasksHash && verdict.tasksHash !== tasksHash) {
+    return { ok: false, missing: [], stale: true };
+  }
+  if (effectiveSpecHash && verdict.effectiveSpecHash && verdict.effectiveSpecHash !== effectiveSpecHash) {
     return { ok: false, missing: [], stale: true };
   }
   const covered = new Set((verdict.coverage || []).filter((c) => c.covered).map((c) => c.req));

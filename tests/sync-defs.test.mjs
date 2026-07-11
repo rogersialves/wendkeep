@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { syncDefs, seedDefinitions } from '../src/sync-defs.mjs';
+import { checkSyncDefs, syncDefs, seedDefinitions } from '../src/sync-defs.mjs';
 
 function tempVaultWithDefs() {
   const vault = mkdtempSync(join(tmpdir(), 'wk-defs-'));
@@ -42,7 +42,7 @@ test('syncDefs: writes the managed AGENTS.md section, idempotent, user content p
   } finally { rmSync(vault, { recursive: true, force: true }); rmSync(project, { recursive: true, force: true }); }
 });
 
-test('syncDefs: agents .toml -> .codex/agents, skills dir -> .claude/skills', () => {
+test('syncDefs: agents -> Codex, skills -> Claude + Codex project dirs', () => {
   const vault = tempVaultWithDefs();
   const project = mkdtempSync(join(tmpdir(), 'wk-proj-'));
   try {
@@ -51,6 +51,9 @@ test('syncDefs: agents .toml -> .codex/agents, skills dir -> .claude/skills', ()
     assert.deepEqual(r.skills, ['bar']);
     assert.ok(existsSync(join(project, '.codex', 'agents', 'foo.toml')), 'agent copied to .codex/agents');
     assert.ok(existsSync(join(project, '.claude', 'skills', 'bar', 'SKILL.md')), 'skill copied to .claude/skills');
+    assert.ok(existsSync(join(project, '.agents', 'skills', 'bar', 'SKILL.md')), 'skill copied to .agents/skills');
+    assert.ok(existsSync(join(project, '.agents', 'skills', 'bar', '.wendkeep-meta.json')), 'version/hash metadata copied');
+    assert.equal(checkSyncDefs(vault, project).ok, true);
     // README.md in agents/ is docs, not a def — not synced.
     assert.equal(existsSync(join(project, '.codex', 'agents', 'README.md')), false);
   } finally {
@@ -63,11 +66,23 @@ test('syncDefs: no .brain defs -> empty result, no crash', () => {
   const vault = mkdtempSync(join(tmpdir(), 'wk-empty-'));
   const project = mkdtempSync(join(tmpdir(), 'wk-proj2-'));
   try {
-    assert.deepEqual(syncDefs(vault, project), { agents: [], skills: [], agentsMd: false });
+    assert.deepEqual(syncDefs(vault, project), { agents: [], skills: [], codexSkills: [], agentsMd: false });
   } finally {
     rmSync(vault, { recursive: true, force: true });
     rmSync(project, { recursive: true, force: true });
   }
+});
+
+test('checkSyncDefs detects stale skill copies without writing', () => {
+  const vault = tempVaultWithDefs();
+  const project = mkdtempSync(join(tmpdir(), 'wk-drift-'));
+  try {
+    syncDefs(vault, project);
+    writeFileSync(join(project, '.agents', 'skills', 'bar', 'SKILL.md'), 'stale\n');
+    const check = checkSyncDefs(vault, project);
+    assert.equal(check.ok, false);
+    assert.ok(check.issues.some((issue) => issue.includes('.agents') && issue.includes('divergiu')));
+  } finally { rmSync(vault, { recursive: true, force: true }); rmSync(project, { recursive: true, force: true }); }
 });
 
 test('seedDefinitions: creates README + example agent/skill, idempotent + non-destructive', () => {

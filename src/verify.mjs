@@ -5,7 +5,11 @@ import { readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { isAbsolute, join, resolve } from 'node:path';
 import { parseTasks, activeChange, appendFixTasks } from '../hooks/change-core.mjs';
 import { loadSensors, requiredSensors, runSensors, evaluateGate } from '../hooks/sensors-core.mjs';
-import { tasksHashOf } from '../hooks/spec-core.mjs';
+import {
+  buildEffectiveRequirementPackage,
+  captureSpecBaseline,
+  tasksHashOf,
+} from '../hooks/spec-core.mjs';
 import { addLesson } from '../hooks/lessons-core.mjs';
 import { getLocale } from '../hooks/locale.mjs';
 
@@ -88,16 +92,36 @@ export function runVerify(argv) {
     const tasks = parseTasks(tarefas);
     const reqIds = [...new Set(tasks.map((t) => t.req).filter(Boolean))];
     const tasksHash = tasksHashOf(tarefas);
+    captureSpecBaseline(vaultBase, changeDir);
+    const effective = buildEffectiveRequirementPackage(vaultBase, changeDir, reqIds);
+    if (effective.errors.length) {
+      process.stderr.write(`verify --deep: spec efetiva inválida: ${effective.errors.join('; ')}\n`);
+      process.exit(1);
+    }
+    if (effective.missing.length) {
+      process.stderr.write(`verify --deep: requisito(s) órfão(s) na spec efetiva: ${effective.missing.join(', ')}\n`);
+      process.exit(1);
+    }
     const pkg = {
       slug,
       tasksHash,
-      requirements: reqIds.map((id) => ({ id })),
+      effectiveSpecHash: effective.hash,
+      requirements: effective.requirements.map((req) => {
+        return {
+          id: req.id,
+          name: req.name,
+          capability: req.capability,
+          operation: req.operation,
+          source: req.source,
+          body: req.body,
+        };
+      }),
       tasks: tasks.map((t) => ({ id: t.id, text: t.text, req: t.req || null, done: t.done })),
       sensors: evidence,
     };
     writeFileSync(join(changeDir, 'verificacao.json'), `${JSON.stringify(pkg, null, 2)}\n`, 'utf8');
     if (reqIds.length === 0) {
-      writeFileSync(join(changeDir, 'verdict.json'), `${JSON.stringify({ slug, ok: true, coverage: [], tasksHash, notes: ['trivial: sem requisito'] }, null, 2)}\n`, 'utf8');
+      writeFileSync(join(changeDir, 'verdict.json'), `${JSON.stringify({ slug, ok: true, coverage: [], tasksHash, effectiveSpecHash: effective.hash, notes: ['trivial: sem requisito'] }, null, 2)}\n`, 'utf8');
       process.stdout.write('verify --deep: pacote + verdict trivial escritos\n');
     } else {
       process.stdout.write('verify --deep: pacote escrito — rode a skill wk-verify pra gravar verdict.json\n');

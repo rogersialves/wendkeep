@@ -5,6 +5,7 @@ import { existsSync } from 'node:fs';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { checkHarness } from '../hooks/harness-doctor.mjs';
+import { checkSyncDefs } from './sync-defs.mjs';
 
 export function runDoctor(argv) {
   const here = dirname(fileURLToPath(import.meta.url));
@@ -40,6 +41,11 @@ export function runDoctor(argv) {
 
   // 2. Harness integrity (Wave B).
   const { errors, warnings } = checkHarness(vaultBase, projectRoot);
+  const defs = checkSyncDefs(vaultBase, projectRoot);
+  if (!defs.ok) {
+    warnings.push(...defs.issues.map((issue) => `defs: ${issue}`));
+    warnings.push('defs stale — rode `wendkeep sync-defs --reseed` e reinicie Claude Code/Codex');
+  }
   process.stdout.write(`\n[harness] ${errors.length} erro(s), ${warnings.length} aviso(s)\n`);
   for (const e of errors) process.stdout.write(`  ✗ ${e}\n`);
   for (const w of warnings) process.stdout.write(`  ! ${w}\n`);

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { parseRequirements, parseDelta, applyDelta, renderSpec, parseSpecsList, promoteSpecs, evaluateVerdict, tasksHashOf, isPlaceholderDelta, discoverSpecDeltas, parseSpecImpact, validateSpecImpact } from '../hooks/spec-core.mjs';
+import { adoptSpecsState, buildEffectiveRequirementPackage, captureSpecBaseline, checkSpecsState, parseRequirements, parseDelta, applyDelta, renderSpec, parseSpecsList, promoteSpecs, evaluateVerdict, tasksHashOf, isPlaceholderDelta, discoverSpecDeltas, parseSpecImpact, specConflicts, validateSpecImpact } from '../hooks/spec-core.mjs';
 
 test('isPlaceholderDelta: scaffold puro true; delta real/REMOVED false; bilíngue', () => {
   const scaffoldPt = '## ADDED Requirements\n### Requisito: (nome)\n(comportamento / cenários)\n\n## MODIFIED Requirements\n\n## REMOVED Requirements\n';
@@ -59,11 +59,13 @@ test('parseSpecImpact + validateSpecImpact: pending/required/none e legado', () 
 });
 
 test('evaluateVerdict: tasksHash mismatch = stale; sem hash no verdict = retrocompat', () => {
-  const v = { ok: true, coverage: [{ req: 'A-1', covered: true }], tasksHash: 'abc123' };
+  const v = { ok: true, coverage: [{ req: 'A-1', covered: true }], tasksHash: 'abc123', effectiveSpecHash: 'spec-a' };
   assert.deepEqual(evaluateVerdict(v, ['A-1'], { tasksHash: 'abc123' }), { ok: true, missing: [] });
   const stale = evaluateVerdict(v, ['A-1'], { tasksHash: 'zzz999' });
   assert.equal(stale.ok, false);
   assert.equal(stale.stale, true);
+  const specStale = evaluateVerdict(v, ['A-1'], { tasksHash: 'abc123', effectiveSpecHash: 'spec-b' });
+  assert.equal(specStale.stale, true);
   // verdict pré-0.6.1 (sem tasksHash): aceito
   const old = { ok: true, coverage: [{ req: 'A-1', covered: true }] };
   assert.equal(evaluateVerdict(old, ['A-1'], { tasksHash: 'abc123' }).ok, true);
@@ -162,6 +164,12 @@ test('parseRequirements: extrai id do heading; retrocompat sem id', () => {
   assert.equal(r[1].name, 'sem id');
 });
 
+test('parseRequirements accepts compound requirement ids used by product specs', () => {
+  const [req] = parseRequirements('### Requisito: LOGIN-ORBIT-4 — entrada orbital\ncritério\n');
+  assert.equal(req.id, 'LOGIN-ORBIT-4');
+  assert.equal(req.name, 'entrada orbital');
+});
+
 test('applyDelta: casa por id; render mantém "ID — nome"', () => {
   const base = parseRequirements('### Requisito: GATE-1 — antigo\na\n');
   const delta = { added: [], modified: parseRequirements('### Requisito: GATE-1 — novo nome\nb\n'), removed: [] };
@@ -170,4 +178,58 @@ test('applyDelta: casa por id; render mantém "ID — nome"', () => {
   assert.equal(reqs[0].id, 'GATE-1');
   assert.equal(reqs[0].name, 'novo nome');
   assert.match(renderSpec('gate', reqs, {}), /### Requisito: GATE-1 — novo nome/);
+});
+
+test('effective spec merges ADDED/MODIFIED/REMOVED with provenance', () => {
+  const vault = mkdtempSync(join(tmpdir(), 'wk-effective-'));
+  const change = join(vault, '08-Mudanças', 'x');
+  try {
+    mkdirSync(join(vault, '07-Specs'), { recursive: true });
+    mkdirSync(join(change, 'specs', 'auth'), { recursive: true });
+    writeFileSync(join(vault, '07-Specs', 'auth.md'), renderSpec('auth', [
+      { id: 'AUTH-1', name: 'login', body: 'antigo' },
+      { id: 'AUTH-2', name: 'legado', body: 'remover' },
+    ]));
+    writeFileSync(join(change, 'proposta.md'), '---\nspecs: [auth]\n---\n');
+    writeFileSync(join(change, 'specs', 'auth', 'spec.md'), '## ADDED Requirements\n### Requisito: AUTH-3 — logout\nnovo\n\n## MODIFIED Requirements\n### Requisito: AUTH-1 — login\natualizado\n\n## REMOVED Requirements\n### Requisito: AUTH-2 — legado\nremover\n');
+    const pkg = buildEffectiveRequirementPackage(vault, change, ['AUTH-1', 'AUTH-3']);
+    assert.deepEqual(pkg.errors, []);
+    assert.deepEqual(pkg.missing, []);
+    assert.equal(pkg.requirements.find((r) => r.id === 'AUTH-1').operation, 'MODIFIED');
+    assert.equal(pkg.requirements.find((r) => r.id === 'AUTH-1').body, 'atualizado');
+    assert.equal(pkg.requirements.find((r) => r.id === 'AUTH-3').operation, 'ADDED');
+    assert.ok(!pkg.specs[0].requirements.some((r) => r.id === 'AUTH-2'));
+    assert.equal(pkg.hash.length, 64);
+  } finally { rmSync(vault, { recursive: true, force: true }); }
+});
+
+test('spec state detects direct living-spec edits', () => {
+  const vault = mkdtempSync(join(tmpdir(), 'wk-state-'));
+  try {
+    mkdirSync(join(vault, '07-Specs'), { recursive: true });
+    const path = join(vault, '07-Specs', 'auth.md');
+    writeFileSync(path, renderSpec('auth', [{ id: 'AUTH-1', name: 'login', body: 'v1' }]));
+    adoptSpecsState(vault);
+    assert.equal(checkSpecsState(vault).ok, true);
+    writeFileSync(path, renderSpec('auth', [{ id: 'AUTH-1', name: 'login', body: 'edit direto' }]));
+    assert.deepEqual(checkSpecsState(vault).changed, ['auth']);
+  } finally { rmSync(vault, { recursive: true, force: true }); }
+});
+
+test('baseline conflict is requirement-scoped', () => {
+  const vault = mkdtempSync(join(tmpdir(), 'wk-conflict-'));
+  const change = join(vault, '08-Mudanças', 'x');
+  try {
+    mkdirSync(join(vault, '07-Specs'), { recursive: true });
+    mkdirSync(join(change, 'specs', 'auth'), { recursive: true });
+    const live = join(vault, '07-Specs', 'auth.md');
+    writeFileSync(live, renderSpec('auth', [{ id: 'AUTH-1', name: 'login', body: 'v1' }, { id: 'AUTH-2', name: 'logout', body: 'v1' }]));
+    writeFileSync(join(change, 'specs', 'auth', 'spec.md'), '## MODIFIED Requirements\n### Requisito: AUTH-1 — login\nminha mudança\n');
+    captureSpecBaseline(vault, change);
+    writeFileSync(live, renderSpec('auth', [{ id: 'AUTH-1', name: 'login', body: 'v1' }, { id: 'AUTH-2', name: 'logout', body: 'outra change' }]));
+    assert.deepEqual(specConflicts(vault, change, ['auth']), []);
+    writeFileSync(live, renderSpec('auth', [{ id: 'AUTH-1', name: 'login', body: 'outra change' }, { id: 'AUTH-2', name: 'logout', body: 'outra change' }]));
+    assert.match(specConflicts(vault, change, ['auth'])[0], /AUTH-1 mudou/);
+    assert.throws(() => promoteSpecs(vault, change, ['auth']), /conflito de spec/);
+  } finally { rmSync(vault, { recursive: true, force: true }); }
 });

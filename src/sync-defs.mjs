@@ -2,11 +2,13 @@
 // they travel with the project in git. They have no automatic consumer — agents
 // read them from their own dirs — so `wendkeep sync-defs` copies them there:
 //   .brain/agents/*.toml  -> <project>/.codex/agents/   (Codex agent format)
-//   .brain/skills/<name>/ -> <project>/.claude/skills/   (skill format)
+//   .brain/skills/<name>/ -> <project>/.claude/skills/ + .agents/skills/ (skill format)
 // .brain is the source of truth; re-run sync after editing. Copy (not symlink) for
 // cross-platform robustness.
-import { copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
-import { isAbsolute, join, resolve } from 'node:path';
+import { createHash } from 'node:crypto';
+import { copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { seedWkSkills } from './skills-seed.mjs';
 import { getLocale } from '../hooks/locale.mjs';
 
@@ -15,6 +17,27 @@ import { getLocale } from '../hooks/locale.mjs';
 // the markers is ours; user content around it is never touched.
 const AG_START = '<!-- wendkeep:skills:start -->';
 const AG_END = '<!-- wendkeep:skills:end -->';
+const PACKAGE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const WENDKEEP_VERSION = JSON.parse(readFileSync(join(PACKAGE_ROOT, 'package.json'), 'utf8')).version;
+const META_FILE = '.wendkeep-meta.json';
+
+function directoryHash(root) {
+  const hash = createHash('sha256');
+  const visit = (dir) => {
+    let names = [];
+    try { names = readdirSync(dir).sort(); } catch { return; }
+    for (const name of names) {
+      if (name === META_FILE) continue;
+      const path = join(dir, name);
+      const rel = relative(root, path).replaceAll('\\', '/');
+      const stat = statSync(path);
+      if (stat.isDirectory()) visit(path);
+      else { hash.update(rel); hash.update('\0'); hash.update(readFileSync(path)); hash.update('\0'); }
+    }
+  };
+  visit(root);
+  return hash.digest('hex');
+}
 
 function skillInventory(skillsSrc) {
   const out = [];
@@ -31,9 +54,10 @@ function skillInventory(skillsSrc) {
   return out;
 }
 
-function renderAgentsSection(skills) {
+function renderAgentsSection(skills, sourceHash = '') {
   const list = skills.map((s) => `- **${s.name}** — ${s.description}`).join('\n');
   return `${AG_START}
+<!-- wendkeep-version: ${WENDKEEP_VERSION}; skills-sha256: ${sourceHash} -->
 ## wendkeep — process skills & loop
 
 This project uses the [wendkeep](https://github.com/rogersialves/wendkeep) harness. Work
@@ -41,9 +65,10 @@ through its change loop: \`wendkeep change new <slug>\` → implement tasks test
 (tag proof \`[sensor:id]\` and requirement \`[req:ID]\`) → \`wendkeep verify\` →
 \`wendkeep verify --deep\` + an independent read-only verification pass writing
 \`verdict.json\` → \`wendkeep change archive\` (gated). Inspect with \`wendkeep change
-status\` / \`spec list\` / \`sensors list\`.
+status\` / \`spec effective --change <slug>\` / \`sensors list\`. Author specs only in
+\`08-Mudanças/<slug>/specs/\`; \`07-Specs\` is generated and must not be edited directly.
 
-Process skills (full text in \`.claude/skills/\` and the vault's \`.brain/skills/\`):
+Process skills (full text in \`.claude/skills/\`, \`.agents/skills/\`, and the vault's \`.brain/skills/\`):
 ${list}
 ${AG_END}`;
 }
@@ -52,7 +77,7 @@ function upsertAgentsMd(projectPath, skillsSrc) {
   const skills = skillInventory(skillsSrc);
   if (!skills.length) return false;
   const path = join(projectPath, 'AGENTS.md');
-  const section = renderAgentsSection(skills);
+  const section = renderAgentsSection(skills, directoryHash(skillsSrc));
   let content = '';
   try { content = readFileSync(path, 'utf8'); } catch { /* novo */ }
   if (content.includes(AG_START) && content.includes(AG_END)) {
@@ -67,7 +92,7 @@ function upsertAgentsMd(projectPath, skillsSrc) {
 }
 
 export function syncDefs(vaultBase, projectPath) {
-  const out = { agents: [], skills: [], agentsMd: false };
+  const out = { agents: [], skills: [], codexSkills: [], agentsMd: false };
 
   const agentsSrc = join(vaultBase, '.brain', 'agents');
   if (existsSync(agentsSrc)) {
@@ -85,10 +110,19 @@ export function syncDefs(vaultBase, projectPath) {
     for (const name of readdirSync(skillsSrc)) {
       const dir = join(skillsSrc, name);
       if (!statSync(dir).isDirectory()) continue; // skip skills/README.md
-      const dest = join(projectPath, '.claude', 'skills', name);
-      mkdirSync(dest, { recursive: true });
-      cpSync(dir, dest, { recursive: true });
+      const destinations = [
+        join(projectPath, '.claude', 'skills', name),
+        join(projectPath, '.agents', 'skills', name),
+      ];
+      const sourceHash = directoryHash(dir);
+      for (const dest of destinations) {
+        rmSync(dest, { recursive: true, force: true });
+        mkdirSync(dest, { recursive: true });
+        cpSync(dir, dest, { recursive: true });
+        writeFileSync(join(dest, META_FILE), `${JSON.stringify({ wendkeepVersion: WENDKEEP_VERSION, sourceHash }, null, 2)}\n`, 'utf8');
+      }
       out.skills.push(name);
+      out.codexSkills.push(name);
     }
   }
 
@@ -96,6 +130,33 @@ export function syncDefs(vaultBase, projectPath) {
   out.agentsMd = upsertAgentsMd(projectPath, skillsSrc);
 
   return out;
+}
+
+export function checkSyncDefs(vaultBase, projectPath) {
+  const issues = [];
+  const skillsSrc = join(vaultBase, '.brain', 'skills');
+  if (!existsSync(skillsSrc)) return { ok: false, issues: ['fonte .brain/skills ausente'] };
+  const names = readdirSync(skillsSrc).filter((name) => {
+    try { return statSync(join(skillsSrc, name)).isDirectory(); } catch { return false; }
+  });
+  for (const name of names) {
+    const expected = directoryHash(join(skillsSrc, name));
+    for (const relDest of [join('.claude', 'skills', name), join('.agents', 'skills', name)]) {
+      const dest = join(projectPath, relDest);
+      if (!existsSync(join(dest, 'SKILL.md'))) { issues.push(`${relDest}: ausente`); continue; }
+      if (directoryHash(dest) !== expected) issues.push(`${relDest}: conteúdo divergiu da fonte`);
+      let meta = null;
+      try { meta = JSON.parse(readFileSync(join(dest, META_FILE), 'utf8')); } catch { /* missing */ }
+      if (meta?.wendkeepVersion !== WENDKEEP_VERSION || meta?.sourceHash !== expected) {
+        issues.push(`${relDest}: metadata stale/ausente (esperado WendKeep ${WENDKEEP_VERSION})`);
+      }
+    }
+  }
+  const expectedSection = renderAgentsSection(skillInventory(skillsSrc), directoryHash(skillsSrc));
+  let agentsMd = '';
+  try { agentsMd = readFileSync(join(projectPath, 'AGENTS.md'), 'utf8'); } catch { /* missing */ }
+  if (!agentsMd.includes(expectedSection)) issues.push('AGENTS.md: bloco gerenciado stale/ausente');
+  return { ok: issues.length === 0, issues, version: WENDKEEP_VERSION, skills: names.length };
 }
 
 // CLI entry for `wendkeep sync-defs`.
@@ -116,6 +177,15 @@ export function runSyncDefs(argv) {
   }
   const vaultBase = isAbsolute(base) ? base : resolve(process.cwd(), base);
   const projectPath = resolve(project || process.cwd());
+  if (argv.includes('--check')) {
+    const r = checkSyncDefs(vaultBase, projectPath);
+    if (r.ok) process.stdout.write(`wendkeep sync-defs --check: ok (${r.skills} skill(s), ${r.version})\n`);
+    else {
+      process.stderr.write(`wendkeep sync-defs --check: drift detectado\n  - ${r.issues.join('\n  - ')}\n`);
+      process.stderr.write('rode `wendkeep sync-defs --reseed` e reinicie Claude Code/Codex\n');
+    }
+    process.exit(r.ok ? 0 : 1);
+  }
   // --reseed (0.31.0): sobrescreve as wk-* de .brain/skills com os seeds da versão instalada
   // ANTES de copiar — é como um vault existente recebe descriptions/HARD-GATE novos.
   if (argv.includes('--reseed')) {
@@ -124,7 +194,7 @@ export function runSyncDefs(argv) {
   }
   const r = syncDefs(vaultBase, projectPath);
   process.stdout.write(
-    `wendkeep sync-defs: ${r.agents.length} agent(s) -> .codex/agents, ${r.skills.length} skill(s) -> .claude/skills\n`,
+    `wendkeep sync-defs: ${r.agents.length} agent(s) -> .codex/agents, ${r.skills.length} skill(s) -> .claude/skills + .agents/skills\n`,
   );
   if (r.agents.length) process.stdout.write(`  agents: ${r.agents.join(', ')}\n`);
   if (r.skills.length) process.stdout.write(`  skills: ${r.skills.join(', ')}\n`);
@@ -151,8 +221,8 @@ model = "gpt-5.5"
 const SKILLS_README = `# .brain/skills — versioned custom skill definitions
 
 Canonical, versioned source for your project's custom skills (\`<name>/SKILL.md\`).
-\`wendkeep sync-defs\` copies each skill folder here into \`<project>/.claude/skills/\` so
-the agent loads them. Edit here (source of truth); re-run \`wendkeep sync-defs\` after changes.
+\`wendkeep sync-defs\` copies each skill folder here into \`<project>/.claude/skills/\` and
+\`<project>/.agents/skills/\`. Edit here (source of truth); re-run sync after changes.
 `;
 
 const EXAMPLE_SKILL = `---

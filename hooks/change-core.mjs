@@ -4,7 +4,7 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { ensureDir, wikilinkFromRel, monthFolderRelFromDateStr } from './obsidian-common.mjs';
-import { parseSpecsList, promoteSpecs, discoverSpecDeltas, tasksHashOf } from './spec-core.mjs';
+import { parseSpecsList, promoteSpecs, discoverSpecDeltas, tasksHashOf, captureSpecBaseline } from './spec-core.mjs';
 import { getLocale } from './locale.mjs';
 
 export const ARCHIVE_DIR = '_arquivo';
@@ -119,8 +119,42 @@ export function newChange(vaultBase, slug, { sessionRel = '', dateStr, simple = 
       writeFileSync(exampleDelta, files.specDelta, 'utf8');
     }
   }
+  if (!existed) captureSpecBaseline(vaultBase, dir);
   setActiveChange(vaultBase, slug);
   return { rel: changeDirRel(slug, vaultBase), created: !existed };
+}
+
+export function useChange(vaultBase, slug) {
+  const dir = join(vaultBase, getLocale(vaultBase).folders.changes, slug);
+  if (!existsSync(join(dir, 'proposta.md'))) return { ok: false, error: `change aberta não encontrada: ${slug}` };
+  setActiveChange(vaultBase, slug);
+  return { ok: true, rel: changeDirRel(slug, vaultBase) };
+}
+
+export function continueChange(vaultBase, archivedSlug, newSlug, options = {}) {
+  const loc = getLocale(vaultBase);
+  const archiveDir = join(vaultBase, loc.folders.changes, ARCHIVE_DIR);
+  let names = [];
+  try { names = readdirSync(archiveDir).filter((name) => statSync(join(archiveDir, name)).isDirectory()); } catch { /* no archive */ }
+  const matches = names.filter((name) => name === archivedSlug || name.endsWith(`-${archivedSlug}`));
+  if (!matches.length) return { ok: false, error: `change arquivada não encontrada: ${archivedSlug}` };
+  if (matches.length > 1) return { ok: false, error: `change arquivada ambígua: ${archivedSlug} (${matches.join(', ')})` };
+  if (existsSync(join(vaultBase, loc.folders.changes, newSlug, 'proposta.md'))) {
+    return { ok: false, error: `change de continuação já existe: ${newSlug}` };
+  }
+  const archivedName = matches[0];
+  const archivedProposal = join(loc.folders.changes, ARCHIVE_DIR, archivedName, 'proposta');
+  const result = newChange(vaultBase, newSlug, options);
+  const proposalPath = join(vaultBase, loc.folders.changes, newSlug, 'proposta.md');
+  let proposal = readFileSync(proposalPath, 'utf8');
+  proposal = proposal.replace(/^specs:/m, `continues: "${wikilinkFromRel(archivedProposal)}"\nspecs:`);
+  const heading = loc.id === 'en' ? '## Continuation' : '## Continuação';
+  const note = loc.id === 'en'
+    ? `Continues ${wikilinkFromRel(archivedProposal)}. Archived evidence and verdict are not inherited.`
+    : `Continua ${wikilinkFromRel(archivedProposal)}. Evidências e verdict da change arquivada não são herdados.`;
+  proposal = `${proposal.trimEnd()}\n\n${heading}\n\n${note}\n`;
+  writeFileSync(proposalPath, proposal, 'utf8');
+  return { ok: true, ...result, archived: archivedName };
 }
 
 export function parseTasks(md) {
@@ -219,7 +253,7 @@ export function renderOpenChanges(state, { tag = 'open_changes' } = {}) {
     else for (const task of change.openTasks) lines.push(`- [ ] ${task.id} ${task.text}`);
   }
   if (state.current) lines.push('Para change atual: `wendkeep change done <id>`; antes de archive: `wendkeep verify`.');
-  lines.push('Qualquer agente pode assumir uma change: selecione-a com `wendkeep change new <slug-existente>` ou use `--change <slug>` quando disponível.');
+  lines.push('Qualquer agente pode assumir uma change: selecione-a com `wendkeep change use <slug>` ou use `--change <slug>` quando disponível.');
   if (tag) lines.push(`</${tag}>`);
   return lines.join('\n');
 }

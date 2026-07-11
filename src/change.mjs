@@ -3,6 +3,8 @@ import { readFileSync } from 'node:fs';
 import { isAbsolute, join, resolve } from 'node:path';
 import {
   newChange,
+  useChange,
+  continueChange,
   activeChange,
   allChangesState,
   listChanges,
@@ -14,7 +16,7 @@ import {
   scaffoldPlaceholders,
 } from '../hooks/change-core.mjs';
 import { evaluateGate, requiredSensors } from '../hooks/sensors-core.mjs';
-import { evaluateVerdict, tasksHashOf, parseSpecsList, parseDelta, parseRequirements, applyDelta, validateSpecImpact } from '../hooks/spec-core.mjs';
+import { buildEffectiveRequirementPackage, evaluateVerdict, tasksHashOf, parseSpecsList, parseDelta, parseRequirements, applyDelta, validateSpecImpact } from '../hooks/spec-core.mjs';
 import { getNextAdrNumber, readControl } from '../hooks/obsidian-common.mjs';
 import { getLocale } from '../hooks/locale.mjs';
 
@@ -59,6 +61,32 @@ export function runChange(argv) {
     try { sessionRel = readControl(vaultBase).session_file || ''; } catch { /* sem control */ }
     const r = newChange(vaultBase, slug, { dateStr: today(), simple: rest.includes('--simple'), sessionRel });
     process.stdout.write(`change ${r.created ? 'created' : 'exists'}: ${r.rel} (active)\n`);
+    process.exit(0);
+  }
+
+  if (sub === 'use') {
+    const slug = slugArg();
+    if (!slug) { process.stderr.write('wendkeep change use: missing <slug>\n'); process.exit(2); }
+    const r = useChange(vaultBase, slug);
+    if (!r.ok) { process.stderr.write(`wendkeep change use: ${r.error}\n`); process.exit(2); }
+    process.stdout.write(`current change: ${slug}\n`);
+    process.exit(0);
+  }
+
+  if (sub === 'continue') {
+    const positionals = rest.filter((a, i) => !a.startsWith('-') && !VALUE_FLAGS.has(rest[i - 1]));
+    const [archivedSlug, newSlug] = positionals;
+    if (!archivedSlug || !newSlug) {
+      process.stderr.write('wendkeep change continue: use <archived-slug> <new-slug>\n');
+      process.exit(2);
+    }
+    let sessionRel = '';
+    try { sessionRel = readControl(vaultBase).session_file || ''; } catch { /* no control */ }
+    const r = continueChange(vaultBase, archivedSlug, newSlug, {
+      dateStr: today(), simple: rest.includes('--simple'), sessionRel,
+    });
+    if (!r.ok) { process.stderr.write(`wendkeep change continue: ${r.error}\n`); process.exit(2); }
+    process.stdout.write(`change created: ${r.rel} (continues ${r.archived}; active)\n`);
     process.exit(0);
   }
 
@@ -113,12 +141,16 @@ export function runChange(argv) {
     if (evidence) for (const e of evidence) process.stdout.write(`  ${e.status === 'green' ? '✓' : '✗'} ${e.id} (${e.severity || 'critical'})\n`);
     else process.stdout.write('evidencia: ausente\n');
     const reqIds = [...new Set(tasks.map((t) => t.req).filter(Boolean))];
+    const effective = buildEffectiveRequirementPackage(vaultBase, dir, reqIds);
+    if (effective.errors.length || effective.missing.length) {
+      process.stdout.write(`spec efetiva: inválida (${[...effective.errors, ...effective.missing.map((id) => `req órfão ${id}`)].join('; ')})\n`);
+    }
     let verdict = null;
     try { verdict = JSON.parse(readFileSync(join(dir, 'verdict.json'), 'utf8')); } catch { /* sem verdict */ }
     if (!verdict) process.stdout.write(`verdict: ausente — rode \`wendkeep verify --deep\`${reqIds.length ? ' + wk-verify' : ' (verdict trivial automático)'}\n`);
     else if (!reqIds.length) process.stdout.write(`verdict: ${verdict.ok === true ? 'ok (trivial)' : 'não-ok — re-verifique'}\n`);
     else {
-      const v = evaluateVerdict(verdict, reqIds, { tasksHash: tasksHashOf(tarefasMd) });
+      const v = evaluateVerdict(verdict, reqIds, { tasksHash: tasksHashOf(tarefasMd), effectiveSpecHash: effective.hash });
       process.stdout.write(`verdict: ${v.ok ? 'ok' : v.stale ? 'stale — re-verifique' : `incompleto: falta ${v.missing.join(', ')}`}\n`);
     }
     try { process.stdout.write(`mutation-round: ${readFileSync(join(dir, '.mutation-round'), 'utf8').trim()}/3\n`); } catch { /* sem rodadas */ }
@@ -195,6 +227,9 @@ export function runChange(argv) {
         }
       }
       const reqIds = [...new Set(tasks.map((t) => t.req).filter(Boolean))];
+      const effective = buildEffectiveRequirementPackage(vaultBase, dir, reqIds);
+      if (effective.errors.length) return { ok: false, failing: [`spec efetiva inválida: ${effective.errors.join('; ')}`] };
+      if (effective.missing.length) return { ok: false, failing: [`requisito(s) órfão(s) na spec efetiva: ${effective.missing.join(', ')}`] };
       let evidence = [];
       try { evidence = JSON.parse(readFileSync(join(dir, 'evidencia.json'), 'utf8')); } catch { /* no evidence */ }
       const s = evaluateGate(evidence, required);
@@ -214,8 +249,16 @@ export function runChange(argv) {
       if (verdict.tasksHash && verdict.tasksHash !== hash) {
         return { ok: false, failing: [`verdict stale (tarefas.md mudou depois da verificação) — re-verifique: \`wendkeep verify --deep\`${reqIds.length ? ' + wk-verify' : ''}`] };
       }
+      let verification = null;
+      try { verification = JSON.parse(readFileSync(join(dir, 'verificacao.json'), 'utf8')); } catch { /* none */ }
+      if (verification?.effectiveSpecHash && verification.effectiveSpecHash !== effective.hash) {
+        return { ok: false, failing: ['pacote de verificação stale (spec efetiva mudou) — rode `wendkeep verify --deep` novamente'] };
+      }
+      if (reqIds.length && verification?.effectiveSpecHash && !verdict.effectiveSpecHash) {
+        return { ok: false, failing: ['verdict sem effectiveSpecHash — rode a skill wk-verify novamente'] };
+      }
       if (reqIds.length) {
-        const v = evaluateVerdict(verdict, reqIds, { tasksHash: hash });
+        const v = evaluateVerdict(verdict, reqIds, { tasksHash: hash, effectiveSpecHash: effective.hash });
         if (!v.ok) {
           if (v.stale) return { ok: false, failing: ['verdict stale (tarefas.md mudou depois da verificação) — re-verifique: `wendkeep verify --deep` + wk-verify'] };
           return { ok: false, failing: [`verdict incompleto: falta ${v.missing.join(', ')}`] };
@@ -250,6 +293,6 @@ export function runChange(argv) {
     process.exit(0);
   }
 
-  process.stderr.write(`wendkeep change: unknown subcommand "${sub}". Known: new, list, show, status, done, undone, diff, archive, abandon.\n`);
+  process.stderr.write(`wendkeep change: unknown subcommand "${sub}". Known: new, use, continue, list, show, status, done, undone, diff, archive, abandon.\n`);
   process.exit(2);
 }

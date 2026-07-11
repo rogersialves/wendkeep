@@ -1,6 +1,6 @@
 // src/skills-seed.mjs — native, zero-dep process skills (Pilar A: the HOW layer).
 // Seeded into the vault's .brain/skills; distributed by `wendkeep sync-defs` to
-// .claude/skills. Wendkeep-flavored (reference change/verify), concise native prose.
+// .claude/skills + .agents/skills. Wendkeep-flavored, concise native prose.
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -41,12 +41,13 @@ vault cego. Exceção única: mudança trivial (typo, 1 linha).
    (teste vermelho antes do código). Marque \`- [x]\` ao concluir. Declare nas tarefas:
    - \`[sensor:<id>]\` — a prova automatizada (roda no verify).
    - \`[req:<ID>]\` — o requisito do spec que a tarefa satisfaz (ex.: \`[req:GATE-1]\`),
-     quando a change mexe numa capability de \`07-Specs\`.
+      quando a change mexe numa capability. Toda autoria de spec ocorre somente em
+      \`08-Mudanças/<slug>/specs/<capability>/spec.md\`; \`07-Specs\` é gerado/read-only.
    Ex.: \`- [ ] 2.1 valida CORE [req:MEM-1] [sensor:memory-validation]\`.
 4. **Verify** — \`wendkeep verify\` roda os sensores → \`evidencia.json\`. Depois
    \`wendkeep verify --deep\` monta o *pacote de verificação* pro passe independente.
 5. **Verify deep** — a skill **wk-verify** (passe fresco, autor≠verificador) lê o pacote,
-   re-deriva a cobertura do \`07-Specs\` e grava \`verdict.json\`. Change trivial (sem
+   usa somente os requisitos autocontidos de \`verificacao.json\` e grava \`verdict.json\`. Change trivial (sem
    \`[req:]\`) recebe verdict automático — pula este passe.
 6. **Archive** — \`wendkeep change archive <slug>\`. O *gate* exige sensores verdes **E**
    \`verdict.json\` cobrindo os \`[req:]\`. Passando, promove os deltas pro \`07-Specs\`,
@@ -55,8 +56,8 @@ vault cego. Exceção única: mudança trivial (typo, 1 linha).
 ## Regras
 
 - Várias changes podem ficar abertas. \`CURRENT_CHANGE.md\` marca uma atual, sem esconder as
-  outras pendências. Claude, Codex ou outro agente podem assumir uma change existente com
-  \`wendkeep change new <slug-existente>\` ou \`--change <slug>\` quando disponível.
+  outras pendências. Claude, Codex ou outro agente assumem uma change existente com
+  \`wendkeep change use <slug>\` ou \`--change <slug>\` quando disponível.
 - Se uma tarefa não precisa de prova automatizada, não declare sensor — o gate só exige
   o que você declarou. Sem \`[sensor:]\`, o archive não trava.
 - A proposta linka a sessão de origem; a sessão linka a mudança ativa. É de propósito:
@@ -77,7 +78,8 @@ vermelho pedindo por ele — e nunca escreva um teste que passaria sob a impleme
 
 ## Derive do spec, não do código
 
-Escreva a asserção a partir do *critério de aceite* do requisito (\`07-Specs\`), não lendo a
+Escreva a asserção a partir do *critério de aceite* da spec efetiva
+(\`wendkeep spec effective --change <slug>\`), não lendo a
 implementação. Cada asserção mira o resultado que o spec definiu. Escrever o teste lendo o
 código = ele só confirma o que o código já faz, bugs inclusos.
 
@@ -214,13 +216,13 @@ nunca tivesse visto a implementação. Contexto fresco, read-only.
 ## O que fazer
 
 1. Leia o pacote \`08-Mudanças/<slug>/verificacao.json\` (requisitos, tarefas, evidência).
-2. **Re-derive a cobertura do \`07-Specs\`** — pra cada \`[req:ID]\` da change, cheque se o
-   comportamento definido no requisito está coberto por um teste que discrimina (não
+2. **Re-derive a cobertura do pacote autocontido** — pra cada requisito completo em
+   \`verificacao.json\`, cheque se o comportamento está coberto por um teste que discrimina (não
    passaria sob impl errada). Evidência \`arquivo:linha\`.
 3. Outcome check ancorado no spec: o resultado observável bate com o critério de aceite?
 4. Grave \`08-Mudanças/<slug>/verdict.json\`:
-   \`{ "slug": "...", "ok": true, "coverage": [{ "req": "GATE-1", "covered": true, "evidence": "arquivo:linha" }], "tasksHash": "<copie do verificacao.json>", "notes": [] }\`.
-   O \`tasksHash\` vem do pacote — é o selo de frescor; sem ele (ou com tarefas alteradas
+   \`{ "slug": "...", "ok": true, "coverage": [{ "req": "GATE-1", "covered": true, "evidence": "arquivo:linha" }], "tasksHash": "<copie do verificacao.json>", "effectiveSpecHash": "<copie do verificacao.json>", "notes": [] }\`.
+   \`tasksHash\` e \`effectiveSpecHash\` vêm do pacote — são selos de frescor; sem eles (ou com tarefas/spec alteradas
    depois), o gate rejeita o verdict como stale.
 
 ## Regras
@@ -259,6 +261,7 @@ leaves the vault blind. Single exception: a trivial change (typo, one line).
    needs a real \`spec_impact_reason\`. \`pending\` is never ready for implementation/archive.
 3. **Apply** — implement each task in tarefas.md with **wk-tdd** (red test first). Tag tasks:
    \`[sensor:<id>]\` (automated proof) and \`[req:<ID>]\` (the spec requirement it satisfies).
+   Author specs only in \`08-Changes/<slug>/specs/\`; \`07-Specs\` is generated/read-only.
 4. **Verify** — \`wendkeep verify\` runs the sensors; then \`wendkeep verify --deep\` builds
    the verification package.
 5. **Verify deep** — the **wk-verify** skill (fresh, author≠verifier) writes \`verdict.json\`.
@@ -269,7 +272,7 @@ leaves the vault blind. Single exception: a trivial change (typo, one line).
 ## Rules
 - Multiple changes may stay open. \`CURRENT_CHANGE.md\` marks one current change without hiding
   other pending tasks. Any agent may take over an existing change with
-  \`wendkeep change new <existing-slug>\` or \`--change <slug>\` where available.
+  \`wendkeep change use <slug>\` or \`--change <slug>\` where available.
 - No \`[sensor:]\` on a task = no automated gate for it. No \`[req:]\` = no independent verdict.
 - The graph links session ↔ change ↔ requirement ↔ decision. That is the point.
 `;
@@ -286,7 +289,7 @@ would pass under the wrong implementation.
 4. **Refactor** with the greens protecting you.
 
 ## Derive from the spec, not the code
-Write assertions from the requirement's acceptance criteria (\`07-Specs\`), not by reading the
+Write assertions from the effective requirement (\`wendkeep spec effective --change <slug>\`), not by reading the
 implementation. Reading the code to write the test = it only confirms what the code already does.
 
 ## Non-shallow litmus
@@ -375,17 +378,18 @@ the author — even if you wrote the code, enter as if you'd never seen it. Fres
 
 ## What to do
 1. Read the package \`08-Changes/<slug>/verificacao.json\` (requirements, tasks, evidence).
-2. **Re-derive coverage from \`07-Specs\`** — for each \`[req:ID]\`, check the requirement's behaviour
+2. **Re-derive coverage from the self-contained package** — for each complete requirement in
+   \`verificacao.json\`, check its behaviour
    is covered by a test that discriminates (wouldn't pass under a wrong impl). \`file:line\` evidence.
 3. Spec-anchored outcome check: does the observable result match the acceptance criterion?
 4. Write \`08-Changes/<slug>/verdict.json\`:
-   \`{ "slug": "...", "ok": true, "coverage": [{ "req": "GATE-1", "covered": true, "evidence": "file:line" }], "tasksHash": "<copy from the package>", "notes": [] }\`.
+   \`{ "slug": "...", "ok": true, "coverage": [{ "req": "GATE-1", "covered": true, "evidence": "file:line" }], "tasksHash": "<copy from the package>", "effectiveSpecHash": "<copy from the package>", "notes": [] }\`.
 
 ## Rules
 - **Author ≠ verifier.** On Claude, spawn a read-only sub-agent for real isolation.
 - \`ok: false\` if any requirement lacks discriminating coverage. A gap is red, not "almost".
 - Don't fix here — a gap becomes a fix task; re-verify after.
-- The archive gate **requires** a fresh \`verdict.json\` (matching \`tasksHash\`) covering every \`[req:]\`.
+- The archive gate **requires** a fresh \`verdict.json\` (matching \`tasksHash\` and \`effectiveSpecHash\`) covering every \`[req:]\`.
 
 ## Templates (in this folder)
 - \`spec-reviewer-prompt.md\` — hand it to the verifier sub-agent you spawn (read-only, author≠verifier).
@@ -402,6 +406,7 @@ const VERDICT_TEMPLATE = `{
     { "req": "GATE-1", "covered": true, "evidence": "tests/foo.test.mjs:42" }
   ],
   "tasksHash": "<copie de verificacao.json — selo de frescor / copy from verificacao.json — freshness seal>",
+  "effectiveSpecHash": "<copie de verificacao.json / copy from verificacao.json>",
   "notes": []
 }
 `;
@@ -415,8 +420,8 @@ Claude). Ele NÃO é o autor: entra fresco, read-only, não edita nada.
 Você é o verificador independente de uma mudança do wendkeep. Não escreveu este código —
 entre como se nunca o tivesse visto. Read-only.
 
-Leia o pacote \`08-Mudanças/<slug>/verificacao.json\` (requisitos, tarefas, evidência) e os
-specs vivos em \`07-Specs/<capability>.md\`.
+Leia somente o pacote autocontido \`08-Mudanças/<slug>/verificacao.json\` (requisitos completos,
+tarefas e evidência). Não reabra \`07-Specs\`: ele ainda não contém deltas não arquivados.
 
 Para cada \`[req:ID]\` da mudança:
 1. Leia o **critério de aceite do requisito** no spec — NÃO leia a implementação primeiro.
@@ -427,7 +432,7 @@ Para cada \`[req:ID]\` da mudança:
 
 Grave \`08-Mudanças/<slug>/verdict.json\` no formato de \`verdict-template.json\`. \`ok: false\` se
 qualquer \`[req:]\` não tem cobertura que discrimina. Não conserte aqui — gap vira tarefa de
-correção. O \`tasksHash\` vem do pacote (selo de frescor; alterou tarefa depois, o gate rejeita).
+correção. \`tasksHash\` e \`effectiveSpecHash\` vêm do pacote; alterações posteriores deixam o verdict stale.
 ---
 `;
 
@@ -440,8 +445,8 @@ It is NOT the author: fresh context, read-only, edits nothing.
 You are the independent verifier of a wendkeep change. You did not write this code — enter as if
 you'd never seen it. Read-only.
 
-Read the package \`08-Changes/<slug>/verificacao.json\` (requirements, tasks, evidence) and the
-living specs in \`07-Specs/<capability>.md\`.
+Read only the self-contained \`08-Changes/<slug>/verificacao.json\` package (complete requirements,
+tasks, evidence). Do not reopen \`07-Specs\`: it does not contain unarchived deltas yet.
 
 For each \`[req:ID]\`:
 1. Read the requirement's **acceptance criterion** in the spec — do NOT read the implementation first.
@@ -452,7 +457,7 @@ For each \`[req:ID]\`:
 
 Write \`08-Changes/<slug>/verdict.json\` in the shape of \`verdict-template.json\`. \`ok: false\` if any
 \`[req:]\` lacks discriminating coverage. Don't fix here — a gap becomes a fix task. \`tasksHash\`
-comes from the package (freshness seal; edit a task later and the gate rejects it as stale).
+and \`effectiveSpecHash\` come from the package (freshness seals; later task/spec edits make verdict stale).
 ---
 `;
 

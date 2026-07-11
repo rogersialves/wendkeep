@@ -15,6 +15,11 @@ function fillScaffold(vault, slug, dir = '08-Mudanças') {
   writeFileSync(join(vault, dir, slug, 'design.md'), `# ${slug} — design\n\n## Abordagem\n\nTeste.\n`);
 }
 
+function writeLivingRequirement(vault, id, capability = 'core') {
+  mkdirSync(join(vault, '07-Specs'), { recursive: true });
+  writeFileSync(join(vault, '07-Specs', `${capability}.md`), `# ${capability}\n\n## Requisitos\n\n### Requisito: ${id} — comportamento\ncritério observável\n`);
+}
+
 test('change new: proposta links the active session from the control file (G2)', async () => {
   const { writeControl } = await import('../hooks/obsidian-common.mjs');
   const vault = mkdtempSync(join(tmpdir(), 'wk-src-'));
@@ -157,6 +162,7 @@ test('archive requires a verdict when a task declares [req:]; ADR lists the req 
     mkdirSync(join(vault, '04-Decisões'), { recursive: true });
     assert.equal(spawn(['new', 'x']).status, 0);
     fillScaffold(vault, 'x');
+    writeLivingRequirement(vault, 'X-1');
     writeFileSync(join(vault, '08-Mudanças', 'x', 'tarefas.md'), '- [x] 1.1 faz [req:X-1]\n');
     const blocked = spawn(['archive', 'x']);
     assert.equal(blocked.status, 1, 'blocked without verdict');
@@ -188,12 +194,13 @@ test('archive blocks a stale verdict when tarefas.md changed after verification 
     writeFileSync(join(proj, 'wendkeep.sensors.json'), JSON.stringify({ version: 1, sensors: [] }));
     assert.equal(spawn(['change', 'new', 'x']).status, 0);
     fillScaffold(vault, 'x');
+    writeLivingRequirement(vault, 'X-1');
     const tarefas = join(vault, '08-Mudanças', 'x', 'tarefas.md');
     writeFileSync(tarefas, '- [x] 1.1 faz [req:X-1]\n');
     assert.equal(spawn(['verify', '--deep']).status, 0);
     const pkg = JSON.parse(readFileSync(join(vault, '08-Mudanças', 'x', 'verificacao.json'), 'utf8'));
     assert.ok(pkg.tasksHash, 'package carries tasksHash');
-    writeFileSync(join(vault, '08-Mudanças', 'x', 'verdict.json'), JSON.stringify({ slug: 'x', ok: true, coverage: [{ req: 'X-1', covered: true }], tasksHash: pkg.tasksHash }));
+    writeFileSync(join(vault, '08-Mudanças', 'x', 'verdict.json'), JSON.stringify({ slug: 'x', ok: true, coverage: [{ req: 'X-1', covered: true }], tasksHash: pkg.tasksHash, effectiveSpecHash: pkg.effectiveSpecHash }));
     // muda as tarefas depois do verdict -> stale
     writeFileSync(tarefas, '- [x] 1.1 faz [req:X-1]\n- [x] 1.2 nova\n');
     const blocked = spawn(['change', 'archive', 'x']);
@@ -469,6 +476,7 @@ test('--force rastreável: ADR ganha forced: true + aviso; trivial ganha trivial
     // não-forced e não-trivial: nada de flags
     assert.equal(spawn(['new', 'f2']).status, 0);
     fillScaffold(vault, 'f2');
+    writeLivingRequirement(vault, 'F-1');
     writeFileSync(join(vault, '08-Mudanças', 'f2', 'tarefas.md'), '- [x] 1.1 feito [req:F-1]\n');
     writeFileSync(join(vault, '08-Mudanças', 'f2', 'verdict.json'), JSON.stringify({ slug: 'f2', ok: true, coverage: [{ req: 'F-1', covered: true }] }));
     assert.equal(spawn(['archive', 'f2']).status, 0);
@@ -555,10 +563,18 @@ test('verify --deep: trivial auto-writes verdict; a change with [req:] only writ
     assert.ok(existsSync(join(vault, '08-Mudanças', 't', 'verdict.json')), 'trivial auto-verdict');
     // with [req:]: package yes, verdict no (agent pass required)
     mkdirSync(join(vault, '08-Mudanças', 'r'), { recursive: true });
+    writeFileSync(join(vault, '08-Mudanças', 'r', 'proposta.md'), '---\nspecs: []\n---\n');
+    writeLivingRequirement(vault, 'X-1');
     writeFileSync(join(vault, '08-Mudanças', 'r', 'tarefas.md'), '- [ ] 1.1 faz [req:X-1] [sensor:ok]\n');
     writeFileSync(join(vault, '.brain', 'CURRENT_CHANGE.md'), 'change: r\n');
     assert.equal(spawn(['verify', '--deep']).status, 0);
-    assert.ok(existsSync(join(vault, '08-Mudanças', 'r', 'verificacao.json')));
+    const reqPackage = JSON.parse(readFileSync(join(vault, '08-Mudanças', 'r', 'verificacao.json'), 'utf8'));
+    assert.equal(reqPackage.requirements[0].id, 'X-1');
+    assert.equal(reqPackage.requirements[0].capability, 'core');
+    assert.equal(reqPackage.requirements[0].body, 'critério observável');
+    assert.equal(reqPackage.requirements[0].operation, 'BASE');
+    assert.equal(reqPackage.requirements[0].source, 'living');
+    assert.equal(reqPackage.effectiveSpecHash.length, 64);
     assert.ok(!existsSync(join(vault, '08-Mudanças', 'r', 'verdict.json')), 'req change needs the agent verdict');
   } finally { rmSync(vault, { recursive: true, force: true }); rmSync(proj, { recursive: true, force: true }); }
 });

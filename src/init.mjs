@@ -3,7 +3,7 @@
 // OBSIDIAN_VAULT_PATH into .claude/settings.json, and adds the mcpvault server to
 // .mcp.json. Idempotent: re-running only adds what is missing.
 import { spawnSync } from 'node:child_process';
-import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { basename, isAbsolute, join, resolve } from 'node:path';
 import { createInterface } from 'node:readline/promises';
 import {
@@ -40,6 +40,7 @@ import { seedDefinitions, syncDefs } from './sync-defs.mjs';
 import { seedWkSkills } from './skills-seed.mjs';
 import { LOCALES, DEFAULT_LOCALE, getLocale, clearLocaleCache, vaultFolders } from '../hooks/locale.mjs';
 import { seedDotcontext, globalHasDotcontext, resolveDotcontextSkipMcp, renderSensorsJson } from './dotcontext-seed.mjs';
+import { adoptSpecsState, SPECS_STATE_FILE } from '../hooks/spec-core.mjs';
 
 function parseArgs(argv) {
   const args = { mcp: true, yes: false, force: false };
@@ -278,7 +279,7 @@ const MESSAGES = {
     colorsOn: 'wendkeep-colors (snippet + grupos do grafo)',
     taxonomy: (n, c, loc, readme, views) => `  [1/4] taxonomia do vault: ${n} pastas (${c} criadas, locale ${loc})${readme}, .brain + change/spec + sensores semeados${views}`,
     readmeCreated: ', README.md criado', viewsNote: (n) => `, ${n} view(s) + dashboard`,
-    defs: (s, a) => `        defs entregues: ${s} skill(s) -> .claude/skills, ${a} agent(s) -> .codex/agents`,
+    defs: (s, a) => `        defs entregues: ${s} skill(s) -> .claude/skills + .agents/skills, ${a} agent(s) -> .codex/agents`,
     settingsBadJson: (p) => `  [2/4] settings.json existe mas não é JSON válido -> escrevi ${p}.new (mescle à mão)`,
     settings: (verb, added, bak) => `  [2/4] settings.json ${verb} (${added} hook(s) wirados, OBSIDIAN_VAULT_PATH setado${bak})`,
     mcpBadJson: (p) => `  [3/4] .mcp.json existe mas não é JSON válido -> escrevi ${p}.new (mescle à mão)`,
@@ -303,7 +304,7 @@ const MESSAGES = {
     colorsOn: 'wendkeep-colors (snippet + graph groups)',
     taxonomy: (n, c, loc, readme, views) => `  [1/4] vault taxonomy: ${n} folders (${c} created, locale ${loc})${readme}, .brain + change/spec + sensors seeded${views}`,
     readmeCreated: ', README.md created', viewsNote: (n) => `, ${n} view(s) + dashboard`,
-    defs: (s, a) => `        defs delivered: ${s} skill(s) -> .claude/skills, ${a} agent(s) -> .codex/agents`,
+    defs: (s, a) => `        defs delivered: ${s} skill(s) -> .claude/skills + .agents/skills, ${a} agent(s) -> .codex/agents`,
     settingsBadJson: (p) => `  [2/4] settings.json exists but is not valid JSON -> wrote ${p}.new (merge by hand)`,
     settings: (verb, added, bak) => `  [2/4] settings.json ${verb} (${added} hook(s) wired, OBSIDIAN_VAULT_PATH set${bak})`,
     mcpBadJson: (p) => `  [3/4] .mcp.json exists but is not valid JSON -> wrote ${p}.new (merge by hand)`,
@@ -482,8 +483,12 @@ export async function runInit(argv) {
   const specsReadme = join(vaultPath, loc.folders.specs, 'README.md');
   if (!existsSync(specsReadme)) {
     writeFileSync(specsReadme, en
-      ? `# Specs — living contract\n\nThe project's capabilities (requirements/scenarios). Changes in \`${loc.folders.changes}/\` promote deltas here on \`wendkeep change archive\`.\n`
-      : `# Specs — contrato vivo\n\nCapacidades do projeto (requisitos/cenários). Changes em \`${loc.folders.changes}/\` promovem deltas aqui no \`wendkeep change archive\`.\n`, 'utf8');
+      ? `# Specs — generated living contract\n\nRead-only: do not author here. Write deltas only in \`${loc.folders.changes}/<slug>/specs/\`; archive promotes them here.\n`
+      : `# Specs — contrato consolidado gerado\n\nSomente leitura: não edite aqui. Escreva deltas apenas em \`${loc.folders.changes}/<slug>/specs/\`; o archive promove para cá.\n`, 'utf8');
+  }
+  if (!existsSync(join(vaultPath, SPECS_STATE_FILE))) {
+    const livingSpecs = readdirSync(join(vaultPath, loc.folders.specs)).filter((name) => name.endsWith('.md') && name !== 'README.md');
+    if (!livingSpecs.length) adoptSpecsState(vaultPath);
   }
   const changeTpl = join(vaultPath, 'Templates', 'Change.md');
   if (!existsSync(changeTpl)) {

@@ -29,6 +29,8 @@ import { join } from 'node:path';
 import {
   renderChangeScaffold,
   newChange,
+  useChange,
+  continueChange,
   activeChange,
   parseTasks,
   listChanges,
@@ -242,4 +244,33 @@ test('activeChangeLink: wikilink to active change proposta, empty when none', ()
   } finally {
     rmSync(vault, { recursive: true, force: true });
   }
+});
+
+test('useChange selects any open change without hiding siblings', () => {
+  const vault = mkdtempSync(join(tmpdir(), 'wk-use-'));
+  try {
+    newChange(vault, 'a', { dateStr: '2026-07-11' });
+    newChange(vault, 'b', { dateStr: '2026-07-11' });
+    assert.equal(useChange(vault, 'a').ok, true);
+    assert.equal(activeChange(vault), 'a');
+    assert.deepEqual(listChanges(vault).active.sort(), ['a', 'b']);
+    assert.equal(useChange(vault, 'missing').ok, false);
+  } finally { rmSync(vault, { recursive: true, force: true }); }
+});
+
+test('continueChange links immutable archive and does not inherit proof', () => {
+  const vault = mkdtempSync(join(tmpdir(), 'wk-cont-'));
+  try {
+    const archived = join(vault, '08-Mudanças', '_arquivo', '2026-07-10-original');
+    mkdirSync(archived, { recursive: true });
+    writeFileSync(join(archived, 'proposta.md'), '---\nstatus: archived\n---\n# original\n');
+    writeFileSync(join(archived, 'verdict.json'), '{"ok":true}\n');
+    const before = readFileSync(join(archived, 'proposta.md'), 'utf8');
+    const result = continueChange(vault, 'original', 'continuacao', { dateStr: '2026-07-11' });
+    assert.equal(result.ok, true);
+    const next = join(vault, '08-Mudanças', 'continuacao');
+    assert.match(readFileSync(join(next, 'proposta.md'), 'utf8'), /continues:.*2026-07-10-original/);
+    assert.equal(existsSync(join(next, 'verdict.json')), false);
+    assert.equal(readFileSync(join(archived, 'proposta.md'), 'utf8'), before);
+  } finally { rmSync(vault, { recursive: true, force: true }); }
 });

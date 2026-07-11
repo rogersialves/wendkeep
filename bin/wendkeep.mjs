@@ -43,10 +43,10 @@ Usage:
                            agent's JSON on stdin. Names: ${RUNNABLE_HOOKS.join(', ')}.
 
   wendkeep doctor [--vault P]  Run a vault health check.
-  wendkeep change <sub>        Change lifecycle: new [--simple] | list | show | status |
-                           done <id> | undone <id> | diff | archive [--force] | abandon [slug].
+  wendkeep change <sub>        Change lifecycle: new [--simple] | use | continue | list | show |
+                           status | done <id> | undone <id> | diff | archive [--force] | abandon.
                            archive exige verdict (rode verify --deep); abandon descarta sem ADR.
-  wendkeep spec <sub>          Living specs: list | show <capability>.
+  wendkeep spec <sub>          Specs: list | show | effective [--change] [--json] | migrate | rebase.
   wendkeep sensors <sub>       list | add <id> "<command>" [--severity --type --report].
   wendkeep cost [opts]         Aggregate AI-coding spend across the vault's sessions.
                            --since <date> · --top [N] (priciest) · --trend [day|week|month]
@@ -70,9 +70,10 @@ Usage:
                            --vault <path> or OBSIDIAN_VAULT_PATH if no path given.
   wendkeep sync-defs [opts]    Copy versioned defs from the vault's .brain into the
                            project: .brain/agents/*.toml -> .codex/agents,
-                           .brain/skills/<name> -> .claude/skills. --vault P --project P.
+                           .brain/skills/<name> -> .claude/skills + .agents/skills. --vault P --project P.
                            --reseed re-semeia as skills wk-* com os seeds da versão instalada
                            (sobrescreve edições manuais nas wk-*) antes de copiar.
+                           --check detecta drift sem modificar arquivos.
   wendkeep --version           Print version.
   wendkeep --help              Show this help.
 `;

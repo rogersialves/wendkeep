@@ -4,6 +4,38 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.34.0] — 2026-07-11
+
+### Added
+
+- **Spec efetiva por change**: `wendkeep spec effective --change <slug> [--json]` combina o
+  contrato consolidado com somente o delta selecionado, incluindo origem e operação por requisito.
+- `change use <slug>` troca o ponteiro global; `change continue <arquivada> <novo-slug>` cria
+  continuação com backlink sem reabrir arquivo nem herdar evidência/verdict.
+- `sync-defs --check`, metadata de versão/hash e entrega idêntica de skills em `.claude/skills`
+  e `.agents/skills`.
+- `SPECS_STATE.json`, baseline por change e `spec migrate/rebase` para detectar edição direta e
+  conflitos concorrentes no mesmo requisito.
+
+### Changed
+
+- `08-Mudanças/<slug>/specs/` é o único local de autoria. `07-Specs` permanece como contrato
+  consolidado gerado/read-only, preservando ADRs e links históricos.
+- `verify --deep` agora grava requisitos completos em `verificacao.json` e sela o pacote com
+  `effectiveSpecHash`; `wk-verify` não relê `07-Specs`.
+- `doctor` valida todas as changes abertas e avisa quando skills precisam de reseed + reinício.
+
+### Fixed
+
+- Requisitos `ADDED` ainda não arquivados deixam de ficar invisíveis ao verificador independente.
+- Archives concorrentes bloqueiam somente quando outra change alterou o mesmo requisito; mudanças
+  não relacionadas na mesma capability podem prosseguir.
+
+### Migration
+
+- Rode `wendkeep spec migrate --vault <vault>` uma vez para adotar os contratos consolidados atuais.
+- Rode `wendkeep sync-defs --reseed --vault <vault> --project .` e reinicie Claude Code/Codex.
+
 ## [0.33.0] — 2026-07-11
 
 ### Added
