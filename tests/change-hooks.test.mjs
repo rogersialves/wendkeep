@@ -114,7 +114,7 @@ test('staleSentinelNames: só prefixos .change-*, só >7 dias; pruneChangeSentin
   finally { rmSync(vault, { recursive: true, force: true }); }
 });
 
-test('changeCtxState: null sem change; hash muda quando tarefas mudam; até 5 tarefas abertas', () => {
+test('changeCtxState: null sem changes; hash muda quando qualquer change muda', () => {
   const empty = mkdtempSync(join(tmpdir(), 'wk-ctx0-'));
   try { assert.equal(changeCtxState(empty), null); }
   finally { rmSync(empty, { recursive: true, force: true }); }
@@ -123,12 +123,20 @@ test('changeCtxState: null sem change; hash muda quando tarefas mudam; até 5 ta
   try {
     const st = changeCtxState(vault);
     assert.equal(st.slug, 'x');
-    assert.equal(st.openTasks.length, 5, 'cap em 5');
+    assert.equal(st.openTasks.length, 6, 'tarefas atuais completas');
     const h1 = st.hash;
     writeFileSync(join(dir, 'tarefas.md'), '- [x] 1.1 a\n- [ ] 1.2 b\n');
     const st2 = changeCtxState(vault);
     assert.notEqual(st2.hash, h1, 'hash muda com tarefas.md');
     assert.equal(st2.openTasks.length, 1);
+    const other = join(vault, '08-Mudanças', 'y');
+    mkdirSync(other, { recursive: true });
+    writeFileSync(join(other, 'proposta.md'), '# y\n');
+    writeFileSync(join(other, 'tarefas.md'), '- [ ] 2.1 de outra change\n');
+    const h2 = st2.hash;
+    const st3 = changeCtxState(vault);
+    assert.notEqual(st3.hash, h2, 'nova change também invalida o hash');
+    assert.deepEqual(st3.changes.map((change) => change.slug), ['x', 'y']);
   } finally { rmSync(vault, { recursive: true, force: true }); }
 });
 
@@ -202,20 +210,23 @@ test('change-guard e2e: deny JSON no stdout, exit 0; input malformado fail-open'
 
 // --- change-context (UserPromptSubmit) ----------------------------------------
 
-test('buildChangePing: pinga 1x, silencia com mesmo hash, re-pinga quando tarefas mudam', () => {
+test('buildChangePing: pinga backlog completo 1x e re-pinga quando outra change muda', () => {
   const { vault, dir } = vaultWithChange();
   try {
     const p1 = buildChangePing(vault, 's1', '');
-    assert.match(p1.context, /<active_change_ping>/);
-    assert.match(p1.context, /Mudança ativa: x/);
+    assert.match(p1.context, /<open_changes_ping>/);
+    assert.match(p1.context, /Change atual .*x/);
     assert.match(p1.context, /1\.1 faz a coisa/);
     assert.match(p1.context, /wendkeep change done/);
     assert.equal(buildChangePing(vault, 's1', ''), null, 'mesmo estado = silêncio');
-    writeFileSync(join(dir, 'tarefas.md'), '- [x] 1.1 faz a coisa\n- [ ] 1.3 nova\n');
+    const other = join(vault, '08-Mudanças', 'y');
+    mkdirSync(other, { recursive: true });
+    writeFileSync(join(other, 'proposta.md'), '# y\n');
+    writeFileSync(join(other, 'tarefas.md'), '- [ ] 2.1 da outra LLM\n');
     const p2 = buildChangePing(vault, 's1', '');
-    assert.match(p2.context, /1\.3 nova/, 'estado mudou = re-ping');
+    assert.match(p2.context, /2\.1 da outra LLM/, 'estado global mudou = re-ping');
     // outra sessão pinga independente
-    assert.match(buildChangePing(vault, 's2', '').context, /<active_change_ping>/);
+    assert.match(buildChangePing(vault, 's2', '').context, /<open_changes_ping>/);
   } finally { rmSync(vault, { recursive: true, force: true }); }
 });
 
@@ -240,7 +251,7 @@ test('change-context e2e: additionalContext no 1º prompt, {} no 2º', () => {
   try {
     const r1 = runHook('change-context', JSON.stringify({ session_id: 'e1', prompt: 'oi' }), vault);
     assert.equal(r1.status, 0);
-    assert.match(JSON.parse(r1.stdout).hookSpecificOutput.additionalContext, /active_change_ping/);
+    assert.match(JSON.parse(r1.stdout).hookSpecificOutput.additionalContext, /open_changes_ping/);
     const r2 = runHook('change-context', JSON.stringify({ session_id: 'e1', prompt: 'oi' }), vault);
     assert.equal(JSON.parse(r2.stdout).hookSpecificOutput?.additionalContext ?? '', '', '2º prompt silencioso');
   } finally { rmSync(vault, { recursive: true, force: true }); }

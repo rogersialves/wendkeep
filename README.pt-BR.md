@@ -110,7 +110,7 @@ Sem recopiar, sem snapshot pra re‑sincronizar — o pacote é a única fonte d
 |---|---|
 | `wendkeep init` | Configura o wendkeep num projeto (taxonomia do cofre + settings + MCP + skills). |
 | `wendkeep hook <name>` | Roda um hook de sessão; invocado pelo `settings.json` (lê o JSON do agente no stdin). |
-| `wendkeep change <sub>` | Ciclo de mudança: `new [--simple]` / `list` / `show` / `status` / `done <id>` / `undone <id>` / `diff` / `archive [--force]`. |
+| `wendkeep change <sub>` | Ciclo de mudança: `new [--simple]` / `list` (backlog global) / `show` / `status [slug]` / `done <id> [--change slug]` / `undone <id> [--change slug]` / `diff` / `archive [--force]`. |
 | `wendkeep verify [--deep]` | Roda os sensores das tarefas da change; `--deep` monta o pacote de verificação independente. |
 | `wendkeep spec <sub>` | Specs vivos: `list` / `show <capability>`. |
 | `wendkeep sensors <sub>` | `list` / `add <id> "<comando>"` — vê/edita `wendkeep.sensors.json` (JSON Schema incluso). |
@@ -147,7 +147,7 @@ Além de capturar sessões, o wendkeep é um **harness**: um loop nativo e sem d
 explore → propose → apply (TDD) → verify → archive
 ```
 
-- **Propose** — `wendkeep change new <slug>` faz o scaffold de `08-Mudanças/<slug>/` (`proposta.md`, `design.md`, `tarefas.md` e um delta `specs/`). A change vira *ativa* e é injetada no próximo `SessionStart`, então o agente retoma o trabalho em curso.
+- **Propose** — `wendkeep change new <slug>` faz o scaffold de `08-Mudanças/<slug>/` (`proposta.md`, `design.md`, `tarefas.md` e um delta `specs/`). A change vira a *atual* global. Várias changes podem ficar abertas: hooks e `change list/status` mostram todas as pendências, enquanto comandos sem `--change` usam somente a atual.
 - **Apply** — implemente cada tarefa de `tarefas.md`. Taggeie a tarefa que precisa de prova de máquina com `[sensor:<id>]`.
 - **Verify** — `wendkeep verify` roda os sensores que suas tarefas declararam (do `wendkeep.sensors.json` na raiz do projeto) e grava `evidencia.json`. Um vermelho crítico falha o gate; um vermelho `warning` é aviso.
 - **Archive** — `wendkeep change archive <slug>` faz **gate** na evidência (bloqueia a não ser que todo sensor crítico declarado esteja verde), promove o delta de cada capability (`ADDED`/`MODIFIED`/`REMOVED`) pro `07-Specs/<capability>.md` vivo, move a change pro `_arquivo/` e cunha um ADR em `04-Decisões/`.
@@ -163,7 +163,7 @@ sessão do agente ──hooks──▶ wendkeep ──▶ Markdown no cofre ─�
    (Claude/Codex)           (Node)      (02-Sessões/…)         (CORE+DIGEST, backlinks)
 ```
 
-O settings.json do agente aponta cada hook pra `npx wendkeep hook …`. No `Stop`, o wendkeep parseia o transcript, anexa o turno, atualiza a tabela de tokens/custo e (idempotentemente) emite qualquer nota de decisão/bug/aprendizado. Em todo `SessionStart`, o `brain-inject` injeta de volta a memória curada (CORE + DIGEST), a change ativa, as lições do projeto e um roteador `<wk_process>` que roteia qualquer tarefa não‑trivial pelo loop a2 (planejar → `change new` + preencher o scaffold → TDD → verify → archive).
+O settings.json do agente aponta cada hook pra `npx wendkeep hook …`. No `Stop`, o wendkeep parseia o transcript, anexa o turno, atualiza a tabela de tokens/custo e (idempotentemente) emite qualquer nota de decisão/bug/aprendizado. Em todo `SessionStart`, o `brain-inject` injeta a memória curada (CORE + DIGEST), todas as changes abertas com suas pendências, o marcador global da change atual, as lições do projeto e o roteador `<wk_process>`. Claude, Codex ou outro agente podem assim retomar trabalho iniciado em outro lugar sem ocultar o restante do backlog.
 
 O **gate** do archive bloqueia a não ser que: o scaffold da change esteja preenchido (G0), nenhuma tarefa esteja aberta (G1), todo sensor crítico declarado esteja verde (com evidência fresca) e — quando a change declara `[req:]` — um `verdict.json` independente cubra eles. O `--force` é a saída de emergência humana; o agente é instruído a nunca usar por conta própria.
 

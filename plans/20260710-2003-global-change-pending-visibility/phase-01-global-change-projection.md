@@ -4,7 +4,7 @@
 
 - Data: 2026-07-10
 - Prioridade: P0
-- Status: pendente
+- Status: concluída em 2026-07-11
 - Dependência: nenhuma
 
 Criar em `change-core.mjs` uma projeção derivada de todas as changes abertas. Ela substitui leituras

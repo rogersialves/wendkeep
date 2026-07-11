@@ -4,6 +4,25 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.33.0] — 2026-07-11
+
+### Added
+
+- **Visão global de changes abertas**: `SessionStart`, `UserPromptSubmit`, `wendkeep change list`
+  e `wendkeep change status` sem slug mostram todas as pendências, inclusive as iniciadas por
+  outro agente.
+- Ações de takeover explícitas no contexto: Claude, Codex ou outro agente podem retomar uma
+  change existente sem perder o restante do backlog.
+
+### Changed
+
+- `.brain/CURRENT_CHANGE.md` continua como ponteiro global único, agora marcado como change
+  **atual**. Comandos implícitos (`done`, `verify`, `archive`, `abandon`) continuam restritos a ela.
+- Mudanças em qualquer `tarefas.md` invalidam o hash do hook de contexto e reinjetam a lista global
+  na sessão afetada.
+- `change-nag` permanece local à change atual; pendências de outra frente não bloqueiam o agente
+  em foco.
+
 ## [0.32.0] — 2026-07-09
 
 ### Added

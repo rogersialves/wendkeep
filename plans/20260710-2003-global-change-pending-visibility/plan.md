@@ -11,9 +11,9 @@ Exibir todas as changes e tarefas abertas para Claude, Codex e demais agentes, m
 
 ## Fases
 
-- [ ] [Fase 1 — projeção global no núcleo](phase-01-global-change-projection.md)
-- [ ] [Fase 2 — hooks multiagente](phase-02-multi-agent-hooks.md)
-- [ ] [Fase 3 — CLI, documentação e validação](phase-03-cli-docs-validation.md)
+- [x] [Fase 1 — projeção global no núcleo](phase-01-global-change-projection.md)
+- [x] [Fase 2 — hooks multiagente](phase-02-multi-agent-hooks.md)
+- [x] [Fase 3 — CLI, documentação e validação](phase-03-cli-docs-validation.md)
 
 ## Dependências
 

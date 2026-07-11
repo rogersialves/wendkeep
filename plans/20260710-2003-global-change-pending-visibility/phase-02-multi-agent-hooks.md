@@ -4,7 +4,7 @@
 
 - Data: 2026-07-10
 - Prioridade: P0
-- Status: pendente
+- Status: concluída em 2026-07-11
 - Dependência: Fase 1
 
 Trocar a injeção exclusiva da change atual por uma visão global, preservando ponteiro único,

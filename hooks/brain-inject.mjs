@@ -1,6 +1,6 @@
 // .agent/hooks/brain-inject.mjs
 // Injeção da camada quente no SessionStart (Claude/Codex/Copilot): CORE curado +
-// DIGEST auto + 1-linha pointer do recall. Budget-capada. Nunca derruba o hook.
+// DIGEST auto + 1-linha pointer do recall + backlog completo de changes. Nunca derruba o hook.
 // Uso (hook): node .agent/hooks/brain-inject.mjs   (input JSON via stdin)
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -72,7 +72,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
         additionalContext: buildInjection(vaultBase),
       },
     });
-    // Sentinela do change-context: a change ativa acabou de ser injetada aqui, então o hook de
+    // Sentinela do change-context: o backlog completo acabou de ser injetado aqui, então o hook
     // UserPromptSubmit não precisa re-pingar no 1º prompt. Bônus — nunca derruba a injeção.
     try {
       const st = changeCtxState(vaultBase);

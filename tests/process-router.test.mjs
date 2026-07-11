@@ -42,6 +42,25 @@ test('wk_process router follows the vault locale (en)', () => {
   } finally { rmSync(vault, { recursive: true, force: true }); }
 });
 
+test('buildInjection exposes every open change independently of the agent provider', () => {
+  const vault = mkdtempSync(join(tmpdir(), 'wk-bi-global-'));
+  try {
+    for (const [slug, task] of [['a', '1.1 Claude iniciou'], ['b', '2.1 Codex iniciou']]) {
+      mkdirSync(join(vault, '08-Mudanças', slug), { recursive: true });
+      writeFileSync(join(vault, '08-Mudanças', slug, 'proposta.md'), '# proposta\n');
+      writeFileSync(join(vault, '08-Mudanças', slug, 'tarefas.md'), `- [ ] ${task}\n`);
+    }
+    mkdirSync(join(vault, '.brain'), { recursive: true });
+    writeFileSync(join(vault, '.brain', 'CURRENT_CHANGE.md'), 'change: a\n');
+    const out = buildInjection(vault);
+    assert.match(out, /<open_changes>/);
+    assert.match(out, /ATUAL — a/);
+    assert.match(out, /ABERTA — b/);
+    assert.match(out, /1\.1 Claude iniciou/);
+    assert.match(out, /2\.1 Codex iniciou/);
+  } finally { rmSync(vault, { recursive: true, force: true }); }
+});
+
 // --- C: anti-scaffold gate -----------------------------------------------------
 
 test('scaffoldPlaceholders flags an unfilled scaffold and clears when filled', () => {

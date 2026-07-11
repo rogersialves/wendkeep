@@ -32,6 +32,9 @@ test('wk-workflow references the wendkeep loop commands', () => {
   assert.match(wf, /wendkeep verify/);
   assert.match(wf, /\[sensor:/);
   assert.match(wf, /spec_impact/);
+  assert.match(wf, /CURRENT_CHANGE/);
+  assert.match(wf, /várias changes|Multiple changes/i);
+  assert.doesNotMatch(wf, /Uma mudança ativa por vez|One active change at a time/);
   assert.match(wf, /specs\/<capability>\/spec\.md|specs\/<capability>/);
 });
 

@@ -29,8 +29,9 @@ vault cego. Exceção única: mudança trivial (typo, 1 linha).
    - \`proposta.md\` — *por quê* e *o que muda* (o WHAT).
    - \`design.md\` — a abordagem técnica.
    - \`tarefas.md\` — a lista de tarefas \`- [ ] N.N descrição\`.
-   A mudança vira a *ativa* (ponteiro \`.brain/CURRENT_CHANGE.md\`) e é injetada no
-   próximo SessionStart, então você retoma o trabalho em curso automaticamente.
+   A mudança vira a *atual* (ponteiro global \`.brain/CURRENT_CHANGE.md\`). Podem existir
+   várias changes abertas: hooks e \`change list/status\` mostram todas as pendências; comandos
+   sem \`--change\` usam somente a atual.
    Antes de implementar, resolva \`spec_impact\` na proposta:
    - \`required\`: liste a capability em \`specs:\` e preencha
      \`specs/<capability>/spec.md\` com ADDED/MODIFIED/REMOVED; ligue tarefas com \`[req:ID]\`.
@@ -53,7 +54,9 @@ vault cego. Exceção única: mudança trivial (typo, 1 linha).
 
 ## Regras
 
-- Uma mudança ativa por vez. Termine (archive) antes de abrir outra.
+- Várias changes podem ficar abertas. \`CURRENT_CHANGE.md\` marca uma atual, sem esconder as
+  outras pendências. Claude, Codex ou outro agente podem assumir uma change existente com
+  \`wendkeep change new <slug-existente>\` ou \`--change <slug>\` quando disponível.
 - Se uma tarefa não precisa de prova automatizada, não declare sensor — o gate só exige
   o que você declarou. Sem \`[sensor:]\`, o archive não trava.
 - A proposta linka a sessão de origem; a sessão linka a mudança ativa. É de propósito:
@@ -248,8 +251,9 @@ leaves the vault blind. Single exception: a trivial change (typo, one line).
 
 1. **Explore** — understand the problem before proposing.
 2. **Propose** — \`wendkeep change new <slug>\` scaffolds \`08-Changes/<slug>/\`
-   (proposta/design/tarefas + a \`specs/\` delta). The change becomes *active* and is
-   injected at the next SessionStart.
+   (proposta/design/tarefas + a \`specs/\` delta). The change becomes *current* through global
+   \`.brain/CURRENT_CHANGE.md\`. Multiple changes may stay open; hooks and \`change list/status\`
+   show every pending task, while commands without \`--change\` use only the current change.
    Before implementation, resolve \`spec_impact\`: \`required\` needs the capability listed in
    \`specs:\` plus a real \`specs/<capability>/spec.md\` delta and \`[req:ID]\` links; \`none\`
    needs a real \`spec_impact_reason\`. \`pending\` is never ready for implementation/archive.
@@ -263,7 +267,9 @@ leaves the vault blind. Single exception: a trivial change (typo, one line).
    verdict AND no open tasks. It promotes the delta into \`07-Specs\` and mints an ADR.
 
 ## Rules
-- One active change at a time. Finish (archive) before starting another.
+- Multiple changes may stay open. \`CURRENT_CHANGE.md\` marks one current change without hiding
+  other pending tasks. Any agent may take over an existing change with
+  \`wendkeep change new <existing-slug>\` or \`--change <slug>\` where available.
 - No \`[sensor:]\` on a task = no automated gate for it. No \`[req:]\` = no independent verdict.
 - The graph links session ↔ change ↔ requirement ↔ decision. That is the point.
 `;

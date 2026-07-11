@@ -32,6 +32,8 @@ import {
   activeChange,
   parseTasks,
   listChanges,
+  allChangesState,
+  renderOpenChanges,
   buildActiveChangeInjection,
   archiveChange,
   activeChangeLink,
@@ -136,15 +138,58 @@ test('listChanges: separates active dirs from _arquivo', () => {
   }
 });
 
-test('buildActiveChangeInjection: block with open tasks when active; empty otherwise', () => {
+test('allChangesState: current first, all open tasks visible, hash changes across changes', () => {
+  const vault = mkdtempSync(join(tmpdir(), 'wk-global-'));
+  try {
+    mkdirSync(join(vault, '.brain'), { recursive: true });
+    for (const [slug, tasks] of [
+      ['a', '- [x] 1.1 done\n- [ ] 1.2 current open\n'],
+      ['b', '- [ ] 2.1 other open\n'],
+    ]) {
+      mkdirSync(join(vault, '08-Mudanças', slug), { recursive: true });
+      writeFileSync(join(vault, '08-Mudanças', slug, 'proposta.md'), '# proposta\n');
+      writeFileSync(join(vault, '08-Mudanças', slug, 'tarefas.md'), tasks);
+    }
+    writeFileSync(join(vault, '.brain', 'CURRENT_CHANGE.md'), 'change: a\n');
+    const first = allChangesState(vault);
+    assert.deepEqual(first.changes.map((change) => change.slug), ['a', 'b']);
+    assert.equal(first.changes[0].current, true);
+    assert.deepEqual(first.changes.flatMap((change) => change.openTasks.map((task) => task.id)), ['1.2', '2.1']);
+    const rendered = renderOpenChanges(first);
+    assert.match(rendered, /### ATUAL — a/);
+    assert.match(rendered, /### ABERTA — b/);
+    assert.match(rendered, /1\.2 current open/);
+    assert.match(rendered, /2\.1 other open/);
+    writeFileSync(join(vault, '08-Mudanças', 'b', 'tarefas.md'), '- [x] 2.1 other open\n');
+    assert.notEqual(allChangesState(vault).hash, first.hash, 'non-current task changes global hash');
+  } finally { rmSync(vault, { recursive: true, force: true }); }
+});
+
+test('allChangesState: keeps broken change visible and reports an orphan pointer', () => {
+  const vault = mkdtempSync(join(tmpdir(), 'wk-global-warning-'));
+  try {
+    mkdirSync(join(vault, '.brain'), { recursive: true });
+    mkdirSync(join(vault, '08-Mudanças', 'b'), { recursive: true });
+    writeFileSync(join(vault, '08-Mudanças', 'b', 'proposta.md'), '# proposta\n');
+    writeFileSync(join(vault, '.brain', 'CURRENT_CHANGE.md'), 'change: missing\n');
+    const state = allChangesState(vault);
+    assert.equal(state.changes[0].slug, 'b');
+    assert.match(state.changes[0].warning, /tarefas\.md/);
+    assert.match(state.pointerWarning, /missing/);
+    assert.match(renderOpenChanges(state), /Aviso:/);
+  } finally { rmSync(vault, { recursive: true, force: true }); }
+});
+
+test('buildActiveChangeInjection: block with all open changes; empty otherwise', () => {
   const vault = mkdtempSync(join(tmpdir(), 'wk-inj-'));
   try {
     mkdirSync(join(vault, '.brain'), { recursive: true });
     mkdirSync(join(vault, '08-Mudanças', 'dark-mode'), { recursive: true });
+    writeFileSync(join(vault, '08-Mudanças', 'dark-mode', 'proposta.md'), '# proposta\n');
     writeFileSync(join(vault, '08-Mudanças', 'dark-mode', 'tarefas.md'), '- [x] 1.1 done\n- [ ] 1.2 open one\n');
     writeFileSync(join(vault, '.brain', 'CURRENT_CHANGE.md'), 'change: dark-mode\n');
     const out = buildActiveChangeInjection(vault);
-    assert.match(out, /<active_change>/);
+    assert.match(out, /<open_changes>/);
     assert.match(out, /dark-mode/);
     assert.match(out, /1\.2 open one/);
     assert.doesNotMatch(out, /1\.1 done/);

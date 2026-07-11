@@ -1,14 +1,13 @@
 #!/usr/bin/env node
 // UserPromptSubmit hook. Dois papéis, ambos quiet-by-default (a maioria dos prompts não injeta nada):
-//   1. Com change ativa: re-injeta <active_change_ping> (slug + tarefas abertas) SÓ quando o
-//      estado mudou desde a última injeção (hash em sentinela por sessão) — o nudge do
-//      SessionStart dilui/compacta; este devolve o loop ao contexto no momento certo.
-//   2. Sem change ativa: prompt com cara de tarefa ganha <wk_skill_gate> mandando invocar a
+//   1. Com changes abertas: re-injeta <open_changes_ping> (backlog completo) SÓ quando o estado
+//      mudou desde a última injeção (hash em sentinela por sessão).
+//   2. Sem changes abertas: prompt com cara de tarefa ganha <wk_skill_gate> mandando invocar a
 //      Skill wk-workflow ANTES de editar — 1x por sessão. É o empurrão de ativação da skill.
 // Fail-open; brain-inject grava a sentinela ctx no SessionStart para não duplicar no 1º prompt.
 import { pathToFileURL } from 'node:url';
 import { getVaultBase, readHookInput, writeHookOutput } from './obsidian-common.mjs';
-import { changeCtxState, readSentinel, writeSentinel } from './change-core.mjs';
+import { changeCtxState, readSentinel, renderOpenChanges, writeSentinel } from './change-core.mjs';
 
 // Conservador de propósito: verbos de tarefa comuns (pt+en) + tamanho mínimo. Falso-negativo
 // custa só o nudge; falso-positivo em pergunta curta viraria ruído.
@@ -25,17 +24,9 @@ export function buildChangePing(vaultBase, sessionId, prompt = '') {
   if (st) {
     if (readSentinel(vaultBase, 'ctx', sessionId) === st.hash) return null;
     writeSentinel(vaultBase, 'ctx', sessionId, st.hash);
-    const lines = st.openTasks.map((t) => `- [ ] ${t.id} ${t.text}`);
-    const context = [
-      '<active_change_ping>',
-      `Mudança ativa: ${st.slug}${st.openTasks.length ? ` — tarefa(s) aberta(s):` : ' — sem tarefas abertas.'}`,
-      ...lines,
-      'Ao concluir uma tarefa: `wendkeep change done <id>`. Antes de arquivar: `wendkeep verify`.',
-      '</active_change_ping>',
-    ].join('\n');
-    return { context, hash: st.hash };
+    return { context: renderOpenChanges(st, { tag: 'open_changes_ping' }), hash: st.hash };
   }
-  // Sem change ativa: gate de skill para prompt-tarefa, 1x por sessão.
+  // Sem changes abertas: gate de skill para prompt-tarefa, 1x por sessão.
   if (!looksLikeTask(prompt)) return null;
   if (readSentinel(vaultBase, 'gate', sessionId)) return null;
   writeSentinel(vaultBase, 'gate', sessionId);

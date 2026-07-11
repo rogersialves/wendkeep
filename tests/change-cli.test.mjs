@@ -222,7 +222,7 @@ test('archive blocks on open tasks; --force overrides (G1)', () => {
   } finally { rmSync(vault, { recursive: true, force: true }); }
 });
 
-test('change status: one screen with tasks, sensors, verdict state (0.7.0)', () => {
+test('change status <slug>: one screen with tasks, sensors, verdict state', () => {
   const vault = mkdtempSync(join(tmpdir(), 'wk-status-'));
   const spawn = (a) => spawnSync(process.execPath, [BIN, 'change', ...a, '--vault', vault], { encoding: 'utf8' });
   try {
@@ -230,13 +230,36 @@ test('change status: one screen with tasks, sensors, verdict state (0.7.0)', () 
     fillScaffold(vault, 'x');
     writeFileSync(join(vault, '08-Mudanças', 'x', 'tarefas.md'), '- [x] 1.1 feita [req:X-1] [sensor:tests]\n- [ ] 1.2 aberta\n');
     writeFileSync(join(vault, '08-Mudanças', 'x', 'evidencia.json'), JSON.stringify([{ id: 'tests', status: 'green', severity: 'critical' }]));
-    const r = spawn(['status']);
+    const r = spawn(['status', 'x']);
     assert.equal(r.status, 0, r.stderr);
     assert.match(r.stdout, /x/);
     assert.match(r.stdout, /1 done.*1 open|1 aberta/i);
     assert.match(r.stdout, /\[x\] 1\.1/);
     assert.match(r.stdout, /tests.*green|✓ tests/i);
     assert.match(r.stdout, /verdict: ausente/i);
+  } finally { rmSync(vault, { recursive: true, force: true }); }
+});
+
+test('change list and status without slug expose every open change and its pending tasks', () => {
+  const vault = mkdtempSync(join(tmpdir(), 'wk-status-global-'));
+  const spawn = (a) => spawnSync(process.execPath, [BIN, 'change', ...a, '--vault', vault], { encoding: 'utf8' });
+  try {
+    assert.equal(spawn(['new', 'a']).status, 0);
+    assert.equal(spawn(['new', 'b']).status, 0, 'b becomes global pointer');
+    for (const [slug, task] of [['a', '1.1 Claude pendente'], ['b', '2.1 Codex pendente']]) {
+      fillScaffold(vault, slug);
+      writeFileSync(join(vault, '08-Mudanças', slug, 'tarefas.md'), `- [ ] ${task}\n`);
+    }
+    const list = spawn(['list']);
+    assert.equal(list.status, 0, list.stderr);
+    assert.match(list.stdout, /ATUAL — b/);
+    assert.match(list.stdout, /ABERTA — a/);
+    assert.match(list.stdout, /1\.1 Claude pendente/);
+    assert.match(list.stdout, /2\.1 Codex pendente/);
+    const status = spawn(['status']);
+    assert.equal(status.status, 0, status.stderr);
+    assert.match(status.stdout, /ATUAL — b/);
+    assert.match(status.stdout, /ABERTA — a/);
   } finally { rmSync(vault, { recursive: true, force: true }); }
 });
 

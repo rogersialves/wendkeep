@@ -112,7 +112,7 @@ No re‑copying, no snapshot to re‑sync — the package is the single source o
 |---|---|
 | `wendkeep init` | Set up wendkeep in a project (vault taxonomy + settings + MCP + skills). |
 | `wendkeep hook <name>` | Run a session hook; invoked by `settings.json` (reads agent JSON on stdin). |
-| `wendkeep change <sub>` | Change lifecycle: `new [--simple]` / `list` / `show` / `status` / `done <id>` / `undone <id>` / `diff` / `archive [--force]`. |
+| `wendkeep change <sub>` | Change lifecycle: `new [--simple]` / `list` (global backlog) / `show` / `status [slug]` / `done <id> [--change slug]` / `undone <id> [--change slug]` / `diff` / `archive [--force]`. |
 | `wendkeep verify [--deep]` | Run the change's task sensors; `--deep` assembles the independent-verification package. |
 | `wendkeep spec <sub>` | Living specs: `list` / `show <capability>`. |
 | `wendkeep sensors <sub>` | `list` / `add <id> "<command>"` — view/edit `wendkeep.sensors.json` (JSON Schema shipped). |
@@ -148,7 +148,7 @@ Beyond capturing sessions, wendkeep is a **harness**: a native, zero‑dependenc
 explore → propose → apply (TDD) → verify → archive
 ```
 
-- **Propose** — `wendkeep change new <slug>` scaffolds `08-Mudanças/<slug>/` (`proposta.md`, `design.md`, `tarefas.md`, and a `specs/` delta). The change becomes *active* and is injected at the next `SessionStart`, so the agent resumes work‑in‑progress.
+- **Propose** — `wendkeep change new <slug>` scaffolds `08-Mudanças/<slug>/` (`proposta.md`, `design.md`, `tarefas.md`, and a `specs/` delta). It becomes the global *current* change. Multiple changes may remain open: hooks and `change list/status` expose every pending task, while commands without `--change` use only the current one.
 - **Apply** — implement each `tarefas.md` task. Tag a task that needs machine proof with `[sensor:<id>]`.
 - **Verify** — `wendkeep verify` runs the sensors your tasks declared (from `wendkeep.sensors.json` at the project root) and records `evidencia.json`. A critical red fails the gate; a `warning` red is advisory.
 - **Archive** — `wendkeep change archive <slug>` **gates** on the evidence (blocks unless every declared critical sensor is green), promotes each capability's spec delta (`ADDED`/`MODIFIED`/`REMOVED`) into the living `07-Specs/<capability>.md`, moves the change to `_arquivo/`, and mints an ADR in `04-Decisões/`.
@@ -175,6 +175,8 @@ Declare the capability in `proposta.md` (`specs: [ui]`) and author its delta in
 
 ```bash
 npx wendkeep change status                     # one screen: tasks / sensors / verdict
+npx wendkeep change list                       # all open changes + pending tasks
+npx wendkeep change status dark-mode           # one change in detail
 npx wendkeep change done 1.1                   # tick a task from the CLI
 npx wendkeep verify                            # run the declared sensors -> evidencia.json
 npx wendkeep verify --deep                     # assemble the verification package
@@ -194,7 +196,7 @@ agent session ──hooks──▶ wendkeep ──▶ Markdown in vault ──�
    (Claude/Codex)        (Node)      (02-Sessões/…)        (CORE+DIGEST, backlinks)
 ```
 
-The agent's settings.json points each hook at `npx wendkeep hook …`. On `Stop`, wendkeep parses the session transcript, appends the turn, updates the token/cost table, and (idempotently) emits any decision/bug/learning notes. On every `SessionStart`, `brain-inject` injects back the curated memory (CORE + DIGEST), the active change, project lessons, and a `<wk_process>` router that routes any non‑trivial task through the a2 loop (plan → `change new` + fill the scaffold → TDD → verify → archive).
+The agent's settings.json points each hook at `npx wendkeep hook …`. On `Stop`, wendkeep parses the session transcript, appends the turn, updates the token/cost table, and (idempotently) emits any decision/bug/learning notes. On every `SessionStart`, `brain-inject` injects back curated memory (CORE + DIGEST), every open change with its pending tasks, the global current-change marker, project lessons, and a `<wk_process>` router. Claude, Codex, or another agent can therefore resume work started elsewhere without hiding the rest of the backlog.
 
 The archive **gate** blocks unless: the change scaffold is filled (G0), no task is open (G1), every declared critical sensor is green (with fresh evidence), and — when the change declares `[req:]` — an independent `verdict.json` covers them. `--force` is the human escape hatch; the agent is instructed never to use it on its own.
 

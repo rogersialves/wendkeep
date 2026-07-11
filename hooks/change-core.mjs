@@ -167,22 +167,67 @@ export function listChanges(vaultBase) {
   try {
     archived = readdirSync(join(base, ARCHIVE_DIR)).filter((n) => !n.startsWith('.'));
   } catch { /* none */ }
-  return { active, archived };
+  return { active: active.sort(), archived: archived.sort() };
 }
 
-export function buildActiveChangeInjection(vaultBase, { maxTasks = 8 } = {}) {
-  const slug = activeChange(vaultBase);
-  if (!slug) return '';
+// Visão derivada de TODAS as changes abertas. CURRENT_CHANGE continua sendo o único foco para
+// comandos implícitos; provider/session nunca filtram a fila, para que outro agente possa assumir
+// o trabalho. O hash leva o conteúdo inteiro de cada tarefas.md — não apenas as contagens — pois
+// ele controla a reinjeção por sessão dos hooks.
+export function allChangesState(vaultBase) {
+  const current = activeChange(vaultBase);
+  const { active } = listChanges(vaultBase);
   const chDir = getLocale(vaultBase).folders.changes;
-  let md = '';
-  try { md = readFileSync(join(vaultBase, chDir, slug, 'tarefas.md'), 'utf8'); } catch { return ''; }
-  const open = parseTasks(md).filter((t) => !t.done).slice(0, maxTasks);
-  const lines = open.map((t) => `- [ ] ${t.id} ${t.text}`);
-  const more = open.length === maxTasks ? '\n*…mais tarefas em tarefas.md*' : '';
-  return `<active_change>
-Mudança ativa: ${slug} — [[${chDir}/${slug}/proposta]]. Tarefas abertas:
-${lines.join('\n')}${more}
-</active_change>`;
+  const fingerprint = [`current:${current}`];
+  const changes = active.map((slug) => {
+    let md = '';
+    let warning = '';
+    try { md = readFileSync(join(vaultBase, chDir, slug, 'tarefas.md'), 'utf8'); }
+    catch { warning = 'tarefas.md ausente ou ilegível'; }
+    const tasks = parseTasks(md);
+    const openTasks = tasks.filter((t) => !t.done);
+    fingerprint.push(`slug:${slug}`, `tasks:${md}`, `warning:${warning}`);
+    return {
+      slug,
+      current: slug === current,
+      openTasks,
+      openCount: openTasks.length,
+      doneCount: tasks.length - openTasks.length,
+      warning,
+    };
+  });
+  changes.sort((a, b) => Number(b.current) - Number(a.current) || a.slug.localeCompare(b.slug));
+  const pointerWarning = current && !changes.some((change) => change.current)
+    ? `CURRENT_CHANGE aponta para change inexistente: ${current}`
+    : '';
+  if (pointerWarning) fingerprint.push(`pointer-warning:${pointerWarning}`);
+  return { current, changes, pointerWarning, hash: tasksHashOf(fingerprint.join('\n')) };
+}
+
+export function renderOpenChanges(state, { tag = 'open_changes' } = {}) {
+  if (!state?.changes?.length && !state?.pointerWarning) return '';
+  const lines = [];
+  if (tag) lines.push(`<${tag}>`);
+  if (state.current) lines.push(`Change atual (comandos sem --change): ${state.current}.`);
+  else lines.push('Nenhuma change atual selecionada; comandos sem --change continuam recusados.');
+  if (state.pointerWarning) lines.push(`Aviso: ${state.pointerWarning}.`);
+  for (const change of state.changes || []) {
+    const label = change.current ? 'ATUAL' : 'ABERTA';
+    lines.push(`### ${label} — ${change.slug} (${change.openCount} aberta(s), ${change.doneCount} concluída(s))`);
+    if (change.warning) lines.push(`- Aviso: ${change.warning}.`);
+    else if (!change.openTasks.length) lines.push('- Nenhuma tarefa aberta.');
+    else for (const task of change.openTasks) lines.push(`- [ ] ${task.id} ${task.text}`);
+  }
+  if (state.current) lines.push('Para change atual: `wendkeep change done <id>`; antes de archive: `wendkeep verify`.');
+  lines.push('Qualquer agente pode assumir uma change: selecione-a com `wendkeep change new <slug-existente>` ou use `--change <slug>` quando disponível.');
+  if (tag) lines.push(`</${tag}>`);
+  return lines.join('\n');
+}
+
+// Mantém o nome exportado para consumidores internos existentes, mas agora injeta o backlog
+// completo em vez de ocultar changes não selecionadas.
+export function buildActiveChangeInjection(vaultBase) {
+  return renderOpenChanges(allChangesState(vaultBase));
 }
 
 export function activeChangeLink(vaultBase) {
@@ -232,14 +277,18 @@ export function writeSentinel(vaultBase, kind, sid, value = '1') {
   } catch { /* fail-open: pior caso = aviso repetido */ }
 }
 
-// Estado da change ativa para o ping do change-context: hash inclui o slug para que trocar de
-// change com tarefas idênticas ainda re-pingue.
-export function changeCtxState(vaultBase, { maxTasks = 5 } = {}) {
-  const slug = activeChange(vaultBase);
-  if (!slug) return null;
-  let md = '';
-  try { md = readFileSync(join(vaultBase, getLocale(vaultBase).folders.changes, slug, 'tarefas.md'), 'utf8'); } catch { /* sem tarefas */ }
-  return { slug, hash: tasksHashOf(`${slug}\n${md}`), openTasks: parseTasks(md).filter((t) => !t.done).slice(0, maxTasks) };
+// Estado global usado pelo change-context: hash cobre qualquer tarefa aberta, inclusive de uma
+// change que não esteja no ponteiro. As propriedades slug/openTasks preservam compatibilidade com
+// consumidores antigos e descrevem somente a atual.
+export function changeCtxState(vaultBase) {
+  const state = allChangesState(vaultBase);
+  if (!state.changes.length && !state.pointerWarning) return null;
+  const selected = state.changes.find((change) => change.current);
+  return {
+    ...state,
+    slug: state.current,
+    openTasks: selected?.openTasks || [],
+  };
 }
 
 // GC das sentinelas (>7 dias) — seleção pura separada da execução (testável sem depender de

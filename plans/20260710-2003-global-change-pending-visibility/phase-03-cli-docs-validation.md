@@ -4,7 +4,7 @@
 
 - Data: 2026-07-10
 - Prioridade: P1
-- Status: pendente
+- Status: concluída em 2026-07-11
 - Dependências: Fases 1 e 2
 
 Expor a projeção global no CLI, atualizar orientação das skills/docs e validar o pacote sem publicar.

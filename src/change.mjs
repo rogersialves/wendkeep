@@ -4,7 +4,9 @@ import { isAbsolute, join, resolve } from 'node:path';
 import {
   newChange,
   activeChange,
+  allChangesState,
   listChanges,
+  renderOpenChanges,
   parseTasks,
   setTaskDone,
   archiveChange,
@@ -61,9 +63,9 @@ export function runChange(argv) {
   }
 
   if (sub === 'list') {
-    const { active, archived } = listChanges(vaultBase);
-    const cur = activeChange(vaultBase);
-    process.stdout.write(`active: ${active.map((s) => (s === cur ? `*${s}` : s)).join(', ') || '(none)'}\n`);
+    const state = allChangesState(vaultBase);
+    const { archived } = listChanges(vaultBase);
+    process.stdout.write(`${renderOpenChanges(state, { tag: '' }) || 'open changes: (none)'}\n`);
     process.stdout.write(`archived: ${archived.join(', ') || '(none)'}\n`);
     process.exit(0);
   }
@@ -82,8 +84,16 @@ export function runChange(argv) {
   }
 
   if (sub === 'status') {
-    const slug = slugArg() || activeChange(vaultBase);
-    if (!slug) { process.stderr.write('wendkeep change status: no change (arg or active)\n'); process.exit(2); }
+    const slug = slugArg();
+    if (!slug) {
+      const state = allChangesState(vaultBase);
+      if (!state.changes.length && !state.pointerWarning) {
+        process.stderr.write('wendkeep change status: no open changes\n');
+        process.exit(2);
+      }
+      process.stdout.write(`${renderOpenChanges(state, { tag: '' })}\n`);
+      process.exit(0);
+    }
     const dir = join(vaultBase, getLocale(vaultBase).folders.changes, slug);
     let tarefasMd;
     try { tarefasMd = readFileSync(join(dir, 'tarefas.md'), 'utf8'); }
