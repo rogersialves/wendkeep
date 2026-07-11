@@ -13,6 +13,7 @@ import {
   setTaskDone,
   archiveChange,
   abandonChange,
+  relinkChanges,
   scaffoldPlaceholders,
 } from '../hooks/change-core.mjs';
 import { evaluateGate, requiredSensors } from '../hooks/sensors-core.mjs';
@@ -284,6 +285,17 @@ export function runChange(argv) {
     process.exit(0);
   }
 
+  if (sub === 'relink') {
+    const r = relinkChanges(vaultBase, { apply: rest.includes('--apply') });
+    if (rest.includes('--json')) { process.stdout.write(`${JSON.stringify(r, null, 2)}\n`); process.exit(0); }
+    process.stdout.write(`${r.rewritten.length} slug(s) morto(s) mapeado(s)${r.applied ? ` · ${r.filesTouched} arquivo(s) reescritos` : ''}\n`);
+    for (const m of r.rewritten) process.stdout.write(`  ${m.from} → ${m.to}\n`);
+    for (const a of r.ambiguous) process.stdout.write(`  ambíguo (pulado): ${a}\n`);
+    for (const o of r.orphans) process.stdout.write(`  sem archive correspondente: ${o}\n`);
+    if (!r.applied) process.stdout.write('\ndry-run — nada foi escrito. Rode com --apply para reescrever os wikilinks.\n');
+    process.exit(0);
+  }
+
   if (sub === 'abandon') {
     const slug = slugArg() || activeChange(vaultBase);
     if (!slug) { process.stderr.write('wendkeep change abandon: missing <slug> and no active change\n'); process.exit(2); }
@@ -293,6 +305,6 @@ export function runChange(argv) {
     process.exit(0);
   }
 
-  process.stderr.write(`wendkeep change: unknown subcommand "${sub}". Known: new, use, continue, list, show, status, done, undone, diff, archive, abandon.\n`);
+  process.stderr.write(`wendkeep change: unknown subcommand "${sub}". Known: new, use, continue, list, show, status, done, undone, diff, archive, abandon, relink.\n`);
   process.exit(2);
 }

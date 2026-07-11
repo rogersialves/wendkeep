@@ -4,6 +4,24 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.35.0] — 2026-07-11
+
+### Fixed
+
+- **Wikilinks para changes arquivadas não quebram mais.** `archive` e `abandon` movem a pasta
+  para `_arquivo/<data>-<slug>/` — e todo wikilink gravado ANTES do move (sessões fechadas,
+  decisões, outras changes) morria, aparecendo cinza no grafo (visto em produção). Agora o move
+  **reescreve os wikilinks no vault inteiro** (`[[08-Mudanças/<slug>/…]]` →
+  `[[08-Mudanças/_arquivo/<data>-<slug>/…]]`, full-path com e sem alias; nunca por basename —
+  `proposta`/`design` existem em toda change). Fail-quiet: a reescrita nunca derruba o archive.
+
+### Added
+
+- **`wendkeep change relink [--apply] [--json]`** — cura retroativa para vaults com links já
+  mortos (changes arquivadas antes da 0.35.0): mapeia cada slug morto para o dir datado em
+  `_arquivo/` e reescreve. Dry-run por default; slug ambíguo (arquivado 2×) é reportado e pulado
+  — nunca chuta; sem archive correspondente vira aviso.
+
 ## [0.34.1] — 2026-07-11
 
 ### Fixed

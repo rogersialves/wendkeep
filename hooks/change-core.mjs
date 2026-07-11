@@ -381,12 +381,6 @@ export function archiveChange(vaultBase, slug, { gate = gateGreen, dateStr, adrN
   const loc = getLocale(vaultBase);
   const chDir = loc.folders.changes;
   const src = join(vaultBase, chDir, slug);
-  let sourceSessionRel = '';
-  try {
-    const proposal = readFileSync(join(src, 'proposta.md'), 'utf8');
-    const m = proposal.match(/\[\[((?:02-Sessões|02-Sessions)\/[^\]|]+?)(?:\|[^\]]+)?\]\]/);
-    if (m) sourceSessionRel = m[1].endsWith('.md') ? m[1] : `${m[1]}.md`;
-  } catch { /* sem source */ }
   const verdict = gate(src);
   if (!verdict.ok) return { ok: false, failing: verdict.failing || [] };
 
@@ -441,16 +435,10 @@ export function archiveChange(vaultBase, slug, { gate = gateGreen, dateStr, adrN
     writeFileSync(pp, c, 'utf8');
   } catch { /* proposta ilegível — segue */ }
 
-  // A sessão guardava o link da change ativa; após o move, reescreva para o caminho arquivado.
-  if (sourceSessionRel) {
-    try {
-      const sessionPath = join(vaultBase, sourceSessionRel);
-      const oldLink = wikilinkFromRel(join(chDir, slug, 'proposta'));
-      const archivedLink = wikilinkFromRel(join(destRel, 'proposta'));
-      const current = readFileSync(sessionPath, 'utf8');
-      if (current.includes(oldLink)) writeFileSync(sessionPath, current.replaceAll(oldLink, archivedLink), 'utf8');
-    } catch { /* backlink é reparo auxiliar; archive já está íntegro */ }
-  }
+  // O move quebrava TODO wikilink gravado antes (sessões fechadas, decisões, outras changes —
+  // links cinza no grafo, visto em produção). Reescreve vault-wide; fail-quiet.
+  let linksRewritten = 0;
+  try { linksRewritten = rewriteChangeLinks(vaultBase, `${chDir}/${slug}`, destRel.replaceAll('\\', '/')); } catch { /* archive já íntegro */ }
 
   // ADR goes in the same dated month folder as session-derived decisions (04-Decisões/ano/MM-MMM/)
   // — not the year root — so all ADRs sit together in the vault's convention.
@@ -485,7 +473,88 @@ Mudança ${changeWikilink} concluída e arquivada.${capLine}${reqLine}${forcedNo
   // Only clear the pointer when the archived change IS the active one — archiving some other
   // slug explicitly must not blank the pointer of a different, still-active change.
   if (activeChange(vaultBase) === slug) clearActiveChange(vaultBase);
-  return { ok: true, failing: [], archivedRel: destRel, adrRel, promoted, specWarnings };
+  return { ok: true, failing: [], archivedRel: destRel, adrRel, promoted, specWarnings, linksRewritten };
+}
+
+// --- reescrita de wikilinks pós-move (0.35.0) ----------------------------------
+// Todo .md do vault (inclui .brain e _arquivo — uma change arquivada pode linkar outra).
+function allVaultMarkdown(vaultBase) {
+  const out = [];
+  const skip = new Set(['.git', '.obsidian', 'node_modules']);
+  const walk = (dir) => {
+    let entries;
+    try { entries = readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    for (const e of entries) {
+      if (skip.has(e.name)) continue;
+      if (e.name.startsWith('.') && e.name !== '.brain') continue;
+      const abs = join(dir, e.name);
+      if (e.isDirectory()) walk(abs);
+      else if (e.name.endsWith('.md')) out.push(abs);
+    }
+  };
+  walk(vaultBase);
+  return out;
+}
+
+// Reescreve `[[fromRel/...]]`, `[[fromRel]]` e `[[fromRel|alias]]` em todo o vault.
+// NUNCA por basename: `proposta`/`design` existem em toda change — só full-path é seguro.
+function rewriteChangeLinks(vaultBase, fromRel, toRel) {
+  let touched = 0;
+  for (const abs of allVaultMarkdown(vaultBase)) {
+    let content;
+    try { content = readFileSync(abs, 'utf8'); } catch { continue; }
+    const next = content
+      .split(`[[${fromRel}/`).join(`[[${toRel}/`)
+      .split(`[[${fromRel}]]`).join(`[[${toRel}]]`)
+      .split(`[[${fromRel}|`).join(`[[${toRel}|`);
+    if (next !== content) {
+      try { writeFileSync(abs, next, 'utf8'); touched += 1; } catch { /* nota readonly — segue */ }
+    }
+  }
+  return touched;
+}
+
+// Cura retroativa (vaults pré-0.35): wikilinks para changes que já moveram sem reescrita.
+// Dry-run por default; match por slug no nome datado do archive (`<data>-<slug>[-abandonada]`);
+// ambíguo (mesmo slug arquivado 2×) é reportado e pulado — nunca chuta.
+export function relinkChanges(vaultBase, { apply = false } = {}) {
+  const chDir = getLocale(vaultBase).folders.changes;
+  const archiveAbs = join(vaultBase, chDir, ARCHIVE_DIR);
+  let archived = [];
+  try { archived = readdirSync(archiveAbs, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name); } catch { /* sem arquivo */ }
+  const slugOf = (name) => name.replace(/^\d{4}-\d{2}-\d{2}-/, '').replace(/-abandonada$/, '');
+
+  // Slugs mortos referenciados em algum .md: [[<chDir>/<seg>/...]] | [[<chDir>/<seg>]] | [[...|
+  const linkRe = new RegExp(`\\[\\[${chDir.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\$&')}/([^/\\]|]+)(?=[/\\]|])`, 'g');
+  const files = allVaultMarkdown(vaultBase);
+  const dead = new Set();
+  for (const abs of files) {
+    let content;
+    try { content = readFileSync(abs, 'utf8'); } catch { continue; }
+    for (const m of content.matchAll(linkRe)) {
+      const seg = m[1];
+      if (seg === ARCHIVE_DIR) continue;
+      if (!existsSync(join(vaultBase, chDir, seg, 'proposta.md'))) dead.add(seg);
+    }
+  }
+
+  const rewritten = [];
+  const ambiguous = [];
+  const orphans = [];
+  const renames = [];
+  for (const seg of dead) {
+    const matches = archived.filter((name) => slugOf(name) === seg);
+    if (matches.length === 1) renames.push({ from: `${chDir}/${seg}`, to: `${chDir}/${ARCHIVE_DIR}/${matches[0]}` });
+    else if (matches.length > 1) ambiguous.push(`${seg} → ${matches.join(', ')}`);
+    else orphans.push(seg);
+  }
+
+  let filesTouched = 0;
+  if (apply) {
+    for (const r of renames) filesTouched += rewriteChangeLinks(vaultBase, r.from, r.to);
+  }
+  rewritten.push(...renames);
+  return { applied: apply, scanned: files.length, filesTouched, rewritten, ambiguous, orphans };
 }
 
 // Abandono (0.31.0): a saída legítima para uma change que não vai adiante — o que antes só o
@@ -504,6 +573,8 @@ export function abandonChange(vaultBase, slug, { dateStr }) {
     const pp = join(destAbs, 'proposta.md');
     writeFileSync(pp, readFileSync(pp, 'utf8').replace(/^status:\s*active\s*$/m, 'status: abandoned'), 'utf8');
   } catch { /* proposta sem frontmatter — segue */ }
+  let linksRewritten = 0;
+  try { linksRewritten = rewriteChangeLinks(vaultBase, `${chDir}/${slug}`, destRel.replaceAll('\\', '/')); } catch { /* abandono já íntegro */ }
   if (activeChange(vaultBase) === slug) clearActiveChange(vaultBase);
-  return { ok: true, failing: [], archivedRel: destRel };
+  return { ok: true, failing: [], archivedRel: destRel, linksRewritten };
 }
