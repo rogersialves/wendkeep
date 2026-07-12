@@ -19,3 +19,20 @@ Process skills (full text in `.claude/skills/`, `.agents/skills/`, and the vault
 - **wk-verify** — Use no verify deep — passe independente read-only (autor≠verificador) que re-deriva a cobertura do spec e grava verdict.json.
 - **wk-workflow** — Use SEMPRE que o usuário pedir para implementar, criar, corrigir, refatorar, adicionar ou alterar código — qualquer tarefa de código não-trivial. Invoque ANTES de editar qualquer arquivo: orquestra o loop a2 (wendkeep change new → tarefas → verify → archive) e registra tudo no vault.
 <!-- wendkeep:skills:end -->
+
+## Release & publicação (regra do projeto)
+
+O mantenedor executa a publicação; agentes apenas **preparam**. Nunca rode `npm publish`
+nem `npm run release` por conta própria.
+
+1. **Antes de preparar**, consulte a versão publicada: `npm view wendkeep version`. Alinhe
+   `package.json`, `CHANGELOG.md` e a tag `vX.Y.Z` a esse estado antes de bumpar.
+2. Bump SemVer: `npm version <patch|minor|major> --no-git-tag-version` (fix→patch, feat→minor).
+3. Adicione a entrada `## [X.Y.Z] — AAAA-MM-DD` no topo do `CHANGELOG.md` (Keep a Changelog).
+   O CHANGELOG é a fonte única — `scripts/release.mjs` e a GitHub Release (`release.yml`) leem dele.
+4. Commit `fix|feat: <resumo> (X.Y.Z)` com código + `package.json` + `CHANGELOG.md`. O working
+   tree precisa ficar limpo (guard do release).
+5. Valide com `npm run release -- --dry-run` (checa CHANGELOG, tree limpo, tag inexistente) e **pare**.
+6. O mantenedor roda `npm run release` (npm publish + tag + push; a GitHub Release nasce do push da tag).
+
+CHANGELOG ↔ NPM ↔ GitHub devem ficar sempre na mesma versão.
