@@ -4,6 +4,13 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.38.3] — 2026-07-12
+
+### Fixed
+
+- Sessões do Codex Desktop voltam a ser criadas quando `SessionStart` ou o primeiro `UserPromptSubmit` não fornecem `transcript_path`: o resolvedor usa o UUID canônico de `CODEX_THREAD_ID` e associa o rollout à mesma entrada assim que o transcript materializa.
+- A barreira cross-provider permanece fail-closed: quando `CODEX_THREAD_ID` e `session_meta.payload.session_id` estão presentes, divergência entre eles adia a escrita em vez de contaminar outra sessão.
+
 ## [0.38.2] — 2026-07-12
 
 ### Fixed

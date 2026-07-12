@@ -124,3 +124,33 @@ test('session-ensure created note carries session_id in frontmatter', () => {
     assert.match(content, /^provider:\s*\S+/m);
   } finally { rmSync(vault, { recursive: true, force: true }); }
 });
+
+test('session-start Codex cria nota sem transcript usando CODEX_THREAD_ID', () => {
+  const vault = mkdtempSync(join(tmpdir(), 'wk-codex-start-'));
+  try {
+    const id = '019f56c7-d594-7460-be9b-d246606e3135';
+    const env = { ...process.env, OBSIDIAN_VAULT_PATH: vault, CODEX_THREAD_ID: id };
+    delete env.CLAUDECODE; delete env.CLAUDE_CODE_SESSION_ID; delete env.CLAUDE_PROJECT_DIR;
+    const r = spawnSync(process.execPath, ['hooks/session-start.mjs'], {
+      encoding: 'utf8', input: '{}', env,
+    });
+    assert.equal(r.status, 0, r.stderr);
+    const registry = JSON.parse(readFileSync(join(vault, '.brain', 'SESSION_REGISTRY.json'), 'utf8'));
+    assert.equal(registry.sessions[id].provider, 'codex');
+    assert.equal(registry.sessions[id].transcript_path, undefined);
+    assert.ok(existsSync(join(vault, registry.sessions[id].session_file)));
+
+    const transcript = join(vault, `rollout-${id}.jsonl`);
+    writeFileSync(transcript, `${JSON.stringify({ type: 'session_meta', payload: { id, session_id: id, model_provider: 'openai' } })}\n`);
+    const ensure = spawnSync(process.execPath, ['hooks/session-ensure.mjs'], {
+      encoding: 'utf8',
+      input: JSON.stringify({ session_id: id, transcript_path: transcript, prompt: 'continuar sessão' }),
+      env,
+    });
+    assert.equal(ensure.status, 0, ensure.stderr);
+    const reconciled = JSON.parse(readFileSync(join(vault, '.brain', 'SESSION_REGISTRY.json'), 'utf8'));
+    assert.equal(reconciled.sessions[id].transcript_path, transcript);
+    assert.equal(Object.keys(reconciled.sessions).length, 1);
+    assert.ok(existsSync(join(vault, reconciled.sessions[id].session_file)));
+  } finally { rmSync(vault, { recursive: true, force: true }); }
+});

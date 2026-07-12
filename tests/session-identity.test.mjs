@@ -8,6 +8,48 @@ import { readSessionRegistry, upsertSessionRegistry, writeControl } from '../hoo
 
 function temp() { return mkdtempSync(join(tmpdir(), 'wk-identity-')); }
 
+function withCodexThreadId(value, fn) {
+  const previous = process.env.CODEX_THREAD_ID;
+  if (value === undefined) delete process.env.CODEX_THREAD_ID;
+  else process.env.CODEX_THREAD_ID = value;
+  try { return fn(); } finally {
+    if (previous === undefined) delete process.env.CODEX_THREAD_ID;
+    else process.env.CODEX_THREAD_ID = previous;
+  }
+}
+
+test('Codex inicia sem transcript usando CODEX_THREAD_ID canônico', () => {
+  const vault = temp();
+  try {
+    const id = '019f56c7-d594-7460-be9b-d246606e3135';
+    const resolved = withCodexThreadId(id, () => resolveSessionIdentity(vault, {}, 'codex'));
+    assert.equal(resolved.state, 'resolved');
+    assert.equal(resolved.canonicalConversationId, id);
+    assert.equal(resolved.transcriptPath, '');
+  } finally { rmSync(vault, { recursive: true, force: true }); }
+});
+
+test('Codex bloqueia transcript cujo session_id diverge de CODEX_THREAD_ID', () => {
+  const vault = temp();
+  try {
+    const tx = join(vault, 'rollout-mismatch.jsonl');
+    writeFileSync(tx, `${JSON.stringify({ type: 'session_meta', payload: { id: 'rollout-mismatch', session_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', model_provider: 'openai' } })}\n`);
+    const resolved = withCodexThreadId('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', () => (
+      resolveSessionIdentity(vault, { transcript_path: tx }, 'codex')
+    ));
+    assert.equal(resolved.state, 'deferred');
+    assert.match(resolved.diagnostics.join(' '), /diverge/i);
+  } finally { rmSync(vault, { recursive: true, force: true }); }
+});
+
+test('Codex não aceita CODEX_THREAD_ID inválido sem transcript', () => {
+  const vault = temp();
+  try {
+    const resolved = withCodexThreadId('ephemeral-resume', () => resolveSessionIdentity(vault, {}, 'codex'));
+    assert.equal(resolved.state, 'deferred');
+  } finally { rmSync(vault, { recursive: true, force: true }); }
+});
+
 test('Codex usa session_id canônico e mantém id do rollout separado', () => {
   const vault = temp();
   try {
@@ -46,7 +88,7 @@ test('Claude: sessão nova sem transcript materializado resolve pelo hookId (nã
     assert.equal(resolved.canonicalConversationId, '5647583f-33eb-4845-a4e4-72b8e5da7fce');
     assert.equal(resolved.transcriptId, 'nao-materializado');
     // Codex no mesmo estado NÃO pode resolver pelo id efêmero do hook — barreira do incidente 2026-07-11
-    const codex = resolveSessionIdentity(vault, { transcript_path: join(vault, 'rollout-inexistente.jsonl'), session_id: 'ephemeral-resume' }, 'codex');
+    const codex = withCodexThreadId(undefined, () => resolveSessionIdentity(vault, { transcript_path: join(vault, 'rollout-inexistente.jsonl'), session_id: 'ephemeral-resume' }, 'codex'));
     assert.equal(codex.state, 'deferred');
   } finally { rmSync(vault, { recursive: true, force: true }); }
 });

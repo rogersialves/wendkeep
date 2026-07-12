@@ -39,10 +39,41 @@ function compatible(provider, transcriptProvider) {
     || (provider === 'claude' && transcriptProvider === 'anthropic');
 }
 
+function canonicalUuid(value = '') {
+  const id = String(value || '').trim().toLowerCase();
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(id) ? id : '';
+}
+
 export function resolveSessionIdentity(vaultBase, input = {}, provider = detectProvider()) {
   const transcriptPath = input.transcript_path || input.transcriptPath || '';
   const inspected = inspectTranscriptIdentity(transcriptPath);
   const hookId = input.session_id || input.sessionId || '';
+  const codexThreadId = canonicalUuid(input.codex_thread_id || input.codexThreadId || process.env.CODEX_THREAD_ID || '');
+
+  // Codex Desktop exposes the stable canonical conversation through
+  // CODEX_THREAD_ID even when SessionStart/UserPromptSubmit omit transcript_path.
+  // This is safer than the hook session_id (which may rotate on resume). Once the
+  // rollout materializes, require both canonical sources to agree.
+  const transcriptConversationId = canonicalUuid(inspected.canonicalConversationId);
+  if (provider === 'codex' && transcriptConversationId && codexThreadId
+    && transcriptConversationId !== codexThreadId) {
+    return {
+      state: 'deferred', provider, transcriptPath,
+      diagnostics: [`CODEX_THREAD_ID diverge do session_id do transcript (${codexThreadId} != ${transcriptConversationId})`],
+    };
+  }
+  if (provider === 'codex' && !inspected.canonicalConversationId && codexThreadId) {
+    return {
+      state: 'resolved',
+      provider,
+      canonicalConversationId: codexThreadId,
+      hookSessionId: hookId,
+      transcriptPath,
+      transcriptId: transcriptPath ? basename(transcriptPath, '.jsonl') : codexThreadId,
+      parentConversationId: '',
+      diagnostics: [],
+    };
+  }
 
   // Claude: input.session_id já é o id canônico e estável da conversa — idêntico
   // ao sessionId que cada linha do transcript grava. Numa sessão nova o arquivo
