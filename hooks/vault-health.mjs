@@ -72,7 +72,9 @@ function hasDefaultPending(content) {
 }
 
 function usageSectionIsPlaced(content, { active = false } = {}) {
-  const usage = content.indexOf('\n## Uso de tokens e custos');
+  const unified = content.indexOf('\n## Agentes, tokens e custos');
+  const legacy = content.indexOf('\n## Uso de tokens e custos');
+  const usage = unified !== -1 ? unified : legacy;
   if (usage === -1) return true;
   const changed = content.indexOf('\n## Arquivos criados ou alterados');
   const pending = content.indexOf('\n## Pendências');
@@ -110,16 +112,17 @@ function checkSession({ vaultBase, sessionRel, control, registry }) {
 
   if (duplicates.length) failures.push(`Marcadores de turno duplicados: ${duplicates.join(', ')}`);
   if (hasHeadingAfterClosing(content)) failures.push('Há headings/iterações após ## Encerramento.');
-  if (!usageSectionIsPlaced(content, { active: activeSession })) failures.push('## Uso de tokens e custos está fora da posição esperada.');
+  if (!usageSectionIsPlaced(content, { active: activeSession })) failures.push('A seção de agentes, tokens e custos está fora da posição esperada.');
+  if (content.includes('\n## Agentes, tokens e custos') && (content.includes('\n## Uso de tokens e custos') || content.includes('\n## Subagents & Workflows'))) {
+    failures.push('A sessão mistura observabilidade consolidada e seções legadas.');
+  }
   if (hasDefaultPending(content)) warnings.push('Pendências ainda contém placeholders padrão.');
 
-  const registryEntry = registry.sessions?.[control.session_id];
-  if (control.session_id && !registryEntry) {
-    failures.push(`SESSION_REGISTRY não possui session_id ativo: ${control.session_id}`);
-  } else if (registryEntry) {
-    if (registryEntry.session_file !== sessionRel) {
-      failures.push('SESSION_REGISTRY diverge do CURRENT_SESSION.md para a sessão ativa.');
-    }
+  const registryPair = Object.entries(registry.sessions || {}).find(([, entry]) => entry?.session_file === sessionRel);
+  const registryEntry = registryPair?.[1];
+  if (!registryEntry) {
+    failures.push(`SESSION_REGISTRY não possui a sessão: ${sessionRel}`);
+  } else {
     if (!registryEntry.transcript_path) {
       warnings.push('SESSION_REGISTRY não possui transcript_path para a sessão ativa.');
     } else if (!existsSync(registryEntry.transcript_path)) {
@@ -165,6 +168,11 @@ export function runVaultHealth({ vaultBase, session = '' }) {
     .filter((item) => item.status === 'active' && item.ended_at)
     .length;
   if (staleDone) warnings.push(`${staleDone} entradas active com ended_at no SESSION_REGISTRY.`);
+  const activeEntries = Object.values(registry.sessions || {}).filter((item) => item?.status === 'active');
+  for (const entry of activeEntries) {
+    if (!entry.session_file) failures.push('SESSION_REGISTRY possui sessão ativa sem session_file.');
+    if (!entry.transcript_path) warnings.push(`Sessão ativa sem transcript_path: ${entry.session_file || '(sem arquivo)'}`);
+  }
 
   const locF = getLocale(vaultBase).folders;
   const derivedFolders = [locF.decisions, locF.bugs, locF.learnings];

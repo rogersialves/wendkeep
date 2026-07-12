@@ -102,6 +102,8 @@ test('upsertSubagentUsage: frontmatter fields + section, idempotent, fail-open',
     let out = readFileSync(notePath, 'utf8');
     assert.match(out, /subagents_count: 1/);
     assert.match(out, /tokens_total_incl_subagents: 4500/); // 1000 main + 3500 sub
+    assert.match(out, /custo_total_incl_subagents_usd:/);
+    assert.match(out, /custo_por_modelo_json:.*claude-opus-4\.8/);
     assert.match(out, /## Subagents & Workflows/);
     // idempotent: single section on re-run
     upsertSubagentUsage(notePath, `${sd}.jsonl`);

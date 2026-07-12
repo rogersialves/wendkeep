@@ -5,7 +5,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, readdirSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -13,9 +13,9 @@ import { fileURLToPath } from 'node:url';
 const here = dirname(fileURLToPath(import.meta.url));
 const BIN = join(here, '..', 'bin', 'wendkeep.mjs');
 
-function runHook(name, { env, cwd }) {
+function runHook(name, { env, cwd, input = {} }) {
   return spawnSync(process.execPath, [BIN, 'hook', name], {
-    input: '{}',
+    input: JSON.stringify(input),
     encoding: 'utf8',
     cwd,
     env,
@@ -28,7 +28,11 @@ test('hook honors OBSIDIAN_VAULT_PATH and writes there (cwd-independent)', () =>
   try {
     const env = { ...process.env, OBSIDIAN_VAULT_PATH: vault };
     delete env.WENDKEEP_DEBUG;
-    const r = runHook('session-ensure', { env, cwd: neutralCwd });
+    // simula runtime Codex: não vazar os marcadores de ambiente do Claude Code pai
+    delete env.CLAUDECODE; delete env.CLAUDE_CODE_SESSION_ID; delete env.CLAUDE_PROJECT_DIR;
+    const transcript = join(neutralCwd, 'rollout.jsonl');
+    writeFileSync(transcript, `${JSON.stringify({ type: 'session_meta', payload: { id: 'runtime-rollout', session_id: 'runtime-session', model_provider: 'openai' } })}\n`);
+    const r = runHook('session-ensure', { env, cwd: neutralCwd, input: { transcript_path: transcript, session_id: 'runtime-session', prompt: 'test runtime' } });
 
     assert.equal(r.status, 0, `exit 0; stderr=\n${r.stderr}`);
     assert.doesNotThrow(() => JSON.parse(r.stdout), `stdout is JSON; got: ${r.stdout}`);

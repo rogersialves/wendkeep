@@ -12,6 +12,7 @@ import {
   wikilinkFromRel, readControl, toVaultRelative, getNextAdrNumber, derivedContentKey,
 } from './obsidian-common.mjs';
 import { getLocale } from './locale.mjs';
+import { resolveSessionEntry } from './session-identity.mjs';
 
 // Decision notes follow the ADR naming convention: ADR-NNNN-<slug>, NNNN a 4-digit sequential
 // number assigned in the order decisions are made (getNextAdrNumber scans the whole 04-Decisões).
@@ -168,8 +169,9 @@ export function captureDecision(vaultBase, input) {
   const dateStr = formatDate(now);
   const provider = providerMeta(input.provider);
 
-  const matched = input.transcript_path ? findActiveSessionByTranscript(vaultBase, input.transcript_path) : null;
-  const sessionRel = matched?.session_file || readControl(vaultBase).session_file || '';
+  const { identity, entry } = resolveSessionEntry(vaultBase, input, provider.id);
+  if (identity.state !== 'resolved') return null;
+  const sessionRel = entry?.session_file || '';
 
   const dir = join(vaultBase, monthFolderRelFromDateStr(loc.folders.decisions, dateStr, vaultBase));
   ensureDir(dir);

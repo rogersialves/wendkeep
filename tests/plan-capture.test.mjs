@@ -9,6 +9,14 @@ import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { capturePlan, extractPlan, planSlug } from '../hooks/plan-capture.mjs';
 import { activeChange, setActiveChange } from '../hooks/change-core.mjs';
+import { upsertSessionRegistry } from '../hooks/obsidian-common.mjs';
+
+function sessionInput(vault, id = 'plan-session') {
+  const tx = join(vault, `${id}.jsonl`);
+  writeFileSync(tx, `${JSON.stringify({ type: 'user', sessionId: id, message: { content: 'plan' } })}\n`);
+  upsertSessionRegistry(vault, id, { status: 'active', provider: 'claude', session_file: `02-Sessões/${id}.md`, transcript_path: tx });
+  return { transcript_path: tx, session_id: id };
+}
 
 const PLAN = `# Plano — auth com refresh token
 
@@ -56,7 +64,8 @@ test('planSlug: slug do H1 do plano', () => {
 test('capturePlan sem change ativa: auto-cria a change preenchida a partir do plano', () => {
   const vault = mkdtempSync(join(tmpdir(), 'wk-pc1-'));
   try {
-    const r = capturePlan(vault, { tool_input: { plan: PLAN }, tool_response: 'User has approved your plan.', session_id: 'p1' });
+    const base = sessionInput(vault, 'p1');
+    const r = capturePlan(vault, { ...base, tool_input: { plan: PLAN }, tool_response: 'User has approved your plan.', session_id: 'p1' });
     assert.ok(r && r.created, 'change criada');
     assert.equal(activeChange(vault), r.slug, 'vira a change ativa');
     const dir = join(vault, '08-Mudanças', r.slug);
@@ -71,7 +80,7 @@ test('capturePlan sem change ativa: auto-cria a change preenchida a partir do pl
     assert.ok(existsSync(join(dir, 'plano-aprovado.md')), 'plano bruto preservado');
     const snapshots = readdirSync(join(dir, 'planos'));
     assert.equal(snapshots.length, 1, 'snapshot imutável criado');
-    capturePlan(vault, { tool_input: { plan: PLAN }, tool_response: { plan: PLAN, filePath: 'x.md' } });
+    capturePlan(vault, { ...base, tool_input: { plan: PLAN }, tool_response: { plan: PLAN, filePath: 'x.md' } });
     assert.equal(readdirSync(join(dir, 'planos')).length, 1, 'mesmo plano deduplicado por hash');
     assert.match(r.context, /registrada no vault/, 'additionalContext confirma');
   } finally { rmSync(vault, { recursive: true, force: true }); }
@@ -80,6 +89,8 @@ test('capturePlan sem change ativa: auto-cria a change preenchida a partir do pl
 test('capturePlan usa registry do transcript como source da change', () => {
   const vault = mkdtempSync(join(tmpdir(), 'wk-pc-reg-'));
   try {
+    const tx = join(vault, 's1.jsonl');
+    writeFileSync(tx, `${JSON.stringify({ type: 'user', sessionId: 's1', message: { content: 'plan' } })}\n`);
     mkdirSync(join(vault, '.brain'), { recursive: true });
     writeFileSync(join(vault, '.brain', 'SESSION_REGISTRY.json'), JSON.stringify({
       version: 1,
@@ -87,13 +98,14 @@ test('capturePlan usa registry do transcript como source da change', () => {
         s1: {
           status: 'active',
           session_file: '02-Sessões/2026/07-JUL/DIA 09/sessao.md',
-          transcript_path: 'C:/Users/test/.claude/projects/p/s1.jsonl',
+          transcript_path: tx,
+          provider: 'claude',
           started_at: '2026-07-09T10:00:00',
         },
       },
     }));
     const r = capturePlan(vault, {
-      transcript_path: 'c:\\users\\test\\.claude\\projects\\p\\s1.jsonl',
+      transcript_path: tx,
       tool_input: { plan: PLAN },
       tool_response: { plan: PLAN, filePath: 'x.md' },
     });
@@ -106,7 +118,9 @@ test('plan-capture entrypoint via stdin persiste e emite contexto', () => {
   const vault = mkdtempSync(join(tmpdir(), 'wk-pc-e2e-'));
   try {
     const hook = join(process.cwd(), 'hooks', 'plan-capture.mjs');
+    const base = sessionInput(vault, 'e2e-plan');
     const input = JSON.stringify({
+      ...base,
       tool_input: { plan: PLAN },
       tool_response: { plan: PLAN, filePath: 'C:/tmp/plan.md', planWasEdited: true, isAgent: false },
       obsidian_vault_path: vault,
@@ -114,7 +128,7 @@ test('plan-capture entrypoint via stdin persiste e emite contexto', () => {
     const r = spawnSync(process.execPath, [hook], {
       input,
       encoding: 'utf8',
-      env: { ...process.env, OBSIDIAN_VAULT_PATH: vault },
+      env: { ...process.env, OBSIDIAN_VAULT_PATH: vault, CLAUDECODE: '1' },
     });
     assert.equal(r.status, 0, r.stderr);
     const output = JSON.parse(r.stdout);
@@ -126,7 +140,7 @@ test('plan-capture entrypoint via stdin persiste e emite contexto', () => {
 test('capturePlan sem checkboxes no plano: tarefas.md mantém o scaffold', () => {
   const vault = mkdtempSync(join(tmpdir(), 'wk-pc2-'));
   try {
-    const r = capturePlan(vault, { tool_input: { plan: '# Plano X\n\n## Contexto\n\nmotivo real\n\ncorpo' }, tool_response: 'User has approved your plan.' });
+    const r = capturePlan(vault, { ...sessionInput(vault, 'p2'), tool_input: { plan: '# Plano X\n\n## Contexto\n\nmotivo real\n\ncorpo' }, tool_response: 'User has approved your plan.' });
     const tarefas = readFileSync(join(vault, '08-Mudanças', r.slug, 'tarefas.md'), 'utf8');
     assert.match(tarefas, /- \[ \] 1\.1/, 'scaffold de tarefa presente');
     assert.match(r.context, /tarefas\.md/, 'context pede revisão das tarefas');
@@ -140,7 +154,7 @@ test('capturePlan com change ativa: anexa plano-aprovado.md sem criar change nov
     mkdirSync(dir, { recursive: true });
     writeFileSync(join(dir, 'proposta.md'), '---\ntype: change\nstatus: active\nspecs: []\n---\n\n# existente\n\nreal\n');
     setActiveChange(vault, 'existente');
-    const r = capturePlan(vault, { tool_input: { plan: PLAN }, tool_response: 'User has approved your plan.' });
+    const r = capturePlan(vault, { ...sessionInput(vault, 'p3'), tool_input: { plan: PLAN }, tool_response: 'User has approved your plan.' });
     assert.ok(r && !r.created, 'não cria change nova');
     assert.equal(r.slug, 'existente');
     assert.ok(existsSync(join(dir, 'plano-aprovado.md')));

@@ -13,6 +13,9 @@ import {
 // Tabela editável em pricing.json (mesma pasta); esta é o fallback embutido
 // usado quando o JSON some ou fica inválido — o hook nunca deve quebrar por isso.
 const DEFAULT_PRICE_REFERENCE = {
+  'gpt-5.6-sol': { label: 'GPT-5.6 Sol API', provider: 'openai', input: 5, cachedInput: 0.5, output: 30 },
+  'gpt-5.6-terra': { label: 'GPT-5.6 Terra API', provider: 'openai', input: 2.5, cachedInput: 0.25, output: 15 },
+  'gpt-5.6-luna': { label: 'GPT-5.6 Luna API', provider: 'openai', input: 1, cachedInput: 0.1, output: 6 },
   'gpt-5.5': {
     label: 'GPT-5.5 API',
     provider: 'openai',
@@ -83,6 +86,17 @@ export function loadPriceReference(file = PRICING_FILE) {
 const PRICE_REFERENCE = loadPriceReference();
 
 const MODEL_ALIASES = {
+  'gpt-5.6': 'gpt-5.6-sol',
+  'gpt-5.6-sol': 'gpt-5.6-sol',
+  'gpt-5-6-sol': 'gpt-5.6-sol',
+  'openai/gpt-5.6': 'gpt-5.6-sol',
+  'openai/gpt-5.6-sol': 'gpt-5.6-sol',
+  'gpt-5.6-terra': 'gpt-5.6-terra',
+  'gpt-5-6-terra': 'gpt-5.6-terra',
+  'openai/gpt-5.6-terra': 'gpt-5.6-terra',
+  'gpt-5.6-luna': 'gpt-5.6-luna',
+  'gpt-5-6-luna': 'gpt-5.6-luna',
+  'openai/gpt-5.6-luna': 'gpt-5.6-luna',
   'gpt-5.5': 'gpt-5.5',
   'gpt-5_5': 'gpt-5.5',
   'openai/gpt-5.5': 'gpt-5.5',
@@ -140,6 +154,15 @@ const MANAGED_FRONTMATTER_KEYS = new Set([
   'custo_modelo_usd',
   'custo_por_modelo',
   'usage_por_transcript',
+  'subagents_count',
+  'subagents_tokens_total',
+  'subagents_custo_usd',
+  'subagents_tools',
+  'subagents_wasted_usd',
+  'tokens_total_incl_subagents',
+  'custo_total_incl_subagents_usd',
+  'observability_schema',
+  'custo_por_modelo_json',
   // Legado: chaves antigas removidas ao reprocessar a sessão.
   'custo_estimado_gpt55_usd',
   'custo_estimado_opus47_usd',
@@ -343,7 +366,7 @@ function parseCodexLines(lines, result) {
     const payload = event.payload || {};
 
     if (event.type === 'session_meta') {
-      result.sessionId = payload.id || result.sessionId;
+      result.sessionId = payload.session_id || payload.id || result.sessionId;
       currentProvider = normalizeProvider(payload.model_provider || currentProvider);
       currentModel = normalizeModelName(payload.model || currentModel);
       result.provider = currentProvider;
@@ -430,6 +453,7 @@ function parseClaudeLines(lines, result) {
   const seenTools = new Set();
   const seenThinking = new Set();
   let thinkingChars = 0;
+  const thinkingCharsByModel = new Map();
   let latestPrompt = '';
 
   for (const line of lines) {
@@ -464,6 +488,7 @@ function parseClaudeLines(lines, result) {
         if (!seenThinking.has(thinkKey)) {
           seenThinking.add(thinkKey);
           thinkingChars += block.thinking.length;
+          thinkingCharsByModel.set(model, (thinkingCharsByModel.get(model) || 0) + block.thinking.length);
         }
       }
     }
@@ -491,6 +516,10 @@ function parseClaudeLines(lines, result) {
   if (thinkingTokens > 0) {
     result.totals.reasoning = thinkingTokens;
     result.pensamento = `thinking ~${formatTokensShort(thinkingTokens)}`;
+    for (const [model, chars] of thinkingCharsByModel) {
+      const entry = result.byModel.get(`anthropic:${model}`);
+      if (entry) entry.usage.reasoning = Math.round(chars / 3.5);
+    }
   }
 
   return result;
@@ -882,8 +911,8 @@ function legacyEntryFromNote(content, summary) {
   };
 }
 
-export function updateSessionUsage({ vaultBase, sessionRel, sessionPath, transcriptPath }) {
-  if (!sessionPath || !existsSync(sessionPath) || !transcriptPath || !existsSync(transcriptPath)) {
+export function collectSessionUsage({ sessionContent, transcriptPath }) {
+  if (!transcriptPath || !existsSync(transcriptPath)) {
     return null;
   }
 
@@ -891,11 +920,16 @@ export function updateSessionUsage({ vaultBase, sessionRel, sessionPath, transcr
   const summary = summarizeTokenUsage(parsed);
   if (!summary.calls) return null;
 
-  const sessionContent = readFileSync(sessionPath, 'utf-8');
   const fmMatch = sessionContent.match(/^---\n([\s\S]*?)\n---/);
   const existingEntries = fmMatch ? parseUsageHistory(fmMatch[1]) : [];
 
   const transcriptId = transcriptIdFromPath(transcriptPath);
+  const previous = existingEntries.find((entry) => entry.transcript_id === transcriptId);
+  const current = entryFromSummary(summary, transcriptId);
+  if (previous) {
+    const comparable = (entry) => JSON.stringify({ ...entry, atualizado_em: undefined });
+    if (comparable(previous) === comparable(current)) current.atualizado_em = previous.atualizado_em;
+  }
   let entries = existingEntries.filter((e) => e.transcript_id !== transcriptId);
 
   if (!existingEntries.length) {
@@ -903,18 +937,25 @@ export function updateSessionUsage({ vaultBase, sessionRel, sessionPath, transcr
     if (legacy) entries.push(legacy);
   }
 
-  entries.push(entryFromSummary(summary, transcriptId));
+  entries.push(current);
 
   const agg = aggregateEntries(entries);
   const withFrontmatter = upsertSessionFrontmatter(sessionContent, agg, entries);
-  const withSection = upsertUsageSection(withFrontmatter, buildUsageSection(agg, entries, summary));
-  writeFileSync(sessionPath, withSection, 'utf-8');
-
   return {
     summary,
     aggregate: agg,
     entries,
+    content: withFrontmatter,
   };
+}
+
+export function updateSessionUsage({ vaultBase, sessionRel, sessionPath, transcriptPath }) {
+  if (!sessionPath || !existsSync(sessionPath)) return null;
+  const result = collectSessionUsage({ sessionContent: readFileSync(sessionPath, 'utf-8'), transcriptPath });
+  if (!result) return null;
+  const withSection = upsertUsageSection(result.content, buildUsageSection(result.aggregate, result.entries, result.summary));
+  writeFileSync(sessionPath, withSection, 'utf-8');
+  return result;
 }
 
 function parseCliArgs(argv) {

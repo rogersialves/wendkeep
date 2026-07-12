@@ -14,7 +14,7 @@ export function statsFrom(agg) {
     sessions: agg.count,
     prompts: agg.prompts || 0,
     cost: agg.total,
-    models: (agg.byModel || []).length,
+    models: (agg.byModel || []).filter((m) => m.model !== 'subagents (legado, modelo desconhecido)').length,
     firstDay: days[0] || '',
     lastDay: days[days.length - 1] || '',
     spanDays: days.length,

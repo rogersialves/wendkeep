@@ -96,11 +96,16 @@ test('change archive BLOCKS a raw scaffold (CLI e2e), message names the scaffold
 test('session-ensure created note carries session_id in frontmatter', () => {
   const vault = mkdtempSync(join(tmpdir(), 'wk-ens-'));
   try {
-    const input = JSON.stringify({ session_id: 'ens-abc-123', prompt: 'planejar tela home do app', cwd: vault });
+    const transcript = join(vault, 'rollout.jsonl');
+    writeFileSync(transcript, `${JSON.stringify({ type: 'session_meta', payload: { id: 'rollout-1', session_id: 'ens-abc-123', model_provider: 'openai' } })}\n`);
+    const input = JSON.stringify({ session_id: 'ens-abc-123', transcript_path: transcript, prompt: 'planejar tela home do app', cwd: vault });
+    // simula runtime Codex: não vazar os marcadores de ambiente do Claude Code pai
+    const env = { ...process.env, OBSIDIAN_VAULT_PATH: vault };
+    delete env.CLAUDECODE; delete env.CLAUDE_CODE_SESSION_ID; delete env.CLAUDE_PROJECT_DIR;
     const r = spawnSync(process.execPath, ['hooks/session-ensure.mjs'], {
       encoding: 'utf8',
       input,
-      env: { ...process.env, OBSIDIAN_VAULT_PATH: vault },
+      env,
     });
     assert.equal(r.status, 0, r.stderr);
     // find the created note

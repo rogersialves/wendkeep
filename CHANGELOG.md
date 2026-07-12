@@ -4,6 +4,42 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.38.1] — 2026-07-12
+
+### Fixed
+
+- Sessão Claude nova não perde mais o 1º turno: `resolveSessionIdentity` usa o `session_id` do hook como identidade canônica quando o transcript ainda não materializou em disco, em vez de adiar a criação da nota. Codex mantém a exigência de rollout/registry — a barreira anti-contaminação do 0.38.0 segue intacta.
+- `task-log` e `subagent-stop` passam a honrar `input.provider` ao resolver a sessão (paridade com `decision-capture`), evitando deferimento falso quando o provider do ambiente diverge do transcript.
+
+## [0.38.0] — 2026-07-12
+
+### Added
+
+- Registry multi-sessão v2: `SESSION_REGISTRY.json` passa a ser a autoridade por conversa, enquanto `CURRENT_SESSION.md` vira um dashboard compatível com todas as sessões ativas.
+- `wendkeep session list|show|use` e `wendkeep change bind <slug> --session <id>` permitem inspecionar sessões concorrentes e transferir explicitamente o vínculo de uma change.
+- Metadados de auditoria da observabilidade registram caller, conversa canônica, transcript e instante da atualização.
+
+### Fixed
+
+- Roteamento cross-provider agora é fail-closed: Codex usa `session_meta.payload.session_id`, Claude usa o `sessionId` do transcript, e writers não recorrem ao foco global quando a identidade é ambígua.
+- Atualizações concorrentes do registry usam lock, releitura e rename atômico; patches vazios não apagam transcript ou metadados válidos.
+- `cost rebuild` reporta entradas órfãs, ausentes ou incompatíveis como estado não verde em vez de omiti-las silenciosamente.
+
+## [0.37.0] — 2026-07-11
+
+### Added
+
+- Observabilidade consolidada em `## Agentes, tokens e custos`: Stop, SubagentStop, importação e rebuild usam um único writer atômico para main + subagents.
+- Ledger por modelo/origem com reasoning tokens e effort, sem alterar a regra de preço do modelo.
+- Novo `wendkeep cost rebuild`, dry-run por padrão; `--apply` reconstrói sessões antigas via `SESSION_REGISTRY` e grava `.brain/COST_REBUILD.json`.
+- Preços API-equivalentes de GPT-5.6 Sol, Terra e Luna.
+
+### Fixed
+
+- Custos de subagents são atribuídos ao modelo que realmente os executou, em vez do modelo principal.
+- Migração remove os headings legados sem perder reaberturas ou iterações mal posicionadas.
+- Totais combinados de tokens/custo são atualizados também no `SubagentStop` e persistidos em campos compatíveis com os dashboards existentes.
+
 ## [0.35.0] — 2026-07-11
 
 ### Fixed

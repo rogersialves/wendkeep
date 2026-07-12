@@ -118,6 +118,11 @@ No re‑copying, no snapshot to re‑sync — the package is the single source o
 | `wendkeep sensors <sub>` | `list` / `add <id> "<command>"` — view/edit `wendkeep.sensors.json` (JSON Schema shipped). |
 | `wendkeep cost [--since d]` | Aggregate AI-coding spend across the vault's sessions — total, by model, by day (`--json`). |
 | `wendkeep import [opts]` | **Retroactive memory** — backfill past **Claude + Codex** sessions into the vault (deduped by `session_id`). `--source all\|claude\|codex` / `--from <dir>` / `--codex-from <dir>` / `--since d` / `--limit n` / `--dry-run` / `--json`. |
+| `wendkeep cost rebuild [opts]` | Recalcula custos históricos do transcript principal e subagents usando `SESSION_REGISTRY`. Dry-run por padrão; `--apply` atualiza notas e grava `.brain/COST_REBUILD.json`. Aceita `--session`, `--limit` e `--json`. |
+| `wendkeep session list\|show\|use` | Lista o registry multi-sessão, mostra uma conversa ou muda somente o foco humano de `CURRENT_SESSION.md`. |
+| `wendkeep change bind <slug> --session <id>` | Vincula ou transfere uma change para uma conversa canônica sem esconder as demais pendências. |
+
+Session notes use one live `## Agentes, tokens e custos` snapshot. Main-agent and subagent hooks recompose it atomically, with costs, token dimensions, reasoning tokens and effort per model/source.
 | `wendkeep lesson add "t" "l"` | Record a project-local lesson (injected at the next SessionStart). |
 | `wendkeep sync-defs` | Copy `.brain/agents\|skills` into `.codex/agents`, `.claude/skills`, `.agents/skills`; `--check` detects drift. |
 | `wendkeep validate-memory [path]` | Validate `.brain/CORE.md` (cap 25, 3 sections, no secrets/PII). |

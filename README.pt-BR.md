@@ -115,6 +115,11 @@ Sem recopiar, sem snapshot pra re‑sincronizar — o pacote é a única fonte d
 | `wendkeep spec <sub>` | Specs vivos: `list` / `show <capability>`. |
 | `wendkeep sensors <sub>` | `list` / `add <id> "<comando>"` — vê/edita `wendkeep.sensors.json` (JSON Schema incluso). |
 | `wendkeep cost [opts]` | Agrega o gasto de IA nas sessões do cofre — total, por modelo, por dia · `--top [N]` · `--trend [day\|week\|month]` (+ projeção) · `--write` (gera `00-Custo.md`) · `--json`. |
+| `wendkeep cost rebuild [opts]` | Reconstrói custos históricos do transcript principal e subagents via `SESSION_REGISTRY`. Dry-run por padrão; `--apply` grava notas e `.brain/COST_REBUILD.json`. |
+| `wendkeep session list\|show\|use` | Lista o registry multi-sessão, mostra uma conversa ou muda somente o foco humano de `CURRENT_SESSION.md`. |
+| `wendkeep change bind <slug> --session <id>` | Vincula ou transfere uma change para uma conversa canônica sem esconder as demais pendências. |
+
+As notas de sessão usam um único snapshot vivo `## Agentes, tokens e custos`. Os hooks do agente principal e dos subagents recompõem o bloco atomicamente, incluindo custo, dimensões de tokens, reasoning e effort por modelo/origem.
 | `wendkeep stats [--vault P]` | Uma linha compartilhável: sessões · prompts · gasto · período · modelos (`--json`). |
 | `wendkeep import [opts]` | **Memória retroativa** — importa sessões passadas de **Claude + Codex** pro cofre (dedup por `session_id`). `--source all\|claude\|codex` / `--from <dir>` / `--codex-from <dir>` / `--stamp-ids` / `--since d` / `--limit n` / `--dry-run` / `--json`. |
 | `wendkeep dashboard [--force]` | (Re)gera os Bases filtrados por pasta + o MOC `00-Dashboard`. |

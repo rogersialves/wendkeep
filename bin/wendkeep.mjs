@@ -43,14 +43,18 @@ Usage:
                            agent's JSON on stdin. Names: ${RUNNABLE_HOOKS.join(', ')}.
 
   wendkeep doctor [--vault P]  Run a vault health check.
-  wendkeep change <sub>        Change lifecycle: new [--simple] | use | continue | list | show |
+  wendkeep change <sub>        Change lifecycle: new [--simple] | use | bind <slug> --session <id> | continue | list | show |
                            status | done <id> | undone <id> | diff | archive [--force] | abandon.
                            archive exige verdict (rode verify --deep); abandon descarta sem ADR.
+  wendkeep session <sub>       Session registry: list | show <id> | use <id>.
   wendkeep spec <sub>          Specs: list | show | effective [--change] [--json] | migrate | rebase.
   wendkeep sensors <sub>       list | add <id> "<command>" [--severity --type --report].
   wendkeep cost [opts]         Aggregate AI-coding spend across the vault's sessions.
                            --since <date> · --top [N] (priciest) · --trend [day|week|month]
                            (+ run-rate projection) · --write (generate 00-Custo.md) · --json.
+  wendkeep cost rebuild        Recalculate historical parent + subagent costs from SESSION_REGISTRY.
+                           Dry-run by default · --apply writes notes + .brain/COST_REBUILD.json
+                           · --session <id|file> · --limit N · --json.
   wendkeep stats [--vault P]   One shareable line: sessions · prompts · spend · span · models (--json).
   wendkeep import [opts]       Backfill: import this project's past Claude + Codex sessions into
                            the vault (deduped by session_id). --source all|claude|codex (default
@@ -127,6 +131,11 @@ async function main() {
     case 'change': {
       const { runChange } = await import('../src/change.mjs');
       runChange(rest);
+      break;
+    }
+    case 'session': {
+      const { runSession } = await import('../src/session.mjs');
+      runSession(rest);
       break;
     }
     case 'verify': {

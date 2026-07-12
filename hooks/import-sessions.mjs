@@ -16,8 +16,7 @@ import {
 } from './session-stop.mjs';
 import { buildSessionContent, allocateSessionPath } from './session-start.mjs';
 import { createLinkedNotes } from './linked-notes.mjs';
-import { updateSessionUsage } from './token-usage.mjs';
-import { upsertSubagentUsage } from './subagent-usage.mjs';
+import { updateSessionObservability } from './session-observability.mjs';
 import { readSessionRegistry, upsertSessionRegistry, formatLocalIso, formatDate, providerMeta } from './obsidian-common.mjs';
 import { getLocale } from './locale.mjs';
 import { captureProseDecisions } from './decision-capture.mjs';
@@ -211,11 +210,8 @@ export function importSession(vaultBase, txPath, opts = {}) {
 
   // Cost + subagent telemetry, exactly like the live Stop hook. Fail-open.
   try {
-    updateSessionUsage({ vaultBase, sessionRel: relPath, sessionPath: absPath, transcriptPath: txPath });
-  } catch { /* usage is best-effort */ }
-  try {
-    upsertSubagentUsage(absPath, txPath);
-  } catch { /* subagent telemetry is best-effort */ }
+    updateSessionObservability({ sessionPath: absPath, transcriptPath: txPath });
+  } catch { /* observability is best-effort */ }
 
   // Finalize: derived notes + closing section + ended_at from the last turn.
   const endedAt = formatLocalIso(endDate);

@@ -8,6 +8,7 @@
 import { pathToFileURL } from 'node:url';
 import { getVaultBase, readHookInput, writeHookOutput } from './obsidian-common.mjs';
 import { changeCtxState, readSentinel, renderOpenChanges, writeSentinel } from './change-core.mjs';
+import { resolveSessionEntry } from './session-identity.mjs';
 
 // Conservador de propósito: verbos de tarefa comuns (pt+en) + tamanho mínimo. Falso-negativo
 // custa só o nudge; falso-positivo em pergunta curta viraria ruído.
@@ -19,12 +20,13 @@ export function looksLikeTask(prompt) {
 }
 
 // Retorna { context, hash? } quando há algo a injetar; null = silêncio.
-export function buildChangePing(vaultBase, sessionId, prompt = '') {
+export function buildChangePing(vaultBase, sessionId, prompt = '', changeSlug = '') {
   const st = changeCtxState(vaultBase);
   if (st) {
     if (readSentinel(vaultBase, 'ctx', sessionId) === st.hash) return null;
     writeSentinel(vaultBase, 'ctx', sessionId, st.hash);
-    return { context: renderOpenChanges(st, { tag: 'open_changes_ping' }), hash: st.hash };
+    const focus = changeSlug ? `\n<session_change>Change vinculada a esta sessão: ${changeSlug}.</session_change>` : '';
+    return { context: `${renderOpenChanges(st, { tag: 'open_changes_ping' })}${focus}`, hash: st.hash };
   }
   // Sem changes abertas: gate de skill para prompt-tarefa, 1x por sessão.
   if (!looksLikeTask(prompt)) return null;
@@ -42,8 +44,10 @@ export function buildChangePing(vaultBase, sessionId, prompt = '') {
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   try {
     const input = readHookInput();
-    const sid = input.session_id || input.sessionId || '';
-    const ping = buildChangePing(getVaultBase(input), sid, input.prompt || '');
+    const vaultBase = getVaultBase(input);
+    const { identity, entry } = resolveSessionEntry(vaultBase, input);
+    const sid = identity.state === 'resolved' ? identity.canonicalConversationId : (input.session_id || input.sessionId || '');
+    const ping = buildChangePing(vaultBase, sid, input.prompt || '', entry?.change_slug || '');
     if (!ping) { writeHookOutput({}); }
     else writeHookOutput({ hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: ping.context } });
   } catch {

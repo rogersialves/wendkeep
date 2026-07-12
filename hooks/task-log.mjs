@@ -8,8 +8,9 @@
 import { existsSync, readFileSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { pathToFileURL } from 'url';
-import { readHookInput, writeHookOutput, getVaultBase, findActiveSessionByTranscript, readControl, formatHourMinute } from './obsidian-common.mjs';
+import { readHookInput, writeHookOutput, getVaultBase, formatHourMinute, providerMeta } from './obsidian-common.mjs';
 import { getLocale } from './locale.mjs';
+import { resolveSessionEntry } from './session-identity.mjs';
 
 // Pull the task's human text from whatever field the payload carries.
 export function taskText(input) {
@@ -41,9 +42,9 @@ export function appendProgress(content, line, heading) {
 export function logTask(vaultBase, input) {
   const text = taskText(input);
   if (!text) return false;
-  const transcriptPath = input.transcript_path || input.transcriptPath || '';
-  const matched = transcriptPath ? findActiveSessionByTranscript(vaultBase, transcriptPath) : null;
-  const sessionRel = matched?.session_file || readControl(vaultBase).session_file || '';
+  const { identity, entry } = resolveSessionEntry(vaultBase, input, providerMeta(input.provider).id);
+  if (identity.state !== 'resolved') return false;
+  const sessionRel = entry?.session_file || '';
   if (!sessionRel) return false;
   const sessionPath = join(vaultBase, sessionRel);
   if (!existsSync(sessionPath)) return false;

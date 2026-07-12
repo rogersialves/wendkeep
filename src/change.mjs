@@ -18,7 +18,7 @@ import {
 } from '../hooks/change-core.mjs';
 import { evaluateGate, requiredSensors } from '../hooks/sensors-core.mjs';
 import { buildEffectiveRequirementPackage, evaluateVerdict, tasksHashOf, parseSpecsList, parseDelta, parseRequirements, applyDelta, validateSpecImpact } from '../hooks/spec-core.mjs';
-import { getNextAdrNumber, readControl } from '../hooks/obsidian-common.mjs';
+import { getNextAdrNumber, readControl, readSessionRegistry, upsertSessionRegistry } from '../hooks/obsidian-common.mjs';
 import { getLocale } from '../hooks/locale.mjs';
 
 function resolveVault(argv) {
@@ -51,7 +51,7 @@ function today() {
 export function runChange(argv) {
   const [sub, ...rest] = argv;
   const vaultBase = resolveVault(rest);
-  const VALUE_FLAGS = new Set(['--vault', '--change', '--project']);
+  const VALUE_FLAGS = new Set(['--vault', '--change', '--project', '--session']);
   const slugArg = () => rest.find((a, i) => !a.startsWith('-') && !VALUE_FLAGS.has(rest[i - 1]));
 
   if (sub === 'new') {
@@ -71,6 +71,18 @@ export function runChange(argv) {
     const r = useChange(vaultBase, slug);
     if (!r.ok) { process.stderr.write(`wendkeep change use: ${r.error}\n`); process.exit(2); }
     process.stdout.write(`current change: ${slug}\n`);
+    process.exit(0);
+  }
+
+  if (sub === 'bind') {
+    const slug = slugArg();
+    const sessionId = opt(rest, '--session');
+    if (!slug || !sessionId) { process.stderr.write('wendkeep change bind: use <slug> --session <id>\n'); process.exit(2); }
+    const state = allChangesState(vaultBase);
+    if (!state.changes.some((item) => item.slug === slug)) { process.stderr.write(`wendkeep change bind: open change not found: ${slug}\n`); process.exit(2); }
+    if (!readSessionRegistry(vaultBase).sessions?.[sessionId]) { process.stderr.write(`wendkeep change bind: session not found: ${sessionId}\n`); process.exit(2); }
+    upsertSessionRegistry(vaultBase, sessionId, { change_slug: slug });
+    process.stdout.write(`session ${sessionId} -> change ${slug}\n`);
     process.exit(0);
   }
 

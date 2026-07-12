@@ -8,17 +8,17 @@ import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import {
-  findActiveSessionByTranscript,
   formatDate,
   getVaultBase,
-  readControl,
   readHookInput,
   slugify,
+  upsertSessionRegistry,
   wikilinkFromRel,
   writeHookOutput,
 } from './obsidian-common.mjs';
 import { activeChange, newChange } from './change-core.mjs';
 import { getLocale } from './locale.mjs';
+import { resolveSessionEntry } from './session-identity.mjs';
 
 // O plano aprovado chega por um de três canais, conforme a versão do Claude Code:
 // tool_input.plan (legado), o bloco "## Approved Plan" do tool_response, ou o arquivo de plano
@@ -94,15 +94,15 @@ export function capturePlan(vaultBase, input) {
   const en = loc.id === 'en';
   const dateStr = formatDate(new Date());
   const rawNote = `---\ntype: plan\ndate: ${dateStr}\ntags:\n  - plano\n---\n\n${plan.trim()}\n`;
-  const transcriptPath = input?.transcript_path ?? input?.transcriptPath ?? '';
-  const sessionRel = findActiveSessionByTranscript(vaultBase, transcriptPath)?.session_file
-    || readControl(vaultBase).session_file
-    || '';
+  const { identity, entry } = resolveSessionEntry(vaultBase, input, 'claude');
+  if (identity.state !== 'resolved') return null;
+  const sessionRel = entry?.session_file || '';
 
-  const active = activeChange(vaultBase);
+  const active = entry?.change_slug || activeChange(vaultBase);
   if (active) {
     const dir = join(vaultBase, loc.folders.changes, active);
     persistApprovedPlan(dir, active, rawNote, plan, dateStr);
+    upsertSessionRegistry(vaultBase, identity.canonicalConversationId, { change_slug: active });
     return {
       slug: active, created: false,
       context: `<plan_captured>\n${en
@@ -113,6 +113,7 @@ export function capturePlan(vaultBase, input) {
 
   const slug = planSlug(plan);
   newChange(vaultBase, slug, { dateStr, sessionRel });
+  upsertSessionRegistry(vaultBase, identity.canonicalConversationId, { change_slug: slug });
   const dir = join(vaultBase, loc.folders.changes, slug);
   const ctx = sectionBody(plan, ['Contexto', 'Context']) || plan.trim().split('\n').slice(0, 6).join('\n');
   const source = sessionRel ? `\n  - "${wikilinkFromRel(sessionRel)}"` : ' []';

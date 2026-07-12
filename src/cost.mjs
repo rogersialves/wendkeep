@@ -4,6 +4,7 @@
 import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { isAbsolute, join, resolve } from 'node:path';
 import { getLocale } from '../hooks/locale.mjs';
+import { rebuildSessionCosts } from './rebuild-costs.mjs';
 
 const round4 = (n) => Math.round((Number(n) || 0) * 10000) / 10000;
 const usd = (n) => `$${(Number(n) || 0).toFixed(4)}`;
@@ -20,6 +21,11 @@ function fmValue(content, key) {
 // Parse the cost-relevant frontmatter of one note; null if it is not a session note.
 export function parseSessionCost(content) {
   if (!/^type:\s*session\s*$/m.test(content)) return null;
+  let ledger = [];
+  try {
+    const raw = fmValue(content, 'custo_por_modelo_json').replaceAll("''", "'");
+    if (raw) ledger = JSON.parse(raw);
+  } catch { /* legacy/malformed note: use safe fallback below */ }
   return {
     date: (fmValue(content, 'date') || '').slice(0, 10),
     model: fmValue(content, 'custo_modelo_label') || fmValue(content, 'modelo') || '?',
@@ -29,6 +35,7 @@ export function parseSessionCost(content) {
     tokens: Number(fmValue(content, 'tokens_total')) || 0,
     subTokens: Number(fmValue(content, 'subagents_tokens_total')) || 0,
     prompts: Number(fmValue(content, 'prompts')) || 0,
+    ledger,
   };
 }
 
@@ -46,8 +53,16 @@ export function aggregateCosts(entries) {
     const d = e.date || '?';
     (byDay[d] = byDay[d] || { cost: 0, count: 0 }).cost += e.mainCost + e.subCost;
     byDay[d].count += 1;
-    (byModel[e.model] = byModel[e.model] || { cost: 0, count: 0 }).cost += e.mainCost + e.subCost;
-    byModel[e.model].count += 1;
+    const rows = e.ledger?.length ? e.ledger : [
+      { model: e.model, cost: e.mainCost },
+      ...(e.subCost ? [{ model: 'subagents (legado, modelo desconhecido)', cost: e.subCost }] : []),
+    ];
+    const seen = new Set();
+    for (const row of rows) {
+      const model = row.model || '?';
+      (byModel[model] = byModel[model] || { cost: 0, count: 0 }).cost += Number(row.cost) || 0;
+      if (!seen.has(model)) { byModel[model].count += 1; seen.add(model); }
+    }
   }
   const total = main + sub;
   return {
@@ -186,6 +201,16 @@ export function runCost(argv) {
   if (!vaultRaw) { process.stderr.write('wendkeep cost: no vault (--vault or OBSIDIAN_VAULT_PATH).\n'); process.exit(2); }
   const vaultBase = isAbsolute(vaultRaw) ? vaultRaw : resolve(process.cwd(), vaultRaw);
   if (!existsSync(vaultBase)) { process.stderr.write(`wendkeep cost: vault not found: ${vaultBase}\n`); process.exit(2); }
+  if (argv[0] === 'rebuild') {
+    const report = rebuildSessionCosts(vaultBase, {
+      apply: argv.includes('--apply'),
+      session: opt(argv, '--session') || '',
+      limit: Number(opt(argv, '--limit')) || 0,
+    });
+    if (argv.includes('--json')) process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
+    else process.stdout.write(`cost rebuild (${report.mode}): ${report.scanned} lidas · ${report.changed} alteradas · ${report.unchanged} iguais · ${report.missing.length} sem fonte · ${report.errors.length} erros\n${report.mode === 'apply' ? 'Relatório: .brain/COST_REBUILD.json\n' : 'Nenhum arquivo foi alterado; use --apply para gravar.\n'}`);
+    process.exit(report.ok ? 0 : 1);
+  }
   const agg = collectVaultCost(vaultBase, { since: opt(argv, '--since') });
 
   if (argv.includes('--json')) { process.stdout.write(`${JSON.stringify(agg, null, 2)}\n`); process.exit(0); }

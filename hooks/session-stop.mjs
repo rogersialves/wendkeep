@@ -4,11 +4,12 @@ import { join } from 'path';
 import { request } from 'http';
 import { pathToFileURL } from 'url';
 import { createLinkedNotes } from './linked-notes.mjs';
-import { addUsage, costBreakdown, emptyTokenUsage, normalizeClaudeUsage, normalizeCodexUsage, priceForModel, updateSessionUsage } from './token-usage.mjs';
+import { addUsage, costBreakdown, emptyTokenUsage, normalizeClaudeUsage, normalizeCodexUsage, priceForModel } from './token-usage.mjs';
 import { buildBrainDigest, buildBrainIndex } from './brain-core.mjs';
 import { activeChangeLink, pruneChangeSentinels } from './change-core.mjs';
 import { getLocale } from './locale.mjs';
-import { upsertSubagentUsage } from './subagent-usage.mjs';
+import { updateSessionObservability } from './session-observability.mjs';
+import { resolveSessionEntry } from './session-identity.mjs';
 import {
   ensureDir,
   findActiveSessionByTranscript,
@@ -705,6 +706,7 @@ function insertIntoIteracoes(content, block) {
   const iter = content.indexOf('\n## Iterações');
   if (iter !== -1) {
     const anchors = [
+      '\n## Agentes, tokens e custos',
       '\n## Uso de tokens e custos',
       '\n## Decisões geradas nesta sessão',
       '\n## Bugs gerados nesta sessão',
@@ -855,7 +857,7 @@ function replacePendingSection(content, pending) {
   const end = content.indexOf(closingMarker, start + marker.length);
   if (end === -1) return content;
 
-  // Preserva seções que outros writers inseriram dentro do span (## Subagents & Workflows,
+  // Preserva seções que outros writers inseriram dentro do span (observabilidade,
   // ## Progresso do plano, ## Mudanças…) — só o texto das Pendências em si é regenerado.
   const span = content.slice(start + marker.length, end);
   const innerIdx = span.indexOf('\n## ');
@@ -1023,13 +1025,18 @@ function main() {
   warnIfDefaultVault(input);
   const control = readControl(vaultBase);
   const transcriptPath = input.transcript_path || input.transcriptPath || '';
+  const { identity, entry } = resolveSessionEntry(vaultBase, input);
+  if (identity.state !== 'resolved' || !entry?.session_file) {
+    process.stderr.write(`[wendkeep] Stop sem identidade segura: ${identity.diagnostics?.join('; ') || 'sessão não registrada'}\n`);
+    writeHookOutput({});
+    return;
+  }
 
   // Roteia o turn pela sessão DO PRÓPRIO transcript (registry), não pelo
   // CURRENT_SESSION global — que sessões concorrentes sobrescrevem, fazendo
   // o turn cair na nota de outra conversa. Sem match por transcript NÃO caímos
   // no global (contaminaria nota alheia): pulamos e o backfill recupera depois.
-  const matched = transcriptPath ? findActiveSessionByTranscript(vaultBase, transcriptPath) : null;
-  const sessionRel = matched?.session_file || '';
+  const sessionRel = entry.session_file;
   if (!sessionRel) {
     writeHookOutput({});
     return;
@@ -1043,7 +1050,7 @@ function main() {
 
   const tx = parseTranscript(input.transcript_path || input.transcriptPath);
   const turnId = input.turn_id || tx.latestTurnId || String(Date.now());
-  const sessionId = matched?.sessionId || control.session_id || tx.sessionId;
+  const sessionId = identity.canonicalConversationId;
   const logged = insertIteration(sessionPath, buildIterationBlock(tx, input), turnId, tx);
 
   try {
@@ -1053,22 +1060,9 @@ function main() {
   }
 
   try {
-    updateSessionUsage({
-      vaultBase,
-      sessionRel,
-      sessionPath,
-      transcriptPath,
-    });
+    updateSessionObservability({ sessionPath, transcriptPath, caller: 'stop', canonicalConversationId: sessionId });
   } catch (error) {
     process.stderr.write(`[wendkeep] Token usage falhou: ${error.message}\n`);
-  }
-
-  // Subagent/workflow telemetry (0.10.0): fold sibling subagent transcripts into the note.
-  // Provider-gated by structure + fail-open — never derruba o Stop.
-  try {
-    upsertSubagentUsage(sessionPath, transcriptPath);
-  } catch (error) {
-    process.stderr.write(`[wendkeep] Subagent usage falhou: ${error.message}\n`);
   }
 
   if (!shouldFinalizeSession()) {
@@ -1089,6 +1083,8 @@ function main() {
       ended_at: '',
       last_turn_id: logged ? turnId : control.last_logged_turn_id,
       transcript_path: transcriptPath,
+      transcript_id: identity.transcriptId,
+      provider: identity.provider,
     });
     pingObsidianVault(input.obsidian_api_key);
     writeHookOutput({});
@@ -1107,7 +1103,9 @@ function main() {
   // grafo quando a change fechava antes do turno seguinte. Aqui sobrevive ao reopen e acumula toda
   // change que passou pela sessão (upsertListSection deduplica). Fail-quiet: nunca derruba o Stop.
   try {
-    const chgLink = activeChangeLink(vaultBase);
+    const chgLink = entry.change_slug
+      ? `Change ativa: [[${getLocale(vaultBase).folders.changes}/${entry.change_slug}/proposta]]`
+      : activeChangeLink(vaultBase);
     const wl = (chgLink.match(/\[\[[^\]]+\]\]/) || [])[0];
     if (wl) {
       let cur = readFileSync(sessionPath, 'utf8');
@@ -1132,6 +1130,8 @@ function main() {
     ended_at: endedAt,
     last_turn_id: turnId,
     transcript_path: transcriptPath,
+    transcript_id: identity.transcriptId,
+    provider: identity.provider,
   });
 
   // Reconstrói índice (camada fria) + digest (camada quente) ao finalizar. Nunca derruba o Stop.

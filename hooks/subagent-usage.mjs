@@ -69,7 +69,7 @@ function readWorkflowRuns(sessionDir) {
 }
 
 function tokensTotal(t = {}) {
-  return (t.input || 0) + (t.cached || 0) + (t.cacheWrite || 0) + (t.output || 0);
+  return Number(t.total || 0) || ((t.input || 0) + (t.cached || 0) + (t.cacheWrite || 0) + (t.output || 0));
 }
 
 const round4 = (n) => Math.round((Number(n) || 0) * 10000) / 10000;
@@ -87,10 +87,11 @@ export function collectSubagentUsage(sessionDir) {
   const subagents = [];
   const wf = {};
   const allTools = new Set();
-  const usageAgg = { input: 0, cached: 0, cacheWrite: 0, output: 0 };
+  const usageAgg = { input: 0, cached: 0, cacheWrite: 0, output: 0, reasoning: 0, total: 0 };
   let count = 0;
   let calls = 0;
   let cost = 0;
+  const modelMap = new Map();
 
   for (const f of files) {
     const summary = summarizeTokenUsage(parseTokenUsageFromTranscript(f));
@@ -107,12 +108,26 @@ export function collectSubagentUsage(sessionDir) {
       agentType,
       workflow,
       model: summary.models[0] || '?',
+      effort: summary.pensamento || '',
       tools: summary.tools.length,
       toolNames: summary.tools,
       calls: summary.calls,
       tokens,
       cost: round4(summary.costs.model),
+      modelRows: summary.modelRows,
     });
+
+    for (const row of summary.modelRows || []) {
+      const rowEffort = summary.pensamento || '';
+      const key = `${row.provider || '?'}\u0000${row.model || '?'}\u0000${rowEffort}`;
+      const current = modelMap.get(key) || { provider: row.provider || '?', model: row.model || '?', effort: rowEffort, calls: 0, tokens: 0, cost: 0,
+        usage: { input: 0, cached: 0, cacheWrite: 0, output: 0, reasoning: 0, total: 0 } };
+      current.calls += row.calls || 0;
+      current.tokens += tokensTotal(row.usage);
+      current.cost += row.costs?.model || 0;
+      for (const k of Object.keys(current.usage)) current.usage[k] += row.usage?.[k] || 0;
+      modelMap.set(key, current);
+    }
 
     count += 1;
     calls += summary.calls;
@@ -151,7 +166,9 @@ export function collectSubagentUsage(sessionDir) {
   return {
     subagents,
     workflows,
-    aggregate: { count, calls, tokens: tokensTotal(usageAgg), cost: round4(cost), wasted, usage: usageAgg, tools: [...allTools] },
+    aggregate: { count, calls, tokens: tokensTotal(usageAgg), cost: round4(cost), wasted, usage: usageAgg, tools: [...allTools],
+      modelRows: [...modelMap.values()].map((r) => ({ ...r, cost: round4(r.cost), source: 'subagent' })),
+    },
   };
 }
 
@@ -173,19 +190,22 @@ export function renderSubagentSection(c) {
     .map((s) => `| ${s.id} | ${s.agentType || '-'} | ${s.workflow || '-'} | ${s.model} | ${s.tools} | ${fmt(s.tokens)} | ${usd(s.cost)} |`)
     .join('\n');
   const wasteLine = a.wasted ? `\n- **Desperdiçado (runs killed/failed):** ${usd(a.wasted)}` : '';
+  const combinedLine = c.combined ? `\n- **Sessão completa (main + subagents):** ${fmt(c.combined.tokens)} tokens · ${usd(c.combined.cost)}` : '';
+  const modelRows = c.combined?.models?.map((m) => `| ${m.model} | ${m.source} | ${fmt(m.tokens)} | ${usd(m.cost)} |`).join('\n') || '';
+  const models = modelRows ? `\n\n### Por modelo (sessão completa)\n\n| Modelo | Origem | Tokens | Custo |\n|---|---|---:|---:|\n${modelRows}` : '';
   return `## Subagents & Workflows
 
-> Custo de subagents/workflows desta sessão — NÃO incluído no total principal acima.
+> Custo de subagents/workflows desta sessão, seguido do total combinado e da atribuição por modelo.
 
 - **Subagents:** ${a.count} · ${a.calls} chamadas · ${fmt(a.tokens)} tokens · ${usd(a.cost)}
 - **Workflows:** ${wf}
-- **Tools (subagents):** ${tools}${wasteLine}
+- **Tools (subagents):** ${tools}${wasteLine}${combinedLine}
 
 ### Por subagent (${a.count})
 
 | Agent | Tipo | Workflow | Modelo | Tools | Tokens | Custo |
 |---|---|---|---|---:|---:|---:|
-${rows}`;
+${rows}${models}`;
 }
 
 function setFrontmatterField(content, key, value) {
@@ -228,6 +248,26 @@ export function upsertSubagentUsage(sessionPath, transcriptPath) {
   content = setFrontmatterField(content, 'subagents_tools', `"${(a.tools || []).join(', ')}"`);
   content = setFrontmatterField(content, 'subagents_wasted_usd', a.wasted || 0);
   content = setFrontmatterField(content, 'tokens_total_incl_subagents', frontmatterNumber(content, 'tokens_total') + a.tokens);
+  content = setFrontmatterField(content, 'custo_total_incl_subagents_usd', round4(frontmatterNumber(content, 'custo_modelo_usd') + a.cost));
+  let mainRows = [];
+  try {
+    const main = summarizeTokenUsage(parseTokenUsageFromTranscript(transcriptPath));
+    mainRows = (main.modelRows || []).map((r) => ({
+      provider: r.provider || '?', model: r.model || '?', source: 'main', calls: r.calls || 0,
+      tokens: tokensTotal(r.usage), cost: round4(r.costs?.model || 0),
+    }));
+  } catch { /* preserve legacy aggregate fallback */ }
+  if (!mainRows.length) {
+    const mainModel = (content.match(/^custo_modelo_label:\s*["']?([^"'\r\n]+)["']?\s*$/m) || [])[1] || '?';
+    mainRows = [{ model: mainModel, source: 'main', cost: round4(frontmatterNumber(content, 'custo_modelo_usd')), tokens: frontmatterNumber(content, 'tokens_total') }];
+  }
+  const ledger = [...mainRows, ...(a.modelRows || [])];
+  collected.combined = {
+    tokens: frontmatterNumber(content, 'tokens_total') + a.tokens,
+    cost: round4(frontmatterNumber(content, 'custo_modelo_usd') + a.cost),
+    models: ledger,
+  };
+  content = setFrontmatterField(content, 'custo_por_modelo_json', `'${JSON.stringify(ledger).replaceAll("'", "''")}'`);
   content = upsertSection(content, '## Subagents & Workflows', renderSubagentSection(collected));
   writeFileSync(sessionPath, content, 'utf8');
   return true;

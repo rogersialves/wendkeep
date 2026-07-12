@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'fs';
 import { basename, dirname, join, relative } from 'path';
 import { getLocale } from './locale.mjs';
 
@@ -201,6 +201,14 @@ export function writeControl(vaultBase, data) {
   const sessionId = data.session_id || '';
   const lastLoggedTurnId = data.last_logged_turn_id || '';
 
+  const registry = readSessionRegistry(vaultBase);
+  const active = Object.entries(registry.sessions || {})
+    .filter(([, item]) => item?.status === 'active' && item.session_file)
+    .sort((a, b) => String(b[1].last_seen || b[1].updated_at || '').localeCompare(String(a[1].last_seen || a[1].updated_at || '')));
+  const activeRows = active.length
+    ? active.map(([id, item]) => `| ${id} | ${item.provider || 'unknown'} | ${item.session_file} | ${item.change_slug || '-'} | ${item.last_seen || item.updated_at || '-'} |`).join('\n')
+    : '| - | - | nenhuma | - | - |';
+
   const content = `---
 status: "${status}"
 session_file: "${sessionFile}"
@@ -213,11 +221,19 @@ last_logged_turn_id: "${lastLoggedTurnId}"
 
 # CURRENT_SESSION
 
+> Visão gerada pelo WendKeep. A autoridade de roteamento é .brain/SESSION_REGISTRY.json; hooks não usam este foco como fallback de escrita.
+
 - **Status:** ${status}
 - **Sessão ativa:** ${sessionFile || 'nenhuma'}
 - **Última sessão encerrada:** ${lastSessionFile || 'nenhuma'}
 - **Início:** ${startedAt || 'n/a'}
 - **Fim:** ${endedAt || 'n/a'}
+
+## Sessões ativas (${active.length})
+
+| Conversa | Provider | Sessão | Change vinculada | Último sinal |
+|---|---|---|---|---|
+${activeRows}
 
 Regra crítica: sempre anexar conteúdo à sessão ativa. Nunca sobrescrever o histórico de iterações.
 `;
@@ -227,16 +243,16 @@ Regra crítica: sempre anexar conteúdo à sessão ativa. Nunca sobrescrever o h
 
 export function readSessionRegistry(vaultBase) {
   const path = registryPath(vaultBase);
-  if (!existsSync(path)) return { version: 1, sessions: {} };
+  if (!existsSync(path)) return { version: 2, sessions: {} };
 
   try {
     const parsed = JSON.parse(readFileSync(path, 'utf-8'));
     return {
-      version: parsed.version || 1,
+      version: Math.max(2, parsed.version || 1),
       sessions: parsed.sessions && typeof parsed.sessions === 'object' ? parsed.sessions : {},
     };
   } catch {
-    return { version: 1, sessions: {} };
+    return { version: 2, sessions: {} };
   }
 }
 
@@ -250,18 +266,82 @@ export function writeSessionRegistry(vaultBase, registry) {
   renameSync(tmp, path);
 }
 
+function registryLockPath(vaultBase) {
+  return `${registryPath(vaultBase)}.lock`;
+}
+
+function waitBriefly(ms) {
+  const signal = new Int32Array(new SharedArrayBuffer(4));
+  Atomics.wait(signal, 0, 0, ms);
+}
+
+export function mutateSessionRegistry(vaultBase, mutator, { timeoutMs = 2000 } = {}) {
+  const lock = registryLockPath(vaultBase);
+  ensureDir(dirname(lock));
+  const deadline = Date.now() + timeoutMs;
+  while (true) {
+    try {
+      mkdirSync(lock);
+      break;
+    } catch (error) {
+      if (error?.code === 'EEXIST') {
+        try {
+          if (Date.now() - statSync(lock).mtimeMs > 10_000) {
+            rmSync(lock, { recursive: true, force: true });
+            continue;
+          }
+        } catch { /* outro processo pode ter liberado o lock */ }
+      }
+      if (error?.code !== 'EEXIST' || Date.now() >= deadline) {
+        throw new Error(`SESSION_REGISTRY lock indisponível: ${error.message}`);
+      }
+      waitBriefly(10);
+    }
+  }
+
+  try {
+    const registry = readSessionRegistry(vaultBase);
+    registry.version = 2;
+    const result = mutator(registry);
+    writeSessionRegistry(vaultBase, registry);
+    return result;
+  } finally {
+    rmSync(lock, { recursive: true, force: true });
+  }
+}
+
+function meaningfulPatch(patch = {}) {
+  const protectedNonEmpty = new Set(['session_file', 'transcript_path', 'transcript_id', 'provider', 'started_at', 'change_slug']);
+  return Object.fromEntries(Object.entries(patch).filter(([key, value]) => {
+    if (value === undefined || value === null) return false;
+    if (value === '' && protectedNonEmpty.has(key)) return false;
+    return true;
+  }));
+}
+
 export function upsertSessionRegistry(vaultBase, sessionId, patch) {
   if (!sessionId) return null;
-
-  const registry = readSessionRegistry(vaultBase);
-  const current = registry.sessions[sessionId] || {};
-  const next = {
-    ...current,
-    ...patch,
-    updated_at: patch.updated_at || formatLocalIso(new Date()),
-  };
-  registry.sessions[sessionId] = next;
-  writeSessionRegistry(vaultBase, registry);
+  const clean = meaningfulPatch(patch);
+  const next = mutateSessionRegistry(vaultBase, (registry) => {
+    const current = registry.sessions[sessionId] || {};
+    const transcriptPaths = [...new Set([
+      ...(Array.isArray(current.transcript_paths) ? current.transcript_paths : []),
+      current.transcript_path,
+      ...(Array.isArray(clean.transcript_paths) ? clean.transcript_paths : []),
+      clean.transcript_path,
+    ].filter(Boolean))];
+    const value = {
+      ...current,
+      ...clean,
+      ...(transcriptPaths.length ? { transcript_paths: transcriptPaths, transcript_path: clean.transcript_path || current.transcript_path || transcriptPaths.at(-1) } : {}),
+      last_seen: clean.last_seen || clean.updated_at || formatLocalIso(new Date()),
+      updated_at: clean.updated_at || formatLocalIso(new Date()),
+    };
+    registry.sessions[sessionId] = value;
+    return value;
+  });
+  const focus = readControl(vaultBase);
+  writeControl(vaultBase, focus);
   return next;
 }
 
@@ -317,10 +397,11 @@ export function pruneRegistry(registry, nowMs, { keepDone = REGISTRY_KEEP_DONE, 
 // Wrapper de IO: varre as ociosas, poda o registry, grava e fecha a NOTA `.md` de cada
 // sessão encerrada (mantém vault e registry alinhados). Devolve quantas fechou.
 export function sweepStaleSessionsFile(vaultBase, now = new Date(), maxIdleMs = SESSION_IDLE_CLOSE_MS, excludeTranscriptPath = '') {
-  const registry = readSessionRegistry(vaultBase);
-  const closed = sweepStaleSessions(registry, now.getTime(), maxIdleMs, excludeTranscriptPath);
-  const pruned = pruneRegistry(registry, now.getTime());
-  if (closed.length || pruned) writeSessionRegistry(vaultBase, registry);
+  const closed = mutateSessionRegistry(vaultBase, (registry) => {
+    const result = sweepStaleSessions(registry, now.getTime(), maxIdleMs, excludeTranscriptPath);
+    pruneRegistry(registry, now.getTime());
+    return result;
+  });
   for (const { session_file, ended_at } of closed) {
     try { closeSessionNoteFile(vaultBase, session_file, ended_at); } catch { /* nunca derruba o sweep */ }
   }
@@ -518,7 +599,8 @@ export function findActiveSessionByTranscript(vaultBase, transcriptPath) {
   let best = null;
   for (const [sessionId, item] of Object.entries(registry.sessions || {})) {
     if (!item || item.status !== 'active' || !item.session_file) continue;
-    if (!transcriptsMatch(item.transcript_path, transcriptPath)) continue;
+    const paths = [...(Array.isArray(item.transcript_paths) ? item.transcript_paths : []), item.transcript_path].filter(Boolean);
+    if (!paths.some((path) => transcriptsMatch(path, transcriptPath))) continue;
     if (!best || String(item.started_at || '') > String(best.started_at || '')) {
       best = { sessionId, session_file: item.session_file, started_at: item.started_at || '' };
     }

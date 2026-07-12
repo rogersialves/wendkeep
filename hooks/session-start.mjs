@@ -30,6 +30,7 @@ import {
   writeHookOutput,
   yamlQuote,
 } from './obsidian-common.mjs';
+import { resolveSessionIdentity } from './session-identity.mjs';
 
 export function buildSessionContent({ relPath, now, summary = 'session', provider: providerId, sessionId = '' }) {
   const date = formatDate(now);
@@ -153,13 +154,26 @@ function main() {
   const vaultBase = getVaultBase(input);
   warnIfDefaultVault(input);
   const now = new Date();
-  const sessionId = input.session_id || input.sessionId || '';
+  const provider = providerMeta();
+  const identity = resolveSessionIdentity(vaultBase, input, provider.id);
+  if (identity.state !== 'resolved') {
+    writeHookOutput({
+      hookSpecificOutput: {
+        hookEventName: 'SessionStart',
+        additionalContext: `<obsidian_session_deferred>Memória global disponível, mas nenhuma escrita de sessão foi feita: ${identity.diagnostics.join('; ')}.</obsidian_session_deferred>`,
+      },
+      systemMessage: `[wendkeep] Identidade de sessão adiada: ${identity.diagnostics.join('; ')}`,
+    });
+    return;
+  }
+  const sessionId = identity.canonicalConversationId;
+  const transcriptPath = identity.transcriptPath;
   const control = readControl(vaultBase);
 
   // Fecha sessões `active` órfãs (sem evento de fim — janela fechada/crash) antes
   // de seguir. Preserva a deste transcript: pode ser reaproveitada logo abaixo.
   try {
-    sweepStaleSessionsFile(vaultBase, now, undefined, input.transcript_path || input.transcriptPath || '');
+    sweepStaleSessionsFile(vaultBase, now, undefined, transcriptPath);
   } catch (error) {
     process.stderr.write(`[wendkeep] sweep de sessões falhou: ${error.message}\n`);
   }
@@ -177,6 +191,9 @@ function main() {
         status: 'active',
         started_at: control.started_at,
         ended_at: '',
+        provider: provider.id,
+        transcript_path: transcriptPath,
+        transcript_id: identity.transcriptId,
       });
       writeHookOutput({
         hookSpecificOutput: {
@@ -220,7 +237,9 @@ function main() {
         status: 'active',
         started_at: startedAt,
         ended_at: '',
-        transcript_path: input.transcript_path || input.transcriptPath || known.transcript_path || '',
+        transcript_path: transcriptPath || known.transcript_path || '',
+        transcript_id: identity.transcriptId,
+        provider: provider.id,
       });
       writeHookOutput({
         hookSpecificOutput: {
@@ -235,7 +254,6 @@ function main() {
   // Re-init da conversa (compactação/resume) traz um session_id novo e cai fora
   // da janela de reuso; o transcript continua o mesmo. Reaproveita a sessão ativa
   // desse transcript em vez de criar um placeholder `HH-MM-codex`.
-  const transcriptPath = input.transcript_path || input.transcriptPath || '';
   if (transcriptPath) {
     const match = findActiveSessionByTranscript(vaultBase, transcriptPath);
     if (match) {
@@ -263,6 +281,8 @@ function main() {
         started_at: startedAt,
         ended_at: '',
         transcript_path: transcriptPath,
+        transcript_id: identity.transcriptId,
+        provider: provider.id,
       });
       writeHookOutput({
         hookSpecificOutput: {
@@ -277,7 +297,7 @@ function main() {
   const summary = sessionSummaryFromInput(input);
   const { absPath, relPath } = allocateSessionPath(vaultBase, now, summary);
   const startedAt = formatLocalIso(now);
-  writeFileSync(absPath, buildSessionContent({ relPath, now, summary, sessionId }), 'utf-8');
+  writeFileSync(absPath, buildSessionContent({ relPath, now, summary, sessionId, provider: provider.id }), 'utf-8');
   writeControl(vaultBase, {
     status: 'active',
     session_file: relPath,
@@ -290,6 +310,9 @@ function main() {
     status: 'active',
     started_at: startedAt,
     ended_at: '',
+    provider: provider.id,
+    transcript_path: transcriptPath,
+    transcript_id: identity.transcriptId,
   });
 
   writeHookOutput({
@@ -298,7 +321,7 @@ function main() {
       additionalContext: buildAdditionalContext({ relPath, startedAt, vaultBase }),
     },
     systemMessage: [
-      `Sessão ${providerMeta().label} criada em ${relPath}.`,
+      `Sessão ${provider.label} criada em ${relPath}.`,
       `${basename(controlPath(vaultBase))} atualizado.`,
       'Iterações devem ser anexadas, nunca sobrescritas.',
     ].join(' '),

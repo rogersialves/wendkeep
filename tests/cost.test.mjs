@@ -36,8 +36,14 @@ test('aggregateCosts: total (main+sub), by day, by model sorted', () => {
   assert.ok(Math.abs(a.avg - 13 / 3) < 1e-3, 'avg per session (~4.33)');
   assert.deepEqual(a.byDay.map((d) => d.date), ['2026-07-05', '2026-07-06']);
   assert.equal(a.byDay.find((d) => d.date === '2026-07-06').cost, 11);
-  assert.equal(a.byModel[0].model, 'opus'); // highest cost first
-  assert.equal(a.byModel[0].cost, 12);
+  assert.equal(a.byModel[0].model, 'subagents (legado, modelo desconhecido)');
+  assert.equal(a.byModel[0].cost, 7);
+});
+
+test('aggregateCosts: ledger attributes subagent spend to its actual model', () => {
+  const a = aggregateCosts([{ date: '2026-07-11', model: 'opus', mainCost: 3, subCost: 1, tokens: 1, subTokens: 1,
+    ledger: [{ model: 'opus', source: 'main', cost: 3 }, { model: 'haiku', source: 'subagent', cost: 1 }] }]);
+  assert.deepEqual(a.byModel.map(({ model, cost }) => ({ model, cost })), [{ model: 'opus', cost: 3 }, { model: 'haiku', cost: 1 }]);
 });
 
 test('wendkeep cost: aggregates real session notes across the vault (e2e)', () => {

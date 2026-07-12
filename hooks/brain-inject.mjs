@@ -10,6 +10,7 @@ import { brainDir } from './brain-core.mjs';
 import { buildActiveChangeInjection, changeCtxState, writeSentinel } from './change-core.mjs';
 import { buildLessonsInjection } from './lessons-core.mjs';
 import { getLocale } from './locale.mjs';
+import { resolveSessionEntry } from './session-identity.mjs';
 
 // The process ROUTER — the enforcement layer. The wk-* skills are passive files; without a
 // standing instruction the model plans in chat, leaves the change scaffold raw and forces the
@@ -42,7 +43,7 @@ function processRouter(localeId) {
 
 const MAX_LINES = 45; // CORE ≤25 + DIGEST ≤15 + folga; salvaguarda se o CORE crescer à mão
 
-export function buildInjection(vaultBase) {
+export function buildInjection(vaultBase, input = {}) {
   const dir = brainDir(vaultBase);
   const read = (name) => {
     try { return readFileSync(join(dir, name), 'utf8').trim(); } catch { return ''; }
@@ -59,7 +60,11 @@ export function buildInjection(vaultBase) {
   const router = processRouter(getLocale(vaultBase).id);
   const change = buildActiveChangeInjection(vaultBase);
   const lessons = buildLessonsInjection(vaultBase);
-  return [brain, router, change, lessons].filter(Boolean).join('\n');
+  const { identity, entry } = resolveSessionEntry(vaultBase, input);
+  const focus = identity.state === 'resolved' && entry?.change_slug
+    ? `<session_change>Change vinculada a esta sessão: ${entry.change_slug}. Este vínculo prevalece para writes automáticos; todas as pendências continuam visíveis acima.</session_change>`
+    : '';
+  return [brain, router, focus, change, lessons].filter(Boolean).join('\n');
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
@@ -69,14 +74,16 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     writeHookOutput({
       hookSpecificOutput: {
         hookEventName: 'SessionStart',
-        additionalContext: buildInjection(vaultBase),
+        additionalContext: buildInjection(vaultBase, input),
       },
     });
     // Sentinela do change-context: o backlog completo acabou de ser injetado aqui, então o hook
     // UserPromptSubmit não precisa re-pingar no 1º prompt. Bônus — nunca derruba a injeção.
     try {
       const st = changeCtxState(vaultBase);
-      if (st) writeSentinel(vaultBase, 'ctx', input.session_id || input.sessionId || '', st.hash);
+      const { identity } = resolveSessionEntry(vaultBase, input);
+      const sid = identity.state === 'resolved' ? identity.canonicalConversationId : (input.session_id || input.sessionId || '');
+      if (st) writeSentinel(vaultBase, 'ctx', sid, st.hash);
     } catch { /* sentinela é bônus */ }
   } catch (error) {
     process.stderr.write(`[brain] inject falhou: ${error.message}\n`);

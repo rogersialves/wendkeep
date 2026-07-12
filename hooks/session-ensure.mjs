@@ -30,6 +30,7 @@ import {
   writeHookOutput,
   yamlQuote,
 } from './obsidian-common.mjs';
+import { resolveSessionIdentity } from './session-identity.mjs';
 
 function sessionIdFromInput(input) {
   return input.session_id || input.sessionId || input.codex_session_id || '';
@@ -239,7 +240,7 @@ function findSessionForInput(vaultBase, input, control) {
   return { sessionId, relPath: '', startedAt: '', fromRegistry: false };
 }
 
-function activateExistingSession({ vaultBase, relPath, startedAt, sessionId, input, now }) {
+function activateExistingSession({ vaultBase, relPath, startedAt, sessionId, input, now, identity }) {
   const sessionPath = join(vaultBase, relPath);
   if (!existsSync(sessionPath)) return false;
 
@@ -259,12 +260,14 @@ function activateExistingSession({ vaultBase, relPath, startedAt, sessionId, inp
     status: 'active',
     started_at: nextStartedAt,
     ended_at: '',
-    transcript_path: input.transcript_path || input.transcriptPath || '',
+    transcript_path: identity.transcriptPath,
+    transcript_id: identity.transcriptId,
+    provider: identity.provider,
   });
   return true;
 }
 
-function createSession({ vaultBase, sessionId, input, now }) {
+function createSession({ vaultBase, sessionId, input, now, identity }) {
   const summary = sessionSummaryFromInput(input);
   const { absPath, relPath } = allocateSessionPath(vaultBase, now, summary);
   const startedAt = formatLocalIso(now);
@@ -283,7 +286,9 @@ function createSession({ vaultBase, sessionId, input, now }) {
     status: 'active',
     started_at: startedAt,
     ended_at: '',
-    transcript_path: input.transcript_path || input.transcriptPath || '',
+    transcript_path: identity.transcriptPath,
+    transcript_id: identity.transcriptId,
+    provider: identity.provider,
   });
   return { relPath, startedAt };
 }
@@ -303,7 +308,18 @@ function main() {
   const vaultBase = getVaultBase(input);
   warnIfDefaultVault(input);
   const now = new Date();
-  const sessionId = sessionIdFromInput(input);
+  const identity = resolveSessionIdentity(vaultBase, input, providerMeta().id);
+  if (identity.state !== 'resolved') {
+    writeHookOutput({
+      hookSpecificOutput: {
+        hookEventName: 'UserPromptSubmit',
+        additionalContext: `<obsidian_session_deferred>Memória global disponível, sem escrita vinculada: ${identity.diagnostics.join('; ')}.</obsidian_session_deferred>`,
+      },
+      systemMessage: `[wendkeep] Identidade de sessão adiada: ${identity.diagnostics.join('; ')}`,
+    });
+    return;
+  }
+  const sessionId = identity.canonicalConversationId;
 
   // Fast path: skip all writes if control file touched < 5 min ago and session matches
   try {
@@ -316,7 +332,7 @@ function main() {
         ctrl.session_file &&
         !isPlaceholderSessionFile(ctrl.session_file) &&
         existsSync(join(vaultBase, ctrl.session_file)) &&
-        (!sessionId || ctrl.session_id === sessionId)
+        ctrl.session_id === sessionId
       ) {
         writeHookOutput({});
         return;
@@ -333,7 +349,7 @@ function main() {
     // Sem reuso-por-janela: só reaproveita a nota do control quando não há
     // identidade pra checar (!sessionId) ou quando é a MESMA conversa. Conversa
     // concorrente recente NÃO pode herdar a nota ativa do ponteiro global.
-    if (existsSync(activePath) && (!sessionId || control.session_id === sessionId)) {
+    if (existsSync(activePath) && control.session_id === sessionId) {
       const titled = maybeRetitleSession({
         vaultBase,
         relPath: control.session_file,
@@ -357,25 +373,30 @@ function main() {
         status: 'active',
         started_at: control.started_at,
         ended_at: '',
-        transcript_path: input.transcript_path || input.transcriptPath || '',
+        transcript_path: identity.transcriptPath,
+        transcript_id: identity.transcriptId,
+        provider: identity.provider,
       });
       writeHookOutput({});
       return;
     }
   }
 
-  const target = findSessionForInput(vaultBase, input, control);
-  if (target.relPath && activateExistingSession({ vaultBase, relPath: target.relPath, startedAt: target.startedAt, sessionId: target.sessionId, input, now })) {
+  const registered = readSessionRegistry(vaultBase).sessions?.[sessionId];
+  const resolvedTarget = registered?.session_file
+    ? { sessionId, relPath: registered.session_file, startedAt: registered.started_at || '' }
+    : { sessionId, relPath: '', startedAt: '' };
+  if (resolvedTarget.relPath && activateExistingSession({ vaultBase, relPath: resolvedTarget.relPath, startedAt: resolvedTarget.startedAt, sessionId, input, now, identity })) {
     outputActiveContext({
-      relPath: target.relPath,
-      startedAt: target.startedAt || formatLocalIso(now),
+      relPath: resolvedTarget.relPath,
+      startedAt: resolvedTarget.startedAt || formatLocalIso(now),
       vaultBase,
-      message: `Sessão Obsidian reaberta em ${target.relPath}. ${basename(controlPath(vaultBase))} atualizado.`,
+      message: `Sessão Obsidian reaberta em ${resolvedTarget.relPath}. ${basename(controlPath(vaultBase))} atualizado.`,
     });
     return;
   }
 
-  const created = createSession({ vaultBase, sessionId, input, now });
+  const created = createSession({ vaultBase, sessionId, input, now, identity });
   outputActiveContext({
     relPath: created.relPath,
     startedAt: created.startedAt,

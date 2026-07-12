@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parseAnswers, buildDecisionCaptureNote, captureDecision } from '../hooks/decision-capture.mjs';
 import { taskText, appendProgress, logTask } from '../hooks/task-log.mjs';
-import { writeControl } from '../hooks/obsidian-common.mjs';
+import { upsertSessionRegistry, writeControl } from '../hooks/obsidian-common.mjs';
 import { mergeSettings } from '../src/init.mjs';
 import { SESSION_HOOKS } from '../src/taxonomy.mjs';
 
@@ -16,8 +16,11 @@ function vaultWithSession() {
   const rel = '02-Sessões/2026/07-JUL/DIA 09/10-00-demo.md';
   mkdirSync(join(vault, '02-Sessões', '2026', '07-JUL', 'DIA 09'), { recursive: true });
   writeFileSync(join(vault, rel), '---\ntype: session\n---\n\n# demo\n\n## Iterações\n\n## Encerramento\n\nEm andamento.\n');
+  const transcript = join(vault, 's1.jsonl');
+  writeFileSync(transcript, `${JSON.stringify({ type: 'session_meta', payload: { id: 'rollout-s1', session_id: 's1', model_provider: 'openai' } })}\n`);
   writeControl(vault, { status: 'active', session_file: rel, session_id: 's1' });
-  return { vault, rel };
+  upsertSessionRegistry(vault, 's1', { status: 'active', provider: 'codex', session_file: rel, transcript_path: transcript });
+  return { vault, rel, transcript };
 }
 
 // --- decision capture -------------------------------------------------------
@@ -58,12 +61,14 @@ test('buildDecisionCaptureNote lists every option and marks the chosen one', () 
 });
 
 test('captureDecision writes a decision note to 04-Decisões and links the live session', () => {
-  const { vault, rel } = vaultWithSession();
+  const { vault, rel, transcript } = vaultWithSession();
   try {
     const r = captureDecision(vault, {
       tool_name: 'AskUserQuestion',
       tool_input: { questions: [{ question: 'Deploy agora?', options: [{ label: 'Sim', description: 'sobe' }, { label: 'Não', description: 'espera' }] }] },
       tool_output: 'Your questions have been answered: "Deploy agora?"="Sim"',
+      transcript_path: transcript,
+      provider: 'codex',
     });
     assert.ok(r && !r.skipped, 'note written');
     const path = join(vault, r.rel);
@@ -73,19 +78,21 @@ test('captureDecision writes a decision note to 04-Decisões and links the live 
     assert.match(c, /✅ \| Sim/);
     assert.match(readFileSync(join(vault, rel), 'utf8'), /04-Decisões\/.+ADR-/);
     // idempotent same day+question
-    const again = captureDecision(vault, { tool_name: 'AskUserQuestion', tool_input: { questions: [{ question: 'Deploy agora?', options: [] }] }, tool_output: '"Deploy agora?"="Sim"' });
+    const again = captureDecision(vault, { transcript_path: transcript, provider: 'codex', tool_name: 'AskUserQuestion', tool_input: { questions: [{ question: 'Deploy agora?', options: [] }] }, tool_output: '"Deploy agora?"="Sim"' });
     assert.ok(again.skipped, 'second capture same day is a no-op');
   } finally { rmSync(vault, { recursive: true, force: true }); }
 });
 
 test('captureDecision records the chosen option from structured tool_response', () => {
-  const { vault } = vaultWithSession();
+  const { vault, transcript } = vaultWithSession();
   try {
     const question = 'Qual direção visual?';
     const r = captureDecision(vault, {
       tool_name: 'AskUserQuestion',
       tool_input: { questions: [{ question, options: [{ label: 'A — Cockpit Soft', description: 'tema suave' }] }] },
       tool_response: { answers: { [question]: 'A — Cockpit Soft' } },
+      transcript_path: transcript,
+      provider: 'codex',
     });
     const note = readFileSync(join(vault, r.rel), 'utf8');
     assert.match(note, /✅ \| A — Cockpit Soft/);
@@ -114,9 +121,9 @@ test('appendProgress inserts before ## Encerramento and dedups', () => {
 });
 
 test('logTask writes plan progress into the active session note', () => {
-  const { vault, rel } = vaultWithSession();
+  const { vault, rel, transcript } = vaultWithSession();
   try {
-    assert.ok(logTask(vault, { task: { content: 'Concluí a tela home' } }));
+    assert.ok(logTask(vault, { transcript_path: transcript, provider: 'codex', task: { content: 'Concluí a tela home' } }));
     const c = readFileSync(join(vault, rel), 'utf8');
     assert.match(c, /## Progresso do plano/);
     assert.match(c, /Concluí a tela home/);
