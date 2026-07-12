@@ -1,0 +1,166 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|clear|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "npx wendkeep hook brain-inject",
+            "timeout": 45,
+            "statusMessage": "wendkeep: injecting memory + active change"
+          }
+        ]
+      },
+      {
+        "matcher": "startup",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "npx wendkeep hook session-start",
+            "timeout": 30,
+            "statusMessage": "wendkeep: opening Obsidian session"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "npx wendkeep hook session-stop",
+            "timeout": 60,
+            "statusMessage": "wendkeep: writing session checkpoint"
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "timeout": 15,
+            "statusMessage": "wendkeep: open tasks check",
+            "args": [
+              "${CLAUDE_PROJECT_DIR}/node_modules/wendkeep/hooks/change-nag.mjs"
+            ]
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "npx wendkeep hook session-ensure",
+            "timeout": 30,
+            "statusMessage": "wendkeep: ensuring active session"
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "timeout": 15,
+            "statusMessage": "wendkeep: change ping",
+            "args": [
+              "${CLAUDE_PROJECT_DIR}/node_modules/wendkeep/hooks/change-context.mjs"
+            ]
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "AskUserQuestion",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "npx wendkeep hook decision-capture",
+            "timeout": 15,
+            "statusMessage": "wendkeep: recording decision"
+          }
+        ]
+      },
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "timeout": 10,
+            "statusMessage": "wendkeep: change warn",
+            "args": [
+              "${CLAUDE_PROJECT_DIR}/node_modules/wendkeep/hooks/change-warn.mjs"
+            ]
+          }
+        ]
+      },
+      {
+        "matcher": "ExitPlanMode",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "timeout": 15,
+            "statusMessage": "wendkeep: capturing approved plan",
+            "args": [
+              "${CLAUDE_PROJECT_DIR}/node_modules/wendkeep/hooks/plan-capture.mjs"
+            ]
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "npx wendkeep hook subagent-stop",
+            "timeout": 20,
+            "statusMessage": "wendkeep: subagent telemetry"
+          }
+        ]
+      }
+    ],
+    "TaskCompleted": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "npx wendkeep hook task-log",
+            "timeout": 10,
+            "statusMessage": "wendkeep: plan progress"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "timeout": 10,
+            "statusMessage": "wendkeep: change gate",
+            "args": [
+              "${CLAUDE_PROJECT_DIR}/node_modules/wendkeep/hooks/change-guard.mjs"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "env": {
+    "OBSIDIAN_VAULT_PATH": "C:\\GitHub\\WendKeep\\.WendKeep-vault",
+    "MCP_TIMEOUT": "60000"
+  },
+  "enabledMcpjsonServers": [
+    "wendkeep-vault"
+  ]
+}

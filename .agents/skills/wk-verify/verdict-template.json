@@ -1,0 +1,10 @@
+{
+  "slug": "<change-slug>",
+  "ok": true,
+  "coverage": [
+    { "req": "GATE-1", "covered": true, "evidence": "tests/foo.test.mjs:42" }
+  ],
+  "tasksHash": "<copie de verificacao.json — selo de frescor / copy from verificacao.json — freshness seal>",
+  "effectiveSpecHash": "<copie de verificacao.json / copy from verificacao.json>",
+  "notes": []
+}

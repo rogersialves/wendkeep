@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "wendkeep-vault": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@bitbonsai/mcpvault@latest",
+        "C:\\GitHub\\WendKeep\\.WendKeep-vault"
+      ]
+    }
+  }
+}

@@ -1,0 +1,6 @@
+# Example custom agent (Codex format). Replace with your own.
+name = "example-agent"
+description = "An example custom agent. Describe when to use it."
+developer_instructions = "You are an example agent. State the role, rules, and output format here."
+nickname_candidates = [ "example" ]
+model = "gpt-5.5"
