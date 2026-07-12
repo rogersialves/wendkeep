@@ -20,7 +20,9 @@
   },
   "scripts": {
     "check": "node --check bin/wendkeep.mjs && node --check src/init.mjs && node --check src/doctor.mjs",
-    "test": "node --test"
+    "test": "node --test",
+    "release": "node scripts/release.mjs",
+    "release:dry": "node scripts/release.mjs --dry-run"
   },
   "keywords": [
     "claude-code",
@@ -42,5 +44,8 @@
   "homepage": "https://github.com/rogersialves/wendkeep#readme",
   "bugs": {
     "url": "https://github.com/rogersialves/wendkeep/issues"
+  },
+  "devDependencies": {
+    "wendkeep": "^0.38.1"
   }
 }

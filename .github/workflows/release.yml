@@ -1,0 +1,37 @@
+name: release
+
+# Fires on any pushed tag vX.Y.Z and creates (or refreshes) the matching GitHub
+# Release, pulling the body straight from CHANGELOG.md. This is what keeps the
+# releases page in sync with npm: even a bare `git push --tags` produces a release.
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  github-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Create or update GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          VERSION="${TAG#v}"
+          node scripts/print-release-notes.mjs "$VERSION" > RELEASE_NOTES.md
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "release $TAG já existe — atualizando notas"
+            gh release edit "$TAG" --notes-file RELEASE_NOTES.md
+          else
+            gh release create "$TAG" --title "$TAG" --notes-file RELEASE_NOTES.md
+          fi

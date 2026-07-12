@@ -16,6 +16,14 @@
       "description": "node --check on the entrypoints",
       "severity": "critical",
       "command": "npm run check"
+    },
+    {
+      "id": "release-tests",
+      "name": "release-tests",
+      "description": "node --test tests/release-changelog.test.mjs",
+      "severity": "critical",
+      "type": "command",
+      "command": "node --test tests/release-changelog.test.mjs"
     }
   ]
 }

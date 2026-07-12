@@ -40,6 +40,12 @@ All notable changes to **wendkeep** are documented here. Format based on
 - Migração remove os headings legados sem perder reaberturas ou iterações mal posicionadas.
 - Totais combinados de tokens/custo são atualizados também no `SubagentStop` e persistidos em campos compatíveis com os dashboards existentes.
 
+## [0.36.0] — 2026-07-11
+
+_Publicada no npm sem changelog dedicado (bump de versão não foi commitado à época);
+registrada retroativamente para paridade npm ↔ GitHub. As mudanças reais desta faixa
+estão consolidadas entre 0.35.0 e 0.38.1._
+
 ## [0.35.0] — 2026-07-11
 
 ### Fixed
