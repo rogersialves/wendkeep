@@ -82,14 +82,49 @@ test('Claude thinking is attributed to the correct model as observational reason
     const transcript = join(root, 'main.jsonl');
     writeFileSync(transcript, JSON.stringify({ type: 'assistant', requestId: 'r1', message: {
       id: 'r1', model: 'claude-fable-5', usage: { input_tokens: 10, output_tokens: 20, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
-      content: [{ type: 'thinking', thinking: 'x'.repeat(350) }],
+      content: [{ type: 'thinking', thinking: 'x'.repeat(350), signature: 'sig' }],
     } }));
     const note = join(root, 'session.md');
     writeFileSync(note, '---\ntype: session\n---\n\n# Sessão\n\n## Pendências\n\nNenhuma.\n');
     const snapshot = updateSessionObservability({ sessionPath: note, transcriptPath: transcript });
-    assert.equal(snapshot.ledger[0].reasoning, 100);
-    assert.equal(snapshot.ledger[0].effort, 'thinking ~100');
+    assert.equal(snapshot.ledger[0].reasoning, 100, 'reasoning is a floor estimate from surviving thinking text');
+    assert.equal(snapshot.ledger[0].effort, 'thinking', 'effort is a binary presence label, not a token count');
     assert.equal(snapshot.ledger[0].total, 30, 'reasoning remains included in output, never double-counted');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('Claude effort comes from thinking presence even when the thinking text is redacted', () => {
+  const root = mkdtempSync(join(tmpdir(), 'wk-observe-redacted-'));
+  try {
+    // Real Claude Code main transcripts redact the thinking text (thinking: '') but keep the
+    // signature — extended thinking WAS active. Effort must still read 'thinking'; the char/3.5
+    // estimate is 0 because there is no text to measure.
+    const transcript = join(root, 'main.jsonl');
+    writeFileSync(transcript, JSON.stringify({ type: 'assistant', requestId: 'r1', message: {
+      id: 'r1', model: 'claude-opus-4-8', usage: { input_tokens: 10, output_tokens: 20, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+      content: [{ type: 'thinking', thinking: '', signature: 's'.repeat(2000) }, { type: 'text', text: 'ok' }],
+    } }));
+    const note = join(root, 'session.md');
+    writeFileSync(note, '---\ntype: session\n---\n\n# Sessão\n\n## Pendências\n\nNenhuma.\n');
+    const snapshot = updateSessionObservability({ sessionPath: note, transcriptPath: transcript });
+    assert.equal(snapshot.ledger[0].effort, 'thinking', 'redacted thinking still counts as thinking active');
+    assert.equal(snapshot.ledger[0].reasoning, 0, 'no surviving text -> reasoning floor is 0');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('Claude with no thinking blocks reports effort none, not unknown', () => {
+  const root = mkdtempSync(join(tmpdir(), 'wk-observe-nothink-'));
+  try {
+    const transcript = join(root, 'main.jsonl');
+    writeFileSync(transcript, JSON.stringify({ type: 'assistant', requestId: 'r1', message: {
+      id: 'r1', model: 'claude-opus-4-8', usage: { input_tokens: 10, output_tokens: 20, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+      content: [{ type: 'text', text: 'resposta direta sem pensamento' }],
+    } }));
+    const note = join(root, 'session.md');
+    writeFileSync(note, '---\ntype: session\n---\n\n# Sessão\n\n## Pendências\n\nNenhuma.\n');
+    const snapshot = updateSessionObservability({ sessionPath: note, transcriptPath: transcript });
+    assert.equal(snapshot.ledger[0].effort, 'none', 'Claude thinking off is deterministic -> none, never unknown');
+    assert.equal(snapshot.ledger[0].reasoning, 0);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 

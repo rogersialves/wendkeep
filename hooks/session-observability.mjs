@@ -11,7 +11,7 @@ const usd = (n) => `$${(Number(n) || 0).toFixed(4)}`;
 const round4 = (n) => Math.round((Number(n) || 0) * 10000) / 10000;
 const effort = (value) => {
   const normalized = String(value || '').trim().toLowerCase();
-  return ['none', 'low', 'medium', 'high', 'xhigh'].includes(normalized) ? normalized : (normalized || 'unknown');
+  return ['none', 'low', 'medium', 'high', 'xhigh', 'thinking'].includes(normalized) ? normalized : (normalized || 'unknown');
 };
 const usageTotal = (u = {}) => Number(u.total || 0) || (Number(u.input || 0) + Number(u.cached || 0) + Number(u.cacheWrite || 0) + Number(u.output || 0));
 

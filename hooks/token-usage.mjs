@@ -454,6 +454,7 @@ function parseClaudeLines(lines, result) {
   const seenThinking = new Set();
   let thinkingChars = 0;
   const thinkingCharsByModel = new Map();
+  let sawThinking = false;
   let latestPrompt = '';
 
   for (const line of lines) {
@@ -483,12 +484,18 @@ function parseClaudeLines(lines, result) {
         result.toolCalls += 1;
         addUnique(result.tools, block.name || 'tool_use');
       }
-      if (block?.type === 'thinking' && block.thinking) {
-        const thinkKey = `${msg.id || ''}:${block.thinking.slice(0, 60)}`;
-        if (!seenThinking.has(thinkKey)) {
-          seenThinking.add(thinkKey);
-          thinkingChars += block.thinking.length;
-          thinkingCharsByModel.set(model, (thinkingCharsByModel.get(model) || 0) + block.thinking.length);
+      if (block?.type === 'thinking') {
+        // Presença = extended thinking ATIVO. A `signature` persiste mesmo quando o Claude
+        // Code redige o texto (`thinking: ''`) — é o único sinal confiável do effort.
+        sawThinking = true;
+        // O texto só sobrevive à redação às vezes; quando sobrevive, estima reasoning tokens.
+        if (block.thinking) {
+          const thinkKey = `${msg.id || ''}:${block.thinking.slice(0, 60)}`;
+          if (!seenThinking.has(thinkKey)) {
+            seenThinking.add(thinkKey);
+            thinkingChars += block.thinking.length;
+            thinkingCharsByModel.set(model, (thinkingCharsByModel.get(model) || 0) + block.thinking.length);
+          }
         }
       }
     }
@@ -510,12 +517,16 @@ function parseClaudeLines(lines, result) {
     result.model = model;
   }
 
-  // Thinking estimado: ~3,5 chars por token. Distribuído no total como informação à parte
-  // (já contido em output_tokens — não somar de novo).
+  // Effort observável no Claude: presença de blocos thinking (signature), não o texto — o
+  // nível low/medium/high não é gravado no transcript. Rótulo binário: thinking/none.
+  result.pensamento = sawThinking ? 'thinking' : 'none';
+
+  // Reasoning: estimativa-piso ~3,5 chars/token dos textos que escaparam da redação (quase
+  // sempre 0 no thread principal). Já contido em output_tokens — nunca somado de novo. NÃO
+  // determina o effort (desacoplado do pensamento acima).
   const thinkingTokens = Math.round(thinkingChars / 3.5);
   if (thinkingTokens > 0) {
     result.totals.reasoning = thinkingTokens;
-    result.pensamento = `thinking ~${formatTokensShort(thinkingTokens)}`;
     for (const [model, chars] of thinkingCharsByModel) {
       const entry = result.byModel.get(`anthropic:${model}`);
       if (entry) entry.usage.reasoning = Math.round(chars / 3.5);
@@ -523,12 +534,6 @@ function parseClaudeLines(lines, result) {
   }
 
   return result;
-}
-
-function formatTokensShort(n) {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
-  return String(n);
 }
 
 function detectTranscriptFormat(lines) {

@@ -4,6 +4,12 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.38.2] — 2026-07-12
+
+### Fixed
+
+- Observabilidade de sessão: o `Effort` do Claude Code passa a derivar da **presença** de blocos `thinking` (a `signature` persiste mesmo quando o Claude Code redige o texto do pensamento), não da estimativa por caracteres — que dava `0` e marcava a sessão como `unknown` mesmo com o extended thinking ativo (visto em 42/43 chamadas do transcript principal). Rótulo binário `thinking`/`none`, desacoplado da contagem de reasoning tokens. Subagents com mesmo modelo/estado deixam de se dividir em linhas `unknown` + `thinking ~Nk` e agrupam corretamente. Reasoning do Claude vira estimativa-piso do texto sobrevivente (não determina mais o effort). Caminho Codex inalterado.
+
 ## [0.38.1] — 2026-07-12
 
 ### Fixed
