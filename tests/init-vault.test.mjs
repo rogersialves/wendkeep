@@ -2,13 +2,14 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { deriveVaultDirName, VAULT_FOLDERS } from '../src/taxonomy.mjs';
 import { renderVaultReadme } from '../src/vault-readme.mjs';
 import { parseLocaleAnswer, promptStrings, initMessages, detectRegisteredVault, readVaultLocale } from '../src/init.mjs';
+import { PROJECT_CONFIG_FILE, PROJECT_MARKER_REL } from '../src/project-vault.mjs';
 
 const BIN = join(dirname(fileURLToPath(import.meta.url)), '..', 'bin', 'wendkeep.mjs');
 
@@ -32,6 +33,55 @@ test('re-init recognizes the registered vault + locale and never creates a diver
     const derived = join(proj, `.${dirname(proj) ? proj.split(/[\\/]/).pop() : 'x'}-vault`);
     assert.ok(!existsSync(derived), 'no divergent default vault created');
     assert.ok(existsSync(join(proj, '.CustomVault', '02-Sessões')), 'reused the registered vault');
+  } finally { rmSync(proj, { recursive: true, force: true }); }
+});
+
+test('init persists a provider-neutral project binding and stable vault identity', () => {
+  const proj = mkdtempSync(join(tmpdir(), 'wk-binding-init-'));
+  const vault = join(proj, '.NutriBrain');
+  const run = () => spawnSync(process.execPath, [BIN, 'init', '--project', proj, '--vault', vault, '--locale', 'pt-BR', '--no-mcp', '--no-companions', '--no-colors', '--yes'], { encoding: 'utf8' });
+  try {
+    const first = run();
+    assert.equal(first.status, 0, first.stderr);
+    const configPath = join(proj, PROJECT_CONFIG_FILE);
+    const markerPath = join(vault, ...PROJECT_MARKER_REL.split('/'));
+    const config = JSON.parse(readFileSync(configPath, 'utf8'));
+    const marker = JSON.parse(readFileSync(markerPath, 'utf8'));
+    assert.equal(config.schemaVersion, 1);
+    assert.equal(config.vault, '.NutriBrain');
+    assert.equal(config.projectId, marker.projectId);
+
+    // Prova que a descoberta não depende mais do env privado do Claude.
+    const settingsPath = join(proj, '.claude', 'settings.json');
+    const settings = JSON.parse(readFileSync(settingsPath, 'utf8'));
+    delete settings.env.OBSIDIAN_VAULT_PATH;
+    writeFileSync(settingsPath, `${JSON.stringify(settings, null, 2)}\n`);
+    assert.equal(detectRegisteredVault(proj), resolve(vault));
+
+    const second = run();
+    assert.equal(second.status, 0, second.stderr);
+    assert.equal(JSON.parse(readFileSync(configPath, 'utf8')).projectId, config.projectId);
+    assert.equal(JSON.parse(readFileSync(markerPath, 'utf8')).projectId, config.projectId);
+  } finally { rmSync(proj, { recursive: true, force: true }); }
+});
+
+test('init migrates a legacy Claude-only vault registration without creating a second vault', () => {
+  const proj = mkdtempSync(join(tmpdir(), 'wk-legacy-binding-'));
+  const legacyVault = join(proj, '.ExistingBrain');
+  mkdirSync(join(proj, '.claude'), { recursive: true });
+  mkdirSync(join(legacyVault, '.brain'), { recursive: true });
+  writeFileSync(join(legacyVault, '.brain', 'config.json'), `${JSON.stringify({ locale: 'pt-BR' }, null, 2)}\n`);
+  writeFileSync(join(proj, '.claude', 'settings.json'), `${JSON.stringify({
+    env: { OBSIDIAN_VAULT_PATH: legacyVault },
+  }, null, 2)}\n`);
+  try {
+    const result = spawnSync(process.execPath, [BIN, 'init', '--project', proj, '--no-mcp', '--no-companions', '--no-colors', '--yes'], { encoding: 'utf8' });
+    assert.equal(result.status, 0, result.stderr);
+    const config = JSON.parse(readFileSync(join(proj, PROJECT_CONFIG_FILE), 'utf8'));
+    const marker = JSON.parse(readFileSync(join(legacyVault, ...PROJECT_MARKER_REL.split('/')), 'utf8'));
+    assert.equal(config.vault, '.ExistingBrain');
+    assert.equal(config.projectId, marker.projectId);
+    assert.equal(existsSync(join(proj, `.${proj.split(/[\\/]/).pop()}-vault`)), false, 'no divergent derived vault');
   } finally { rmSync(proj, { recursive: true, force: true }); }
 });
 

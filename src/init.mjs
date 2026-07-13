@@ -1,6 +1,6 @@
 // `wendkeep init` — cross-platform replacement for setup-vault.ps1.
-// Creates the vault taxonomy, NON-DESTRUCTIVELY merges the session hooks +
-// OBSIDIAN_VAULT_PATH into .claude/settings.json, and adds the mcpvault server to
+// Creates the vault taxonomy + provider-neutral project binding, NON-DESTRUCTIVELY
+// merges the session hooks into .claude/settings.json, and adds the mcpvault server to
 // .mcp.json. Idempotent: re-running only adds what is missing.
 import { spawnSync } from 'node:child_process';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
@@ -41,6 +41,7 @@ import { seedWkSkills } from './skills-seed.mjs';
 import { LOCALES, DEFAULT_LOCALE, getLocale, clearLocaleCache, vaultFolders } from '../hooks/locale.mjs';
 import { seedDotcontext, globalHasDotcontext, resolveDotcontextSkipMcp, renderSensorsJson } from './dotcontext-seed.mjs';
 import { adoptSpecsState, SPECS_STATE_FILE } from '../hooks/spec-core.mjs';
+import { bindProjectVault, readProjectBinding } from './project-vault.mjs';
 
 function parseArgs(argv) {
   const args = { mcp: true, yes: false, force: false };
@@ -281,7 +282,7 @@ const MESSAGES = {
     readmeCreated: ', README.md criado', viewsNote: (n) => `, ${n} view(s) + dashboard`,
     defs: (s, a) => `        defs entregues: ${s} skill(s) -> .claude/skills + .agents/skills, ${a} agent(s) -> .codex/agents`,
     settingsBadJson: (p) => `  [2/4] settings.json existe mas não é JSON válido -> escrevi ${p}.new (mescle à mão)`,
-    settings: (verb, added, bak) => `  [2/4] settings.json ${verb} (${added} hook(s) wirados, OBSIDIAN_VAULT_PATH setado${bak})`,
+    settings: (verb, added, bak) => `  [2/4] settings.json ${verb} (${added} hook(s) wirados; .wendkeep.json é o vínculo compartilhado${bak})`,
     mcpBadJson: (p) => `  [3/4] .mcp.json existe mas não é JSON válido -> escrevi ${p}.new (mescle à mão)`,
     mcp: (verb, names, bak) => `  [3/4] .mcp.json ${verb} (${names}${bak})`,
     mcpSkipped: '  [3/4] .mcp.json ignorado (--no-mcp, sem companions MCP)',
@@ -306,7 +307,7 @@ const MESSAGES = {
     readmeCreated: ', README.md created', viewsNote: (n) => `, ${n} view(s) + dashboard`,
     defs: (s, a) => `        defs delivered: ${s} skill(s) -> .claude/skills + .agents/skills, ${a} agent(s) -> .codex/agents`,
     settingsBadJson: (p) => `  [2/4] settings.json exists but is not valid JSON -> wrote ${p}.new (merge by hand)`,
-    settings: (verb, added, bak) => `  [2/4] settings.json ${verb} (${added} hook(s) wired, OBSIDIAN_VAULT_PATH set${bak})`,
+    settings: (verb, added, bak) => `  [2/4] settings.json ${verb} (${added} hook(s) wired; .wendkeep.json is the shared binding${bak})`,
     mcpBadJson: (p) => `  [3/4] .mcp.json exists but is not valid JSON -> wrote ${p}.new (merge by hand)`,
     mcp: (verb, names, bak) => `  [3/4] .mcp.json ${verb} (${names}${bak})`,
     mcpSkipped: '  [3/4] .mcp.json skipped (--no-mcp, no MCP companions)',
@@ -334,9 +335,14 @@ export function parseLocaleAnswer(ans) {
   return 'pt-BR';
 }
 
-// The vault path this project was set up with — read from .claude/settings.json's
-// OBSIDIAN_VAULT_PATH (written by a prior init). Empty when the project isn't configured yet.
+// The vault path this project was set up with. New installs use the provider-neutral
+// `.wendkeep.json`; `.claude/settings.json` remains a local migration bridge for projects
+// initialized before 0.39.0.
 export function detectRegisteredVault(projectPath) {
+  try {
+    const binding = readProjectBinding(projectPath);
+    if (binding?.base) return binding.base;
+  } catch { /* init will surface/repair through an explicit --vault */ }
   try {
     const s = JSON.parse(readFileSync(join(projectPath, '.claude', 'settings.json'), 'utf8'));
     const v = s && s.env && s.env.OBSIDIAN_VAULT_PATH;
@@ -357,8 +363,8 @@ export async function runInit(argv) {
   const projectPath = resolve(args.project || process.cwd());
   const log = (s) => process.stdout.write(`${s}\n`);
 
-  // Recognize an already-configured project: the vault is registered in the project's
-  // settings.json (OBSIDIAN_VAULT_PATH) and its locale is locked in the vault's config.json.
+  // Recognize an already-configured project through `.wendkeep.json`, or through the
+  // project-local Claude setting during migration. Locale remains locked in vault config.
   // On re-run (e.g. after `npm i -D wendkeep@latest`) we reuse both and SKIP the language + vault
   // prompts — asking again risks a divergent vault from a mistyped name. `--vault` / `--locale`
   // override; the vault question is a once-per-project thing.
@@ -392,6 +398,10 @@ export async function runInit(argv) {
     }
   }
   vaultPath = isAbsolute(vaultPath) ? vaultPath : resolve(projectPath, vaultPath);
+
+  // Persist the provider-neutral binding before any hook/config delivery. This also
+  // claims the vault identity and rejects accidental cross-project graph contamination.
+  bindProjectVault({ projectRoot: projectPath, vaultPath });
 
   // Companion plugins/MCP selection. --no-companions wins; --companions <csv> is
   // explicit; an interactive TTY gets a multi-choice prompt (context-mode pre-checked);

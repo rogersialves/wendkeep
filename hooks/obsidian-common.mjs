@@ -2,9 +2,10 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'fs';
 import { basename, dirname, join, relative } from 'path';
 import { getLocale } from './locale.mjs';
+import { resolveProjectVault } from '../src/project-vault.mjs';
 
-// Neutral fallback only. The vault is normally resolved from the
-// OBSIDIAN_VAULT_PATH env var (set by `wendkeep init`) via getVaultBase() below.
+// Deprecated export kept for consumers that imported it before 0.39.0. Automatic
+// hooks never use this fallback: an unbound project fails closed.
 export const DEFAULT_VAULT_BASE = join(
   process.env.USERPROFILE || process.env.HOME || process.cwd(),
   'wendkeep-vault',
@@ -31,19 +32,12 @@ export function writeHookOutput(payload = {}) {
   process.stdout.write(JSON.stringify(payload));
 }
 
-// Resolve the vault and report WHERE the path came from, so callers can react to
-// an unconfigured install instead of silently writing to the home fallback.
-//   env     -> OBSIDIAN_VAULT_PATH (set by `wendkeep init`)
-//   payload -> obsidian_vault_path from the hook's JSON input
-//   default -> DEFAULT_VAULT_BASE (~/wendkeep-vault) — a phantom vault nobody opened
+// Resolve from explicit hook payload or the nearest project-local binding. A legacy
+// `.claude/settings.json` registration is accepted as a migration bridge so Codex can
+// discover projects initialized by older WendKeep versions. Global process env and the
+// historical home fallback are intentionally excluded to prevent cross-project writes.
 export function resolveVault(input = {}) {
-  if (process.env.OBSIDIAN_VAULT_PATH) {
-    return { base: process.env.OBSIDIAN_VAULT_PATH, source: 'env' };
-  }
-  if (input && input.obsidian_vault_path) {
-    return { base: input.obsidian_vault_path, source: 'payload' };
-  }
-  return { base: DEFAULT_VAULT_BASE, source: 'default' };
+  return resolveProjectVault({ input });
 }
 
 export function getVaultBase(input = {}) {
@@ -60,16 +54,15 @@ export function debugLog(...args) {
   process.stderr.write(`[wendkeep] ${text}\n`);
 }
 
-// Warn loudly (stderr) when the vault resolved to the home fallback — i.e. neither
-// OBSIDIAN_VAULT_PATH nor a payload path was provided. Without this the hooks write
-// notes into ~/wendkeep-vault with zero signal that the install is misconfigured.
-// Returns the resolution source so callers can branch if they want.
+// Migration warning for projects that are still discovered through Claude's local
+// settings. Missing bindings throw before this point and are handled by each hook's
+// fail-closed top-level catch.
 export function warnIfDefaultVault(input = {}) {
   const { base, source } = resolveVault(input);
-  if (source === 'default') {
+  if (source === 'legacy-project-settings') {
     process.stderr.write(
-      `[wendkeep] WARNING: OBSIDIAN_VAULT_PATH não definido — gravando no fallback "${base}". ` +
-        'Rode `wendkeep init` ou defina OBSIDIAN_VAULT_PATH apontando ao seu vault Obsidian.\n',
+      `[wendkeep] Configuração legada do vault detectada em .claude/settings.json ("${base}"). `
+        + 'Rode `wendkeep init --yes` para criar .wendkeep.json; Codex e Claude continuarão no mesmo vault.\n',
     );
   }
   return source;

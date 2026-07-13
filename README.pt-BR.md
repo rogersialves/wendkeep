@@ -58,7 +58,7 @@ npx wendkeep init
 O `wendkeep init` é interativo e **idempotente**. Ele:
 
 1. Cria a taxonomia de pastas do cofre e um `README.md` templado (cofre padrão: `<projeto>/.<nome-do-projeto>-vault`, ex.: `.MeuApp-vault`; sobrescreva com `--vault`).
-2. **Mescla** os três hooks de sessão e o `OBSIDIAN_VAULT_PATH` no `.claude/settings.json` — sem atropelar suas configs (salva um `.bak`; arquivo ilegível fica intocado e um `.new` é escrito pra você mesclar).
+2. Grava um vínculo provider-neutral **`.wendkeep.json`** na raiz do projeto e o marcador correspondente `.brain/PROJECT.json` no cofre. Codex e Claude Code descobrem o mesmo vault pelo `cwd` da sessão, sem variável global do Windows. Registros antigos em `.claude/settings.json` são adotados automaticamente.
 3. Adiciona o servidor MCP **`wendkeep-vault`** ao `.mcp.json` pro agente ler/escrever o cofre. Pule com `--no-mcp` — ex.: quando o agente já tem um MCP de cofre. (`--no-mcp` pula *só o MCP do próprio wendkeep*; os MCPs de companion seguem `--companions`.)
 4. Oferece fixar plugins/MCP **companion** (múltipla escolha; **nenhum** pré-marcado). Cada um é wirado do jeito mais agnóstico que suporta:
    - **`context-mode`** — otimizador de contexto + memória FTS5, como servidor MCP no `.mcp.json` (qualquer agente).
@@ -94,15 +94,31 @@ npx wendkeep init --no-companions --no-mcp --yes              # zero companions,
 
 Depois abra o cofre no Obsidian, mande um prompt de teste no seu agente e confirme que uma nota aparece em `02-Sessões/…` (ou `02-Sessions/…` num cofre `en`).
 
+### Isolamento por projeto
+
+Cada projeto possui um `.wendkeep.json` com `projectId` estável e caminho do vault. Caminhos
+relativos, como `.NutriGymBrain`, partem da raiz do projeto; caminhos absolutos também são
+aceitos. Os hooks procuram o vínculo mais próximo subindo a partir do `cwd`. O vault guarda a
+mesma identidade em `.brain/PROJECT.json`, e uma divergência bloqueia a escrita. Sem vínculo,
+os hooks falham de modo seguro e nunca criam o antigo fallback `~/wendkeep-vault`.
+
+`OBSIDIAN_VAULT_PATH` permanece somente como compatibilidade legada para comandos manuais.
+Ele não roteia hooks automáticos do Codex ou Claude, e o vínculo local prevalece sobre uma
+variável herdada da máquina.
+
 ## Atualizar
 
-Como os hooks vivem dentro do pacote instalado (o settings.json chama `npx wendkeep hook <name>`), atualizar é só:
+Como os hooks vivem dentro do pacote instalado, atualize e rode novamente o `init`
+idempotente. Essa etapa cria ou migra o vínculo provider-neutral:
 
 ```bash
-npm update wendkeep
+npm install --save-dev wendkeep@latest
+npx --no-install wendkeep init --project . --vault <seu-vault> --yes
+npx --no-install wendkeep sync-defs --project . --reseed
+npx --no-install wendkeep doctor --project .
 ```
 
-Sem recopiar, sem snapshot pra re‑sincronizar — o pacote é a única fonte da verdade.
+Reinicie Codex e Claude Code depois de resemear as skills geradas.
 
 ## Comandos
 

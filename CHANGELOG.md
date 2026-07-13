@@ -4,6 +4,39 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.39.0] — 2026-07-13
+
+### Added
+
+- Configuração provider-neutral `.wendkeep.json`, descoberta do diretório da sessão para os
+  pais, permitindo que Codex e Claude Code resolvam o mesmo vault sem variável global do
+  Windows. Caminhos relativos ao projeto e caminhos absolutos são suportados.
+- Identidade estável `projectId`, espelhada em `.brain/PROJECT.json`; vínculos que apontem
+  para o vault de outro projeto são rejeitados antes de qualquer gravação.
+- `doctor` informa caminho e origem do vínculo efetivo. Comandos CLI executados dentro do
+  projeto também descobrem o vault local, mantendo `--vault` como override explícito.
+
+### Changed
+
+- `wendkeep init` cria o vínculo projeto→vault de forma idempotente e adota instalações
+  antigas registradas em `.claude/settings.json`, sem mover ou dividir o histórico.
+- Um vínculo local sempre vence um `OBSIDIAN_VAULT_PATH` herdado pelo processo. A variável
+  permanece apenas para compatibilidade de comandos manuais legados.
+
+### Fixed
+
+- Hooks do Codex deixam de gravar sessões no vault doméstico `~/wendkeep-vault` quando o
+  processo não recebe o ambiente privado do Claude Code. Sem vínculo local ou payload
+  explícito, o hook agora falha de modo seguro, emite diagnóstico e não cria arquivos.
+- Projetos simultâneos deixam de compartilhar acidentalmente sessões, mudanças e grafo por
+  causa de uma variável global de usuário apontando para um único vault.
+
+### Migration
+
+- Após atualizar, execute uma vez `wendkeep init --project . --vault <vault> --yes`, depois
+  `wendkeep sync-defs --project . --reseed` e `wendkeep doctor --project .`; reinicie Codex e
+  Claude Code para recarregar os artefatos gerados.
+
 ## [0.38.3] — 2026-07-12
 
 ### Fixed

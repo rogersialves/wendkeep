@@ -52,7 +52,7 @@ export function renderVaultReadme({ projectName, vaultPath, withMcp = true, loca
     const mcpIntro = withMcp ? ', and read/written by the **MCPVault** MCP server' : '';
     const access = [`- **Obsidian:** open this folder with "Open folder as vault" → \`${vaultPath}\``];
     if (withMcp) access.push('- **Agent (MCP):** the `wendkeep-vault` server (MCPVault) points at this vault (set in `.mcp.json`), giving the agent read/write on the notes.');
-    access.push('- **Hooks:** `settings.json` calls `npx wendkeep hook <name>`; the vault is located via `OBSIDIAN_VAULT_PATH` (also written by `wendkeep init`).');
+    access.push('- **Hooks:** Codex and Claude Code call `npx wendkeep hook <name>`; the vault is discovered from the project-local `.wendkeep.json` binding and checked against `.brain/PROJECT.json`.');
     return `# Obsidian vault — ${name}
 
 > Knowledge base of **${name}**, captured automatically by wendkeep from AI coding-agent
@@ -84,7 +84,7 @@ ${access.join('\n')}
   const mcpIntro = withMcp ? ', e lida/escrita pelo MCP server **MCPVault**' : '';
   const access = [`- **Obsidian:** abra esta pasta com "Open folder as vault" → \`${vaultPath}\``];
   if (withMcp) access.push('- **Agente (MCP):** o servidor `wendkeep-vault` (MCPVault) é apontado para este vault pelo `wendkeep init` (em `.mcp.json`), dando ao agente leitura/escrita das notas.');
-  access.push('- **Hooks:** `settings.json` chama `npx wendkeep hook <name>`; o vault é localizado via a env `OBSIDIAN_VAULT_PATH` (também gravada pelo `wendkeep init`).');
+  access.push('- **Hooks:** Codex e Claude Code chamam `npx wendkeep hook <name>`; o vault é descoberto pelo vínculo local `.wendkeep.json` e validado contra `.brain/PROJECT.json`.');
   return `# Vault Obsidian — ${name}
 
 > Base de conhecimento de **${name}**, capturada automaticamente pelo wendkeep a

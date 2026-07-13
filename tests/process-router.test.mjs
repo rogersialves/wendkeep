@@ -98,9 +98,9 @@ test('session-ensure created note carries session_id in frontmatter', () => {
   try {
     const transcript = join(vault, 'rollout.jsonl');
     writeFileSync(transcript, `${JSON.stringify({ type: 'session_meta', payload: { id: 'rollout-1', session_id: 'ens-abc-123', model_provider: 'openai' } })}\n`);
-    const input = JSON.stringify({ session_id: 'ens-abc-123', transcript_path: transcript, prompt: 'planejar tela home do app', cwd: vault });
+    const input = JSON.stringify({ session_id: 'ens-abc-123', transcript_path: transcript, prompt: 'planejar tela home do app', cwd: vault, obsidian_vault_path: vault });
     // simula runtime Codex: não vazar os marcadores de ambiente do Claude Code pai
-    const env = { ...process.env, OBSIDIAN_VAULT_PATH: vault };
+    const env = { ...process.env };
     delete env.CLAUDECODE; delete env.CLAUDE_CODE_SESSION_ID; delete env.CLAUDE_PROJECT_DIR;
     const r = spawnSync(process.execPath, ['hooks/session-ensure.mjs'], {
       encoding: 'utf8',
@@ -129,10 +129,10 @@ test('session-start Codex cria nota sem transcript usando CODEX_THREAD_ID', () =
   const vault = mkdtempSync(join(tmpdir(), 'wk-codex-start-'));
   try {
     const id = '019f56c7-d594-7460-be9b-d246606e3135';
-    const env = { ...process.env, OBSIDIAN_VAULT_PATH: vault, CODEX_THREAD_ID: id };
+    const env = { ...process.env, CODEX_THREAD_ID: id };
     delete env.CLAUDECODE; delete env.CLAUDE_CODE_SESSION_ID; delete env.CLAUDE_PROJECT_DIR;
     const r = spawnSync(process.execPath, ['hooks/session-start.mjs'], {
-      encoding: 'utf8', input: '{}', env,
+      encoding: 'utf8', input: JSON.stringify({ obsidian_vault_path: vault, cwd: vault }), env,
     });
     assert.equal(r.status, 0, r.stderr);
     const registry = JSON.parse(readFileSync(join(vault, '.brain', 'SESSION_REGISTRY.json'), 'utf8'));
@@ -144,7 +144,7 @@ test('session-start Codex cria nota sem transcript usando CODEX_THREAD_ID', () =
     writeFileSync(transcript, `${JSON.stringify({ type: 'session_meta', payload: { id, session_id: id, model_provider: 'openai' } })}\n`);
     const ensure = spawnSync(process.execPath, ['hooks/session-ensure.mjs'], {
       encoding: 'utf8',
-      input: JSON.stringify({ session_id: id, transcript_path: transcript, prompt: 'continuar sessão' }),
+      input: JSON.stringify({ session_id: id, transcript_path: transcript, prompt: 'continuar sessão', obsidian_vault_path: vault, cwd: vault }),
       env,
     });
     assert.equal(ensure.status, 0, ensure.stderr);

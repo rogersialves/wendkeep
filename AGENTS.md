@@ -1,5 +1,5 @@
 <!-- wendkeep:skills:start -->
-<!-- wendkeep-version: 0.38.1; skills-sha256: d09987ccbbefccd06af0a290dc6d820444e6c306230b1e4cba9b7d0cccd3039f -->
+<!-- wendkeep-version: 0.39.0; skills-sha256: d09987ccbbefccd06af0a290dc6d820444e6c306230b1e4cba9b7d0cccd3039f -->
 ## wendkeep — process skills & loop
 
 This project uses the [wendkeep](https://github.com/rogersialves/wendkeep) harness. Work

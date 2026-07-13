@@ -1,6 +1,6 @@
 {
   "name": "wendkeep",
-  "version": "0.38.3",
+  "version": "0.39.0",
   "description": "A persistent-memory harness for AI coding agents on your Obsidian vault: turn-by-turn session capture plus a native, zero-dependency spec→change→verify→archive loop (sensor-gated, independent verdict, mutation discrimination). Local-first, agent-agnostic (Claude Code, Codex, Cursor…).",
   "type": "module",
   "bin": {
@@ -19,7 +19,7 @@
     "node": ">=18"
   },
   "scripts": {
-    "check": "node --check bin/wendkeep.mjs && node --check src/init.mjs && node --check src/doctor.mjs",
+    "check": "node --check bin/wendkeep.mjs && node --check src/init.mjs && node --check src/doctor.mjs && node --check src/project-vault.mjs",
     "test": "node --test",
     "release": "node scripts/release.mjs",
     "release:dry": "node scripts/release.mjs --dry-run"

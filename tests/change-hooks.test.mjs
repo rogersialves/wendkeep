@@ -20,9 +20,15 @@ import { nagDecision } from '../hooks/change-nag.mjs';
 const BIN = join(dirname(fileURLToPath(import.meta.url)), '..', 'bin', 'wendkeep.mjs');
 
 function runHook(name, stdin, vault, extraEnv = {}) {
+  let input = stdin;
+  try {
+    const parsed = JSON.parse(stdin);
+    parsed.obsidian_vault_path ||= vault;
+    input = JSON.stringify(parsed);
+  } catch { /* malformed-input tests must remain malformed */ }
   return spawnSync(process.execPath, [BIN, 'hook', name], {
-    input: stdin, encoding: 'utf8',
-    env: { ...process.env, OBSIDIAN_VAULT_PATH: vault, ...extraEnv },
+    input, encoding: 'utf8',
+    env: { ...process.env, ...extraEnv },
   });
 }
 

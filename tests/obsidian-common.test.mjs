@@ -7,8 +7,11 @@ import {
   getVaultBase,
   debugLog,
   warnIfDefaultVault,
-  DEFAULT_VAULT_BASE,
 } from '../hooks/obsidian-common.mjs';
+import { bindProjectVault } from '../src/project-vault.mjs';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
 
 // Temporarily set/unset env vars (undefined => deleted), restoring afterwards.
 function withEnv(vars, fn) {
@@ -44,37 +47,33 @@ function captureStderr(fn) {
   return out;
 }
 
-test('resolveVault: OBSIDIAN_VAULT_PATH wins, source "env"', () => {
+test('resolveVault: explicit payload wins over a global environment path', () => {
   withEnv({ OBSIDIAN_VAULT_PATH: '/tmp/envvault' }, () => {
-    const r = resolveVault({ obsidian_vault_path: '/tmp/payload' });
-    assert.equal(r.source, 'env');
-    assert.equal(r.base, '/tmp/envvault');
-  });
-});
-
-test('resolveVault: payload used when env unset, source "payload"', () => {
-  withEnv({ OBSIDIAN_VAULT_PATH: undefined }, () => {
     const r = resolveVault({ obsidian_vault_path: '/tmp/payload' });
     assert.equal(r.source, 'payload');
-    assert.equal(r.base, '/tmp/payload');
+    assert.equal(r.base, resolve('/tmp/payload'));
   });
 });
 
-test('resolveVault: falls back to DEFAULT_VAULT_BASE, source "default"', () => {
-  withEnv({ OBSIDIAN_VAULT_PATH: undefined }, () => {
-    const r = resolveVault({});
-    assert.equal(r.source, 'default');
-    assert.equal(r.base, DEFAULT_VAULT_BASE);
-  });
+test('resolveVault: discovers the nearest project binding', () => {
+  const root = mkdtempSync(join(tmpdir(), 'wk-common-project-'));
+  const nested = join(root, 'src', 'nested');
+  const vault = join(root, '.vault');
+  mkdirSync(nested, { recursive: true });
+  try {
+    bindProjectVault({ projectRoot: root, vaultPath: vault });
+    const r = withEnv({ OBSIDIAN_VAULT_PATH: join(root, 'wrong') }, () => resolveVault({ cwd: nested }));
+    assert.equal(r.source, 'project-config');
+    assert.equal(r.base, resolve(vault));
+  } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-test('getVaultBase stays backward-compatible', () => {
-  withEnv({ OBSIDIAN_VAULT_PATH: '/tmp/envvault' }, () => {
-    assert.equal(getVaultBase({ obsidian_vault_path: '/tmp/p' }), '/tmp/envvault');
-  });
+test('getVaultBase fails closed without a project binding', () => {
+  const root = mkdtempSync(join(tmpdir(), 'wk-common-empty-'));
   withEnv({ OBSIDIAN_VAULT_PATH: undefined }, () => {
-    assert.equal(getVaultBase({}), DEFAULT_VAULT_BASE);
+    assert.throws(() => getVaultBase({ cwd: root }), { code: 'WENDKEEP_VAULT_UNCONFIGURED' });
   });
+  rmSync(root, { recursive: true, force: true });
 });
 
 test('debugLog: silent unless WENDKEEP_DEBUG set', () => {
@@ -91,25 +90,33 @@ test('debugLog: writes to stderr when WENDKEEP_DEBUG set', () => {
   assert.match(out, /boom/);
 });
 
-test('warnIfDefaultVault: warns loudly when falling back to default', () => {
+test('warnIfDefaultVault: warns when using the legacy project-local Claude registration', () => {
+  const root = mkdtempSync(join(tmpdir(), 'wk-common-legacy-'));
+  const vault = join(root, '.vault');
+  mkdirSync(join(root, '.claude'), { recursive: true });
+  writeFileSync(join(root, '.claude', 'settings.json'), JSON.stringify({ env: { OBSIDIAN_VAULT_PATH: vault } }));
   let source;
   const out = withEnv({ OBSIDIAN_VAULT_PATH: undefined }, () =>
     captureStderr(() => {
-      source = warnIfDefaultVault({});
+      source = warnIfDefaultVault({ cwd: root });
     }),
   );
-  assert.equal(source, 'default');
-  assert.match(out, /OBSIDIAN_VAULT_PATH/);
+  assert.equal(source, 'legacy-project-settings');
+  assert.match(out, /\.wendkeep\.json/);
   assert.match(out, /wendkeep init/);
+  rmSync(root, { recursive: true, force: true });
 });
 
-test('warnIfDefaultVault: silent when env vault configured', () => {
+test('warnIfDefaultVault: silent when the project binding is configured', () => {
+  const root = mkdtempSync(join(tmpdir(), 'wk-common-configured-'));
+  bindProjectVault({ projectRoot: root, vaultPath: join(root, '.vault') });
   let source;
-  const out = withEnv({ OBSIDIAN_VAULT_PATH: '/tmp/envvault' }, () =>
+  const out = withEnv({ OBSIDIAN_VAULT_PATH: join(root, 'wrong') }, () =>
     captureStderr(() => {
-      source = warnIfDefaultVault({});
+      source = warnIfDefaultVault({ cwd: root });
     }),
   );
-  assert.equal(source, 'env');
+  assert.equal(source, 'project-config');
   assert.equal(out, '');
+  rmSync(root, { recursive: true, force: true });
 });

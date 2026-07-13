@@ -2,10 +2,11 @@
 // harness integrity check (hooks/harness-doctor.mjs). Exits 1 on any error.
 import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { dirname, isAbsolute, join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { checkHarness } from '../hooks/harness-doctor.mjs';
 import { checkSyncDefs } from './sync-defs.mjs';
+import { resolveProjectVault } from './project-vault.mjs';
 
 export function runDoctor(argv) {
   const here = dirname(fileURLToPath(import.meta.url));
@@ -23,19 +24,28 @@ export function runDoctor(argv) {
     else passthrough.push(a);
   }
 
-  const env = { ...process.env };
-  if (vault) env.OBSIDIAN_VAULT_PATH = isAbsolute(vault) ? vault : resolve(process.cwd(), vault);
-  if (!env.OBSIDIAN_VAULT_PATH) {
-    process.stderr.write('wendkeep doctor: no vault. Pass --vault <path> or set OBSIDIAN_VAULT_PATH.\n');
+  const projectRoot = resolve(project || process.cwd());
+  let resolution;
+  try {
+    resolution = resolveProjectVault({
+      startDir: projectRoot,
+      explicitVault: vault || '',
+      validateIdentity: !vault,
+    });
+  } catch (error) {
+    process.stderr.write(`wendkeep doctor: ${error.message}\n`);
     process.exit(2);
   }
-  const vaultBase = env.OBSIDIAN_VAULT_PATH;
-  const projectRoot = resolve(project || process.cwd());
+  const vaultBase = resolution.base;
+  process.stdout.write(`[vault] ${resolution.source}: ${vaultBase} (project: ${projectRoot})\n`);
+  if (resolution.source === 'legacy-project-settings') {
+    process.stdout.write('  ! migração pendente: rode `wendkeep init --project . --vault "<vault>" --yes` para criar .wendkeep.json\n');
+  }
 
   // 1. Session/vault integrity (existing check).
   let healthStatus = 0;
   if (existsSync(hookFile)) {
-    const r = spawnSync(process.execPath, [hookFile, ...passthrough], { stdio: 'inherit', env });
+    const r = spawnSync(process.execPath, [hookFile, ...passthrough, '--vault', vaultBase], { stdio: 'inherit' });
     healthStatus = r.status ?? 0;
   }
 

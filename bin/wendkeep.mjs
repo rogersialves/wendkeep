@@ -102,8 +102,32 @@ function runHook(name) {
   process.exit(r.status ?? 0);
 }
 
+function optionValue(argv, name) {
+  const index = argv.indexOf(name);
+  if (index >= 0) return argv[index + 1] || '';
+  return argv.find((item) => item.startsWith(`${name}=`))?.slice(name.length + 1) || '';
+}
+
+async function preferProjectVault(argv) {
+  // Existing command modules still consume OBSIDIAN_VAULT_PATH internally. Populate it
+  // only inside this CLI process from the provider-neutral project binding, overriding
+  // any inherited machine-global value. An explicit --vault remains authoritative.
+  if (optionValue(argv, '--vault')) return;
+  try {
+    const { resolveProjectVault } = await import('../src/project-vault.mjs');
+    const resolved = resolveProjectVault({ startDir: optionValue(argv, '--project') || process.cwd() });
+    process.env.OBSIDIAN_VAULT_PATH = resolved.base;
+  } catch {
+    // Backward-compatible manual CLI behavior: individual commands still explain
+    // --vault / legacy env when no project binding exists. Hooks do not use this path.
+  }
+}
+
 async function main() {
   const [cmd, ...rest] = process.argv.slice(2);
+  if (cmd && !['init', 'hook', '--version', '-v', '--help', '-h', 'help'].includes(cmd)) {
+    await preferProjectVault(rest);
+  }
   switch (cmd) {
     case 'init': {
       const { runInit } = await import('../src/init.mjs');

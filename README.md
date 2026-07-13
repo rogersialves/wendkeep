@@ -60,7 +60,7 @@ npx wendkeep init
 `wendkeep init` is interactive and **idempotent**. It will:
 
 1. Create the vault folder taxonomy and a templated `README.md` (default vault: `<project>/.<project-name>-vault`, e.g. `.MyApp-vault`; override with `--vault`).
-2. **Merge** the three session hooks and `OBSIDIAN_VAULT_PATH` into `.claude/settings.json` — without clobbering your existing settings (a `.bak` is saved; an unparseable file is left untouched and a `.new` is written for you to merge).
+2. Write a provider-neutral **`.wendkeep.json`** binding at the project root and a matching `.brain/PROJECT.json` marker in the vault. Codex and Claude Code discover the same vault from their session `cwd`; no machine-global environment variable is required. Existing `.claude/settings.json` registrations are adopted automatically.
 3. Add the **`wendkeep-vault`** MCP server to `.mcp.json` so the agent can read/write the vault. Skip with `--no-mcp` — e.g. when the agent already has a vault MCP. (`--no-mcp` skips *only wendkeep's own* MCP; companion MCPs still follow `--companions`.)
 4. Offer to pin **companion** plugins/MCP (multi-choice; only `context-mode` pre-checked). Each is wired the most agent-agnostic way it supports:
    - **`context-mode`** — context optimizer + FTS5 memory, as a `.mcp.json` MCP server (any agent). The recommended default.
@@ -96,15 +96,32 @@ npx wendkeep init --no-companions --no-mcp --yes              # zero companions,
 
 Then open the vault in Obsidian, send a test prompt in your agent, and confirm a note appears under `02-Sessões/…` (or `02-Sessions/…` for an `en` vault).
 
+### Project isolation
+
+Each project owns a `.wendkeep.json` containing a stable `projectId` and its vault path.
+Relative paths (for example `.NutriGymBrain`) are resolved from the project root; absolute
+paths are also supported. Hooks search upward from the agent's `cwd`, so nested packages use
+the nearest binding. The vault carries the same identity in `.brain/PROJECT.json`; a mismatch
+is rejected before any session is written. If no binding exists, hooks fail closed and never
+create the historical `~/wendkeep-vault` fallback.
+
+`OBSIDIAN_VAULT_PATH` remains only as legacy/manual CLI compatibility. It is not used to
+route automatic Codex or Claude hooks and a project-local binding overrides an inherited
+machine value.
+
 ## Updating
 
-Because the hooks live inside the installed package (settings.json calls `npx wendkeep hook <name>`), upgrading is just:
+Because the hooks live inside the installed package, upgrade the package and re-run the
+idempotent init. The init step creates/migrates the provider-neutral project binding:
 
 ```bash
-npm update wendkeep
+npm install --save-dev wendkeep@latest
+npx --no-install wendkeep init --project . --vault <your-vault> --yes
+npx --no-install wendkeep sync-defs --project . --reseed
+npx --no-install wendkeep doctor --project .
 ```
 
-No re‑copying, no snapshot to re‑sync — the package is the single source of truth.
+Restart Codex and Claude Code after reseeding their generated skills.
 
 ## Commands
 
