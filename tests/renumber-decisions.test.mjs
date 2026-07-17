@@ -75,8 +75,9 @@ test('planRenumber assigns sequential ADR numbers in strict chronological order'
     assert.match(plan[1].newRelNoExt, /ADR-0002-d$/);
     assert.match(plan[2].newRelNoExt, /ADR-0003-b$/);
     assert.match(plan[3].newRelNoExt, /ADR-0004-c$/);
-    // each file stays in its own dated folder
-    assert.match(plan[1].newRelNoExt, /04-Decisões\/2026\/04-ABR\/DIA 05\/ADR-0002-d$/);
+    // DRV-7 — destino é a pasta do MÊS da data, sem subpasta DIA
+    assert.match(plan[1].newRelNoExt, /^04-Decisões\/2026\/04-ABR\/ADR-0002-d$/);
+    for (const p of plan) assert.doesNotMatch(p.newRelNoExt, /\/DIA /, 'nenhum destino com DIA');
   } finally { rmSync(vault, { recursive: true, force: true }); }
 });
 
@@ -99,23 +100,25 @@ test('renumberDecisions apply renames files, rewrites wikilinks vault-wide, is i
 
     const rep = renumberDecisions(vault, { apply: true });
     assert.equal(rep.renamed, 4);
-    // files renamed in place
-    assert.ok(existsSync(join(vault, '04-Decisões', '2026', '04-ABR', 'DIA 05', 'ADR-0002-d.md')));
-    assert.ok(existsSync(join(vault, '04-Decisões', '2026', '06-JUN', 'DIA 10', 'ADR-0004-c.md')));
+    // DRV-7 — arquivos movidos pra pasta do mês (sem DIA), DIA de origem removido
+    assert.ok(existsSync(join(vault, '04-Decisões', '2026', '04-ABR', 'ADR-0002-d.md')));
+    assert.ok(existsSync(join(vault, '04-Decisões', '2026', '06-JUN', 'ADR-0004-c.md')));
     assert.ok(!existsSync(join(vault, '04-Decisões', '2026', '06-JUN', 'DIA 10', '2026-06-10-escolha-c.md')), 'old name gone');
+    assert.ok(!existsSync(join(vault, '04-Decisões', '2026', '06-JUN', 'DIA 10')), 'DIA de origem vazio removido');
+    assert.ok(!existsSync(join(vault, '04-Decisões', '2026', '04-ABR', 'DIA 05')), 'DIA 05 removido');
     // no stray temp files
     const leftovers = [];
     (function walk(d) { for (const e of readdirSync(d, { withFileTypes: true })) { const p = join(d, e.name); if (e.isDirectory()) walk(p); else if (e.name.includes('.wk-renum-')) leftovers.push(p); } })(join(vault, '04-Decisões'));
     assert.equal(leftovers.length, 0, 'temp files cleaned');
 
-    // wikilinks rewritten (full path, basename, and alias)
+    // wikilinks rewritten pro NOVO caminho de mês (full path, basename, and alias)
     const s = readFileSync(sess, 'utf8');
-    assert.match(s, /\[\[04-Decisões\/2026\/05-MAI\/DIA 18\/ADR-0003-b\]\]/);
+    assert.match(s, /\[\[04-Decisões\/2026\/05-MAI\/ADR-0003-b\]\]/);
     assert.match(s, /\[\[ADR-0004-c\]\]/);
-    assert.match(s, /\[\[04-Decisões\/2026\/03-MAR\/DIA 29\/ADR-0001-a\|ADR-0001\]\]/);
+    assert.match(s, /\[\[04-Decisões\/2026\/03-MAR\/ADR-0001-a\|ADR-0001\]\]/);
 
     // body normalized
-    const dNote = readFileSync(join(vault, '04-Decisões', '2026', '04-ABR', 'DIA 05', 'ADR-0002-d.md'), 'utf8');
+    const dNote = readFileSync(join(vault, '04-Decisões', '2026', '04-ABR', 'ADR-0002-d.md'), 'utf8');
     assert.match(dNote, /^type: decision$/m);
     assert.match(dNote, /^adr: 2$/m);
     assert.match(dNote, /^# ADR-0002 — Delta$/m);

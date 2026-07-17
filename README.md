@@ -139,8 +139,8 @@ Restart Codex and Claude Code after reseeding their generated skills.
 | `wendkeep session list\|show\|use` | Lista o registry multi-sessão, mostra uma conversa ou muda somente o foco humano de `CURRENT_SESSION.md`. |
 | `wendkeep change bind <slug> --session <id>` | Vincula ou transfere uma change para uma conversa canônica sem esconder as demais pendências. |
 | `wendkeep note new --type bug\|learning "<title>"` | Create a **numbered** derived note (`BUG-`/`APR-NNNN`) in the month folder and print its vault path. `--date YYYY-MM-DD`. |
-| `wendkeep renumber-decisions` | Renumber `04-Decisões` to `ADR-NNNN-<slug>` chronologically + rewrite wikilinks. Preview by default; `--apply` / `--json`. |
-| `wendkeep renumber-bugs` | Same for `05-Bugs` → `BUG-NNNN-<slug>`, also moving notes out of legacy `DIA N` subfolders. |
+| `wendkeep renumber-decisions` | Renumber `04-Decisões` to `ADR-NNNN-<slug>` chronologically, move notes out of legacy `DIA N` subfolders into the month folder, and rewrite wikilinks. Preview by default; `--apply` / `--json`. |
+| `wendkeep renumber-bugs` | Same for `05-Bugs` → `BUG-NNNN-<slug>`. |
 | `wendkeep renumber-learnings` | Same for `06-Aprendizados`/`06-Learnings` → `APR-NNNN-<slug>`. |
 | `wendkeep lesson add "t" "l"` | Record a project-local lesson (injected at the next SessionStart). |
 | `wendkeep sync-defs` | Copy `.brain/agents\|skills` into `.codex/agents`, `.claude/skills`, `.agents/skills`; `--check` detects drift. |

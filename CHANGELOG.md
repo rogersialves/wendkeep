@@ -4,6 +4,17 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.42.0] — 2026-07-17
+
+### Changed
+
+- `wendkeep renumber-decisions --apply` agora **move** as notas de subpastas `DIA N` para a
+  pasta do mês da sua data (achatando o legado), consistente com `renumber-bugs`/
+  `renumber-learnings` do 0.41.0. Antes só renomeava in-place para `ADR-NNNN-<slug>` e
+  deixava as pastas de dia intactas. Os wikilinks já eram reescritos vault-wide; agora
+  acompanham o novo caminho de mês, e as pastas `DIA` que ficam vazias são removidas.
+  Notas sem data resolvível preservam a pasta atual (nunca são perdidas). Idempotente.
+
 ## [0.41.0] — 2026-07-16
 
 ### Added

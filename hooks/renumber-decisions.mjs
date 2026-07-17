@@ -5,9 +5,10 @@
 // chronological order (the order decisions were made), renames the files in place, updates every
 // wikilink to them across the whole vault, and normalizes each note's `type`/`adr`/H1. Idempotent:
 // running it again on an already-canonical vault is a no-op (same order, same names).
-import { readdirSync, readFileSync, renameSync, writeFileSync, existsSync } from 'node:fs';
+import { readdirSync, readFileSync, renameSync, rmdirSync, writeFileSync, existsSync } from 'node:fs';
 import { join, dirname, relative } from 'node:path';
 import { getLocale } from './locale.mjs';
+import { ensureDir, monthFolderRelFromDateStr } from './obsidian-common.mjs';
 
 export const padAdr = (n) => String(n).padStart(4, '0');
 
@@ -29,17 +30,25 @@ function walkDecisions(vaultBase, decisionsDir) {
   return out;
 }
 
+// Resolve a decision's date: frontmatter `date:` > filename `YYYY-MM-DD` prefix > dated folder
+// (`.../YYYY/MM-.../DIA N/`). Returns '' when nothing is derivable. Used by both the sort key
+// and the destination-folder computation (so a note is filed under the month of its real date).
+export function decisionDate({ abs, base, content }) {
+  const c = content ?? (existsSync(abs) ? safeRead(abs) : '');
+  const fmDate = c.match(/^date:\s*(\d{4}-\d{2}-\d{2})/m);
+  if (fmDate) return fmDate[1];
+  const fnDate = base.match(/^(\d{4}-\d{2}-\d{2})/);
+  if (fnDate) return fnDate[1];
+  const folderDate = String(abs).replaceAll('\\', '/').match(/\/(\d{4})\/(\d{2})-[^/]+\/DIA\s+(\d{1,2})\//i);
+  if (folderDate) return `${folderDate[1]}-${folderDate[2]}-${String(folderDate[3]).padStart(2, '0')}`;
+  return '';
+}
+
 // Chronological sort key: date, then time, then existing ADR number, then filename — all derived
 // from (in priority) frontmatter, filename prefix, and the dated folder path.
 export function decisionSortKey({ abs, base, content }) {
   const c = content ?? (existsSync(abs) ? safeRead(abs) : '');
-  const fmDate = c.match(/^date:\s*(\d{4}-\d{2}-\d{2})/m);
-  const fnDate = base.match(/^(\d{4}-\d{2}-\d{2})/);
-  const folderDate = abs.replaceAll('\\', '/').match(/\/(\d{4})\/(\d{2})-[^/]+\/DIA\s+(\d{1,2})\//i);
-  let date = '9999-12-31';
-  if (fmDate) date = fmDate[1];
-  else if (fnDate) date = fnDate[1];
-  else if (folderDate) date = `${folderDate[1]}-${folderDate[2]}-${String(folderDate[3]).padStart(2, '0')}`;
+  const date = decisionDate({ abs, base, content: c }) || '9999-12-31';
 
   const fmTime = c.match(/^started_at:\s*\S*T(\d{2}:\d{2}:\d{2})/m);
   const srcTime = c.match(/\[\[[^\]]*\/(\d{2})-(\d{2})-[^\]]*\]\]/); // session wikilink HH-MM prefix
@@ -131,13 +140,16 @@ export function planRenumber(vaultBase) {
     const num = i + 1;
     const slug = slugFromDecisionName(n.base);
     const newBase = `ADR-${padAdr(num)}-${slug}.md`;
-    const folderRel = dirname(n.rel);
-    const newRel = folderRel === '.' ? newBase : `${folderRel}/${newBase}`;
+    // Destination = the month folder of the note's date (like renumber-derived): flatten legacy
+    // `DIA N` subfolders. No derivable date -> keep the current dirname (never lose the note).
+    const date = decisionDate(n);
+    const destDirRel = date ? monthFolderRelFromDateStr(decisionsDir, date, vaultBase) : dirname(n.rel);
+    const newRel = `${destDirRel.replaceAll('\\', '/')}/${newBase}`;
     const oldAdr = n.base.match(/^ADR-(\d+)/i);
     renames.push({
       num, slug,
       oldAbs: n.abs,
-      newAbs: join(dirname(n.abs), newBase),
+      newAbs: join(vaultBase, destDirRel, newBase),
       oldRelNoExt: n.rel.replace(/\.md$/i, ''),
       newRelNoExt: newRel.replace(/\.md$/i, ''),
       oldBaseNoExt: n.base.replace(/\.md$/i, ''),
@@ -173,11 +185,12 @@ export function renumberDecisions(vaultBase, { apply = false } = {}) {
     temps.set(r, tmp);
   });
 
-  // Phase B — normalize each note's body, then land it at its final path. For a renamed note we
-  // write the normalized content back over its temp and renameSync temp -> final (no delete: the
-  // temp file becomes the final file). For an unchanged name we just rewrite in place.
+  // Phase B — normalize each note's body, then land it at its final path (possibly a different
+  // month directory). For a renamed note we write the normalized content over its temp and
+  // renameSync temp -> final; for an unchanged name we rewrite in place.
   for (const r of renames) {
     const tmp = temps.get(r);
+    ensureDir(dirname(r.newAbs));
     if (tmp) {
       writeFileSync(tmp, normalizeDecisionContent(safeRead(tmp), r.num), 'utf8');
       renameSync(tmp, r.newAbs);
@@ -194,5 +207,25 @@ export function renumberDecisions(vaultBase, { apply = false } = {}) {
     const after = rewriteLinks(before, linkRenames);
     if (after !== before) { writeFileSync(abs, after, 'utf8'); report.filesTouched += 1; report.linksUpdated += 1; }
   }
+
+  // Phase D — drop legacy `DIA *` folders left empty by the move to the month folder.
+  pruneEmptyDayFolders(vaultBase, getLocale(vaultBase).folders.decisions);
   return report;
+}
+
+// Remove now-empty `DIA *` folders under the decisions root (best-effort, fail-quiet).
+function pruneEmptyDayFolders(vaultBase, folderRel) {
+  const walk = (dir) => {
+    let entries;
+    try { entries = readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    for (const e of entries) {
+      if (!e.isDirectory()) continue;
+      const abs = join(dir, e.name);
+      walk(abs);
+      if (/^DIA\s/i.test(e.name)) {
+        try { rmdirSync(abs); } catch { /* não-vazio — fica */ }
+      }
+    }
+  };
+  walk(join(vaultBase, folderRel));
 }
