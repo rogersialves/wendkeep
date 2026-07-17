@@ -16,6 +16,34 @@ function vaultWith(files) {
   return vault;
 }
 
+// DRV-8 — dedup de bug/decisão enxerga notas da sessão em qualquer subpasta (incl. DIA legado)
+test('existingKeysForSession: finds a session note in a legacy DIA subfolder (recursive)', async () => {
+  const { existingKeysForSession } = await import('../hooks/linked-notes.mjs');
+  const vault = vaultWith([]);
+  try {
+    const sessionRel = '02-Sessões/2026/06-JUN/DIA 12/01-26-x.md';
+    const dia = join(vault, '04-Decisões', '2026', '06-JUN', 'DIA 12');
+    mkdirSync(dia, { recursive: true });
+    writeFileSync(join(dia, 'ADR-0018-regra.md'), '---\ntype: decision\ncontent_key: "chave-legada"\nsession: "[[02-Sessões/2026/06-JUN/DIA 12/01-26-x]]"\n---\n# ADR-0018\n');
+    const keys = existingKeysForSession(vault, sessionRel, '2026-06-12');
+    assert.deepEqual(keys.decisions, ['chave-legada'], 'nota em DIA da sessão é vista (scan recursivo)');
+  } finally { rmSync(vault, { recursive: true, force: true }); }
+});
+
+test('existingKeysForSession: month-folder note still deduped; unrelated note ignored', async () => {
+  const { existingKeysForSession } = await import('../hooks/linked-notes.mjs');
+  const vault = vaultWith([]);
+  try {
+    const sessionRel = '02-Sessões/2026/06-JUN/DIA 12/01-26-x.md';
+    const mes = join(vault, '05-Bugs', '2026', '06-JUN');
+    mkdirSync(mes, { recursive: true });
+    writeFileSync(join(mes, 'BUG-0001-y.md'), '---\ntype: bug\ncontent_key: "chave-mes"\nsession: "[[02-Sessões/2026/06-JUN/DIA 12/01-26-x]]"\n---\n# BUG-0001\n');
+    writeFileSync(join(mes, 'BUG-0002-z.md'), '---\ntype: bug\ncontent_key: "outra-sessao"\n---\n# BUG-0002 sem link\n');
+    const keys = existingKeysForSession(vault, sessionRel, '2026-06-12');
+    assert.deepEqual(keys.bugs, ['chave-mes'], 'nota do mês continua; nota sem link da sessão ignorada');
+  } finally { rmSync(vault, { recursive: true, force: true }); }
+});
+
 test('getNextDerivedNumber: empty folder yields 1', () => {
   const vault = vaultWith([]);
   try {

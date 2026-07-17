@@ -4,6 +4,17 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.43.0] — 2026-07-17
+
+### Fixed
+
+- Dedup de nota derivada era assimétrico: aprendizado deduplicava recursivamente (vault
+  inteiro), mas **bug e decisão só olhavam a pasta do mês** (`existingKeysForSession`, scan
+  não-recursivo). Uma nota da sessão numa subpasta `DIA` legada não era vista, então um
+  re-import/re-captura da mesma sessão criava uma duplicata de bug/decisão. Agora
+  `existingKeysForSession` varre a pasta derivada recursivamente (como o de aprendizado),
+  mantendo a semântica per-sessão (só notas que referenciam a sessão contam).
+
 ## [0.42.0] — 2026-07-17
 
 ### Changed

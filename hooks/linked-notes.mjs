@@ -553,10 +553,6 @@ ${L.learn.futureHint}
 
 const derivedFoldersFor = (vaultBase) => { const f = getLocale(vaultBase).folders; return { bugs: f.bugs, decisions: f.decisions, learnings: f.learnings }; };
 
-function listMd(dir) {
-  try { return readdirSync(dir).filter((f) => f.endsWith('.md')); } catch { return []; }
-}
-
 // Chaves content_key das derivadas já existentes que linkam esta sessão.
 // Vault-wide learning content_keys (recursive over the learnings folder). existingKeysForSession
 // only looks at the current session + month, so the same lesson re-extracted on a later day/
@@ -582,19 +578,31 @@ function collectLearningKeys(vaultBase) {
   return keys;
 }
 
-function existingKeysForSession(vaultBase, sessionRel, dateStr) {
+// dateStr kept for call compatibility; no longer used to narrow the scan — a session's note may
+// sit in a legacy `DIA` subfolder, not just the month folder, so we walk the whole derived tree
+// (like collectLearningKeys). The per-session semantics stay: only notes referencing THIS session
+// count, so bugs/decisions from other sessions never leak in.
+export function existingKeysForSession(vaultBase, sessionRel, dateStr) { // eslint-disable-line no-unused-vars
   const wikilink = wikilinkFromRel(sessionRel);
   const out = { bugs: [], decisions: [], learnings: [] };
   for (const [type, folder] of Object.entries(derivedFoldersFor(vaultBase))) {
-    const dir = join(vaultBase, monthFolderRelFromDateStr(folder, dateStr, vaultBase));
-    for (const fileName of listMd(dir)) {
-      try {
-        const c = readFileSync(join(dir, fileName), 'utf-8');
-        if (!c.includes(sessionRel) && !c.includes(wikilink)) continue;
-        const m = c.match(/^content_key:\s*"?(.*?)"?\s*$/m);
-        if (m && m[1]) out[type].push(m[1]);
-      } catch { /* ignora nota ilegível */ }
-    }
+    const root = join(vaultBase, folder);
+    const walk = (d) => {
+      let entries;
+      try { entries = readdirSync(d, { withFileTypes: true }); } catch { return; }
+      for (const e of entries) {
+        const p = join(d, e.name);
+        if (e.isDirectory()) { walk(p); continue; }
+        if (!e.name.endsWith('.md')) continue;
+        try {
+          const c = readFileSync(p, 'utf-8');
+          if (!c.includes(sessionRel) && !c.includes(wikilink)) continue;
+          const m = c.match(/^content_key:\s*"?(.*?)"?\s*$/m);
+          if (m && m[1]) out[type].push(m[1]);
+        } catch { /* ignora nota ilegível */ }
+      }
+    };
+    walk(root);
   }
   return out;
 }
