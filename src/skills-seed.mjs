@@ -35,15 +35,18 @@ vault cego. Exceção única: mudança trivial (typo, 1 linha).
    Antes de implementar, resolva \`spec_impact\` na proposta:
    - \`required\`: liste a capability em \`specs:\` e preencha
      \`specs/<capability>/spec.md\` com ADDED/MODIFIED/REMOVED; ligue tarefas com \`[req:ID]\`.
+     Heading de requisito: \`### Requisito: <ID> — <nome>\` (ou só \`### Requisito: <ID>\`);
+     o ID é a identidade (ex.: \`GATE-1\`, \`API-AUTH-2\`).
    - \`none\`: registre uma justificativa real em \`spec_impact_reason\`.
    \`pending\` nunca é estado pronto para implementação ou archive.
 3. **Apply** — implemente cada tarefa de \`tarefas.md\` com disciplina **wk-tdd**
    (teste vermelho antes do código). Marque \`- [x]\` ao concluir. Declare nas tarefas:
    - \`[sensor:<id>]\` — a prova automatizada (roda no verify).
    - \`[req:<ID>]\` — o requisito do spec que a tarefa satisfaz (ex.: \`[req:GATE-1]\`),
-      quando a change mexe numa capability. Toda autoria de spec ocorre somente em
+      quando a change mexe numa capability. Uma tarefa pode declarar vários
+      \`[req:]\` — todos contam na cobertura. Toda autoria de spec ocorre somente em
       \`08-Mudanças/<slug>/specs/<capability>/spec.md\`; \`07-Specs\` é gerado/read-only.
-   Ex.: \`- [ ] 2.1 valida CORE [req:MEM-1] [sensor:memory-validation]\`.
+   Ex.: \`- [ ] 2.1 valida CORE [req:MEM-1] [req:MEM-2] [sensor:memory-validation]\`.
 4. **Verify** — \`wendkeep verify\` roda os sensores → \`evidencia.json\`. Depois
    \`wendkeep verify --deep\` monta o *pacote de verificação* pro passe independente.
 5. **Verify deep** — a skill **wk-verify** (passe fresco, autor≠verificador) lê o pacote,
@@ -259,8 +262,11 @@ leaves the vault blind. Single exception: a trivial change (typo, one line).
    Before implementation, resolve \`spec_impact\`: \`required\` needs the capability listed in
    \`specs:\` plus a real \`specs/<capability>/spec.md\` delta and \`[req:ID]\` links; \`none\`
    needs a real \`spec_impact_reason\`. \`pending\` is never ready for implementation/archive.
+   Requirement heading: \`### Requirement: <ID> — <name>\` (or bare \`### Requirement: <ID>\`);
+   the ID is the identity (e.g. \`GATE-1\`, \`API-AUTH-2\`).
 3. **Apply** — implement each task in tarefas.md with **wk-tdd** (red test first). Tag tasks:
-   \`[sensor:<id>]\` (automated proof) and \`[req:<ID>]\` (the spec requirement it satisfies).
+   \`[sensor:<id>]\` (automated proof) and \`[req:<ID>]\` (the spec requirement it satisfies;
+   a task may declare several \`[req:]\` tags — all of them count toward coverage).
    Author specs only in \`08-Changes/<slug>/specs/\`; \`07-Specs\` is generated/read-only.
 4. **Verify** — \`wendkeep verify\` runs the sensors; then \`wendkeep verify --deep\` builds
    the verification package.

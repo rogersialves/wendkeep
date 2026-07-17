@@ -4,7 +4,7 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { ensureDir, wikilinkFromRel, monthFolderRelFromDateStr } from './obsidian-common.mjs';
-import { parseSpecsList, promoteSpecs, discoverSpecDeltas, tasksHashOf, captureSpecBaseline } from './spec-core.mjs';
+import { parseSpecsList, promoteSpecs, discoverSpecDeltas, tasksHashOf, captureSpecBaseline, REQ_ID_RE_SRC } from './spec-core.mjs';
 import { getLocale } from './locale.mjs';
 
 export const ARCHIVE_DIR = '_arquivo';
@@ -161,18 +161,18 @@ export function parseTasks(md) {
   const tasks = [];
   const re = /^-\s+\[( |x)\]\s+(\S+)\s+(.*)$/gm;
   const sensorRe = /\[sensor:\s*([\w.-]+)\]/;
-  const reqRe = /\[req:\s*([A-Z][A-Z0-9]*-\d+)\]/;
+  const reqReG = new RegExp(`\\[req:\\s*(${REQ_ID_RE_SRC})\\]`, 'g');
   let m;
   while ((m = re.exec(String(md))) !== null) {
     let text = m[3].trim();
     const sm = text.match(sensorRe);
-    const rm = text.match(reqRe);
+    const reqs = [...text.matchAll(reqReG)].map((r) => r[1]);
     const sensor = sm ? sm[1] : undefined;
-    const req = rm ? rm[1] : undefined;
     if (sm) text = text.replace(sensorRe, '');
-    if (rm) text = text.replace(reqRe, '');
+    if (reqs.length) text = text.replace(reqReG, '');
     text = text.replace(/\s+/g, ' ').trim();
-    tasks.push({ id: m[2], text, done: m[1] === 'x', ...(sensor ? { sensor } : {}), ...(req ? { req } : {}) });
+    // `req` stays as alias of the first id — older consumers keep working.
+    tasks.push({ id: m[2], text, done: m[1] === 'x', ...(sensor ? { sensor } : {}), ...(reqs.length ? { req: reqs[0], reqs } : {}) });
   }
   return tasks;
 }
@@ -419,7 +419,7 @@ export function archiveChange(vaultBase, slug, { gate = gateGreen, dateStr, adrN
   }
 
   let reqIds = [];
-  try { reqIds = [...new Set(parseTasks(readFileSync(join(src, 'tarefas.md'), 'utf8')).map((t) => t.req).filter(Boolean))]; } catch { /* sem tarefas */ }
+  try { reqIds = [...new Set(parseTasks(readFileSync(join(src, 'tarefas.md'), 'utf8')).flatMap((t) => t.reqs ?? []))]; } catch { /* sem tarefas */ }
 
   ensureDir(join(vaultBase, chDir, ARCHIVE_DIR));
   try {

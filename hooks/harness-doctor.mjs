@@ -41,7 +41,7 @@ export function checkHarness(vaultBase, projectRoot) {
     let tasks = [];
     let tarefasMd = '';
     try { tarefasMd = readFileSync(join(dir, 'tarefas.md'), 'utf8'); tasks = parseTasks(tarefasMd); } catch { /* sem tarefas */ }
-    const reqIds = [...new Set(tasks.map((t) => t.req).filter(Boolean))];
+    const reqIds = [...new Set(tasks.flatMap((t) => t.reqs ?? []))];
     const effective = buildEffectiveRequirementPackage(vaultBase, dir, reqIds);
     errors.push(...effective.errors.map((e) => `${name}: spec efetiva inválida: ${e}`));
     if (effective.missing.length) errors.push(`req órfão em ${name}: ${effective.missing.map((id) => `[req:${id}]`).join(', ')} não existe na spec efetiva`);

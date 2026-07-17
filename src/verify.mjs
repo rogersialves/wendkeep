@@ -4,10 +4,11 @@
 import { readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { isAbsolute, join, resolve } from 'node:path';
 import { parseTasks, activeChange, appendFixTasks } from '../hooks/change-core.mjs';
-import { loadSensors, requiredSensors, runSensors, evaluateGate } from '../hooks/sensors-core.mjs';
+import { loadSensorsDetailed, findProjectRoot, requiredSensors, runSensors, evaluateGate } from '../hooks/sensors-core.mjs';
 import {
   buildEffectiveRequirementPackage,
   captureSpecBaseline,
+  formatOrphanReqs,
   tasksHashOf,
 } from '../hooks/spec-core.mjs';
 import { addLesson } from '../hooks/lessons-core.mjs';
@@ -29,7 +30,9 @@ export function runVerify(argv) {
   const vaultRaw = opt(argv, '--vault') || process.env.OBSIDIAN_VAULT_PATH;
   if (!vaultRaw) { process.stderr.write('wendkeep verify: no vault (--vault or OBSIDIAN_VAULT_PATH).\n'); process.exit(2); }
   const vaultBase = isAbsolute(vaultRaw) ? vaultRaw : resolve(process.cwd(), vaultRaw);
-  const projectRoot = resolve(opt(argv, '--project') || process.cwd());
+  // --project wins; otherwise climb from cwd to the nearest project marker (agent shells
+  // keep their cwd across commands, so verify from a subdirectory is a recurring miss).
+  const projectRoot = resolve(opt(argv, '--project') || findProjectRoot(process.cwd()) || process.cwd());
   const slug = opt(argv, '--change') || activeChange(vaultBase);
   if (!slug) { process.stderr.write('wendkeep verify: no change (--change or active).\n'); process.exit(2); }
 
@@ -39,7 +42,15 @@ export function runVerify(argv) {
   catch { process.stderr.write(`wendkeep verify: change not found: ${slug}\n`); process.exit(2); }
 
   const ids = requiredSensors(parseTasks(tarefas));
-  const sensors = loadSensors(projectRoot);
+  const loaded = loadSensorsDetailed(projectRoot);
+  if (loaded.error) {
+    process.stderr.write(`wendkeep verify: wendkeep.sensors.json inválido em ${loaded.path}: ${loaded.error}\n`);
+    process.exit(2);
+  }
+  if (loaded.missing && ids.length) {
+    process.stderr.write(`wendkeep verify: wendkeep.sensors.json não encontrado em ${loaded.path} — rode da raiz do projeto ou use --project <raiz>\n`);
+  }
+  const sensors = loaded.sensors;
   const evidence = runSensors(sensors, ids, { cwd: projectRoot });
   writeFileSync(join(changeDir, 'evidencia.json'), `${JSON.stringify(evidence, null, 2)}\n`, 'utf8');
   // Freshness seal: bind this evidence to the tarefas.md it was produced against, so the archive
@@ -90,7 +101,7 @@ export function runVerify(argv) {
   // change (no [req:] tasks, sensors green) gets an auto verdict — no agent pass needed.
   if (argv.includes('--deep')) {
     const tasks = parseTasks(tarefas);
-    const reqIds = [...new Set(tasks.map((t) => t.req).filter(Boolean))];
+    const reqIds = [...new Set(tasks.flatMap((t) => t.reqs ?? []))];
     const tasksHash = tasksHashOf(tarefas);
     captureSpecBaseline(vaultBase, changeDir);
     const effective = buildEffectiveRequirementPackage(vaultBase, changeDir, reqIds);
@@ -99,7 +110,7 @@ export function runVerify(argv) {
       process.exit(1);
     }
     if (effective.missing.length) {
-      process.stderr.write(`verify --deep: requisito(s) órfão(s) na spec efetiva: ${effective.missing.join(', ')}\n`);
+      process.stderr.write(`verify --deep: ${formatOrphanReqs(effective.missing)}\n`);
       process.exit(1);
     }
     const pkg = {
@@ -116,7 +127,7 @@ export function runVerify(argv) {
           body: req.body,
         };
       }),
-      tasks: tasks.map((t) => ({ id: t.id, text: t.text, req: t.req || null, done: t.done })),
+      tasks: tasks.map((t) => ({ id: t.id, text: t.text, req: t.req || null, reqs: t.reqs || [], done: t.done })),
       sensors: evidence,
     };
     writeFileSync(join(changeDir, 'verificacao.json'), `${JSON.stringify(pkg, null, 2)}\n`, 'utf8');

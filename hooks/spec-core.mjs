@@ -22,15 +22,29 @@ export const MANAGED_SPEC_MARKER = '<!-- wendkeep:managed-spec — generated fro
 // Parse is BILINGUAL always (mixed vaults never break); rendering follows the vault locale.
 const REQ_RE = /^### (?:Requisito|Requirement):\s*(.+)$/gm;
 
+// Single source of truth for requirement-id shape — task tags ([req:ID]) and spec
+// headings MUST agree, or coverage silently misses (multi-segment ids like API-AUTH-2).
+export const REQ_ID_RE_SRC = '[A-Z][A-Z0-9]*(?:-[A-Z0-9]+)*-\\d+';
+
+// Orphan diagnostics must teach the fix, not just name the ids — the heading format
+// is the most common cause and lives only here.
+export function formatOrphanReqs(ids) {
+  const list = ids.join(', ');
+  const ex = ids[0] || 'GATE-1';
+  return `requisito(s) órfão(s) na spec efetiva: ${list} — heading esperado no spec.md da change: "### Requisito: ${ex} — <nome>" (ou só "### Requisito: ${ex}")`;
+}
+
 export function parseRequirements(md) {
   const text = String(md);
   const matches = [...text.matchAll(REQ_RE)];
   const reqs = [];
   for (let i = 0; i < matches.length; i += 1) {
     const raw = matches[i][1].trim();
-    // Identity is the ID (e.g. GATE-1) when the heading is "<ID> — <nome>"; else the whole text.
-    const idM = raw.match(/^([A-Z][A-Z0-9]*(?:-[A-Z0-9]+)*-\d+)\s*—\s*(.+)$/);
-    const id = idM ? idM[1] : null;
+    // Identity is the ID (e.g. GATE-1) when the heading is "<ID> — <nome>" or a bare
+    // "<ID>"; else the whole text. Bare ids keep specs writable without the em-dash.
+    const idM = raw.match(new RegExp(`^(${REQ_ID_RE_SRC})\\s*—\\s*(.+)$`));
+    const bare = idM ? null : raw.match(new RegExp(`^(${REQ_ID_RE_SRC})$`));
+    const id = idM ? idM[1] : bare ? bare[1] : null;
     const name = idM ? idM[2].trim() : raw;
     const start = matches[i].index + matches[i][0].length;
     const end = i + 1 < matches.length ? matches[i + 1].index : text.length;

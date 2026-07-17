@@ -49,7 +49,7 @@ export function runSpec(argv) {
       tasks = parseTasks(readFileSync(join(changeDir, 'tarefas.md'), 'utf8'));
     }
     catch { process.stderr.write(`wendkeep spec effective: change not found: ${slug}\n`); process.exit(2); }
-    const reqIds = [...new Set(tasks.map((task) => task.req).filter(Boolean))];
+    const reqIds = [...new Set(tasks.flatMap((task) => task.reqs ?? []))];
     const effective = buildEffectiveRequirementPackage(vaultBase, changeDir, reqIds);
     if (effective.errors.length) {
       process.stderr.write(`wendkeep spec effective: invalid delta: ${effective.errors.join('; ')}\n`);

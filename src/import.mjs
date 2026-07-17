@@ -12,7 +12,22 @@ function opt(argv, name) {
   return eq ? eq.slice(name.length + 1) : undefined;
 }
 
+const KNOWN_FLAGS = new Set([
+  '--vault', '--project', '--source', '--from', '--codex-from', '--since', '--limit',
+  '--dry-run', '--json', '--rescan-decisions', '--stamp-ids', '--help', '-h',
+]);
+
 export function runImportCli(argv) {
+  // Import writes to the vault; an unrecognized flag must never fall through to the
+  // destructive default (--source all). Fail fast, point at --help.
+  for (const a of argv) {
+    if (!a.startsWith('-')) continue;
+    const name = a.includes('=') ? a.slice(0, a.indexOf('=')) : a;
+    if (!KNOWN_FLAGS.has(name)) {
+      process.stderr.write(`wendkeep import: flag desconhecida "${name}" (use --help)\n`);
+      process.exit(2);
+    }
+  }
   const vaultRaw = opt(argv, '--vault') || process.env.OBSIDIAN_VAULT_PATH;
   if (!vaultRaw) { process.stderr.write('wendkeep import: no vault (--vault or OBSIDIAN_VAULT_PATH).\n'); process.exit(2); }
   const vaultBase = isAbsolute(vaultRaw) ? vaultRaw : resolve(process.cwd(), vaultRaw);

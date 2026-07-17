@@ -17,7 +17,7 @@ import {
   scaffoldPlaceholders,
 } from '../hooks/change-core.mjs';
 import { evaluateGate, requiredSensors } from '../hooks/sensors-core.mjs';
-import { buildEffectiveRequirementPackage, evaluateVerdict, tasksHashOf, parseSpecsList, parseDelta, parseRequirements, applyDelta, validateSpecImpact } from '../hooks/spec-core.mjs';
+import { buildEffectiveRequirementPackage, evaluateVerdict, formatOrphanReqs, tasksHashOf, parseSpecsList, parseDelta, parseRequirements, applyDelta, validateSpecImpact } from '../hooks/spec-core.mjs';
 import { getNextAdrNumber, readControl, readSessionRegistry, upsertSessionRegistry } from '../hooks/obsidian-common.mjs';
 import { getLocale } from '../hooks/locale.mjs';
 
@@ -147,13 +147,13 @@ export function runChange(argv) {
     process.stdout.write(`specs: ${specs.join(', ') || '(nenhuma)'}\n`);
     process.stdout.write(`tarefas: ${done} done / ${tasks.length - done} open\n`);
     for (const t of tasks) {
-      process.stdout.write(`  [${t.done ? 'x' : ' '}] ${t.id} ${t.text}${t.req ? ` [req:${t.req}]` : ''}${t.sensor ? ` [sensor:${t.sensor}]` : ''}\n`);
+      process.stdout.write(`  [${t.done ? 'x' : ' '}] ${t.id} ${t.text}${(t.reqs ?? []).map((r) => ` [req:${r}]`).join('')}${t.sensor ? ` [sensor:${t.sensor}]` : ''}\n`);
     }
     let evidence = null;
     try { evidence = JSON.parse(readFileSync(join(dir, 'evidencia.json'), 'utf8')); } catch { /* sem evidência */ }
     if (evidence) for (const e of evidence) process.stdout.write(`  ${e.status === 'green' ? '✓' : '✗'} ${e.id} (${e.severity || 'critical'})\n`);
     else process.stdout.write('evidencia: ausente\n');
-    const reqIds = [...new Set(tasks.map((t) => t.req).filter(Boolean))];
+    const reqIds = [...new Set(tasks.flatMap((t) => t.reqs ?? []))];
     const effective = buildEffectiveRequirementPackage(vaultBase, dir, reqIds);
     if (effective.errors.length || effective.missing.length) {
       process.stdout.write(`spec efetiva: inválida (${[...effective.errors, ...effective.missing.map((id) => `req órfão ${id}`)].join('; ')})\n`);
@@ -239,10 +239,10 @@ export function runChange(argv) {
           return { ok: false, failing: ['evidência stale (tarefas.md mudou desde o último verify) — rode `wendkeep verify` de novo'] };
         }
       }
-      const reqIds = [...new Set(tasks.map((t) => t.req).filter(Boolean))];
+      const reqIds = [...new Set(tasks.flatMap((t) => t.reqs ?? []))];
       const effective = buildEffectiveRequirementPackage(vaultBase, dir, reqIds);
       if (effective.errors.length) return { ok: false, failing: [`spec efetiva inválida: ${effective.errors.join('; ')}`] };
-      if (effective.missing.length) return { ok: false, failing: [`requisito(s) órfão(s) na spec efetiva: ${effective.missing.join(', ')}`] };
+      if (effective.missing.length) return { ok: false, failing: [formatOrphanReqs(effective.missing)] };
       let evidence = [];
       try { evidence = JSON.parse(readFileSync(join(dir, 'evidencia.json'), 'utf8')); } catch { /* no evidence */ }
       const s = evaluateGate(evidence, required);

@@ -4,6 +4,33 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.40.0] — 2026-07-16
+
+### Added
+
+- `parseTasks` captura **todos** os `[req:]` de uma tarefa em `reqs: string[]` (`req` permanece
+  como alias do primeiro, retrocompatível). Antes, só o primeiro entrava no pacote de
+  verificação e os demais sumiam sem aviso.
+- Heading de requisito aceita ID puro (`### Requisito: GATE-1`) como identidade, além do
+  formato preferido `### Requisito: <ID> — <nome>`. Diagnóstico de requisito órfão agora
+  ensina o formato esperado com exemplo concreto.
+- `findProjectRoot`: `wendkeep verify` executado de um subdiretório sobe a árvore até achar
+  `wendkeep.sensors.json`/`.wendkeep.json` (à la `.git`); `--project` continua autoritativo.
+- `--help`/`-h` universal: qualquer subcomando com `--help` imprime a ajuda e sai com 0,
+  interceptado antes da resolução de vault — nunca executa o comando.
+
+### Fixed
+
+- Regex de ID de requisito unificada entre tarefa e spec (`REQ_ID_RE_SRC`): IDs
+  multi-segmento (`API-AUTH-2`) agora são reconhecidos também nas tarefas.
+- `wendkeep verify` distingue `wendkeep.sensors.json` ausente (aviso com path + dica
+  `--project`) de JSON inválido (erro alto com a mensagem do parse). Antes, ambos viravam
+  "sensor não definido" para todos os sensores.
+- `wendkeep import` com flag desconhecida agora falha com exit 2 citando a flag, em vez de
+  cair no default destrutivo `--source all` (que chegou a importar 78 sessões sem querer).
+- Templates seed (skills de workflow pt/en) documentam o formato de heading de requisito e o
+  suporte a múltiplos `[req:]` por tarefa.
+
 ## [0.39.0] — 2026-07-13
 
 ### Added

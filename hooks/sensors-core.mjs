@@ -2,15 +2,37 @@
 // Pure-ish: `spawn` is injectable so runs are testable without a shell. Config lives
 // at the PROJECT ROOT (wendkeep.sensors.json); evidence lives per-change in the vault.
 import { spawnSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, readFileSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
 
 export function loadSensors(projectRoot, file = 'wendkeep.sensors.json') {
+  return loadSensorsDetailed(projectRoot, file).sensors;
+}
+
+// Missing config and broken config are different failures: absent file usually means
+// wrong cwd (subdirectory), broken JSON means the config itself needs fixing. Collapsing
+// both into [] made every sensor report "sensor não definido" — a misleading diagnosis.
+export function loadSensorsDetailed(projectRoot, file = 'wendkeep.sensors.json') {
+  const path = join(projectRoot, file);
+  if (!existsSync(path)) return { sensors: [], missing: true, error: null, path };
   try {
-    const data = JSON.parse(readFileSync(join(projectRoot, file), 'utf8'));
-    return Array.isArray(data.sensors) ? data.sensors : [];
-  } catch {
-    return [];
+    const data = JSON.parse(readFileSync(path, 'utf8'));
+    return { sensors: Array.isArray(data.sensors) ? data.sensors : [], missing: false, error: null, path };
+  } catch (e) {
+    return { sensors: [], missing: false, error: e.message, path };
+  }
+}
+
+// Climb the directory tree looking for a project marker (wendkeep.sensors.json or
+// .wendkeep.json), like git does with .git — shells in agent harnesses keep their cwd
+// across commands, so verify is often run from a subdirectory.
+export function findProjectRoot(startDir) {
+  let dir = resolve(startDir);
+  for (;;) {
+    if (existsSync(join(dir, 'wendkeep.sensors.json')) || existsSync(join(dir, '.wendkeep.json'))) return dir;
+    const parent = dirname(dir);
+    if (parent === dir) return null;
+    dir = parent;
   }
 }
 

@@ -125,6 +125,13 @@ async function preferProjectVault(argv) {
 
 async function main() {
   const [cmd, ...rest] = process.argv.slice(2);
+  // Universal --help: any subcommand with --help/-h prints usage and never executes.
+  // Intercepted BEFORE vault resolution so it works anywhere — help must never depend
+  // on project state, and no command may treat --help as a runnable default.
+  if (cmd && (rest.includes('--help') || rest.includes('-h'))) {
+    process.stdout.write(HELP);
+    process.exit(0);
+  }
   if (cmd && !['init', 'hook', '--version', '-v', '--help', '-h', 'help'].includes(cmd)) {
     await preferProjectVault(rest);
   }

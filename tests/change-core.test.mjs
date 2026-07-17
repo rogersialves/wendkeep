@@ -23,6 +23,33 @@ test('parseTasks: extracts [req:ID] alongside [sensor:]', () => {
   assert.equal(t[0].text, 'faz');
 });
 
+// REQ-1 — múltiplos [req:] por tarefa são todos capturados (nunca descartados em silêncio)
+test('parseTasks: captures every [req:] into reqs[], req stays alias of the first', () => {
+  const t = parseTasks('- [ ] 1.1 faz X [req:GATE-1] [req:GATE-2] [req:GATE-3]\n');
+  assert.deepEqual(t[0].reqs, ['GATE-1', 'GATE-2', 'GATE-3']);
+  assert.equal(t[0].req, 'GATE-1', 'req = alias do primeiro (retrocompat)');
+  assert.equal(t[0].text, 'faz X', 'todas as tags removidas do texto');
+});
+
+test('parseTasks: single [req:] still yields reqs[] with one entry', () => {
+  const t = parseTasks('- [ ] 2.1 faz Y [req:MEM-1] [sensor:tests]\n');
+  assert.deepEqual(t[0].reqs, ['MEM-1']);
+  assert.equal(t[0].req, 'MEM-1');
+});
+
+test('parseTasks: task without [req:] has neither req nor reqs', () => {
+  const t = parseTasks('- [ ] 3.1 sem req\n');
+  assert.equal(t[0].req, undefined);
+  assert.equal(t[0].reqs, undefined);
+});
+
+// REQ-2 — regex de ID única: multi-segmento reconhecido na tarefa (igual à spec)
+test('parseTasks: multi-segment req id (API-AUTH-2) is recognized', () => {
+  const t = parseTasks('- [ ] 4.1 protege rota [req:API-AUTH-2]\n');
+  assert.deepEqual(t[0].reqs, ['API-AUTH-2']);
+  assert.equal(t[0].text, 'protege rota');
+});
+
 import { mkdtempSync, existsSync, readFileSync, rmSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';

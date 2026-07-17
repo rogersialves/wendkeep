@@ -26,6 +26,23 @@ test('wk-verify present; wk-tdd/brainstorming carry TLC discipline; workflow cit
   assert.match(by['wk-workflow'], /verify --deep/);
 });
 
+// REQ-4 — o template do workflow documenta o formato de heading de requisito e
+// o suporte a múltiplos [req:] por tarefa (pt e en).
+test('wk-workflow teaches the requirement heading format and multi-[req:] support', () => {
+  const wf = WK_SKILLS.find((s) => s.name === 'wk-workflow').body;
+  assert.match(wf, /### Requisito: <ID> — <nome>/, 'pt: formato de heading com ID');
+  assert.match(wf, /### Requisito: <ID>/, 'pt: forma com ID puro');
+  assert.match(wf, /vários\s+.?\[req:|múltiplos\s+.?\[req:/i, 'pt: múltiplos [req:] por tarefa');
+  assert.match(wf, /API-AUTH-2/, 'pt: exemplo multi-segmento');
+});
+
+test('wk-workflow EN variant teaches the same requirement-id contract', () => {
+  const en = wkSkills('en').find((s) => s.name === 'wk-workflow');
+  assert.ok(en, 'en seed exists');
+  assert.match(en.body, /### Requirement: <ID> — <name>/, 'en: heading format');
+  assert.match(en.body, /several\s+.?\[req:|multiple\s+.?\[req:/i, 'en: multiple [req:] per task');
+});
+
 test('wk-workflow references the wendkeep loop commands', () => {
   const wf = WK_SKILLS.find((s) => s.name === 'wk-workflow').body;
   assert.match(wf, /wendkeep change new/);

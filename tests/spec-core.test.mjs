@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { adoptSpecsState, buildEffectiveRequirementPackage, captureSpecBaseline, checkSpecsState, parseRequirements, parseDelta, applyDelta, renderSpec, parseSpecsList, promoteSpecs, evaluateVerdict, tasksHashOf, isPlaceholderDelta, discoverSpecDeltas, parseSpecImpact, specConflicts, validateSpecImpact } from '../hooks/spec-core.mjs';
+import { adoptSpecsState, buildEffectiveRequirementPackage, captureSpecBaseline, checkSpecsState, parseRequirements, parseDelta, applyDelta, renderSpec, parseSpecsList, promoteSpecs, evaluateVerdict, tasksHashOf, isPlaceholderDelta, discoverSpecDeltas, parseSpecImpact, specConflicts, validateSpecImpact, formatOrphanReqs } from '../hooks/spec-core.mjs';
 
 test('isPlaceholderDelta: scaffold puro true; delta real/REMOVED false; bilíngue', () => {
   const scaffoldPt = '## ADDED Requirements\n### Requisito: (nome)\n(comportamento / cenários)\n\n## MODIFIED Requirements\n\n## REMOVED Requirements\n';
@@ -90,6 +90,35 @@ test('parseRequirements: ordered blocks, drops trailing footer', () => {
   assert.deepEqual(r.map((x) => x.name), ['A', 'B']);
   assert.equal(r[0].body, 'corpo A');
   assert.equal(r[1].body, 'corpo B');
+});
+
+// REQ-3 — heading com ID puro (sem "— nome") é identidade; em-dash continua preferido
+test('parseRequirements: bare id heading (### Requisito: GATE-1) yields id, not null', () => {
+  const r = parseRequirements('### Requisito: GATE-1\ncorpo\n');
+  assert.equal(r[0].id, 'GATE-1');
+  assert.equal(r[0].name, 'GATE-1');
+  assert.equal(r[0].body, 'corpo');
+});
+
+test('parseRequirements: multi-segment bare id (API-AUTH-2) yields id', () => {
+  const r = parseRequirements('### Requisito: API-AUTH-2\ncorpo\n');
+  assert.equal(r[0].id, 'API-AUTH-2');
+});
+
+test('parseRequirements: id — name form still wins; plain name still has null id', () => {
+  const r = parseRequirements('### Requisito: GATE-1 — Nome legal\nx\n\n### Requisito: Só um nome\ny\n');
+  assert.equal(r[0].id, 'GATE-1');
+  assert.equal(r[0].name, 'Nome legal');
+  assert.equal(r[1].id, null);
+  assert.equal(r[1].name, 'Só um nome');
+});
+
+// REQ-4 — diagnóstico de órfão ensina o formato de heading esperado
+test('formatOrphanReqs: names the ids and teaches the expected heading format', () => {
+  const msg = formatOrphanReqs(['GATE-9', 'API-AUTH-2']);
+  assert.match(msg, /GATE-9, API-AUTH-2/);
+  assert.match(msg, /### Requisito: GATE-9 — <nome>/, 'exemplo concreto com o primeiro id');
+  assert.match(msg, /### Requisito: GATE-9"?\)/, 'forma com id puro também é ensinada');
 });
 
 test('parseDelta: three sections', () => {

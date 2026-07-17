@@ -1,9 +1,71 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { loadSensors, requiredSensors, runSensors, evaluateGate, parseMutationReport } from '../hooks/sensors-core.mjs';
+import { loadSensors, loadSensorsDetailed, findProjectRoot, requiredSensors, runSensors, evaluateGate, parseMutationReport } from '../hooks/sensors-core.mjs';
+
+// SEN-1 — config ausente (ENOENT) é distinta de config inválida (parse error)
+test('loadSensorsDetailed: missing file reports missing:true with the resolved path', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'wk-sen-'));
+  try {
+    const r = loadSensorsDetailed(dir);
+    assert.deepEqual(r.sensors, []);
+    assert.equal(r.missing, true);
+    assert.equal(r.error, null);
+    assert.ok(r.path.includes(dir), 'path resolvido aponta onde procurou');
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('loadSensorsDetailed: invalid JSON reports the parse error, never an empty list', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'wk-sen-'));
+  try {
+    writeFileSync(join(dir, 'wendkeep.sensors.json'), '{ broken');
+    const r = loadSensorsDetailed(dir);
+    assert.equal(r.missing, false);
+    assert.ok(r.error, 'erro de parse presente');
+    assert.deepEqual(r.sensors, []);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('loadSensorsDetailed: valid config returns sensors with no error', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'wk-sen-'));
+  try {
+    writeFileSync(join(dir, 'wendkeep.sensors.json'), JSON.stringify({ sensors: [{ id: 't', command: 'x' }] }));
+    const r = loadSensorsDetailed(dir);
+    assert.equal(r.missing, false);
+    assert.equal(r.error, null);
+    assert.equal(r.sensors.length, 1);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+// SEN-2 — descoberta ascendente da raiz (à la .git)
+test('findProjectRoot: climbs from a subdirectory to the dir holding wendkeep.sensors.json', () => {
+  const root = mkdtempSync(join(tmpdir(), 'wk-root-'));
+  try {
+    writeFileSync(join(root, 'wendkeep.sensors.json'), '{"sensors":[]}');
+    const sub = join(root, 'mobile-app', 'src');
+    mkdirSync(sub, { recursive: true });
+    assert.equal(findProjectRoot(sub), root);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('findProjectRoot: .wendkeep.json also marks the root', () => {
+  const root = mkdtempSync(join(tmpdir(), 'wk-root-'));
+  try {
+    writeFileSync(join(root, '.wendkeep.json'), '{}');
+    const sub = join(root, 'pkg');
+    mkdirSync(sub, { recursive: true });
+    assert.equal(findProjectRoot(sub), root);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('findProjectRoot: no marker anywhere returns null', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'wk-nomark-'));
+  try {
+    assert.equal(findProjectRoot(dir), null);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
 
 test('parseMutationReport: only Survived/NoCoverage as file/line/mutator', () => {
   const json = { files: {
