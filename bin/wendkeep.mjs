@@ -68,6 +68,12 @@ Usage:
   wendkeep renumber-decisions   Renumber 04-Decisões to ADR-<NNNN>-<slug> in chronological order,
                            renaming files + rewriting every wikilink. Preview by default; --apply to
                            write. --vault P · --json.
+  wendkeep renumber-bugs        Renumber 05-Bugs to BUG-<NNNN>-<slug> chronologically, moving notes
+                           out of legacy "DIA N" subfolders into the month folder and rewriting
+                           wikilinks. Preview by default; --apply · --vault P · --json.
+  wendkeep renumber-learnings   Same for 06-Aprendizados/06-Learnings with APR-<NNNN>-<slug>.
+  wendkeep note new --type bug|learning "<título>"  Create a numbered derived note (BUG-/APR-NNNN)
+                           in the month folder and print its vault path. --date YYYY-MM-DD · --vault P.
   wendkeep lesson add "t" "l"   Record a project-local lesson (injected at SessionStart).
   wendkeep validate-memory [path]  Validate .brain/CORE.md against the compaction
                            protocol (cap 25, 3 sections, no secrets/PII). Uses
@@ -212,6 +218,21 @@ async function main() {
     case 'renumber-decisions': {
       const { runRenumberDecisions } = await import('../src/renumber.mjs');
       runRenumberDecisions(rest);
+      break;
+    }
+    case 'renumber-bugs': {
+      const { runRenumberBugs } = await import('../src/renumber.mjs');
+      runRenumberBugs(rest);
+      break;
+    }
+    case 'renumber-learnings': {
+      const { runRenumberLearnings } = await import('../src/renumber.mjs');
+      runRenumberLearnings(rest);
+      break;
+    }
+    case 'note': {
+      const { runNote } = await import('../src/note.mjs');
+      runNote(rest);
       break;
     }
     case '--version':

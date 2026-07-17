@@ -72,6 +72,24 @@ test('derived notes: en locale renders english headings; pt default intact (B3)'
   assert.match(buildLearningNoteContent(learn, '2026-07-06', 'x', undefined, 'k', 'en'), /## What we learned/);
 });
 
+// DRV-1 — builders numerados: frontmatter bug:/apr: e H1 com prefixo (pt e en)
+test('derived notes: numbered builders emit bug:/apr: frontmatter and prefixed H1', async () => {
+  const { buildBugNoteContent, buildLearningNoteContent } = await import('../hooks/linked-notes.mjs');
+  const bug = { symptom: 's', rootCause: 'rc', fixes: [], changedFiles: [], evidence: [], lessons: 'l', tags: [], severity: 'high' };
+  const bugMd = buildBugNoteContent(bug, '', '2026-07-06', '02-Sessões/x', undefined, 'k', 'pt-BR', 7);
+  assert.match(bugMd, /^bug: 7$/m, 'frontmatter bug: N');
+  assert.match(bugMd, /^# BUG-0007 — /m, 'H1 numerado com em dash');
+  const bugEn = buildBugNoteContent(bug, '', '2026-07-06', '02-Sessions/x', undefined, 'k', 'en', 12);
+  assert.match(bugEn, /^# BUG-0012 — /m, 'en também numerado');
+  const learn = { title: 't', context: 'c', content: 'w', tags: [] };
+  const learnMd = buildLearningNoteContent(learn, '2026-07-06', 'x', undefined, 'k', 'pt-BR', 3);
+  assert.match(learnMd, /^apr: 3$/m, 'frontmatter apr: N');
+  assert.match(learnMd, /^# APR-0003 — /m, 'H1 numerado');
+  // retrocompat: sem número, H1 antigo permanece
+  assert.match(buildBugNoteContent(bug, '', '2026-07-06', 'x', undefined, 'k'), /^# Bug - /m);
+  assert.match(buildLearningNoteContent(learn, '2026-07-06', 'x', undefined, 'k'), /^# Aprendizado - /m);
+});
+
 test('en vault: change loop end-to-end (scaffold, requirement heading, ADR in 04-Decisions)', () => {
   const vault = mkdtempSync(join(tmpdir(), 'wk-enloop-'));
   const spawn = (a) => spawnSync(process.execPath, [BIN, 'change', ...a, '--vault', vault], { encoding: 'utf8' });

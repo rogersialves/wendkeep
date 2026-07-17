@@ -46,6 +46,7 @@ export const HOOK_FILES = [
   'import-sessions.mjs',
   'decision-capture.mjs',
   'renumber-decisions.mjs',
+  'renumber-derived.mjs',
   'subagent-stop.mjs',
   'task-log.mjs',
   'vault-health.mjs',

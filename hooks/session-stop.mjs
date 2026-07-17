@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { existsSync, readFileSync, writeFileSync } from 'fs';
+import { existsSync, readdirSync, readFileSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { request } from 'http';
 import { pathToFileURL } from 'url';
@@ -803,10 +803,15 @@ export function findLinkedDerivedNotes(vaultBase, sessionRel) {
     learnings: locF.learnings,
   };
 
-  for (const [key, folder] of Object.entries(folders)) {
-    const dir = join(vaultBase, folder);
-    for (const fileName of listMarkdownFiles(dir)) {
-      const absPath = join(dir, fileName);
+  // Recursive: derived notes live in month subfolders (04-Decisões/2026/07-JUL/ADR-...,
+  // 05-Bugs/.../BUG-...) — a root-only scan missed every one of them.
+  const walk = (dir, key) => {
+    let entries;
+    try { entries = readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    for (const entry of entries) {
+      const absPath = join(dir, entry.name);
+      if (entry.isDirectory()) { walk(absPath, key); continue; }
+      if (!entry.name.endsWith('.md')) continue;
       try {
         const content = readFileSync(absPath, 'utf-8');
         if (noteReferencesSession(content, sessionRel)) {
@@ -816,7 +821,8 @@ export function findLinkedDerivedNotes(vaultBase, sessionRel) {
         // Ignore unreadable notes; the hook must not block session shutdown.
       }
     }
-  }
+  };
+  for (const [key, folder] of Object.entries(folders)) walk(join(vaultBase, folder), key);
 
   return linked;
 }

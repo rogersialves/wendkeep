@@ -102,7 +102,7 @@ export function rewriteLinks(content, renames) {
   return c;
 }
 
-function allVaultMarkdown(vaultBase) {
+export function allVaultMarkdown(vaultBase) {
   const out = [];
   const skip = new Set(['.git', '.obsidian', 'node_modules', '_arquivo']);
   const walk = (dir) => {

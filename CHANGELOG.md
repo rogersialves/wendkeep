@@ -4,6 +4,37 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.41.0] — 2026-07-16
+
+### Added
+
+- Notas derivadas numeradas: bug e aprendizado gerados automaticamente nascem como
+  `BUG-NNNN-<slug>.md` / `APR-NNNN-<slug>.md` na pasta do mês (nunca subpasta `DIA N`),
+  com frontmatter `bug:`/`apr:` e H1 `# BUG-0001 — <título>` — paridade com o ADR de
+  04-Decisões. Numeração via `getNextDerivedNumber` (scan recursivo, max+1; `getNextAdrNumber`
+  virou wrapper).
+- `wendkeep note new --type bug|learning "<título>"`: cria a nota manual já numerada no
+  path certo (respeitando locale), com backlink da sessão ativa, e imprime o path — o
+  agente nunca calcula número nem pasta à mão. `--date YYYY-MM-DD` opcional.
+- `wendkeep renumber-bugs` e `wendkeep renumber-learnings`: migração retroativa — preview
+  por default, `--apply` renomeia em ordem cronológica, MOVE notas de subpastas `DIA N` e
+  da raiz para a pasta do mês, normaliza frontmatter/H1, reescreve wikilinks vault-wide
+  (full-path e basename) e remove pastas `DIA` vazias. Idempotente.
+- Convenção injetada (VAULT_COMPLEMENT_RULES) e seeds wk-debugging (pt/en) ensinam a
+  numeração, a regra sem-DIA e o uso de `wendkeep note new`.
+
+### Fixed
+
+- `findLinkedDerivedNotes` (Stop hook) agora varre as pastas derivadas recursivamente —
+  antes só enxergava notas na raiz de 04-Decisões/05-Bugs/06-Aprendizados, então notas nas
+  subpastas de mês nunca entravam no merge de wikilinks da sessão.
+
+### Migration
+
+- Para migrar vaults existentes: `wendkeep renumber-bugs` (revisar preview) →
+  `wendkeep renumber-bugs --apply`; idem `renumber-learnings`. Depois
+  `wendkeep sync-defs --project . --reseed` para atualizar as skills wk-*.
+
 ## [0.40.0] — 2026-07-16
 
 ### Added

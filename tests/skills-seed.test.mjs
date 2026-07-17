@@ -43,6 +43,23 @@ test('wk-workflow EN variant teaches the same requirement-id contract', () => {
   assert.match(en.body, /several\s+.?\[req:|multiple\s+.?\[req:/i, 'en: multiple [req:] per task');
 });
 
+// DRV-6 — convenção de notas derivadas: sem DIA, numeradas, criadas via `wendkeep note new`
+test('derived-note convention: VAULT_COMPLEMENT_RULES and seeds teach note new + no-DIA', async () => {
+  const { VAULT_COMPLEMENT_RULES } = await import('../hooks/obsidian-common.mjs');
+  const rules = VAULT_COMPLEMENT_RULES.join('\n');
+  assert.match(rules, /wendkeep note new/, 'regras injetadas citam o comando');
+  assert.match(rules, /BUG-|APR-/, 'regras citam a numeração');
+  assert.match(rules, /DIA/, 'regras proíbem a subpasta DIA explicitamente');
+
+  const wfPt = WK_SKILLS.find((s) => s.name === 'wk-workflow').body;
+  const dbgPt = WK_SKILLS.find((s) => s.name === 'wk-debugging').body;
+  assert.match(dbgPt, /wendkeep note new/, 'wk-debugging pt ensina note new');
+  assert.match(wfPt + dbgPt, /BUG-NNNN|BUG-\d{4}/, 'seeds pt citam BUG-NNNN');
+
+  const dbgEn = wkSkills('en').find((s) => s.name === 'wk-debugging').body;
+  assert.match(dbgEn, /wendkeep note new/, 'wk-debugging en ensina note new');
+});
+
 test('wk-workflow references the wendkeep loop commands', () => {
   const wf = WK_SKILLS.find((s) => s.name === 'wk-workflow').body;
   assert.match(wf, /wendkeep change new/);

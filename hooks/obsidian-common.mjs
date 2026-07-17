@@ -19,6 +19,7 @@ export const VAULT_COMPLEMENT_RULES = [
   'Regra prática do Vault: os hooks garantem o histórico automático por turno; o agente só complementa manualmente quando houver valor durável de memória, decisão, bug, aprendizado ou auditoria/validação.',
   'Evite duplicar o que o hook já registra. Use escrita manual para síntese curada baseada em evidências, não para histórico bruto nem raciocínio interno.',
   'Quando complementar, registre a síntese na sessão ativa dentro de `## Iterações` antes de `## Decisões geradas nesta sessão`, ou crie nota derivada em `04-Decisões/`, `05-Bugs/` ou `06-Aprendizados/` com backlink para a sessão.',
+  'Notas derivadas vivem na pasta do MÊS (`<pasta>/<ano>/<MM-MMM>/`), nunca em subpasta `DIA N`, com nome numerado `ADR-`/`BUG-`/`APR-NNNN-<slug>`. Para criar bug ou aprendizado manual, use `wendkeep note new --type bug|learning "título"` — o comando cria a nota já numerada no lugar certo e imprime o path; nunca escreva o arquivo à mão.',
   'Atualize `SHARED_MEMORY.md` somente quando a síntese mudar estado ativo que outro agente precise saber.',
 ];
 
@@ -661,10 +662,12 @@ export function listMarkdownFiles(dir) {
   }
 }
 
-export function getNextAdrNumber(vaultBase) {
-  const decisionsDir = join(vaultBase, getLocale(vaultBase).folders.decisions);
+// Sequential numbering shared by every derived-note family (ADR-, BUG-, APR-):
+// recursive walk because notes live in dated subfolders (AAAA/MM-MMM and legacy DIA DD).
+export function getNextDerivedNumber(vaultBase, folderKey, prefix) {
+  const baseDir = join(vaultBase, getLocale(vaultBase).folders[folderKey]);
+  const re = new RegExp(`^${prefix}-(\\d+)`, 'i');
   let max = 0;
-  // Varre recursivamente: os ADRs agora vivem em subpastas datadas (AAAA/MM-MMM/DIA DD).
   const walk = (dir) => {
     let entries;
     try {
@@ -676,13 +679,17 @@ export function getNextAdrNumber(vaultBase) {
       if (entry.isDirectory()) {
         walk(join(dir, entry.name));
       } else {
-        const match = entry.name.match(/^ADR-(\d+)/i);
+        const match = entry.name.match(re);
         if (match) max = Math.max(max, Number(match[1]));
       }
     }
   };
-  walk(decisionsDir);
+  walk(baseDir);
   return max + 1;
+}
+
+export function getNextAdrNumber(vaultBase) {
+  return getNextDerivedNumber(vaultBase, 'decisions', 'ADR');
 }
 
 export function statExists(path) {

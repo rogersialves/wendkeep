@@ -132,6 +132,13 @@ mudando coisas no escuro.
   isole uma variável por vez.
 - Leia a mensagem de erro inteira e a stack — a linha decisiva costuma estar ali.
 - "Não faz sentido" = uma suposição sua está errada. Cheque as suposições, não o improvável.
+
+## Registro no vault
+
+Bug com valor durável vira nota numerada: \`wendkeep note new --type bug "resumo"\` —
+cria \`BUG-NNNN-<slug>.md\` na pasta do mês de \`05-Bugs\` (nunca subpasta \`DIA N\`) e
+imprime o path pra você preencher sintoma/causa raiz/correção. Aprendizado extraído do
+debug: \`wendkeep note new --type learning "lição"\` (vira \`APR-NNNN-\` em \`06-Aprendizados\`).
 `;
 
 const BRAINSTORMING = `# Brainstorming — ideia vira design
@@ -324,6 +331,13 @@ Use it when something fails or behaves wrong. One hypothesis at a time — no sh
 
 Changed several things and it "worked"? You don't know what fixed it — revert, isolate one
 variable. Read the whole error + stack — the decisive line is usually there.
+
+## Vault record
+
+A durable bug becomes a numbered note: \`wendkeep note new --type bug "summary"\` — creates
+\`BUG-NNNN-<slug>.md\` in the month folder of \`05-Bugs\` (never a \`DIA N\` subfolder) and
+prints the path for you to fill in. A learning from the debug: \`wendkeep note new --type
+learning "lesson"\` (becomes \`APR-NNNN-\` in the learnings folder).
 `;
 
 const BRAINSTORMING_EN = `# Brainstorming — idea into design

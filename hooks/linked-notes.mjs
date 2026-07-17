@@ -6,6 +6,7 @@ import {
   derivedContentKey,
   ensureDir,
   getNextAdrNumber,
+  getNextDerivedNumber,
   keysBate,
   providerMeta,
   slugify,
@@ -183,11 +184,13 @@ const NOTE_LABELS = {
 };
 function noteLabels(localeId) { return NOTE_LABELS[localeId] || NOTE_LABELS['pt-BR']; }
 
-export function buildBugNoteContent(bug, issueRef, dateStr, sessionRel, provider = providerMeta(), contentKey = derivedContentKey(bug.rootCause), localeId = 'pt-BR') {
+export function buildBugNoteContent(bug, issueRef, dateStr, sessionRel, provider = providerMeta(), contentKey = derivedContentKey(bug.rootCause), localeId = 'pt-BR', bugNum = 0) {
   const L = noteLabels(localeId);
   const title = issueRef
     ? `${issueRef} - ${normalizeInline(bug.rootCause, 80)}`
     : normalizeInline(bug.rootCause, 80);
+  // bugNum = 0 keeps the legacy unnumbered shape (existing call sites/tests unaffected).
+  const heading = bugNum ? `# BUG-${String(bugNum).padStart(4, '0')} — ${title}` : `# Bug - ${title}`;
 
   return `---
 type: bug
@@ -195,7 +198,7 @@ date: ${dateStr}
 status: fixed
 provider: ${provider.id}
 content_key: "${contentKey}"
-${sessionYamlLinks(sessionRel)}
+${bugNum ? `bug: ${bugNum}\n` : ''}${sessionYamlLinks(sessionRel)}
 cssclasses:
   - topic-bug
 tags:
@@ -204,7 +207,7 @@ severity: ${yamlQuote(bug.severity)}
 issue: ${yamlQuote(issueRef || '')}
 ---
 
-# Bug - ${title}
+${heading}
 
 > [!note] ${L.autoTag}
 > ${L.autoLine(provider.label)}
@@ -436,22 +439,24 @@ export function extractLearningDetails(tx, bugDetails) {
   return learnings.length ? learnings.slice(0, 5) : null;
 }
 
-export function buildLearningNoteContent(learning, dateStr, sessionRel, provider = providerMeta(), contentKey = derivedContentKey(learning.title), localeId = 'pt-BR') {
+export function buildLearningNoteContent(learning, dateStr, sessionRel, provider = providerMeta(), contentKey = derivedContentKey(learning.title), localeId = 'pt-BR', aprNum = 0) {
   const L = noteLabels(localeId);
+  // aprNum = 0 keeps the legacy unnumbered shape (existing call sites/tests unaffected).
+  const heading = aprNum ? `# APR-${String(aprNum).padStart(4, '0')} — ${learning.title}` : `# ${L.learn.title} - ${learning.title}`;
   return `---
 type: learning
 date: ${dateStr}
 status: active
 provider: ${provider.id}
 content_key: "${contentKey}"
-${sessionYamlLinks(sessionRel)}
+${aprNum ? `apr: ${aprNum}\n` : ''}${sessionYamlLinks(sessionRel)}
 cssclasses:
   - topic-learning
 tags:
 ${yamlTags(learning.tags.map((tag) => (tag === 'codex' ? provider.tag : tag)))}
 ---
 
-# ${L.learn.title} - ${learning.title}
+${heading}
 
 > [!note] ${L.autoTag}
 > ${L.autoLine(provider.label)}
@@ -464,6 +469,81 @@ ${learning.context || L.complete}
 ## ${L.learn.learned}
 
 ${learning.content}
+
+## ${L.learn.future}
+
+${L.learn.futureHint}
+`;
+}
+
+// Manual derived notes (`wendkeep note new`): same sections as the auto-generated shape,
+// but with placeholders — the agent/human fills them in. status differs: a manual bug is
+// OPEN (the auto one is extracted from an applied fix, hence fixed).
+export function buildManualBugNote(title, { num, dateStr, sessionRel = '', localeId = 'pt-BR' }) {
+  const L = noteLabels(localeId);
+  const src = sessionRel ? `${sessionYamlLinks(sessionRel)}\n` : '';
+  return `---
+type: bug
+date: ${dateStr}
+status: open
+content_key: "${derivedContentKey(title)}"
+bug: ${num}
+${src}cssclasses:
+  - topic-bug
+tags:
+  - bug
+severity: ""
+issue: ""
+---
+
+# BUG-${String(num).padStart(4, '0')} — ${title}
+
+## ${L.bug.symptom}
+
+${L.verify}
+
+## ${L.bug.rootCause}
+
+${L.verify}
+
+## ${L.bug.fix}
+
+${L.bug.noFix}
+
+## ${L.bug.evidence}
+
+${L.bug.addEvidence}
+
+## ${L.bug.lessons}
+
+${L.complete}
+`;
+}
+
+export function buildManualLearningNote(title, { num, dateStr, sessionRel = '', localeId = 'pt-BR' }) {
+  const L = noteLabels(localeId);
+  const src = sessionRel ? `${sessionYamlLinks(sessionRel)}\n` : '';
+  return `---
+type: learning
+date: ${dateStr}
+status: active
+content_key: "${derivedContentKey(title)}"
+apr: ${num}
+${src}cssclasses:
+  - topic-learning
+tags:
+  - aprendizado
+---
+
+# APR-${String(num).padStart(4, '0')} — ${title}
+
+## ${L.learn.context}
+
+${L.complete}
+
+## ${L.learn.learned}
+
+${L.complete}
 
 ## ${L.learn.future}
 
@@ -544,9 +624,11 @@ export function createLinkedNotes(vaultBase, dateStr, sessionRel, tx, options = 
     const bugKey = derivedContentKey(bugDetails.rootCause);
     if (!alreadyHasKey(existingKeys.bugs, bugKey)) {
       const causeSlug = slugify(bugDetails.rootCause, 'bug', 40);
-      const fileName = issueRef ? `${issueRef}-${causeSlug}.md` : `${dateStr}-bug-${causeSlug}.md`;
+      // Numbered AFTER the dedup guard so a deduplicated note never burns a number.
+      const bugNum = getNextDerivedNumber(vaultBase, 'bugs', 'BUG');
+      const fileName = `BUG-${String(bugNum).padStart(4, '0')}-${issueRef ? `${slugify(issueRef, '', 20)}-` : ''}${causeSlug}.md`;
       const filePath = join(bugsDir, fileName);
-      if (!existsSync(filePath)) writeFileSync(filePath, buildBugNoteContent(bugDetails, issueRef, dateStr, sessionRel, provider, bugKey, loc.id), 'utf-8');
+      if (!existsSync(filePath)) writeFileSync(filePath, buildBugNoteContent(bugDetails, issueRef, dateStr, sessionRel, provider, bugKey, loc.id, bugNum), 'utf-8');
       linked.bugs.push(toVaultRelative(vaultBase, filePath));
       existingKeys.bugs.push(bugKey);
     }
@@ -585,9 +667,11 @@ export function createLinkedNotes(vaultBase, dateStr, sessionRel, tx, options = 
       if (alreadyHasKey(existingKeys.learnings, learningKey)) continue;
       if (vaultLearningKeys.has(learningKey)) continue; // already learned elsewhere in the vault
       const learningSlug = slugify(learning.title, 'aprendizado', 40);
-      const fileName = `${dateStr}-${learningSlug}.md`;
+      // Minted inside the loop: each learning consumes its own sequential number.
+      const aprNum = getNextDerivedNumber(vaultBase, 'learnings', 'APR');
+      const fileName = `APR-${String(aprNum).padStart(4, '0')}-${learningSlug}.md`;
       const filePath = join(learningsDir, fileName);
-      if (!existsSync(filePath)) writeFileSync(filePath, buildLearningNoteContent(learning, dateStr, sessionRel, provider, learningKey, loc.id), 'utf-8');
+      if (!existsSync(filePath)) writeFileSync(filePath, buildLearningNoteContent(learning, dateStr, sessionRel, provider, learningKey, loc.id, aprNum), 'utf-8');
       linked.learnings.push(toVaultRelative(vaultBase, filePath));
       existingKeys.learnings.push(learningKey);
     }

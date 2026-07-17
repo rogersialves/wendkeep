@@ -17,3 +17,20 @@ test('monthFolderRelFromDateStr: <folder>/<year>/<MM-MON>, no DIA', () => {
 test('datedFolderRelFromDateStr: sessions still include DIA (unchanged)', () => {
   assert.match(datedFolderRelFromDateStr('02-Sessões', '2026-06-29'), /DIA 29/);
 });
+
+// DRV-1 — `note new` nunca cria subpasta DIA (trava e2e via bin)
+test('note new: created path never contains a DIA subfolder', async () => {
+  const { mkdtempSync, mkdirSync, rmSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { spawnSync } = await import('node:child_process');
+  const { fileURLToPath } = await import('node:url');
+  const { dirname } = await import('node:path');
+  const BIN = join(dirname(fileURLToPath(import.meta.url)), '..', 'bin', 'wendkeep.mjs');
+  const vault = mkdtempSync(join(tmpdir(), 'wk-nodia-'));
+  mkdirSync(join(vault, '.brain'), { recursive: true });
+  try {
+    const r = spawnSync(process.execPath, [BIN, 'note', 'new', '--type', 'learning', 'sem dia', '--vault', vault], { encoding: 'utf8' });
+    assert.equal(r.status, 0, r.stderr);
+    assert.doesNotMatch(r.stdout, /DIA/, 'path sem subpasta DIA');
+  } finally { rmSync(vault, { recursive: true, force: true }); }
+});
