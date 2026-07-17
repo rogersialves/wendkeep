@@ -65,6 +65,9 @@ vault cego. Exceção única: mudança trivial (typo, 1 linha).
   o que você declarou. Sem \`[sensor:]\`, o archive não trava.
 - A proposta linka a sessão de origem; a sessão linka a mudança ativa. É de propósito:
   o grafo do Obsidian mostra plano↔sessão↔decisão.
+- Notas derivadas (bug/aprendizado) são numeradas (\`BUG-NNNN-\`/\`APR-NNNN-\`) e vivem na
+  pasta do mês — nunca em subpasta \`DIA N\`. Crie via \`wendkeep note new --type
+  bug|learning "título"\` (imprime o path), não à mão.
 `;
 
 const TDD = `# TDD — Red, Green, Refactor (testes que discriminam)
@@ -288,6 +291,9 @@ leaves the vault blind. Single exception: a trivial change (typo, one line).
   \`wendkeep change use <slug>\` or \`--change <slug>\` where available.
 - No \`[sensor:]\` on a task = no automated gate for it. No \`[req:]\` = no independent verdict.
 - The graph links session ↔ change ↔ requirement ↔ decision. That is the point.
+- Derived notes (bug/learning) are numbered (\`BUG-NNNN-\`/\`APR-NNNN-\`) and live in the
+  month folder — never in a \`DIA N\` subfolder. Create them via \`wendkeep note new --type
+  bug|learning "title"\` (prints the path), never by hand.
 `;
 
 const TDD_EN = `# TDD — Red, Green, Refactor (tests that discriminate)

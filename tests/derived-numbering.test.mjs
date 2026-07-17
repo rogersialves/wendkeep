@@ -83,6 +83,26 @@ test('createLinkedNotes: bug and learnings are numbered in the month folder (no 
   } finally { rmSync(vault, { recursive: true, force: true }); }
 });
 
+// DRV-1 — issueRef entra no nome, sem duplicação quando a causa raiz já o contém
+test('createLinkedNotes: bug with issueRef keeps the ref in the name, without duplicating it', async () => {
+  const { createLinkedNotes } = await import('../hooks/linked-notes.mjs');
+  const vault = vaultWith([]);
+  try {
+    const tx = {
+      assistantMessages: [
+        'Causa raiz: NUT-463 o endpoint de login retornava 500 quando o token expirava no meio do refresh.',
+        'git commit -m "fix(auth): renova token antes do refresh"',
+      ],
+      userPrompts: ['NUT-463 login quebrado'],
+    };
+    const linked = createLinkedNotes(vault, '2026-07-16', SESSION_REL, tx, { issueRefs: ['NUT-463'] });
+    assert.equal(linked.bugs.length, 1);
+    const base = linked.bugs[0].split('/').pop();
+    assert.match(base, /^BUG-0001-nut-463-/i, 'ref preservado no nome');
+    assert.equal((base.toLowerCase().match(/nut-463/g) || []).length, 1, 'ref aparece UMA vez, sem duplicar');
+  } finally { rmSync(vault, { recursive: true, force: true }); }
+});
+
 // DRV-5 — Stop enxerga notas derivadas nas subpastas de mês (não só na raiz)
 test('findLinkedDerivedNotes: finds a month-folder note that references the session', async () => {
   const { findLinkedDerivedNotes } = await import('../hooks/session-stop.mjs');

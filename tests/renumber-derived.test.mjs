@@ -96,7 +96,13 @@ test('CLI renumber-bugs: preview default, --apply writes, --json, exit 2 without
     assert.equal(report.renamed, 3);
     assert.ok(existsSync(join(vault, '05-Bugs', '2026', '03-MAR', 'BUG-0001-raiz-antiga.md')));
 
-    const noVault = spawnSync(process.execPath, [BIN, 'renumber-learnings'], { encoding: 'utf8', env: { ...process.env, OBSIDIAN_VAULT_PATH: '' }, cwd: tmpdir() });
+    // Isola o env do harness: dentro do Claude Code, CLAUDE_PROJECT_DIR faria o
+    // project-vault resolver o vault do repo e o exit 2 nunca aconteceria.
+    const cleanEnv = { ...process.env, OBSIDIAN_VAULT_PATH: '' };
+    delete cleanEnv.CLAUDE_PROJECT_DIR;
+    delete cleanEnv.CLAUDECODE;
+    delete cleanEnv.CLAUDE_CODE_SESSION_ID;
+    const noVault = spawnSync(process.execPath, [BIN, 'renumber-learnings'], { encoding: 'utf8', env: cleanEnv, cwd: tmpdir() });
     assert.equal(noVault.status, 2, 'exit 2 sem vault');
   } finally { rmSync(vault, { recursive: true, force: true }); }
 });

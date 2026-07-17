@@ -626,7 +626,10 @@ export function createLinkedNotes(vaultBase, dateStr, sessionRel, tx, options = 
       const causeSlug = slugify(bugDetails.rootCause, 'bug', 40);
       // Numbered AFTER the dedup guard so a deduplicated note never burns a number.
       const bugNum = getNextDerivedNumber(vaultBase, 'bugs', 'BUG');
-      const fileName = `BUG-${String(bugNum).padStart(4, '0')}-${issueRef ? `${slugify(issueRef, '', 20)}-` : ''}${causeSlug}.md`;
+      // Keep the tracker ref in the name, but only once — root causes often repeat it.
+      const refSlug = issueRef ? slugify(issueRef, '', 20) : '';
+      const refPrefix = refSlug && !causeSlug.includes(refSlug) ? `${refSlug}-` : '';
+      const fileName = `BUG-${String(bugNum).padStart(4, '0')}-${refPrefix}${causeSlug}.md`;
       const filePath = join(bugsDir, fileName);
       if (!existsSync(filePath)) writeFileSync(filePath, buildBugNoteContent(bugDetails, issueRef, dateStr, sessionRel, provider, bugKey, loc.id, bugNum), 'utf-8');
       linked.bugs.push(toVaultRelative(vaultBase, filePath));

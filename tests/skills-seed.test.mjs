@@ -51,13 +51,17 @@ test('derived-note convention: VAULT_COMPLEMENT_RULES and seeds teach note new +
   assert.match(rules, /BUG-|APR-/, 'regras citam a numeração');
   assert.match(rules, /DIA/, 'regras proíbem a subpasta DIA explicitamente');
 
+  // Asserts SEPARADOS por seed/idioma — concatenar mascararia um seed sem a convenção.
+  const en = wkSkills('en');
   const wfPt = WK_SKILLS.find((s) => s.name === 'wk-workflow').body;
+  const wfEn = en.find((s) => s.name === 'wk-workflow').body;
   const dbgPt = WK_SKILLS.find((s) => s.name === 'wk-debugging').body;
-  assert.match(dbgPt, /wendkeep note new/, 'wk-debugging pt ensina note new');
-  assert.match(wfPt + dbgPt, /BUG-NNNN|BUG-\d{4}/, 'seeds pt citam BUG-NNNN');
-
-  const dbgEn = wkSkills('en').find((s) => s.name === 'wk-debugging').body;
-  assert.match(dbgEn, /wendkeep note new/, 'wk-debugging en ensina note new');
+  const dbgEn = en.find((s) => s.name === 'wk-debugging').body;
+  for (const [label, body] of [['wf pt', wfPt], ['wf en', wfEn], ['dbg pt', dbgPt], ['dbg en', dbgEn]]) {
+    assert.match(body, /wendkeep note new/, `${label} ensina note new`);
+    assert.match(body, /BUG-NNNN|BUG-\d{4}/, `${label} cita BUG-NNNN`);
+    assert.match(body, /DIA/, `${label} menciona a regra sem-DIA`);
+  }
 });
 
 test('wk-workflow references the wendkeep loop commands', () => {
