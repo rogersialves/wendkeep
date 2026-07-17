@@ -81,6 +81,23 @@ test('planRenumber assigns sequential ADR numbers in strict chronological order'
   } finally { rmSync(vault, { recursive: true, force: true }); }
 });
 
+// DRV-7 fallback — sem data resolvível (nem frontmatter, nem nome, nem pasta DIA), a nota
+// preserva o dirname atual: nunca é movida às cegas nem perdida.
+test('renumberDecisions: note with no resolvable date stays in its current folder', () => {
+  const vault = mkdtempSync(join(tmpdir(), 'wk-renum-nd-'));
+  try {
+    const dec = join(vault, '04-Decisões');
+    mkdirSync(dec, { recursive: true });
+    // sem `date:` no frontmatter, sem prefixo YYYY-MM-DD no nome, na raiz (sem pasta de mês/DIA)
+    writeFileSync(join(dec, 'ADR-003-sem-data.md'), '---\ntype: decision\ntags:\n  - decisao\n---\n\n# Sem data\n\ncorpo\n');
+    const plan = planRenumber(vault);
+    assert.equal(plan.length, 1);
+    assert.equal(plan[0].newRelNoExt, '04-Decisões/ADR-0001-sem-data', 'renomeia mas fica na raiz');
+    renumberDecisions(vault, { apply: true });
+    assert.ok(existsSync(join(dec, 'ADR-0001-sem-data.md')), 'permanece no dirname original');
+  } finally { rmSync(vault, { recursive: true, force: true }); }
+});
+
 test('renumberDecisions apply renames files, rewrites wikilinks vault-wide, is idempotent', () => {
   const vault = seedVault();
   try {
