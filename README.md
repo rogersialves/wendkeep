@@ -138,13 +138,17 @@ Restart Codex and Claude Code after reseeding their generated skills.
 | `wendkeep cost rebuild [opts]` | Recalcula custos históricos do transcript principal e subagents usando `SESSION_REGISTRY`. Dry-run por padrão; `--apply` atualiza notas e grava `.brain/COST_REBUILD.json`. Aceita `--session`, `--limit` e `--json`. |
 | `wendkeep session list\|show\|use` | Lista o registry multi-sessão, mostra uma conversa ou muda somente o foco humano de `CURRENT_SESSION.md`. |
 | `wendkeep change bind <slug> --session <id>` | Vincula ou transfere uma change para uma conversa canônica sem esconder as demais pendências. |
-
-Session notes use one live `## Agentes, tokens e custos` snapshot. Main-agent and subagent hooks recompose it atomically, with costs, token dimensions, reasoning tokens and effort per model/source.
+| `wendkeep note new --type bug\|learning "<title>"` | Create a **numbered** derived note (`BUG-`/`APR-NNNN`) in the month folder and print its vault path. `--date YYYY-MM-DD`. |
+| `wendkeep renumber-decisions` | Renumber `04-Decisões` to `ADR-NNNN-<slug>` chronologically + rewrite wikilinks. Preview by default; `--apply` / `--json`. |
+| `wendkeep renumber-bugs` | Same for `05-Bugs` → `BUG-NNNN-<slug>`, also moving notes out of legacy `DIA N` subfolders. |
+| `wendkeep renumber-learnings` | Same for `06-Aprendizados`/`06-Learnings` → `APR-NNNN-<slug>`. |
 | `wendkeep lesson add "t" "l"` | Record a project-local lesson (injected at the next SessionStart). |
 | `wendkeep sync-defs` | Copy `.brain/agents\|skills` into `.codex/agents`, `.claude/skills`, `.agents/skills`; `--check` detects drift. |
 | `wendkeep validate-memory [path]` | Validate `.brain/CORE.md` (cap 25, 3 sections, no secrets/PII). |
 | `wendkeep doctor [--vault P]` | Run a vault health check (integrity of sessions, registry, links). |
 | `wendkeep --version` / `--help` | Version / usage. |
+
+Session notes use one live `## Agentes, tokens e custos` snapshot. Main-agent and subagent hooks recompose it atomically, with costs, token dimensions, reasoning tokens and effort per model/source.
 
 ## Retroactive memory (`import`) — install today, remember yesterday
 
@@ -161,6 +165,43 @@ wendkeep import --vault .myproject-vault --source codex   # just Codex
 - **Deduped** by `session_id` against the vault's `SESSION_REGISTRY` **and** existing notes' frontmatter — only sessions not already present are imported, and it never overwrites an existing note. Re-running is a no-op.
 - **`--from <dir>`** / **`--codex-from <dir>`** point at the transcript folders explicitly (use if the auto-derived path misses). Also: `--since <date>`, `--limit <n>`, `--json`.
 - Once imported, `wendkeep cost` aggregates your entire history — retroactively, across both agents.
+
+## Derived notes — numbered like ADRs (`note new`, `renumber-*`)
+
+Decisions, bugs and learnings are **derived notes**: they live in the month folder of their tree (`<folder>/<year>/<MM-MON>/`) and carry a sequential id — `ADR-0001`, `BUG-0001`, `APR-0001`. One glance tells you what a note is and where it sits in the project's history. No day-level subfolders: a `DIA N` folder holding one note is noise, and it hides the note from folder-wide search.
+
+**Creating one** (never write the file by hand — the command owns the number, the folder and the frontmatter):
+
+```bash
+wendkeep note new --type bug "login 500s when the token expires mid-refresh"
+# → 05-Bugs/2026/07-JUL/BUG-0007-login-500s-when-the-token-expires.md
+
+wendkeep note new --type learning "a regex without /g only ever returns the first match"
+# → 06-Aprendizados/2026/07-JUL/APR-0003-a-regex-without-g-only-ever-returns.md
+```
+
+It prints the created path, numbers from the current max (recursive scan), files it in the month folder for today (`--date YYYY-MM-DD` to override), and links the active session in `source:` so the graph stays connected. Agents get this rule injected at SessionStart — they call the command instead of guessing a filename.
+
+**Migrating an existing vault.** Notes created before `0.41.0` have date-prefixed names (`2026-07-16-bug-<slug>.md`) and may sit in legacy `DIA N` subfolders. One command per tree renumbers them chronologically, moves them up into the month folder, and rewrites every wikilink across the vault:
+
+```bash
+# Bugs — 05-Bugs → BUG-NNNN
+wendkeep renumber-bugs                  # preview: prints every from → to, writes nothing
+wendkeep renumber-bugs --apply          # migrate
+
+# Learnings — 06-Aprendizados → APR-NNNN
+wendkeep renumber-learnings             # preview
+wendkeep renumber-learnings --apply     # migrate
+
+# Decisions — 04-Decisões → ADR-NNNN (since 0.30.0)
+wendkeep renumber-decisions             # preview
+wendkeep renumber-decisions --apply     # migrate
+```
+
+- **Preview is the default.** Nothing is written until `--apply` — read the `from → to` list first; that is where a mangled slug shows up, before it touches your files.
+- **One tree at a time, on purpose.** There is no `renumber-all`: each folder is migrated and reviewed on its own.
+- **Order is chronological**, derived from the note's date (frontmatter → filename prefix → folder), so `BUG-0001` is genuinely the oldest bug — not the first one the scanner happened to read.
+- **Wikilinks are rewritten vault-wide** (full-path and basename forms, aliases preserved), the body's `type`/`bug:`/`apr:`/H1 are normalized, and emptied `DIA` folders are removed. **Idempotent**: a second `--apply` renames nothing. Close Obsidian while migrating, and commit the vault first if it is under git.
 
 ## Change lifecycle — the a2 loop (spec‑driven, native)
 
