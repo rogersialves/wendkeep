@@ -40,7 +40,7 @@ import { seedDefinitions, syncDefs } from './sync-defs.mjs';
 import { seedWkSkills } from './skills-seed.mjs';
 import { LOCALES, DEFAULT_LOCALE, getLocale, clearLocaleCache, vaultFolders } from '../hooks/locale.mjs';
 import { seedDotcontext, globalHasDotcontext, resolveDotcontextSkipMcp, renderSensorsJson } from './dotcontext-seed.mjs';
-import { adoptSpecsState, SPECS_STATE_FILE } from '../hooks/spec-core.mjs';
+import { adoptSpecsState, ensureSpecsReadme, SPECS_STATE_FILE } from '../hooks/spec-core.mjs';
 import { bindProjectVault, readProjectBinding } from './project-vault.mjs';
 
 function parseArgs(argv) {
@@ -490,12 +490,7 @@ export async function runInit(argv) {
   seedWkSkills(brainDir, loc.id); // Pilar A: native process skills, in the vault locale.
   // Seed the change/spec layer starters (Pilar B) — non-destructive.
   const en = loc.id === 'en';
-  const specsReadme = join(vaultPath, loc.folders.specs, 'README.md');
-  if (!existsSync(specsReadme)) {
-    writeFileSync(specsReadme, en
-      ? `# Specs — generated living contract\n\nRead-only: do not author here. Write deltas only in \`${loc.folders.changes}/<slug>/specs/\`; archive promotes them here.\n`
-      : `# Specs — contrato consolidado gerado\n\nSomente leitura: não edite aqui. Escreva deltas apenas em \`${loc.folders.changes}/<slug>/specs/\`; o archive promove para cá.\n`, 'utf8');
-  }
+  ensureSpecsReadme(vaultPath); // same explainer promoteSpecs refreshes (per-capability, read-only)
   if (!existsSync(join(vaultPath, SPECS_STATE_FILE))) {
     const livingSpecs = readdirSync(join(vaultPath, loc.folders.specs)).filter((name) => name.endsWith('.md') && name !== 'README.md');
     if (!livingSpecs.length) adoptSpecsState(vaultPath);

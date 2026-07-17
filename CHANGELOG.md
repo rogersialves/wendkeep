@@ -4,6 +4,21 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.44.0] — 2026-07-17
+
+### Changed
+
+- `wendkeep change new` não cria mais o placeholder `specs/exemplo/spec.md` (nem a pasta
+  `specs/`). Era ruído — sempre deletado à mão, e `discoverSpecDeltas` já o filtrava. Quando
+  a change resolve `spec_impact: required`, o autor escreve `specs/<capability>/spec.md`
+  direto; o formato do delta vive na skill wk-workflow. O filtro de `exemplo` fica (compat
+  com changes antigas em voo).
+- README gerado do `07-Specs` reescrito para explicar o ponto mais confundido: specs são
+  **por capability, não por mudança** (N changes promovem no mesmo arquivo; o histórico
+  por-change vive em `_arquivo`). `promoteSpecs` passa a garantir/atualizar esse README a
+  cada archive (`ensureSpecsReadme`), então vaults existentes recebem o texto novo no
+  próximo archive — não só os criados via `init`.
+
 ## [0.43.0] — 2026-07-17
 
 ### Fixed

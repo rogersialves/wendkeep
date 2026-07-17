@@ -110,14 +110,12 @@ export function newChange(vaultBase, slug, { sessionRel = '', dateStr, simple = 
   write('proposta.md', files.proposta);
   write('tarefas.md', files.tarefas);
   if (!existed) write('.spec-impact-v1', '1\n');
-  // Auto-sizing (Wave B): a --simple change skips the design + spec-delta scaffold.
+  // Auto-sizing (Wave B): a --simple change skips the design scaffold.
+  // No `specs/exemplo` placeholder: it was pure noise (always hand-deleted). When a change
+  // resolves `spec_impact: required`, the author writes `specs/<capability>/spec.md` directly
+  // — the delta format lives in the wk-workflow skill (and `renderChangeScaffold().specDelta`).
   if (!simple) {
     write('design.md', files.design);
-    const exampleDelta = join(dir, 'specs', 'exemplo', 'spec.md');
-    if (!existsSync(exampleDelta)) {
-      mkdirSync(join(dir, 'specs', 'exemplo'), { recursive: true });
-      writeFileSync(exampleDelta, files.specDelta, 'utf8');
-    }
   }
   if (!existed) captureSpecBaseline(vaultBase, dir);
   setActiveChange(vaultBase, slug);

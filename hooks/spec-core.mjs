@@ -317,6 +317,47 @@ export function discoverSpecDeltas(changeDir) {
   return caps;
 }
 
+// The 07-Specs README, explaining the most-confused point: specs are per-CAPABILITY, not
+// per-change (many changes promote into the same file; the per-change record lives in
+// _arquivo). Generated + read-only. Written on init and refreshed on every archive so
+// existing vaults self-heal. Bilingual by vault locale.
+export function ensureSpecsReadme(vaultBase) {
+  const loc = getLocale(vaultBase);
+  const en = loc.id === 'en';
+  const dir = join(vaultBase, loc.folders.specs);
+  ensureDir(dir);
+  const body = en
+    ? `# Specs — generated living contract
+
+**One file per _capability_, not per change.** Each file is the current, cumulative contract
+of a capability — the sum of every change's spec delta that was promoted here. Many changes
+touch the same capability, so N changes collapse into far fewer spec files.
+
+Think of it like source code vs commits: this folder is the *current code* of each capability;
+the *commits* that built it are the archived changes in \`${loc.folders.changes}/_arquivo/\`.
+
+- **Generated + read-only.** Never author here. Write deltas only in
+  \`${loc.folders.changes}/<slug>/specs/<capability>/spec.md\` (ADDED/MODIFIED/REMOVED);
+  \`wendkeep change archive\` promotes them into this folder.
+- Per-change history → \`${loc.folders.changes}/_arquivo/\`. Current contract → here.
+`
+    : `# Specs — contrato consolidado gerado
+
+**Um arquivo por _capability_, não por mudança.** Cada arquivo é o contrato atual e acumulado
+de uma capability — a soma de todos os deltas de spec promovidos aqui. Várias mudanças tocam a
+mesma capability, então N mudanças colapsam em bem menos specs.
+
+Pense como código-fonte vs commits: esta pasta é o *código atual* de cada capability; os
+*commits* que a construíram são as mudanças arquivadas em \`${loc.folders.changes}/_arquivo/\`.
+
+- **Gerado + somente leitura.** Nunca edite aqui. Escreva deltas apenas em
+  \`${loc.folders.changes}/<slug>/specs/<capability>/spec.md\` (ADDED/MODIFIED/REMOVED); o
+  \`wendkeep change archive\` promove para esta pasta.
+- Histórico por mudança → \`${loc.folders.changes}/_arquivo/\`. Contrato atual → aqui.
+`;
+  writeFileSync(join(dir, 'README.md'), body, 'utf8');
+}
+
 // Merge each capability's delta (in the change) into the living spec in 07-Specs.
 export function promoteSpecs(vaultBase, changeDir, specs, { changeWikilink, dateStr } = {}) {
   const loc = getLocale(vaultBase);
@@ -347,6 +388,7 @@ export function promoteSpecs(vaultBase, changeDir, specs, { changeWikilink, date
     promoted.push(cap);
   }
   recordPromotedSpecs(vaultBase, promoted);
+  ensureSpecsReadme(vaultBase); // self-heal the explainer so existing vaults get it on archive
   return { promoted, warnings };
 }
 

@@ -136,6 +136,8 @@ test('newChange: creates the 3 files + active pointer, non-destructive', () => {
     for (const f of ['proposta.md', 'design.md', 'tarefas.md']) {
       assert.ok(existsSync(join(vault, '08-Mudanças', 'dark-mode', f)), `${f} created`);
     }
+    // DX: change nova NÃO nasce com o placeholder specs/exemplo (ruído; sempre deletado à mão).
+    assert.ok(!existsSync(join(vault, '08-Mudanças', 'dark-mode', 'specs')), 'no specs/exemplo scaffold');
     assert.equal(activeChange(vault), 'dark-mode');
     assert.ok(existsSync(join(vault, '08-Mudanças', 'dark-mode', '.spec-impact-v1')));
     const again = newChange(vault, 'dark-mode', { sessionRel: '02-Sessões/x', dateStr: '2026-07-05' });

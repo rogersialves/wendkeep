@@ -3,7 +3,36 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { adoptSpecsState, buildEffectiveRequirementPackage, captureSpecBaseline, checkSpecsState, parseRequirements, parseDelta, applyDelta, renderSpec, parseSpecsList, promoteSpecs, evaluateVerdict, tasksHashOf, isPlaceholderDelta, discoverSpecDeltas, parseSpecImpact, specConflicts, validateSpecImpact, formatOrphanReqs } from '../hooks/spec-core.mjs';
+import { adoptSpecsState, buildEffectiveRequirementPackage, captureSpecBaseline, checkSpecsState, parseRequirements, parseDelta, applyDelta, renderSpec, parseSpecsList, promoteSpecs, evaluateVerdict, tasksHashOf, isPlaceholderDelta, discoverSpecDeltas, parseSpecImpact, specConflicts, validateSpecImpact, formatOrphanReqs, ensureSpecsReadme } from '../hooks/spec-core.mjs';
+import { existsSync } from 'node:fs';
+
+// DX — README do 07-Specs explica per-capability (não por mudança) e é auto-curativo
+test('ensureSpecsReadme: writes a README explaining per-capability vs per-change', () => {
+  const vault = mkdtempSync(join(tmpdir(), 'wk-sreadme-'));
+  try {
+    ensureSpecsReadme(vault);
+    const readme = readFileSync(join(vault, '07-Specs', 'README.md'), 'utf8');
+    assert.match(readme, /capability/i, 'menciona capability');
+    assert.match(readme, /n[ãa]o por mudan[çc]a|not per change/i, 'esclarece que não é por mudança');
+    assert.match(readme, /_arquivo/, 'aponta o histórico por-change');
+    assert.match(readme, /gerad|read-only|somente leitura/i, 'diz que é gerado/read-only');
+    // idempotente/refresh: 2ª chamada não quebra e mantém o conteúdo
+    ensureSpecsReadme(vault);
+    assert.equal(readFileSync(join(vault, '07-Specs', 'README.md'), 'utf8'), readme, 'estável no re-run');
+  } finally { rmSync(vault, { recursive: true, force: true }); }
+});
+
+test('promoteSpecs: refreshes the 07-Specs README on archive', () => {
+  const vault = mkdtempSync(join(tmpdir(), 'wk-promo-readme-'));
+  try {
+    const changeDir = join(vault, '08-Mudanças', 'x');
+    mkdirSync(join(changeDir, 'specs', 'auth'), { recursive: true });
+    writeFileSync(join(changeDir, 'specs', 'auth', 'spec.md'), '## ADDED Requirements\n### Requisito: AUTH-1 — login\nusuário entra\n');
+    promoteSpecs(vault, changeDir, ['auth'], {});
+    assert.ok(existsSync(join(vault, '07-Specs', 'README.md')), 'README garantido no promote');
+    assert.match(readFileSync(join(vault, '07-Specs', 'README.md'), 'utf8'), /capability/i);
+  } finally { rmSync(vault, { recursive: true, force: true }); }
+});
 
 test('isPlaceholderDelta: scaffold puro true; delta real/REMOVED false; bilíngue', () => {
   const scaffoldPt = '## ADDED Requirements\n### Requisito: (nome)\n(comportamento / cenários)\n\n## MODIFIED Requirements\n\n## REMOVED Requirements\n';

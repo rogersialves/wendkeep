@@ -100,7 +100,7 @@ test('en vault: change loop end-to-end (scaffold, requirement heading, ADR in 04
     const dir = join(vault, '08-Changes', 'x');
     assert.ok(existsSync(join(dir, 'proposta.md')), 'change under 08-Changes');
     assert.match(readFileSync(join(dir, 'proposta.md'), 'utf8'), /## Why/, 'en scaffold');
-    assert.match(readFileSync(join(dir, 'specs', 'exemplo', 'spec.md'), 'utf8'), /### Requirement:/, 'en delta template');
+    assert.ok(!existsSync(join(dir, 'specs', 'exemplo', 'spec.md')), 'no exemplo placeholder');
     // promote an en spec + archive
     writeFileSync(join(dir, 'proposta.md'), '---\ntype: change\nstatus: active\nspec_impact: required\nspec_impact_reason: ""\nspecs: [auth]\n---\n# x\n');
     writeFileSync(join(dir, 'design.md'), '# x — design\n\n## Approach\n\nTest approach.\n');
