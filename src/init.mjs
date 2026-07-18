@@ -16,6 +16,9 @@ import {
   hookCommand,
   hookCommandLocal,
   hookCommandLocalLegacy,
+  codexHookSpecs,
+  codexHookEntry,
+  CODEX_MATCHER_EVENTS,
   deriveVaultDirName,
   selectableCompanions,
   resolveCompanions,
@@ -192,6 +195,47 @@ export function mergeSettings(existing, { vaultPath, withMcp, force, companions 
   return { settings: s, added };
 }
 
+// Codex counterpart of mergeSettings: projects the SAME hook specs into the shape Codex
+// reads from <project>/.codex/hooks.json. Deliberately simpler than mergeSettings — there
+// is only one command form (npx), so there is no dual-recognition to do. The one migration
+// it does handle is the legacy `timeout` key, which Codex silently ignores in favour of a
+// 600s default; rewriting it to `timeoutSec` invalidates the stored trusted_hash and costs
+// the user one "Hooks need review" prompt. That is the point.
+export function mergeCodexHooks(existing, { force = false } = {}) {
+  const file = existing && typeof existing === 'object' ? { ...existing } : {};
+  file.hooks = { ...(file.hooks || {}) };
+  const specs = codexHookSpecs([...SESSION_HOOKS, ...CHANGE_NUDGE_HOOKS, ...CHANGE_GATE_HOOKS])
+    .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+  for (const h of specs) {
+    const entry = codexHookEntry(h);
+    const owns = (x) => x.command === entry.command;
+    const groups = Array.isArray(file.hooks[h.event]) ? [...file.hooks[h.event]] : [];
+    const owning = groups.find((g) => (g.hooks || []).some(owns));
+    if (owning) {
+      const hk = owning.hooks.find(owns);
+      // `timeout` is the pre-0.46 key: Codex never read it. Migrate it even without --force,
+      // otherwise the hook keeps running at the 600s default forever.
+      const legacyTimeout = 'timeout' in hk;
+      if (force || legacyTimeout) {
+        if (legacyTimeout) {
+          if (hk.timeoutSec === undefined) hk.timeoutSec = hk.timeout;
+          delete hk.timeout;
+        }
+        if (force) {
+          hk.timeoutSec = entry.timeoutSec;
+          if (entry.statusMessage) hk.statusMessage = entry.statusMessage;
+        }
+      }
+      file.hooks[h.event] = groups;
+      continue;
+    }
+    const matcher = CODEX_MATCHER_EVENTS.has(h.event) ? h.matcher : null;
+    groups.push(matcher ? { matcher, hooks: [entry] } : { hooks: [entry] });
+    file.hooks[h.event] = groups;
+  }
+  return file;
+}
+
 export function mergeMcp(existing, { vaultPath, withVault = true, companions = [], skipMcp = [] }) {
   const m = existing && typeof existing === 'object' ? { ...existing } : {};
   m.mcpServers = { ...(m.mcpServers || {}) };
@@ -278,16 +322,19 @@ const MESSAGES = {
     lCompanions: '  companions ', lColors: '  cores      ',
     skipped: 'ignorado', none: 'nenhum',
     colorsOn: 'wendkeep-colors (snippet + grupos do grafo)',
-    taxonomy: (n, c, loc, readme, views) => `  [1/4] taxonomia do vault: ${n} pastas (${c} criadas, locale ${loc})${readme}, .brain + change/spec + sensores semeados${views}`,
+    taxonomy: (n, c, loc, readme, views) => `  [1/5] taxonomia do vault: ${n} pastas (${c} criadas, locale ${loc})${readme}, .brain + change/spec + sensores semeados${views}`,
     readmeCreated: ', README.md criado', viewsNote: (n) => `, ${n} view(s) + dashboard`,
     defs: (s, a) => `        defs entregues: ${s} skill(s) -> .claude/skills + .agents/skills, ${a} agent(s) -> .codex/agents`,
-    settingsBadJson: (p) => `  [2/4] settings.json existe mas não é JSON válido -> escrevi ${p}.new (mescle à mão)`,
-    settings: (verb, added, bak) => `  [2/4] settings.json ${verb} (${added} hook(s) wirados; .wendkeep.json é o vínculo compartilhado${bak})`,
-    mcpBadJson: (p) => `  [3/4] .mcp.json existe mas não é JSON válido -> escrevi ${p}.new (mescle à mão)`,
-    mcp: (verb, names, bak) => `  [3/4] .mcp.json ${verb} (${names}${bak})`,
-    mcpSkipped: '  [3/4] .mcp.json ignorado (--no-mcp, sem companions MCP)',
-    colorsSkipped: '  [4/4] cores ignoradas (--no-colors)',
-    colors: (r) => `  [4/4] cores: ${r}`,
+    settingsBadJson: (p) => `  [2/5] settings.json existe mas não é JSON válido -> escrevi ${p}.new (mescle à mão)`,
+    settings: (verb, added, bak) => `  [2/5] settings.json ${verb} (${added} hook(s) wirados; .wendkeep.json é o vínculo compartilhado${bak})`,
+    codexBadJson: (p) => `  [3/5] .codex/hooks.json existe mas não é JSON válido -> escrevi ${p}.new (mescle à mão)`,
+    codexHooks: (verb, bak) => `  [3/5] .codex/hooks.json ${verb} (hooks de sessão do Codex${bak})`,
+    codexTrust: '        [!] o Codex só executa esses hooks depois que você aprovar "Hooks need review" no startup — o init não consegue pré-aprovar.',
+    mcpBadJson: (p) => `  [4/5] .mcp.json existe mas não é JSON válido -> escrevi ${p}.new (mescle à mão)`,
+    mcp: (verb, names, bak) => `  [4/5] .mcp.json ${verb} (${names}${bak})`,
+    mcpSkipped: '  [4/5] .mcp.json ignorado (--no-mcp, sem companions MCP)',
+    colorsSkipped: '  [5/5] cores ignoradas (--no-colors)',
+    colors: (r) => `  [5/5] cores: ${r}`,
     merged: 'mesclado', created: 'criado', bakSaved: ', .bak salvo',
     nextSteps: '\nPróximos passos:',
     step1: (v) => `  1. Abra o vault no Obsidian: "Abrir pasta como cofre" -> ${v}`,
@@ -303,16 +350,19 @@ const MESSAGES = {
     lCompanions: '  companions ', lColors: '  colors     ',
     skipped: 'skipped', none: 'none',
     colorsOn: 'wendkeep-colors (snippet + graph groups)',
-    taxonomy: (n, c, loc, readme, views) => `  [1/4] vault taxonomy: ${n} folders (${c} created, locale ${loc})${readme}, .brain + change/spec + sensors seeded${views}`,
+    taxonomy: (n, c, loc, readme, views) => `  [1/5] vault taxonomy: ${n} folders (${c} created, locale ${loc})${readme}, .brain + change/spec + sensors seeded${views}`,
     readmeCreated: ', README.md created', viewsNote: (n) => `, ${n} view(s) + dashboard`,
     defs: (s, a) => `        defs delivered: ${s} skill(s) -> .claude/skills + .agents/skills, ${a} agent(s) -> .codex/agents`,
-    settingsBadJson: (p) => `  [2/4] settings.json exists but is not valid JSON -> wrote ${p}.new (merge by hand)`,
-    settings: (verb, added, bak) => `  [2/4] settings.json ${verb} (${added} hook(s) wired; .wendkeep.json is the shared binding${bak})`,
-    mcpBadJson: (p) => `  [3/4] .mcp.json exists but is not valid JSON -> wrote ${p}.new (merge by hand)`,
-    mcp: (verb, names, bak) => `  [3/4] .mcp.json ${verb} (${names}${bak})`,
-    mcpSkipped: '  [3/4] .mcp.json skipped (--no-mcp, no MCP companions)',
-    colorsSkipped: '  [4/4] colors skipped (--no-colors)',
-    colors: (r) => `  [4/4] colors: ${r}`,
+    settingsBadJson: (p) => `  [2/5] settings.json exists but is not valid JSON -> wrote ${p}.new (merge by hand)`,
+    settings: (verb, added, bak) => `  [2/5] settings.json ${verb} (${added} hook(s) wired; .wendkeep.json is the shared binding${bak})`,
+    codexBadJson: (p) => `  [3/5] .codex/hooks.json exists but is not valid JSON -> wrote ${p}.new (merge by hand)`,
+    codexHooks: (verb, bak) => `  [3/5] .codex/hooks.json ${verb} (Codex session hooks${bak})`,
+    codexTrust: '        [!] Codex only runs these hooks after you approve "Hooks need review" at startup — init cannot pre-approve them.',
+    mcpBadJson: (p) => `  [4/5] .mcp.json exists but is not valid JSON -> wrote ${p}.new (merge by hand)`,
+    mcp: (verb, names, bak) => `  [4/5] .mcp.json ${verb} (${names}${bak})`,
+    mcpSkipped: '  [4/5] .mcp.json skipped (--no-mcp, no MCP companions)',
+    colorsSkipped: '  [5/5] colors skipped (--no-colors)',
+    colors: (r) => `  [5/5] colors: ${r}`,
     merged: 'merged', created: 'created', bakSaved: ', .bak saved',
     nextSteps: '\nNext steps:',
     step1: (v) => `  1. Open the vault in Obsidian: "Open folder as vault" -> ${v}`,
@@ -537,6 +587,22 @@ export async function runInit(argv) {
     writeJson(settingsPath, settings);
     log(M.settings(hadFile ? M.merged : M.created, added, hadFile ? M.bakSaved : ''));
   }
+
+  // 2b. .codex/hooks.json -----------------------------------------------------
+  // Without this, Codex opens with the vault reachable (via .mcp.json) but no session:
+  // CURRENT_SESSION.md never gets written and registrySessions stays 0.
+  const codexPath = join(projectPath, '.codex', 'hooks.json');
+  const codexRead = readJsonSafe(codexPath);
+  if (!codexRead.ok) {
+    writeJson(`${codexPath}.new`, mergeCodexHooks(null, { force: true }));
+    log(M.codexBadJson(codexPath));
+  } else {
+    const hadFile = codexRead.data !== null;
+    if (hadFile) backup(codexPath);
+    writeJson(codexPath, mergeCodexHooks(codexRead.data, { force: args.force }));
+    log(M.codexHooks(hadFile ? M.merged : M.created, hadFile ? M.bakSaved : ''));
+  }
+  log(M.codexTrust);
 
   // 3. .mcp.json --------------------------------------------------------------
   // Written when mcpvault is wanted OR a selected companion ships an MCP server.

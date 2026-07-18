@@ -290,3 +290,61 @@ test('wendkeep init --companions wires plugin layer, UA hook and MCP server', ()
     rmSync(parent, { recursive: true, force: true });
   }
 });
+
+// --- 0.46.0: Codex session wiring -------------------------------------------
+// Regression: a fresh project with Codex opened with the vault reachable via .mcp.json but
+// NO session — CURRENT_SESSION.md absent, registrySessions 0 — because init only ever wired
+// .claude/settings.json.
+test('init wires .codex/hooks.json so Codex opens a session', () => {
+  const proj = mkdtempSync(join(tmpdir(), 'wk-codex-e2e-'));
+  const run = () => spawnSync(process.execPath, [BIN, 'init', '--project', proj, '--vault', join(proj, '.v'), '--locale', 'pt-BR', '--no-mcp', '--no-companions', '--no-colors', '--yes'], { encoding: 'utf8' });
+  try {
+    const first = run();
+    assert.equal(first.status, 0, first.stderr);
+    const hooksPath = join(proj, '.codex', 'hooks.json');
+    assert.ok(existsSync(hooksPath), '.codex/hooks.json escrito');
+    const file = JSON.parse(readFileSync(hooksPath, 'utf8'));
+    const cmds = (ev) => (file.hooks[ev] || []).flatMap((g) => (g.hooks || []).map((h) => h.command));
+    assert.ok(cmds('SessionStart').includes('npx wendkeep hook session-start'), 'session-start wirado');
+    assert.ok(cmds('SessionStart').includes('npx wendkeep hook brain-inject'), 'brain-inject wirado');
+    assert.ok(cmds('UserPromptSubmit').includes('npx wendkeep hook session-ensure'), 'session-ensure wirado');
+    assert.ok(cmds('Stop').includes('npx wendkeep hook session-stop'), 'session-stop wirado');
+
+    // As três armadilhas silenciosas do harness do Codex.
+    const wire = JSON.stringify(file);
+    assert.ok(!wire.includes('"timeout"'), 'timeout viraria 600s — tem que ser timeoutSec');
+    assert.ok(!wire.includes('CLAUDE_PROJECT_DIR'), 'variável do Claude não resolve no Codex');
+    assert.equal(file.hooks.PreToolUse, undefined, 'nenhum hook de tool (payload incompatível)');
+    assert.equal(file.hooks.PostToolUse, undefined, 'nenhum hook de tool (payload incompatível)');
+
+    // O usuário precisa saber do trust gate, senão reporta "hooks não disparam".
+    assert.match(first.stdout, /Hooks need review/);
+
+    // re-init não duplica
+    const second = run();
+    assert.equal(second.status, 0, second.stderr);
+    const again = JSON.parse(readFileSync(hooksPath, 'utf8'));
+    assert.equal((again.hooks.SessionStart || []).length, 2, 'SessionStart continua com 2 grupos');
+    assert.equal((again.hooks.Stop || []).length, 2, 'Stop continua com 2 grupos');
+  } finally { rmSync(proj, { recursive: true, force: true }); }
+});
+
+test('init preserva um .codex/hooks.json ilegível e escreve o merge no .new', () => {
+  const proj = mkdtempSync(join(tmpdir(), 'wk-codex-bad-'));
+  try {
+    const hooksPath = join(proj, '.codex', 'hooks.json');
+    mkdirSync(join(proj, '.codex'), { recursive: true });
+    const corrupt = '{ "hooks": { não é JSON';
+    writeFileSync(hooksPath, corrupt);
+
+    const r = spawnSync(process.execPath, [BIN, 'init', '--project', proj, '--vault', join(proj, '.v'), '--locale', 'pt-BR', '--no-mcp', '--no-companions', '--no-colors', '--yes'], { encoding: 'utf8' });
+    assert.equal(r.status, 0, r.stderr);
+
+    // o original é do usuário — nunca clobbered
+    assert.equal(readFileSync(hooksPath, 'utf8'), corrupt, 'arquivo ilegível preservado byte a byte');
+    const proposed = JSON.parse(readFileSync(`${hooksPath}.new`, 'utf8'));
+    const cmds = (proposed.hooks.SessionStart || []).flatMap((g) => (g.hooks || []).map((h) => h.command));
+    assert.ok(cmds.includes('npx wendkeep hook session-start'), '.new traz o merge proposto');
+    assert.match(r.stdout, /hooks\.json/, 'init avisa sobre o arquivo inválido');
+  } finally { rmSync(proj, { recursive: true, force: true }); }
+});
