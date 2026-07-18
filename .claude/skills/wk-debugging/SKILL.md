@@ -24,3 +24,10 @@ mudando coisas no escuro.
   isole uma variável por vez.
 - Leia a mensagem de erro inteira e a stack — a linha decisiva costuma estar ali.
 - "Não faz sentido" = uma suposição sua está errada. Cheque as suposições, não o improvável.
+
+## Registro no vault
+
+Bug com valor durável vira nota numerada: `wendkeep note new --type bug "resumo"` —
+cria `BUG-NNNN-<slug>.md` na pasta do mês de `05-Bugs` (nunca subpasta `DIA N`) e
+imprime o path pra você preencher sintoma/causa raiz/correção. Aprendizado extraído do
+debug: `wendkeep note new --type learning "lição"` (vira `APR-NNNN-` em `06-Aprendizados`).
