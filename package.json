@@ -46,6 +46,6 @@
     "url": "https://github.com/rogersialves/wendkeep/issues"
   },
   "devDependencies": {
-    "wendkeep": "^0.44.0"
+    "wendkeep": "^0.45.0"
   }
 }
