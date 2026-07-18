@@ -26,15 +26,18 @@ vault cego. Exceção única: mudança trivial (typo, 1 linha).
    Antes de implementar, resolva `spec_impact` na proposta:
    - `required`: liste a capability em `specs:` e preencha
      `specs/<capability>/spec.md` com ADDED/MODIFIED/REMOVED; ligue tarefas com `[req:ID]`.
+     Heading de requisito: `### Requisito: <ID> — <nome>` (ou só `### Requisito: <ID>`);
+     o ID é a identidade (ex.: `GATE-1`, `API-AUTH-2`).
    - `none`: registre uma justificativa real em `spec_impact_reason`.
    `pending` nunca é estado pronto para implementação ou archive.
 3. **Apply** — implemente cada tarefa de `tarefas.md` com disciplina **wk-tdd**
    (teste vermelho antes do código). Marque `- [x]` ao concluir. Declare nas tarefas:
    - `[sensor:<id>]` — a prova automatizada (roda no verify).
    - `[req:<ID>]` — o requisito do spec que a tarefa satisfaz (ex.: `[req:GATE-1]`),
-      quando a change mexe numa capability. Toda autoria de spec ocorre somente em
+      quando a change mexe numa capability. Uma tarefa pode declarar vários
+      `[req:]` — todos contam na cobertura. Toda autoria de spec ocorre somente em
       `08-Mudanças/<slug>/specs/<capability>/spec.md`; `07-Specs` é gerado/read-only.
-   Ex.: `- [ ] 2.1 valida CORE [req:MEM-1] [sensor:memory-validation]`.
+   Ex.: `- [ ] 2.1 valida CORE [req:MEM-1] [req:MEM-2] [sensor:memory-validation]`.
 4. **Verify** — `wendkeep verify` roda os sensores → `evidencia.json`. Depois
    `wendkeep verify --deep` monta o *pacote de verificação* pro passe independente.
 5. **Verify deep** — a skill **wk-verify** (passe fresco, autor≠verificador) lê o pacote,
@@ -53,3 +56,6 @@ vault cego. Exceção única: mudança trivial (typo, 1 linha).
   o que você declarou. Sem `[sensor:]`, o archive não trava.
 - A proposta linka a sessão de origem; a sessão linka a mudança ativa. É de propósito:
   o grafo do Obsidian mostra plano↔sessão↔decisão.
+- Notas derivadas (bug/aprendizado) são numeradas (`BUG-NNNN-`/`APR-NNNN-`) e vivem na
+  pasta do mês — nunca em subpasta `DIA N`. Crie via `wendkeep note new --type
+  bug|learning "título"` (imprime o path), não à mão.
