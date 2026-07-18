@@ -102,15 +102,17 @@ export const SESSION_HOOKS = [
   // timeout 45 (was 15): measured ~4s warm via npx, but Windows startup contention (several npx
   // cold-starts at once — a sibling MCP took 26s in a real log) blew 15s and silently dropped the
   // memory injection for the whole session.
-  { event: 'SessionStart', matcher: 'startup|clear|compact', name: 'brain-inject', timeout: 45, order: -10, statusMessage: 'wendkeep: injecting memory + active change' },
-  { event: 'SessionStart', matcher: 'startup', name: 'session-start', timeout: 30, statusMessage: 'wendkeep: opening Obsidian session' },
-  { event: 'Stop', matcher: null, name: 'session-stop', timeout: 60, statusMessage: 'wendkeep: writing session checkpoint' },
-  { event: 'UserPromptSubmit', matcher: null, name: 'session-ensure', timeout: 30, statusMessage: 'wendkeep: ensuring active session' },
+  { event: 'SessionStart', matcher: 'startup|clear|compact', name: 'brain-inject', timeout: 45, order: -10, codex: true, statusMessage: 'wendkeep: injecting memory + active change' },
+  { event: 'SessionStart', matcher: 'startup', name: 'session-start', timeout: 30, codex: true, statusMessage: 'wendkeep: opening Obsidian session' },
+  { event: 'Stop', matcher: null, name: 'session-stop', timeout: 60, codex: true, statusMessage: 'wendkeep: writing session checkpoint' },
+  { event: 'UserPromptSubmit', matcher: null, name: 'session-ensure', timeout: 30, codex: true, statusMessage: 'wendkeep: ensuring active session' },
   // Capture an interactive decision (AskUserQuestion) — options + the user's choice — into 04-Decisões.
+  // codex: AskUserQuestion is a Claude-only tool; there is nothing to match on.
   { event: 'PostToolUse', matcher: 'AskUserQuestion', name: 'decision-capture', timeout: 15, statusMessage: 'wendkeep: recording decision' },
   // Refresh subagent/workflow telemetry as each subagent finishes (resilient to a missed Stop).
-  { event: 'SubagentStop', matcher: null, name: 'subagent-stop', timeout: 20, statusMessage: 'wendkeep: subagent telemetry' },
+  { event: 'SubagentStop', matcher: null, name: 'subagent-stop', timeout: 20, codex: true, statusMessage: 'wendkeep: subagent telemetry' },
   // Log plan/task progress into the active session note when a task is marked complete.
+  // codex: TaskCompleted is not in Codex's hook event enum.
   { event: 'TaskCompleted', matcher: null, name: 'task-log', timeout: 10, statusMessage: 'wendkeep: plan progress' },
 ];
 
@@ -134,14 +136,38 @@ export function hookCommandLocalLegacy(name) {
 // preservar a opção futura de gates opt-in; hoje o init wira TODOS por default.
 // preferLocal: alta frequência → invocação node-direta quando houver instalação local.
 export const CHANGE_NUDGE_HOOKS = [
-  { event: 'UserPromptSubmit', matcher: null, name: 'change-context', timeout: 15, order: 10, preferLocal: true, statusMessage: 'wendkeep: change ping' },
+  { event: 'UserPromptSubmit', matcher: null, name: 'change-context', timeout: 15, order: 10, preferLocal: true, codex: true, statusMessage: 'wendkeep: change ping' },
+  // codex: reads tool_input.file_path, which Codex's apply_patch envelope does not carry.
   { event: 'PostToolUse', matcher: 'Edit|Write|MultiEdit', name: 'change-warn', timeout: 10, order: 10, preferLocal: true, statusMessage: 'wendkeep: change warn' },
+  // codex: no ExitPlanMode equivalent — update_plan is the running TODO list, not an approval.
   { event: 'PostToolUse', matcher: 'ExitPlanMode', name: 'plan-capture', timeout: 15, order: 10, preferLocal: true, statusMessage: 'wendkeep: capturing approved plan' },
-  { event: 'Stop', matcher: null, name: 'change-nag', timeout: 15, order: 10, preferLocal: true, statusMessage: 'wendkeep: open tasks check' },
+  { event: 'Stop', matcher: null, name: 'change-nag', timeout: 15, order: 10, preferLocal: true, codex: true, statusMessage: 'wendkeep: open tasks check' },
 ];
 export const CHANGE_GATE_HOOKS = [
+  // codex: reads tool_input.command; Codex's exec sends a raw string and exec_command an argv,
+  // so the guard would silently fail OPEN — worse than absent, since the docs would promise it.
   { event: 'PreToolUse', matcher: 'Bash', name: 'change-guard', timeout: 10, order: 10, preferLocal: true, statusMessage: 'wendkeep: change gate' },
 ];
+
+// --- Codex projection ---------------------------------------------------------
+// Codex reads <project>/.codex/hooks.json (PascalCase event keys, same group shape as
+// Claude's settings.json). Only specs that opt in with `codex: true` are projected — the
+// rest carry a `// codex:` comment above them saying why. Three deltas from Claude, each
+// verified against codex-rs and each silent when wrong: the timeout key is `timeoutSec`
+// (`timeout` is not a field and falls through to a 600s default), there is no
+// ${CLAUDE_PROJECT_DIR} so `preferLocal` never applies, and matcher is only honoured on
+// SessionStart (UserPromptSubmit/Stop null it at discovery).
+export const CODEX_MATCHER_EVENTS = new Set(['SessionStart']);
+
+export function codexHookSpecs(specs) {
+  return specs.filter((h) => h.codex === true && !h.command);
+}
+
+export function codexHookEntry(spec) {
+  const entry = { type: 'command', command: hookCommand(spec.name), timeoutSec: spec.timeout };
+  if (spec.statusMessage) entry.statusMessage = spec.statusMessage;
+  return entry;
+}
 
 // --- companion plugins / MCP --------------------------------------------------
 // Optional tools wendkeep init can pin alongside the vault. Each is wired through

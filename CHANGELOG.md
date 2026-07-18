@@ -4,6 +4,78 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.46.0] — 2026-07-18
+
+### Added
+
+- `wendkeep init` agora escreve também `<projeto>/.codex/hooks.json`, e não só
+  `.claude/settings.json`. Fechava aqui o buraco mais confuso do onboarding com Codex: o
+  `.mcp.json` gerado deixava o vault **alcançável**, então tudo parecia certo — mas sem hooks
+  não havia sessão, `CURRENT_SESSION.md` nunca aparecia e o `registrySessions` ficava em 0. As
+  saídas eram escrever o `.codex/hooks.json` à mão ou rodar `wendkeep import --source codex`
+  depois do fato, ambas descobertas tarde demais. Um projeto novo com Codex nasce com sessão.
+- Sete hooks wirados, marcados `codex: true` em `src/taxonomy.mjs`: `brain-inject`
+  (SessionStart, matcher `startup|clear|compact`), `session-start` (SessionStart, `startup`),
+  `session-ensure` e `change-context` (UserPromptSubmit, sem matcher), `session-stop` e
+  `change-nag` (Stop, sem matcher) e `subagent-stop` (SubagentStop).
+- Cinco hooks ficaram **deliberadamente de fora**, cada um com um comentário `// codex:` no
+  `src/taxonomy.mjs` explicando o porquê — projetar um hook que não funciona é pior que não
+  projetá-lo. `change-guard` lê `tool_input.command`, mas a superfície de shell do Codex é
+  `exec` (`custom_tool_call`, com `tool_input` string crua) ou `exec_command`/`shell_command`:
+  o guard falharia **aberto**, dando uma sensação de proteção que não existe. `change-warn` lê
+  `tool_input.file_path`, e o `apply_patch` do Codex manda um envelope de patch sem esse campo.
+  `plan-capture` não tem equivalente — `update_plan` é a lista de TODO corrente e dispara no
+  meio do turno, não no fim do plano. `decision-capture` depende de `AskUserQuestion`, uma
+  ferramenta exclusiva do Claude. E `task-log` depende de `TaskCompleted`, que não existe no
+  enum de eventos de hook do Codex.
+- A projeção Codex tem três diferenças em relação ao formato do `settings.json`, todas
+  **silenciosas quando erradas** — daí valerem registro. (1) A chave de timeout é `timeoutSec`,
+  não `timeout`. (2) O comando é sempre `npx wendkeep hook <nome>`, nunca a forma node-direta:
+  aquela emite `${CLAUDE_PROJECT_DIR}`, que não existe no Codex, então a flag `preferLocal` é
+  ignorada de propósito na projeção. (3) As chaves de evento são PascalCase — o snake_case que
+  se vê em `[hooks.state]` no `~/.codex/config.toml` é o rótulo interno do evento, não a chave
+  do JSON.
+- Merge não-destrutivo, mesma disciplina do `mergeSettings`: reconhece um grupo já wirado e
+  nunca duplica em re-`init`, preserva hooks de terceiros e hooks irmãos agrupados junto,
+  `--force` atualiza `timeoutSec`/`statusMessage` no lugar, e um `.bak` é salvo. Arquivo
+  existente ilegível não é tocado — a proposta vai para `.codex/hooks.json.new`.
+- Testes: `tests/init-codex-hooks.test.mjs` (12 unitários sobre `mergeCodexHooks`) e um e2e em
+  `tests/init-vault.test.mjs`. Suíte completa: 397 passando.
+
+### Fixed
+
+- Hooks Codex do wendkeep rodavam com o timeout **default de 600s**, não com o configurado. A
+  chave correta é `timeoutSec`; `timeout` não é campo, não é rejeitado e simplesmente não é
+  lido, então o valor caía no default sem um único aviso. Todo `.codex/hooks.json` escrito à
+  mão antes disso (o do NutriGym, entre outros) carrega o erro. `mergeCodexHooks` migra a
+  chave legada in place, **mesmo sem `--force`** — é correção de bug, não refresh opcional.
+- `src/taxonomy.mjs` carregava um NUL (`0x00`) e um `0x1f` **literais** dentro da classe de
+  caracteres do `deriveVaultDirName`. Por causa do NUL o `file` classificava o fonte como
+  binário, e o ripgrep pula binário por default — um Grep por qualquer termo no arquivo
+  voltava vazio, em silêncio. Não era erro, era ausência de resultado, e justo no arquivo onde
+  vivem os specs de hook e as constantes de companion. Os dois bytes viraram as sequências de
+  escape `\x00` e `\x1f`; o regex é byte-idêntico em comportamento (#7).
+
+### Changed
+
+- A numeração dos passos do `init` foi de `[n/4]` para `[n/5]`. O novo passo 3 é o
+  `.codex/hooks.json`, então `.mcp.json` passou a ser `[4/5]` e as cores `[5/5]`.
+
+### Migration
+
+- **Quem já tem hooks Codex do wendkeep vai ver um prompt "Hooks need review" a mais neste
+  upgrade.** Isso é esperado, não regressão: a identidade do hook é hasheada, e corrigir
+  `timeout` → `timeoutSec` muda o conteúdo, logo muda o hash, logo o Codex pede re-aprovação.
+  Uma vez só.
+- Independente disso, todo hook nasce Untrusted: o Codex enumera mas **não executa** até o
+  usuário aprovar no prompt de startup. O `init` não tem como pré-aprovar —
+  `--dangerously-bypass-hook-trust` é por invocação e não persiste `trusted_hash` — então
+  passou a imprimir um aviso explicando o prompt em vez de deixar o usuário achar que o wiring
+  falhou.
+- O `init` **não** escreve `[features] hooks = true` no `.codex/config.toml`, de propósito. O
+  Codex declara essa feature como `Stage::Stable` com `default_enabled: true`, então a linha
+  seria no-op — e a camada de config do projeto é trust-gated como um todo de qualquer forma.
+
 ## [0.45.1] — 2026-07-18
 
 ### Fixed

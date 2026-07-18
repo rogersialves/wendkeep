@@ -12,7 +12,7 @@ Tudo que foi conscientemente **descartado** ou **adiado**. Diferença importante
 | Dashboard de custo/tokens | Adiada — Fase 1 | Cobrável e aditivo ao dashboard cloud; só após sync ter pagantes reais. |
 | Memória/busca compartilhada em equipe | Adiada — Fase 2 | Produto diferente do solo; só após solos amarem + inbound de times. |
 | Observabilidade (por que o agente esqueceu/errou) | Adiada — Fase 3 | Problema mais difícil dos três concorrentes; só com base de equipe pagante. |
-| Suporte a outros agentes (Codex, Gemini, etc.) | Adiada | Foco do MVP é Claude Code (a sua ferramenta). Expandir depois de validado. |
+| Suporte a outros agentes (Codex, Gemini, etc.) | Codex: **entregue** (import 0.17.0; hooks de sessão via `.codex/hooks.json` no `init`, 0.46.0 — ver `17-agent-agnostic.md`). Demais: adiada | Foco do MVP era Claude Code; Codex validou primeiro. Gemini/outros só quando houver demanda. |
 
 ---
 
