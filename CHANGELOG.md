@@ -4,6 +4,38 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.45.1] — 2026-07-18
+
+### Fixed
+
+- Documentação: 31 inconsistências entre os READMEs e o comportamento real do pacote,
+  encontradas auditando o texto contra o tarball publicado da 0.45.0. Nenhuma mudança de
+  código — `src/`, `hooks/`, `bin/` e `schema/` são idênticos aos da 0.45.0. Este release
+  existe porque o README viaja dentro do tarball: a correção só chega à página do npm e a
+  quem instala o pacote com uma nova publicação.
+- Duas afirmações levavam o usuário a um resultado diferente do prometido: o README dizia
+  que `context-mode` vinha pré-marcado no picker de companions e que `init --yes` o
+  instalava (todo companion é `default: false` desde a 0.24.0, e `--yes` instala zero), e
+  as seções de requisitos/init sugeriam captura de sessões Codex automática após o `init`,
+  contradizendo o próprio Notes & roadmap (o `init` só wira `.claude/settings.json`).
+- Tabela de Comandos reescrita a partir do `--help` do binário: faltavam `stats` (usado na
+  própria introdução do README), `dashboard`, `change use|continue|abandon|relink`,
+  `cost --top|--trend|--write`, `import --stamp-ids|--rescan-decisions`, `verify --change`,
+  `spec rebase --accept-current`, `sensors add --name|--description` e `sync-defs --reseed`.
+  Três linhas da tabela em inglês tinham ficado em português.
+- Correções factuais: `--force` dispensa só a checagem de tarefa aberta (G1), não o gate
+  inteiro; `verdict.json` é exigido sempre desde a 0.31.0 (uma change sem `[req:]` destrava
+  com o verdict trivial do `verify --deep`, não pulando a etapa); `change new` não scaffolda
+  mais `specs/` e `--simple` pula o `design.md`; os sensores semeados são uma allow-list
+  fixa mais `memory-validation`; `detectProvider()` não conhece Copilot; `context-mode` é
+  plugin do Claude Code, sem entrada em `.mcp.json`; `brain-inject` roda em
+  `startup|clear|compact`; as skills vão para `.claude/skills` e `.agents/skills`;
+  `dotcontext` é `hidden`; `docs/` não vai no tarball; e uma tarefa carrega um só
+  `[sensor:]` (`[req:]` é que aceita vários).
+- `README.pt-BR.md`: a tabela de comandos estava partida ao meio por um parágrafo, fazendo
+  oito linhas renderizarem como texto cru no npm e no GitHub. Reparada e sincronizada com o
+  inglês — os dois arquivos fecham com os mesmos 20 comandos e 42 flags.
+
 ## [0.45.0] — 2026-07-18
 
 ### Fixed
