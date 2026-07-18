@@ -1,0 +1,49 @@
+name: auto-tag-release
+
+# Closes the recurring gap: `npm publish` (or a merge) lands a version bump on main but the
+# git tag is never pushed, so `release.yml` never fires and the GitHub Releases page falls
+# behind npm/CHANGELOG. This watches main; when `package.json` carries a version with no
+# matching tag yet, it creates the tag AND the GitHub Release in one job (notes from
+# CHANGELOG via scripts/print-release-notes.mjs). The tag is a no-op if it already exists
+# (e.g. the maintainer used `npm run release`), so the two flows coexist.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'package.json'
+      - 'CHANGELOG.md'
+
+permissions:
+  contents: write
+
+jobs:
+  tag-and-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Tag + release when the version is new
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          TAG="v$VERSION"
+          if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
+            echo "tag $TAG já existe — release fica com o fluxo do tag push"; exit 0
+          fi
+          # CHANGELOG is the single source of truth — fail loud if the entry is missing.
+          node scripts/print-release-notes.mjs "$VERSION" > RELEASE_NOTES.md
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "$TAG" -m "$TAG"
+          git push origin "$TAG"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release edit "$TAG" --notes-file RELEASE_NOTES.md
+          else
+            gh release create "$TAG" --title "$TAG" --notes-file RELEASE_NOTES.md
+          fi
