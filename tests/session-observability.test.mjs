@@ -6,6 +6,29 @@ import { join } from 'node:path';
 import { updateSessionObservability } from '../hooks/session-observability.mjs';
 import { refreshSubagents } from '../hooks/subagent-stop.mjs';
 import { upsertSessionRegistry, writeControl } from '../hooks/obsidian-common.mjs';
+import { sameUsageData } from '../hooks/token-usage.mjs';
+
+// Preservação de `atualizado_em`: o dado é "o mesmo" independente da ORDEM das chaves.
+// A entrada vinda do parse do note (transcript_id, modelos, tools, provider, …) tem ordem
+// diferente da recém-computada (transcript_id, provider, modelos, …). O compare antigo
+// (JSON.stringify) dava false p/ dado idêntico → atualizado_em re-stampado → teste flaky.
+test('sameUsageData: identical usage with different key order compares equal', () => {
+  const built = { transcript_id: 'main', provider: 'openai', modelos: ['x'], pensamento: 'high', input: 100, cache_write: 0, cache_read: 50, output: 40, reasoning: 20, total: 190, custo_usd: 0.0017, prompts: 1, tool_calls: 0, chamadas_llm: 1, tools: [], atualizado_em: '2026-07-18T00:19:39' };
+  const parsed = { transcript_id: 'main', modelos: ['x'], tools: [], provider: 'openai', pensamento: 'high', input: 100, cache_write: 0, cache_read: 50, output: 40, reasoning: 20, total: 190, custo_usd: 0.0017, prompts: 1, tool_calls: 0, chamadas_llm: 1, atualizado_em: '2026-07-18T00:19:41' };
+  assert.equal(sameUsageData(built, parsed), true, 'ordem de chaves e atualizado_em não contam');
+});
+
+test('sameUsageData: any changed usage number compares unequal', () => {
+  const a = { provider: 'openai', modelos: ['x'], input: 100, output: 40, total: 190, custo_usd: 0.0017, tools: [] };
+  assert.equal(sameUsageData(a, { ...a, output: 41 }), false, 'output mudou → re-stampa');
+  assert.equal(sameUsageData(a, { ...a, modelos: ['x', 'y'] }), false, 'modelos mudou → re-stampa');
+  assert.equal(sameUsageData(a, { ...a, tools: ['Read'] }), false, 'tools mudou → re-stampa');
+});
+
+test('sameUsageData: null/undefined side is never equal', () => {
+  assert.equal(sameUsageData(null, {}), false);
+  assert.equal(sameUsageData({}, undefined), false);
+});
 
 function codexTranscript({ id, model, effort, input, cached, output, reasoning }) {
   return [

@@ -4,6 +4,18 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.45.0] — 2026-07-18
+
+### Fixed
+
+- Observabilidade: o note de sessão deixa de ser reescrito com timestamp novo a cada Stop
+  quando o uso não muda. A preservação de `atualizado_em` (`token-usage.mjs`) comparava
+  `previous` (parseado do note) com `current` (recém-computado) via `JSON.stringify` —
+  sensível à ordem das chaves, que difere entre parse e build, então a comparação **sempre**
+  falhava e o timestamp era re-stampado toda vez. Novo `sameUsageData(a, b)` compara os campos
+  de uso de forma ordem-insensível (ignorando `atualizado_em`). Corrige o churn de reescrita e
+  o teste flaky "same sources produce byte-identical markdown".
+
 ## [0.44.0] — 2026-07-17
 
 ### Changed

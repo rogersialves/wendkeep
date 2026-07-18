@@ -604,6 +604,19 @@ function transcriptIdFromPath(transcriptPath) {
   return basename(String(transcriptPath || '')).replace(/\.jsonl?$/i, '') || 'desconhecido';
 }
 
+// The usage fields that define whether a transcript's entry "changed" — everything except the
+// key (transcript_id) and the timestamp (atualizado_em). Order-insensitive by design: a new
+// field here is the single place to keep preservation correct.
+const USAGE_FIELDS = ['provider', 'pensamento', 'input', 'cache_write', 'cache_read',
+  'output', 'reasoning', 'total', 'custo_usd', 'prompts', 'tool_calls', 'chamadas_llm'];
+
+export function sameUsageData(a, b) {
+  if (!a || !b) return false;
+  const listEqual = (x, y) => (x || []).join(' ') === (y || []).join(' ');
+  return USAGE_FIELDS.every((f) => (a[f] ?? null) === (b[f] ?? null))
+    && listEqual(a.modelos, b.modelos) && listEqual(a.tools, b.tools);
+}
+
 function entryFromSummary(summary, transcriptId) {
   return {
     transcript_id: transcriptId,
@@ -931,10 +944,11 @@ export function collectSessionUsage({ sessionContent, transcriptPath }) {
   const transcriptId = transcriptIdFromPath(transcriptPath);
   const previous = existingEntries.find((entry) => entry.transcript_id === transcriptId);
   const current = entryFromSummary(summary, transcriptId);
-  if (previous) {
-    const comparable = (entry) => JSON.stringify({ ...entry, atualizado_em: undefined });
-    if (comparable(previous) === comparable(current)) current.atualizado_em = previous.atualizado_em;
-  }
+  // Preserve the old timestamp when the usage data is unchanged, so an unchanged session note
+  // stays byte-identical (no needless rewrite on every Stop). Compared semantically, NOT via
+  // JSON.stringify: the parsed-from-note entry and the freshly-built one have different key
+  // orders, which made the old stringify compare always mismatch — preservation never fired.
+  if (previous && sameUsageData(previous, current)) current.atualizado_em = previous.atualizado_em;
   let entries = existingEntries.filter((e) => e.transcript_id !== transcriptId);
 
   if (!existingEntries.length) {
