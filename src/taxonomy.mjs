@@ -330,7 +330,7 @@ export function deriveVaultDirName(projectPath) {
     .pop() || '';
   const clean = base
     .replace(/^[.\s]+/, '') // drop leading dots/space so we never get `..name`
-    .replace(/[<>:"/\\|?* -]/g, '-') // FS-unsafe chars -> dash
+    .replace(/[<>:"/\\|?*\x00-\x1f]/g, '-') // FS-unsafe chars -> dash
     .replace(/\s+/g, '-') // whitespace -> dash
     .replace(/-+/g, '-') // collapse dash runs
     .replace(/^-+|-+$/g, '') // trim edge dashes
