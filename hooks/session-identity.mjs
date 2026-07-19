@@ -96,6 +96,30 @@ export function resolveSessionIdentity(vaultBase, input = {}, provider = detectP
     };
   }
 
+  // Codex on Windows can deliver a Stop payload whose transcript_path never arrives (or is
+  // lost to a truncated JSON, openai/codex#23784). The registry already knows the mapping —
+  // the lookup below just sat under this gate, unreachable in the one case it solves. The
+  // comment above says we require "rollout/registry"; the registry half was never wired.
+  // Requiring the entry's provider to match preserves the cross-provider invariant from the
+  // 2026-07-11 incident: we are not minting a canonical id, we are finding an ALREADY
+  // REGISTERED session whose key is the hook's own id. A resume with a fresh id simply
+  // misses and stays deferred.
+  if (!transcriptPath && hookId) {
+    const entry = readSessionRegistry(vaultBase).sessions?.[hookId];
+    if (entry?.transcript_path && entry.provider === provider) {
+      return {
+        state: 'resolved',
+        provider,
+        canonicalConversationId: hookId,
+        hookSessionId: hookId,
+        transcriptPath: entry.transcript_path,
+        transcriptId: entry.transcript_id || basename(entry.transcript_path, '.jsonl'),
+        parentConversationId: '',
+        diagnostics: ['transcript recuperado do SESSION_REGISTRY'],
+      };
+    }
+  }
+
   if (!transcriptPath || !inspected.canonicalConversationId) {
     return { state: 'deferred', provider, transcriptPath, diagnostics: ['transcript ausente ou sem identidade canônica'] };
   }

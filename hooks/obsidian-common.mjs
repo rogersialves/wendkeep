@@ -23,10 +23,52 @@ export const VAULT_COMPLEMENT_RULES = [
   'Atualize `SHARED_MEMORY.md` somente quando a síntese mudar estado ativo que outro agente precise saber.',
 ];
 
+// Codex on Windows serializes the Stop payload with `last_assistant_message` cut mid-string
+// and never closed when the assistant text carries non-ASCII (openai/codex#23784). That field
+// is LAST in codex-rs's StopCommandInput, so everything wendkeep consumes — session_id,
+// turn_id, transcript_path, cwd — sits in the intact prefix.
+//
+// One pass, tracking quotes/escapes/depth, remembering the offset of the last top-level comma
+// that was NOT inside a string. Re-closing there yields the well-formed prefix. Deliberately
+// NOT a decreasing brute-force parse: this runs on every turn and the payload can be tens of
+// KB. The truncated field is dropped, never reconstructed — half an assistant message is
+// invented data, and it is the one field we do not need.
+export function salvageTruncatedJson(raw) {
+  const text = String(raw || '');
+  if (text[0] !== '{') return null;
+  let inString = false;
+  let escaped = false;
+  let depth = 0;
+  let lastBoundary = -1;
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i];
+    if (escaped) { escaped = false; continue; }
+    if (ch === '\\') { if (inString) escaped = true; continue; }
+    if (ch === '"') { inString = !inString; continue; }
+    if (inString) continue;
+    if (ch === '{' || ch === '[') depth += 1;
+    else if (ch === '}' || ch === ']') depth -= 1;
+    else if (ch === ',' && depth === 1) lastBoundary = i;
+  }
+  if (lastBoundary === -1) return null;
+  try {
+    const parsed = JSON.parse(`${text.slice(0, lastBoundary)}}`);
+    return parsed && typeof parsed === 'object' ? parsed : null;
+  } catch { return null; }
+}
+
 export function readHookInput() {
   const raw = readFileSync(0, 'utf-8').trim();
   if (!raw) return {};
-  return JSON.parse(raw);
+  try {
+    return JSON.parse(raw);
+  } catch (error) {
+    const salvaged = salvageTruncatedJson(raw);
+    // `_wk` prefix: the object is the harness payload merged with our own metadata, and a
+    // silent key collision here would be worse than the ugly prefix.
+    if (salvaged) return { ...salvaged, _wkSalvaged: true };
+    throw error;
+  }
 }
 
 export function writeHookOutput(payload = {}) {
@@ -503,6 +545,10 @@ export function isBootstrapPrompt(text = '') {
   return clean.startsWith('# AGENTS.md instructions')
     || clean.startsWith('<environment_context>')
     || clean.startsWith('<permissions instructions>')
+    // Codex injects the available-plugins catalogue as the first userPrompt of turn 1.
+    // Anchored with startsWith on purpose: matching the bare substring would discard a
+    // legitimate prompt that merely asks about plugins.
+    || clean.startsWith('<recommended_plugins>')
     || clean.includes('You are Codex, a coding agent')
     || clean.startsWith('## Memory');
 }
