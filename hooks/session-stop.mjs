@@ -584,6 +584,16 @@ function formatTokenLine(usage, model) {
   return cost ? `${line} — ≈ API equivalente (não é cobrança do plano)` : line;
 }
 
+// User-facing explanation for a turn that could not be memorialized. Names the upstream bug
+// when the payload arrived salvaged, because "wendkeep didn't record it" reads as a wendkeep
+// defect and the user would have nowhere to look.
+export function bailMessage(why, input = {}) {
+  const truncated = input._wkSalvaged
+    ? ' O payload do Stop chegou truncado (openai/codex#23784).'
+    : '';
+  return `[wendkeep] Turno não registrado: ${why}.${truncated} Recupere com \`wendkeep import --source codex\`.`;
+}
+
 export function buildIterationBlock(tx, input) {
   const turnId = input.turn_id || tx.latestTurnId || `${Date.now()}`;
   const turn = selectTurn(tx, turnId);
@@ -1033,8 +1043,11 @@ function main() {
   const transcriptPath = input.transcript_path || input.transcriptPath || '';
   const { identity, entry } = resolveSessionEntry(vaultBase, input);
   if (identity.state !== 'resolved' || !entry?.session_file) {
-    process.stderr.write(`[wendkeep] Stop sem identidade segura: ${identity.diagnostics?.join('; ') || 'sessão não registrada'}\n`);
-    writeHookOutput({});
+    const why = identity.diagnostics?.join('; ') || 'sessão não registrada';
+    process.stderr.write(`[wendkeep] Stop sem identidade segura: ${why}\n`);
+    // stderr alone is a black hole here: Codex discards it, which is how an entire session of
+    // lost turns produced no signal at all. systemMessage is what the UI actually shows.
+    writeHookOutput({ systemMessage: bailMessage(why, input) });
     return;
   }
 
@@ -1160,6 +1173,9 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     main();
   } catch (error) {
     process.stderr.write(`[wendkeep] Stop falhou: ${error.message}\n`);
-    writeHookOutput({});
+    // Same reasoning as the identity bail: stderr is discarded by Codex. Exit stays 0 —
+    // a non-zero Stop hook blocks the turn (openai/codex#21921), and trading a lost turn
+    // for a stuck session is a worse deal.
+    writeHookOutput({ systemMessage: bailMessage(error.message) });
   }
 }

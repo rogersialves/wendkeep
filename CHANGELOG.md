@@ -4,6 +4,57 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.46.1] — 2026-07-19
+
+### Fixed
+
+- **Turnos do Codex sumiam da nota sem nenhum aviso.** No Windows o Codex serializa o payload
+  do `Stop` com o campo `last_assistant_message` cortado no meio, sem fechar a string JSON —
+  bug upstream ainda aberto ([openai/codex#23784](https://github.com/openai/codex/issues/23784)).
+  Sessão em português enche esse campo de acento, então o corte é frequente. O
+  `readHookInput` fazia `JSON.parse` cru, lançava, e o `session-stop` saía com código 0
+  escrevendo só no stderr — que o Codex descarta. Resultado: a nota era criada, o summary
+  atualizava a cada prompt, e nenhuma iteração jamais entrava. Só o `Stop` quebrava porque
+  `last_assistant_message` é o único campo exclusivo dele; `SessionStart` e
+  `UserPromptSubmit` não o carregam.
+  Como esse campo é o **último** do `StopCommandInput`, tudo que o wendkeep consome
+  (`session_id`, `turn_id`, `transcript_path`, `cwd`) está no prefixo bem-formado. O
+  `readHookInput` passa a recuperar esse prefixo numa passada só, descartando o campo
+  truncado — nunca reconstruindo-o, porque metade de uma mensagem é dado inventado.
+- **O hook parou de falhar em silêncio.** Todo caminho de bail do `session-stop` agora emite
+  `systemMessage`, que a UI do Codex mostra, com o motivo e o comando de recuperação. O exit
+  code continua 0 de propósito: hook de `Stop` que sai diferente de zero trava o turno
+  (openai/codex#21921), e trocar turno perdido por sessão travada é pior negócio.
+- **`resolveSessionIdentity` passa a usar o `SESSION_REGISTRY` como fonte do
+  `transcript_path`** quando o payload não o traz. O registry já tinha o mapeamento; o lookup
+  é que ficava abaixo do gate, inalcançável justo no caso que resolveria. A entrada precisa
+  ser do mesmo provider, o que preserva o invariante do incidente de contaminação
+  cross-provider de 2026-07-11.
+- **`wendkeep import` deixou de ser cego para a sessão danificada.** O dedup perguntava
+  "existe registro?", não "existe conteúdo?" — e como o `session-start` registra antes do
+  `session-stop` escrever, **as sessões esvaziadas pelo bug acima eram exatamente as que o
+  comando de recuperação se recusava a consertar.** Agora a decisão compara os turnos do
+  transcript com os marcadores `wk-turn` já na nota: cobertura completa pula, parcial ou
+  vazia completa a nota existente sem criar uma segunda. Sem flag opt-in — quem roda `import`
+  depois de perder sessão não tem como saber que precisaria de uma. O relatório ganhou a
+  categoria `repaired`, separada de `imported` (nota nova) e de `skipped` (já completa).
+- **Sessões importadas ganhavam título de bloco injetado pelo harness.** Seis notas de um
+  mesmo projeto ficaram chamadas `<recommended_plugins> Here is a list of plugins that ar`,
+  no frontmatter e no nome do arquivo. Causa de uma linha: `buildIterationBlock` seleciona
+  `userPrompts.at(-1)` e o `deriveSummary` usava `.find(Boolean)` — o harness injeta o bloco
+  como **primeiro** prompt do turno e o pedido do usuário vem por **último**. Mesmo dado,
+  ponta oposta. As duas seleções agora são a mesma, com `isBootstrapPrompt` (que passou a
+  reconhecer `<recommended_plugins>`) como rede, aplicado ao prompt inteiro e não linha a
+  linha — filtrar por linha cairia na linha seguinte do próprio bloco injetado.
+
+### Recuperação
+
+- Quem perdeu turnos de sessões Codex antes desta versão recupera com
+  `wendkeep import --source codex`. O rollout do Codex fica íntegro em disco, e o import agora
+  completa a nota existente em vez de pulá-la. Rodar mais de uma vez é no-op.
+- Notas já criadas com título poluído **não** são renomeadas automaticamente: mexer em nome de
+  arquivo quebra wikilink e reorganiza o grafo, e isso é decisão do dono do vault.
+
 ## [0.46.0] — 2026-07-18
 
 ### Added

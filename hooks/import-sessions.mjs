@@ -17,7 +17,7 @@ import {
 import { buildSessionContent, allocateSessionPath } from './session-start.mjs';
 import { createLinkedNotes } from './linked-notes.mjs';
 import { updateSessionObservability } from './session-observability.mjs';
-import { readSessionRegistry, upsertSessionRegistry, formatLocalIso, formatDate, providerMeta } from './obsidian-common.mjs';
+import { readSessionRegistry, upsertSessionRegistry, formatLocalIso, formatDate, providerMeta, isBootstrapPrompt } from './obsidian-common.mjs';
 import { getLocale } from './locale.mjs';
 import { captureProseDecisions } from './decision-capture.mjs';
 
@@ -154,6 +154,36 @@ export function capturedSessionIds(vaultBase) {
   return ids;
 }
 
+// session_id -> absolute note path, for the sessions that already have a note on disk. The
+// registry alone is not enough: it records a session the moment session-start runs, which is
+// exactly the state a damaged session is stuck in (registered, note empty).
+export function capturedSessionNotes(vaultBase) {
+  const notes = new Map();
+  const registry = readSessionRegistry(vaultBase).sessions || {};
+  for (const [id, entry] of Object.entries(registry)) {
+    if (!entry?.session_file) continue;
+    const abs = join(vaultBase, ...String(entry.session_file).split('/'));
+    if (existsSync(abs)) notes.set(id, abs);
+  }
+  try {
+    const sessionsDir = join(vaultBase, getLocale(vaultBase).folders.sessions);
+    for (const path of walkFiles(sessionsDir, /\.md$/i)) {
+      const id = noteSessionId(path);
+      if (id && !notes.has(id)) notes.set(id, path);
+    }
+  } catch { /* registry alone is enough */ }
+  return notes;
+}
+
+// Turn ids already memorialized in a note, read from the `wk-turn` markers insertIteration
+// writes. Missing/unreadable note = nothing captured.
+export function noteTurnIds(notePath) {
+  try {
+    const md = readFileSync(notePath, 'utf-8');
+    return new Set([...md.matchAll(/<!-- (?:wk|codex)-turn: ([^\s]+) -->/g)].map((m) => m[1]));
+  } catch { return new Set(); }
+}
+
 export function discoverCodexTranscripts(projectPath, fromDir) {
   const dir = fromDir || defaultCodexSessionsDir();
   if (!dir || !existsSync(dir)) return { dir, transcripts: [] };
@@ -168,9 +198,14 @@ export function discoverCodexTranscripts(projectPath, fromDir) {
 }
 
 // Session objective for the note title/frontmatter: first real user prompt, one line.
-function deriveSummary(tx) {
-  for (const turn of tx.turns || []) {
-    const prompt = (turn.userPrompts || []).find(Boolean);
+// Mirrors buildIterationBlock's selection (`userPrompts.at(-1)`) on purpose: the harness
+// injects preamble as the FIRST prompt of a turn and the user's request lands LAST, so taking
+// the first titled six Vendiva sessions "<recommended_plugins> Here is a list of plugins".
+// isBootstrapPrompt is the belt: it runs per whole prompt, not per line — filtering by line
+// would fall through to the next line of the SAME injected block.
+export function deriveSummary(tx) {
+  for (const turn of tx?.turns || []) {
+    const prompt = (turn.userPrompts || []).filter((p) => p && !isBootstrapPrompt(p)).at(-1);
     if (prompt) {
       return prompt.replace(/[\r\n#]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 80) || 'session';
     }
@@ -313,15 +348,18 @@ export function runImport(vaultBase, opts = {}) {
     codexDir = d.dir;
     transcripts.push(...d.transcripts);
   }
-  const captured = capturedSessionIds(vaultBase);
+  const notes = capturedSessionNotes(vaultBase);
   const sinceMs = since ? Date.parse(since) : 0;
-  const report = { source: src, claudeDir, codexDir, scanned: transcripts.length, imported: 0, skipped: 0, errors: [], sessions: [] };
+  const report = { source: src, claudeDir, codexDir, scanned: transcripts.length, imported: 0, repaired: 0, skipped: 0, errors: [], sessions: [] };
 
   let done = 0;
   for (const t of transcripts) {
-    if (captured.has(t.sessionId)) { report.skipped++; continue; }
     if (limit && done >= limit) break;
 
+    // Every transcript is parsed now, including already-captured ones: partial coverage is
+    // undetectable without the turn list. The old presence-only check was cheaper but made
+    // the recovery command blind to exactly the sessions it exists to repair. Narrow a large
+    // vault with --since / --limit.
     let tx;
     try {
       tx = parseTranscript(t.path);
@@ -331,6 +369,31 @@ export function runImport(vaultBase, opts = {}) {
     }
     const turns = tx.turns || [];
     if (!turns.length) { report.skipped++; continue; }
+
+    const existingNote = notes.get(t.sessionId);
+    if (existingNote) {
+      const have = noteTurnIds(existingNote);
+      const missing = turns.filter((turn) => !have.has(String(turn.turnId)));
+      if (!missing.length) { report.skipped++; continue; }
+      if (dryRun) {
+        report.sessions.push({ sessionId: t.sessionId, turns: missing.length, repaired: true, dryRun: true });
+        report.repaired++;
+        done++;
+        continue;
+      }
+      try {
+        for (const turn of missing) {
+          insertIteration(existingNote, buildIterationBlock(tx, { turn_id: turn.turnId, now: turn.timestamp }), turn.turnId, tx);
+        }
+        try { updateSessionObservability({ sessionPath: existingNote, transcriptPath: t.path }); } catch { /* best-effort */ }
+        report.sessions.push({ sessionId: t.sessionId, turns: missing.length, repaired: true });
+        report.repaired++;
+        done++;
+      } catch (error) {
+        report.errors.push({ sessionId: t.sessionId, error: error.message });
+      }
+      continue;
+    }
 
     const startTs = turns[0].timestamp || '';
     if (sinceMs && startTs && Number.isFinite(Date.parse(startTs)) && Date.parse(startTs) < sinceMs) {
