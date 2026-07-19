@@ -4,6 +4,40 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.46.2] — 2026-07-19
+
+### Fixed
+
+- **Rollout de subagent do Codex virava sessão top-level no import.** Um subagent do Codex
+  não é um arquivo em `<transcript>/subagents/` — é um rollout **irmão** no
+  `~/.codex/sessions/`, cujo `session_meta` declara `source.subagent` e aponta pro pai via
+  `parent_thread_id`. O import ignorava o marcador e materializava o subagent como uma
+  "sessão" própria, com o contexto do pai inteiro replicado (subagent herda o histórico) —
+  no caso real, uma nota fantasma de 23 turnos duplicando a conversa da sessão-mãe. Agora a
+  descoberta expõe o marcador, o import conta subagents à parte no relatório (nunca em
+  `skipped`) e nenhuma nota é criada. A entrada de registry que o import antigo escreveu
+  para um subagent é removida — self-healing do nosso próprio dado errado, nunca limpeza
+  genérica: entrada com o mesmo id mas transcript diferente é preservada.
+- **Telemetria de subagent do Codex nunca chegava à sessão-mãe — nem ao vivo.** A descoberta
+  (`collectSubagentUsage`) era Claude-shaped: procurava um diretório `subagents/` ao lado do
+  transcript, que no Codex não existe. Resultado: toda sessão Codex fechava com
+  `subagents_count: 0`, tanto no import quanto no hook vivo `SubagentStop` wirado na 0.46.0
+  — o custo dos subagents simplesmente não existia no vault. A nova
+  `collectCodexSubagentUsage` acha os irmãos por `parent_thread_id` (no dia do rollout pai e
+  no dia seguinte, cobrindo spawn que cruza a meia-noite UTC — o caso real passou a seis
+  minutos disso) e devolve o mesmo agregado que o writer já consome: vivo e import passam a
+  atribuir pelo mesmo caminho.
+- **O bloco injetado ainda aparecia como fala do usuário no "Contexto conversado".** O fix
+  da 0.46.1 protegeu o título, mas a linha `**Usuário:**` da iteração vinha de um segundo
+  filtro (`shouldIgnoreUserText`) que duplicava por cópia a lista do `isBootstrapPrompt` — e
+  as cópias divergiram. O filtro agora delega: um lugar só para o próximo bloco que o
+  harness inventar.
+- Bytes NUL literais em `hooks/token-usage.mjs` e `hooks/subagent-usage.mjs` escapados —
+  mesma classe do fix de `taxonomy.mjs` (#7): o byte cru fazia o `file` classificar o fonte
+  como binário e o ripgrep pulá-lo em silêncio. Entrou `tests/source-hygiene.test.mjs`
+  barrando byte de controle em qualquer fonte publicado; ele pegou uma quarta ocorrência
+  introduzida durante esta própria mudança.
+
 ## [0.46.1] — 2026-07-19
 
 ### Fixed

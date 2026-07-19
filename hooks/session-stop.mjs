@@ -18,6 +18,7 @@ import {
   formatLocalIso,
   getNextAdrNumber,
   getVaultBase,
+  isBootstrapPrompt,
   warnIfDefaultVault,
   listMarkdownFiles,
   readControl,
@@ -53,11 +54,12 @@ const SYNTHETIC_EVENT_TAG = /^<\/?(?:task-notification|system-reminder|local-com
 
 function shouldIgnoreUserText(text) {
   const trimmed = String(text || '').trim();
+  // Bootstrap detection is DELEGATED, not copied: this used to duplicate isBootstrapPrompt's
+  // prefix list and the copies drifted — <recommended_plugins> made it into one and not the
+  // other, so the title came out clean while the same block still showed as "Usuário" in the
+  // conversation context. One filter, one place to add the next injected block.
   return SYNTHETIC_EVENT_TAG.test(trimmed)
-    || /^# AGENTS\.md instructions/.test(trimmed)
-    || trimmed.startsWith('<permissions instructions>')
-    || trimmed.includes('You are Codex, a coding agent')
-    || trimmed.startsWith('## Memory')
+    || isBootstrapPrompt(trimmed)
     // Harness utility meta-prompts (title generation, classifiers) — not real user turns; they
     // were leaking into note titles/summaries on import.
     || /^Generate a concise( UI)? title/i.test(trimmed)

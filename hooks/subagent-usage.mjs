@@ -76,6 +76,109 @@ const round4 = (n) => Math.round((Number(n) || 0) * 10000) / 10000;
 
 // Aggregate every subagent transcript under <sessionDir>/subagents. null when the dir is
 // absent (Codex / a session with no subagents) or nothing parseable.
+// --- Codex discovery ----------------------------------------------------------
+// A Codex subagent is not a file under `<transcript>/subagents/` — it is a SIBLING rollout
+// in ~/.codex/sessions/YYYY/MM/DD/, whose session_meta declares source.subagent and points
+// back via parent_thread_id. Without this, every Codex session closed with subagents_count 0,
+// live (SubagentStop) and on import alike.
+
+// First line of a rollout, bounded — Codex meta lines can be large (env, git, instructions).
+function readRolloutMeta(path, maxBytes = 4 * 1024 * 1024) {
+  try {
+    const text = readFileSync(path, 'utf-8');
+    if (text.length > maxBytes) return null;
+    const line = text.slice(0, text.indexOf('\n') === -1 ? text.length : text.indexOf('\n'));
+    const e = JSON.parse(line);
+    return e.type === 'session_meta' ? (e.payload || {}) : null;
+  } catch { return null; }
+}
+
+// Sibling day dirs to scan: the parent rollout's own dir plus the NEXT day — a session that
+// crosses midnight UTC spawns its subagent in the other day's folder, and the first real case
+// (Vendiva, 23:54 UTC) missed that by six minutes.
+function codexSiblingDirs(transcriptPath) {
+  const dir = join(transcriptPath, '..');
+  const m = String(dir).replace(/[\\/]+$/, '').match(/(\d{4})[\\/](\d{2})[\\/](\d{2})$/);
+  if (!m) return [dir];
+  const next = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]) + 1));
+  const pad = (n) => String(n).padStart(2, '0');
+  const nextDir = join(dir, '..', '..', '..', String(next.getUTCFullYear()), pad(next.getUTCMonth() + 1), pad(next.getUTCDate()));
+  return [dir, nextDir];
+}
+
+export function collectCodexSubagentUsage(transcriptPath) {
+  const meta = readRolloutMeta(transcriptPath);
+  if (!meta?.id) return null; // not a Codex rollout — the Claude path stays untouched
+  const canonicalId = meta.id;
+
+  const subagents = [];
+  const allTools = new Set();
+  const usageAgg = { input: 0, cached: 0, cacheWrite: 0, output: 0, reasoning: 0, total: 0 };
+  const modelMap = new Map();
+  let count = 0;
+  let calls = 0;
+  let cost = 0;
+
+  for (const dayDir of codexSiblingDirs(transcriptPath)) {
+    let names;
+    try { names = readdirSync(dayDir); } catch { continue; }
+    for (const n of names) {
+      if (!/\.jsonl$/i.test(n)) continue;
+      const f = join(dayDir, n);
+      if (f === transcriptPath) continue;
+      const sib = readRolloutMeta(f);
+      if (!sib?.source?.subagent) continue;
+      const parent = sib.parent_thread_id || sib.source.subagent.thread_spawn?.parent_thread_id || '';
+      if (parent !== canonicalId) continue;
+
+      const summary = summarizeTokenUsage(parseTokenUsageFromTranscript(f));
+      if (!summary.calls) continue;
+      const tokens = tokensTotal(summary.totals);
+      for (const t of summary.tools) allTools.add(t);
+
+      subagents.push({
+        id: String(sib.id || basename(f, '.jsonl')).slice(0, 12),
+        agentType: sib.source.subagent.thread_spawn?.agent_nickname || 'codex-subagent',
+        workflow: null,
+        model: summary.models[0] || '?',
+        effort: summary.pensamento || '',
+        tools: summary.tools.length,
+        toolNames: summary.tools,
+        calls: summary.calls,
+        tokens,
+        cost: round4(summary.costs.model),
+        modelRows: summary.modelRows,
+      });
+
+      for (const row of summary.modelRows || []) {
+        const rowEffort = summary.pensamento || '';
+        const key = `${row.provider || '?'}\u0000${row.model || '?'}\u0000${rowEffort}`;
+        const current = modelMap.get(key) || { provider: row.provider || '?', model: row.model || '?', effort: rowEffort, calls: 0, tokens: 0, cost: 0,
+          usage: { input: 0, cached: 0, cacheWrite: 0, output: 0, reasoning: 0, total: 0 } };
+        current.calls += row.calls || 0;
+        current.tokens += tokensTotal(row.usage);
+        current.cost += row.costs?.model || 0;
+        for (const k of Object.keys(current.usage)) current.usage[k] += row.usage?.[k] || 0;
+        modelMap.set(key, current);
+      }
+
+      count += 1;
+      calls += summary.calls;
+      cost += summary.costs.model;
+      for (const k of Object.keys(usageAgg)) usageAgg[k] += summary.totals[k] || 0;
+    }
+  }
+
+  if (!count) return null;
+  return {
+    subagents,
+    workflows: [],
+    aggregate: { count, calls, tokens: tokensTotal(usageAgg), cost: round4(cost), wasted: 0, usage: usageAgg, tools: [...allTools],
+      modelRows: [...modelMap.values()].map((r) => ({ ...r, cost: round4(r.cost), source: 'subagent' })),
+    },
+  };
+}
+
 export function collectSubagentUsage(sessionDir) {
   const subDir = join(sessionDir, 'subagents');
   if (!existsSync(subDir)) return null;
