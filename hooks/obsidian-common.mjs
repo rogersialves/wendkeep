@@ -355,6 +355,25 @@ function meaningfulPatch(patch = {}) {
   }));
 }
 
+// Remove one registry entry, but ONLY when its transcript matches the given path — this is
+// self-healing for entries wendkeep itself mis-wrote (a subagent rollout registered as a
+// top-level session by import <=0.46.1), never generic registry cleanup. An entry with the
+// same id but a different transcript belongs to someone else's state and is preserved.
+export function removeSessionRegistryEntry(vaultBase, sessionId, transcriptPath) {
+  if (!sessionId) return false;
+  let removed = false;
+  mutateSessionRegistry(vaultBase, (registry) => {
+    const entry = registry.sessions[sessionId];
+    if (!entry) return null;
+    const paths = [...(Array.isArray(entry.transcript_paths) ? entry.transcript_paths : []), entry.transcript_path].filter(Boolean);
+    if (!paths.some((p) => transcriptsMatch(p, transcriptPath))) return null;
+    delete registry.sessions[sessionId];
+    removed = true;
+    return null;
+  });
+  return removed;
+}
+
 export function upsertSessionRegistry(vaultBase, sessionId, patch) {
   if (!sessionId) return null;
   const clean = meaningfulPatch(patch);

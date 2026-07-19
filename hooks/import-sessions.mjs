@@ -17,7 +17,7 @@ import {
 import { buildSessionContent, allocateSessionPath } from './session-start.mjs';
 import { createLinkedNotes } from './linked-notes.mjs';
 import { updateSessionObservability } from './session-observability.mjs';
-import { readSessionRegistry, upsertSessionRegistry, formatLocalIso, formatDate, providerMeta, isBootstrapPrompt } from './obsidian-common.mjs';
+import { readSessionRegistry, upsertSessionRegistry, removeSessionRegistryEntry, formatLocalIso, formatDate, providerMeta, isBootstrapPrompt } from './obsidian-common.mjs';
 import { getLocale } from './locale.mjs';
 import { captureProseDecisions } from './decision-capture.mjs';
 
@@ -192,7 +192,12 @@ export function discoverCodexTranscripts(projectPath, fromDir) {
     const meta = readSessionMeta(path);
     if (!meta || !meta.id) continue;
     if (projectPath && !cwdMatchesProject(meta.cwd, projectPath)) continue;
-    transcripts.push({ path, sessionId: meta.id, cwd: meta.cwd || '' });
+    // A subagent thread's rollout is a SIBLING file of its parent's — same dir, own id. The
+    // meta says what the file IS; ignoring it turned hierarchy into a duplicate session note.
+    const subagent = meta.source?.subagent
+      ? { parentThreadId: meta.parent_thread_id || meta.source.subagent.thread_spawn?.parent_thread_id || '', nickname: meta.source.subagent.thread_spawn?.agent_nickname || '' }
+      : null;
+    transcripts.push({ path, sessionId: meta.id, cwd: meta.cwd || '', subagent });
   }
   return { dir, transcripts };
 }
@@ -350,10 +355,21 @@ export function runImport(vaultBase, opts = {}) {
   }
   const notes = capturedSessionNotes(vaultBase);
   const sinceMs = since ? Date.parse(since) : 0;
-  const report = { source: src, claudeDir, codexDir, scanned: transcripts.length, imported: 0, repaired: 0, skipped: 0, errors: [], sessions: [] };
+  const report = { source: src, claudeDir, codexDir, scanned: transcripts.length, imported: 0, repaired: 0, skipped: 0, subagents: 0, errors: [], sessions: [] };
 
   let done = 0;
   for (const t of transcripts) {
+    // A subagent rollout is telemetry of its PARENT session, never a session of its own —
+    // importing it materialized the parent's replayed context as a ghost note. Counted apart
+    // from `skipped` (which means "session already covered"). If import <=0.46.1 registered
+    // it as a top-level session, that entry is our own bad write: heal it.
+    if (t.subagent) {
+      report.subagents++;
+      if (!dryRun) {
+        try { removeSessionRegistryEntry(vaultBase, t.sessionId, t.path); } catch { /* best-effort */ }
+      }
+      continue;
+    }
     if (limit && done >= limit) break;
 
     // Every transcript is parsed now, including already-captured ones: partial coverage is

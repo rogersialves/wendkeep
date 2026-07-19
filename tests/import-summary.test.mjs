@@ -61,3 +61,53 @@ test('isBootstrapPrompt: reconhece o bloco de plugins injetado', () => {
   assert.equal(isBootstrapPrompt(REAL), false);
   assert.equal(isBootstrapPrompt('Quais recommended_plugins devo instalar?'), false);
 });
+
+// --- OBS-4: o bloco de iteração usa o MESMO filtro do título ------------------
+
+test('buildIterationBlock: Contexto conversado não mostra o bloco injetado como Usuário', async () => {
+  const { mkdtempSync, mkdirSync, writeFileSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const { parseTranscript, buildIterationBlock } = await import('../hooks/session-stop.mjs');
+
+  const dir = mkdtempSync(join(tmpdir(), 'wk-conv-'));
+  const events = [
+    { type: 'session_meta', timestamp: '2026-07-18T19:41:45.000Z', payload: { id: 'cx-conv', timestamp: '2026-07-18T19:41:45.000Z', cwd: 'C:\p', model: 'gpt-5', model_provider: 'openai' } },
+    { type: 'event_msg', timestamp: '2026-07-18T19:42:01.000Z', payload: { type: 'task_started', turn_id: 't1' } },
+    { type: 'event_msg', timestamp: '2026-07-18T19:42:02.000Z', payload: { type: 'user_message', turn_id: 't1', message: INJECTED } },
+    { type: 'event_msg', timestamp: '2026-07-18T19:42:03.000Z', payload: { type: 'user_message', turn_id: 't1', message: REAL } },
+    { type: 'event_msg', timestamp: '2026-07-18T19:42:04.000Z', payload: { type: 'agent_message', turn_id: 't1', message: 'Analisado com sucesso.' } },
+  ];
+  const p = join(dir, 'rollout-2026-07-18T19-41-45-cx-conv.jsonl');
+  writeFileSync(p, events.map((e) => JSON.stringify(e)).join('\n') + '\n', 'utf-8');
+
+  const tx = parseTranscript(p);
+  const block = buildIterationBlock(tx, { turn_id: 't1' });
+  assert.ok(!block.includes('recommended_plugins'), 'preâmbulo do harness não é fala do usuário');
+  assert.ok(block.includes(REAL), 'o pedido real permanece no contexto');
+  assert.ok(block.includes('Analisado com sucesso'), 'a resposta permanece');
+});
+
+test('buildIterationBlock: prompt que MENCIONA o termo atravessa o filtro inteiro', async () => {
+  // A guarda contra o filtro guloso, no caminho REAL (parseTranscript -> shouldIgnoreUserText),
+  // não só no unitário de isBootstrapPrompt: um `/recommended_plugins/` sem âncora passaria lá
+  // e ainda engoliria este pedido aqui.
+  const { mkdtempSync, writeFileSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const { parseTranscript, buildIterationBlock } = await import('../hooks/session-stop.mjs');
+
+  const MENTION = 'Quais recommended_plugins devo instalar no projeto?';
+  const dir = mkdtempSync(join(tmpdir(), 'wk-conv-mention-'));
+  const events = [
+    { type: 'session_meta', timestamp: '2026-07-18T19:41:45.000Z', payload: { id: 'cx-mention', timestamp: '2026-07-18T19:41:45.000Z', cwd: 'C:\\p', model: 'gpt-5', model_provider: 'openai' } },
+    { type: 'event_msg', timestamp: '2026-07-18T19:42:01.000Z', payload: { type: 'task_started', turn_id: 't1' } },
+    { type: 'event_msg', timestamp: '2026-07-18T19:42:02.000Z', payload: { type: 'user_message', turn_id: 't1', message: MENTION } },
+    { type: 'event_msg', timestamp: '2026-07-18T19:42:03.000Z', payload: { type: 'agent_message', turn_id: 't1', message: 'Nenhum é obrigatório.' } },
+  ];
+  const p = join(dir, 'rollout-2026-07-18T19-41-45-cx-mention.jsonl');
+  writeFileSync(p, events.map((e) => JSON.stringify(e)).join('\n') + '\n', 'utf-8');
+
+  const block = buildIterationBlock(parseTranscript(p), { turn_id: 't1' });
+  assert.ok(block.includes(MENTION), 'pedido legítimo não pode ser engolido por substring');
+});

@@ -612,7 +612,7 @@ const USAGE_FIELDS = ['provider', 'pensamento', 'input', 'cache_write', 'cache_r
 
 export function sameUsageData(a, b) {
   if (!a || !b) return false;
-  const listEqual = (x, y) => (x || []).join(' ') === (y || []).join(' ');
+  const listEqual = (x, y) => (x || []).join('\u0000') === (y || []).join('\u0000');
   return USAGE_FIELDS.every((f) => (a[f] ?? null) === (b[f] ?? null))
     && listEqual(a.modelos, b.modelos) && listEqual(a.tools, b.tools);
 }

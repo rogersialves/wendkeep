@@ -1,7 +1,7 @@
 // Single atomic writer for session usage, models, reasoning/effort and subagents.
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { collectSessionUsage } from './token-usage.mjs';
-import { collectSubagentUsage, sessionDirFromTranscript } from './subagent-usage.mjs';
+import { collectSubagentUsage, collectCodexSubagentUsage, sessionDirFromTranscript } from './subagent-usage.mjs';
 import { inspectTranscriptIdentity } from './session-identity.mjs';
 
 const HEADING = '## Agentes, tokens e custos';
@@ -137,7 +137,11 @@ ${renderSubagents(subagents)}`;
 export function buildSessionObservability({ sessionContent, transcriptPath }) {
   const main = collectSessionUsage({ sessionContent, transcriptPath });
   if (!main) return null;
-  const subagents = collectSubagentUsage(sessionDirFromTranscript(transcriptPath));
+  // Claude layout first (<transcript>/subagents/); when absent, the Codex layout — sibling
+  // rollouts linked by parent_thread_id. The Codex collector self-gates: a Claude transcript
+  // has no session_meta line, so it returns null and this stays a strict fallback.
+  const subagents = collectSubagentUsage(sessionDirFromTranscript(transcriptPath))
+    || collectCodexSubagentUsage(transcriptPath);
   const ledger = [...mainLedger(main), ...subagentLedger(subagents)];
   const sub = subagents?.aggregate || { count: 0, tokens: 0, cost: 0, wasted: 0, tools: [] };
   let content = main.content;
