@@ -1,10 +1,12 @@
 // hooks/harness-doctor.mjs — integrity checks for the a2 harness state (Wave B).
 // Pure-ish (fs reads only). `wendkeep doctor` reports errors (exit 1) + warnings.
-import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import { activeChange, parseTasks } from './change-core.mjs';
+import { activeChange, parseTasks, backfillArtifactLinks } from './change-core.mjs';
+import { relinkDerivedNotes } from './linked-notes.mjs';
 import { buildEffectiveRequirementPackage, checkSpecsState, evaluateVerdict, tasksHashOf, validateSpecImpact } from './spec-core.mjs';
 import { getLocale } from './locale.mjs';
+import { readControl } from './obsidian-common.mjs';
 
 export function checkHarness(vaultBase, projectRoot) {
   const loc = getLocale(vaultBase);
@@ -62,4 +64,38 @@ export function checkHarness(vaultBase, projectRoot) {
   }
 
   return { errors, warnings };
+}
+
+// --- diagnóstico de links do grafo (read-only, reusa os reparos em dry-run) -----
+// Surfaça os órfãos que o doctor não enxergava: notas derivadas sem sessão-fonte,
+// artefatos de change sem backlink, e o estado das cores do grafo. Cada não-zero tem um
+// comando de reparo (note relink / change backlink / theme sync).
+export function checkVaultLinks(vaultBase) {
+  let derivedOrphans = 0;
+  try { derivedOrphans = relinkDerivedNotes(vaultBase, {}).linked.length; } catch { /* sem notas derivadas */ }
+  let artifactOrphans = 0;
+  try { artifactOrphans = backfillArtifactLinks(vaultBase, {}).changed.length; } catch { /* sem changes */ }
+  let graphColors = null; // true=com grupos · false=vazio/ausente de cores · null=sem graph.json
+  try {
+    const g = JSON.parse(readFileSync(join(vaultBase, '.obsidian', 'graph.json'), 'utf8'));
+    graphColors = Array.isArray(g.colorGroups) && g.colorGroups.length > 0;
+  } catch { graphColors = null; }
+  return { derivedOrphans, artifactOrphans, graphColors };
+}
+
+const unquoteControl = (v) => String(v ?? '').replace(/^"(.*)"$/, '$1').trim();
+
+// O control marca `inactive` quando a sessão-mãe encerra, mesmo com um workflow/subagente
+// ainda vivo em background. Se a nota da sessão foi escrita há pouco apesar do `inactive`,
+// sinaliza a atividade recente — o doctor deixa de dizer "inativa" quando não está.
+export function checkSessionActivity(vaultBase, { now = Date.now(), windowMs = 5 * 60000 } = {}) {
+  const control = readControl(vaultBase);
+  const active = unquoteControl(control.status) === 'active';
+  const sessionRel = unquoteControl(active ? control.session_file : (control.last_session_file || control.session_file));
+  let ageMs = null;
+  if (sessionRel) {
+    try { ageMs = now - statSync(join(vaultBase, sessionRel)).mtimeMs; } catch { ageMs = null; }
+  }
+  const backgroundSuspected = !active && sessionRel !== '' && ageMs !== null && ageMs >= 0 && ageMs < windowMs;
+  return { lastSession: sessionRel, active, ageMs, backgroundSuspected };
 }

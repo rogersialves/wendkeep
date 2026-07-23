@@ -4,6 +4,21 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.49.0] — 2026-07-23
+
+### Added
+
+- **`wendkeep doctor` agora surfaça os órfãos do grafo com o comando de reparo.** Nova seção
+  `[links]`: conta notas derivadas sem sessão-fonte (→ `note relink`), artefatos de change
+  sem backlink (→ `change backlink`) e o estado das cores do grafo (→ `theme sync`); quando
+  tudo conectado, diz `grafo conectado`. Reusa as funções de reparo em dry-run — zero lógica
+  nova de detecção. Antes o dono do vault só descobria os órfãos olhando o grafo no Obsidian
+  e não sabia qual comando rodava.
+- **Sessão não mente "inativa" com atividade recente.** Nova seção `[sessão]`: quando o
+  control marca `inactive` mas a nota da sessão foi escrita há pouco, o doctor sinaliza
+  possível workflow/subagente em segundo plano — o control só reflete o lifecycle da
+  sessão-mãe, não a atividade de background. Capability `vault-doctor` (DIAG-1..4).
+
 ## [0.48.0] — 2026-07-23
 
 ### Added
