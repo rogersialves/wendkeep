@@ -167,6 +167,26 @@ test('healSpecBacklinks: adds proposta backlink to spec.md, idempotent', () => {
   } finally { rmSync(vault, { recursive: true, force: true }); }
 });
 
+// CGRAPH-2 (review P2) — o backlink nunca quebra frontmatter YAML existente
+test('healSpecBacklinks: preserves leading YAML frontmatter (inserts after it)', () => {
+  const vault = mkdtempSync(join(tmpdir(), 'wk-heal-fm-'));
+  try {
+    const dir = join(vault, '08-Mudanças', 'c');
+    mkdirSync(join(dir, 'specs', 'cap'), { recursive: true });
+    writeFileSync(join(dir, 'proposta.md'), '# c\n');
+    const fm = '---\ncssclasses:\n  - topic-spec\ntags:\n  - spec\n---\n\n# cap — spec\n\n## ADDED Requirements\n';
+    writeFileSync(join(dir, 'specs', 'cap', 'spec.md'), fm);
+    assert.equal(healSpecBacklinks(dir, vault), 1);
+    const c = readFileSync(join(dir, 'specs', 'cap', 'spec.md'), 'utf8');
+    assert.ok(c.startsWith('---\n'), 'frontmatter stays at the very top');
+    assert.match(c, /cssclasses:\s*\n\s*- topic-spec/, 'frontmatter keys intact');
+    const fmEnd = c.indexOf('\n---\n');
+    const linkPos = c.indexOf('[[08-Mudanças/c/proposta]]');
+    assert.ok(fmEnd > 0 && linkPos > fmEnd, 'backlink sits after the frontmatter block');
+    assert.equal(healSpecBacklinks(dir, vault), 0, 'idempotent with frontmatter too');
+  } finally { rmSync(vault, { recursive: true, force: true }); }
+});
+
 // CGRAPH-2 — o archive heala o spec.md antes de mover (fica linkado no _arquivo)
 test('archiveChange: heals orphan spec.md backlink through the move', () => {
   const vault = mkdtempSync(join(tmpdir(), 'wk-arc-spec-'));

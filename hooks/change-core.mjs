@@ -532,14 +532,22 @@ function backlinkLabel(loc) {
   return loc.id === 'en' ? 'Change:' : 'Mudança:';
 }
 
-// Injeta a linha de backlink logo abaixo do primeiro heading (ou no topo se não houver).
+// Injeta a linha de backlink logo abaixo do primeiro heading — mas NUNCA acima de um bloco
+// de frontmatter YAML: prepender antes do `---` quebra o frontmatter (Obsidian para de ler
+// cssclasses/tags). Ordem: preserva o frontmatter, depois cai abaixo do 1º heading do corpo,
+// senão no topo do corpo.
 function insertBacklink(content, backlinkLine) {
-  const m = content.match(/^(#[^\n]*\n)/);
-  if (m) {
-    const rest = content.slice(m[0].length).replace(/^\n+/, '');
-    return `${m[0]}\n${backlinkLine}\n\n${rest}`;
+  let head = '';
+  let body = content;
+  const fm = content.match(/^---\n[\s\S]*?\n---\n?/);
+  if (fm) { head = fm[0]; body = content.slice(fm[0].length); }
+  const h = body.match(/^\s*#[^\n]*\n/);
+  if (h) {
+    const rest = body.slice(h[0].length).replace(/^\n+/, '');
+    return `${head}${h[0]}\n${backlinkLine}\n\n${rest}`;
   }
-  return `${backlinkLine}\n\n${content}`;
+  const rest = body.replace(/^\n+/, '');
+  return `${head}${backlinkLine}\n\n${rest}`;
 }
 
 // Auto-heal (0.47): garante o backlink pro proposta em cada specs/<cap>/spec.md do change.
