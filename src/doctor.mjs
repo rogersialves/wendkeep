@@ -4,7 +4,7 @@ import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { checkHarness } from '../hooks/harness-doctor.mjs';
+import { checkHarness, checkVaultLinks, checkSessionActivity } from '../hooks/harness-doctor.mjs';
 import { checkSyncDefs } from './sync-defs.mjs';
 import { resolveProjectVault } from './project-vault.mjs';
 
@@ -59,6 +59,26 @@ export function runDoctor(argv) {
   process.stdout.write(`\n[harness] ${errors.length} erro(s), ${warnings.length} aviso(s)\n`);
   for (const e of errors) process.stdout.write(`  ✗ ${e}\n`);
   for (const w of warnings) process.stdout.write(`  ! ${w}\n`);
+
+  // 3. Link/graph health — órfãos que o grafo do Obsidian mostraria, com o comando de reparo.
+  const links = checkVaultLinks(vaultBase);
+  const graphLabel = links.graphColors === true ? 'com cores' : links.graphColors === false ? 'sem cores' : 'sem graph.json';
+  process.stdout.write(`\n[links] ${links.derivedOrphans} derivada(s) órfã(s) · ${links.artifactOrphans} artefato(s) órfão(s) · grafo: ${graphLabel}\n`);
+  if (links.derivedOrphans) process.stdout.write('  → wendkeep note relink --apply\n');
+  if (links.artifactOrphans) process.stdout.write('  → wendkeep change backlink --apply\n');
+  if (links.graphColors === false) process.stdout.write('  → wendkeep theme sync (feche o Obsidian antes)\n');
+  if (!links.derivedOrphans && !links.artifactOrphans && links.graphColors !== false) process.stdout.write('  grafo conectado ✓\n');
+
+  // 4. Sessão: não mente "inativa" quando há atividade recente (workflow/subagente em background).
+  const act = checkSessionActivity(vaultBase);
+  if (act.lastSession) {
+    const label = act.active
+      ? 'ativa'
+      : act.backgroundSuspected
+        ? `inativa no control, mas escrita há ${Math.round((act.ageMs || 0) / 1000)}s — possível workflow/subagente em background`
+        : 'inativa';
+    process.stdout.write(`[sessão] última: ${act.lastSession} (${label})\n`);
+  }
 
   process.exit(healthStatus !== 0 || errors.length ? 1 : 0);
 }
