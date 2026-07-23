@@ -8,6 +8,10 @@
 
 export const SNIPPET_NAME = 'wendkeep-colors';
 
+// Readable line width for note content — Obsidian's default (~700px) wastes wide monitors.
+// Ajuste aqui (1200px / 1400px / 100vw) para mudar em todos os vaults de uma vez.
+export const READABLE_LINE_WIDTH = '1400px';
+
 import { LOCALES } from '../hooks/locale.mjs';
 const PT = LOCALES['pt-BR'];
 
@@ -85,6 +89,13 @@ ${rootVars}
 
 .theme-dark { --us-line-tint: 44%; }
 .theme-light { --us-line-tint: 36%; }
+
+/* --- Readable line width: wider than Obsidian's ~700px default ------------ */
+/* !important porque o Obsidian declara --file-line-width com specificity alta; sem ele
+   a regra do body não vence e a linha volta pro ~700px. */
+body {
+  --file-line-width: ${READABLE_LINE_WIDTH} !important;
+}
 
 /* --- File explorer: accented folders ------------------------------------- */
 ${FX} {

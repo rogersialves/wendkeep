@@ -44,8 +44,11 @@ Usage:
 
   wendkeep doctor [--vault P]  Run a vault health check.
   wendkeep change <sub>        Change lifecycle: new [--simple] | use | bind <slug> --session <id> | continue | list | show |
-                           status | done <id> | undone <id> | diff | archive [--force] | abandon.
+                           status | done <id> | undone <id> | diff | archive [--force] | abandon | relink | backlink.
                            archive exige verdict (rode verify --deep); abandon descarta sem ADR.
+                           backlink [--apply]: injeta o backlink pro proposta em design/tarefas/spec órfãos (open + _arquivo).
+  wendkeep theme sync          Re-aplica o color system (snippet CSS + graph color groups) num vault
+                           existente — recupera o grafo cinza sem re-init. --vault P.
   wendkeep session <sub>       Session registry: list | show <id> | use <id>.
   wendkeep spec <sub>          Specs: list | show | effective [--change] [--json] | migrate | rebase.
   wendkeep sensors <sub>       list | add <id> "<command>" [--severity --type --report].
@@ -173,6 +176,11 @@ async function main() {
     case 'session': {
       const { runSession } = await import('../src/session.mjs');
       runSession(rest);
+      break;
+    }
+    case 'theme': {
+      const { runTheme } = await import('../src/theme.mjs');
+      runTheme(rest);
       break;
     }
     case 'verify': {

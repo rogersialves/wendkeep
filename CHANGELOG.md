@@ -4,6 +4,29 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.47.0] — 2026-07-23
+
+### Added
+
+- **Grafo do vault conectado: todo artefato de change linka o hub.** `change new` gera
+  `design.md` e `tarefas.md` com um backlink full-path pro `proposta.md` da própria change —
+  antes nasciam sem nenhum wikilink, ilhas no grafo do Obsidian (num vault real: 48 de 63
+  `.md` de `08-Mudanças` órfãos). O full-path (nunca basename, ambíguo entre changes) sobrevive
+  ao archive: o `rewriteChangeLinks` retargeta pro `_arquivo` junto com os demais links.
+- **Auto-heal do backlink em `spec.md`.** O delta de spec é escrito à mão, então `verify` e
+  `archive` passam a injetar o backlink pro proposta em cada `specs/<capability>/spec.md` que
+  estiver sem — idempotente. Nenhum artefato de change fica desconectado do plano↔sessão.
+- **`wendkeep change backlink [--apply]`** — backfill dos artefatos órfãos que já existem no
+  vault (changes open e arquivadas), apontando cada `design`/`tarefas`/`spec` pro proposta no
+  seu local atual. Dry-run por default; `--apply` escreve. Idempotente.
+- **`wendkeep theme sync`** — re-aplica o color system (snippet CSS + graph color groups) num
+  vault existente, sem re-`init`. Recupera o grafo que ficou cinza quando o Obsidian (dono do
+  `graph.json`) zera os `colorGroups`. O instalador virou módulo compartilhado com o `init`,
+  então os dois nunca divergem.
+- **Snippet define `--file-line-width`.** O CSS gerado passa a definir a largura de linha
+  legível (1400px, ajustável) sobre o `body` com `!important` — antes era edição manual em
+  cada vault. As capabilities `change-graph` e `vault-theme` documentam o contrato em `07-Specs`.
+
 ## [0.46.2] — 2026-07-19
 
 ### Fixed

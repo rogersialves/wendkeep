@@ -68,6 +68,8 @@ import {
   activeChangeLink,
   appendFixTasks,
   setTaskDone,
+  healSpecBacklinks,
+  backfillArtifactLinks,
 } from '../hooks/change-core.mjs';
 
 test('setTaskDone: toggles the exact task id; false when id missing', () => {
@@ -110,6 +112,128 @@ test('newChange --simple: only proposta + tarefas, no design/specs (auto-sizing)
     const proposta = readFileSync(join(dir, 'proposta.md'), 'utf8');
     assert.match(proposta, /spec_impact: none/);
     assert.match(proposta, /spec_impact_reason: ".+"/);
+  } finally { rmSync(vault, { recursive: true, force: true }); }
+});
+
+// CGRAPH-1 — artefatos gerados linkam o hub proposta (full-path, archive-safe)
+test('renderChangeScaffold: design + tarefas link the change hub (proposta)', () => {
+  const { design, tarefas } = renderChangeScaffold({
+    slug: 'x', sessionRel: '02-Sessões/s', dateStr: '2026-07-23',
+  });
+  const hub = '[[08-Mudanças/x/proposta]]';
+  assert.ok(design.includes(hub), 'design links the proposta hub');
+  assert.ok(tarefas.includes(hub), 'tarefas links the proposta hub');
+});
+
+test('renderChangeScaffold en: hub link uses the 08-Changes folder', () => {
+  const { design, tarefas } = renderChangeScaffold({
+    slug: 'y', sessionRel: '', dateStr: '2026-07-23', locale: 'en',
+  });
+  assert.ok(design.includes('[[08-Changes/y/proposta]]'), 'en design links hub');
+  assert.ok(tarefas.includes('[[08-Changes/y/proposta]]'), 'en tarefas links hub');
+});
+
+// CGRAPH-1 — o backlink full-path é reescrito pelo move do archive
+test('archiveChange: artifact backlink survives the move to _arquivo', () => {
+  const vault = mkdtempSync(join(tmpdir(), 'wk-arc-link-'));
+  try {
+    mkdirSync(join(vault, '.brain'), { recursive: true });
+    mkdirSync(join(vault, '04-Decisões'), { recursive: true });
+    newChange(vault, 'dm', { dateStr: '2026-07-05' });
+    const r = archiveChange(vault, 'dm', { dateStr: '2026-07-05', adrNum: 5 });
+    assert.equal(r.ok, true);
+    const design = readFileSync(join(vault, '08-Mudanças', '_arquivo', '2026-07-05-dm', 'design.md'), 'utf8');
+    const tarefas = readFileSync(join(vault, '08-Mudanças', '_arquivo', '2026-07-05-dm', 'tarefas.md'), 'utf8');
+    assert.ok(design.includes('[[08-Mudanças/_arquivo/2026-07-05-dm/proposta]]'), 'design backlink rewritten');
+    assert.ok(tarefas.includes('[[08-Mudanças/_arquivo/2026-07-05-dm/proposta]]'), 'tarefas backlink rewritten');
+    assert.doesNotMatch(design, /\[\[08-Mudanças\/dm\/proposta\]\]/, 'stale open-path link gone');
+  } finally { rmSync(vault, { recursive: true, force: true }); }
+});
+
+// CGRAPH-2 — auto-heal do backlink em spec.md (escrito à mão), idempotente
+test('healSpecBacklinks: adds proposta backlink to spec.md, idempotent', () => {
+  const vault = mkdtempSync(join(tmpdir(), 'wk-heal-'));
+  try {
+    const dir = join(vault, '08-Mudanças', 'c');
+    mkdirSync(join(dir, 'specs', 'cap'), { recursive: true });
+    writeFileSync(join(dir, 'proposta.md'), '# c\n');
+    writeFileSync(join(dir, 'specs', 'cap', 'spec.md'), '## ADDED Requirements\n### Requisito: X-1 — n\nbody\n');
+    assert.equal(healSpecBacklinks(dir, vault), 1, 'heals the orphan spec');
+    const specPath = join(dir, 'specs', 'cap', 'spec.md');
+    assert.ok(readFileSync(specPath, 'utf8').includes('[[08-Mudanças/c/proposta]]'), 'backlink injected');
+    assert.equal(healSpecBacklinks(dir, vault), 0, 'idempotent: nothing to heal on re-run');
+    const hits = (readFileSync(specPath, 'utf8').match(/\[\[08-Mudanças\/c\/proposta\]\]/g) || []).length;
+    assert.equal(hits, 1, 'no duplicate backlink');
+  } finally { rmSync(vault, { recursive: true, force: true }); }
+});
+
+// CGRAPH-2 (review P2) — o backlink nunca quebra frontmatter YAML existente
+test('healSpecBacklinks: preserves leading YAML frontmatter (inserts after it)', () => {
+  const vault = mkdtempSync(join(tmpdir(), 'wk-heal-fm-'));
+  try {
+    const dir = join(vault, '08-Mudanças', 'c');
+    mkdirSync(join(dir, 'specs', 'cap'), { recursive: true });
+    writeFileSync(join(dir, 'proposta.md'), '# c\n');
+    const fm = '---\ncssclasses:\n  - topic-spec\ntags:\n  - spec\n---\n\n# cap — spec\n\n## ADDED Requirements\n';
+    writeFileSync(join(dir, 'specs', 'cap', 'spec.md'), fm);
+    assert.equal(healSpecBacklinks(dir, vault), 1);
+    const c = readFileSync(join(dir, 'specs', 'cap', 'spec.md'), 'utf8');
+    assert.ok(c.startsWith('---\n'), 'frontmatter stays at the very top');
+    assert.match(c, /cssclasses:\s*\n\s*- topic-spec/, 'frontmatter keys intact');
+    const fmEnd = c.indexOf('\n---\n');
+    const linkPos = c.indexOf('[[08-Mudanças/c/proposta]]');
+    assert.ok(fmEnd > 0 && linkPos > fmEnd, 'backlink sits after the frontmatter block');
+    assert.equal(healSpecBacklinks(dir, vault), 0, 'idempotent with frontmatter too');
+  } finally { rmSync(vault, { recursive: true, force: true }); }
+});
+
+// CGRAPH-2 — o archive heala o spec.md antes de mover (fica linkado no _arquivo)
+test('archiveChange: heals orphan spec.md backlink through the move', () => {
+  const vault = mkdtempSync(join(tmpdir(), 'wk-arc-spec-'));
+  try {
+    mkdirSync(join(vault, '.brain'), { recursive: true });
+    mkdirSync(join(vault, '04-Decisões'), { recursive: true });
+    const dir = join(vault, '08-Mudanças', 'sp');
+    mkdirSync(join(dir, 'specs', 'cap'), { recursive: true });
+    writeFileSync(join(dir, 'proposta.md'), '---\ntype: change\nspecs:\n  - cap\n---\n# sp\n');
+    writeFileSync(join(dir, 'tarefas.md'), '- [x] 1.1 done\n');
+    writeFileSync(join(dir, 'specs', 'cap', 'spec.md'), '## ADDED Requirements\n### Requisito: X-1 — n\nbody\n\n## MODIFIED Requirements\n\n## REMOVED Requirements\n');
+    const r = archiveChange(vault, 'sp', { dateStr: '2026-07-05', adrNum: 6 });
+    assert.equal(r.ok, true, r.failing && r.failing.join('; '));
+    const spec = readFileSync(join(vault, '08-Mudanças', '_arquivo', '2026-07-05-sp', 'specs', 'cap', 'spec.md'), 'utf8');
+    assert.ok(spec.includes('[[08-Mudanças/_arquivo/2026-07-05-sp/proposta]]'), 'spec backlink healed + rewritten');
+  } finally { rmSync(vault, { recursive: true, force: true }); }
+});
+
+// CGRAPH-3 — backfill dos órfãos existentes (open + _arquivo), dry-run default, idempotente
+test('backfillArtifactLinks: heals open + archived orphans, dry-run default, idempotent', () => {
+  const vault = mkdtempSync(join(tmpdir(), 'wk-backfill-'));
+  try {
+    const open = join(vault, '08-Mudanças', 'o');
+    mkdirSync(join(open, 'specs', 'cap'), { recursive: true });
+    writeFileSync(join(open, 'proposta.md'), '# o\n');
+    writeFileSync(join(open, 'design.md'), '# o — design\n\n## Abordagem\n');
+    writeFileSync(join(open, 'tarefas.md'), '# o — tarefas\n\n- [ ] 1.1 x\n');
+    writeFileSync(join(open, 'specs', 'cap', 'spec.md'), '## ADDED Requirements\n');
+    const arch = join(vault, '08-Mudanças', '_arquivo', '2026-07-01-a');
+    mkdirSync(arch, { recursive: true });
+    writeFileSync(join(arch, 'proposta.md'), '# a\n');
+    writeFileSync(join(arch, 'design.md'), '# a — design\n');
+
+    const dry = backfillArtifactLinks(vault, {});
+    assert.equal(dry.applied, false);
+    assert.ok(dry.changed.length >= 4, 'reports the orphans it would heal');
+    assert.ok(!readFileSync(join(open, 'design.md'), 'utf8').includes('[['), 'dry-run writes nothing');
+
+    const app = backfillArtifactLinks(vault, { apply: true });
+    assert.equal(app.applied, true);
+    assert.ok(readFileSync(join(open, 'design.md'), 'utf8').includes('[[08-Mudanças/o/proposta]]'));
+    assert.ok(readFileSync(join(open, 'tarefas.md'), 'utf8').includes('[[08-Mudanças/o/proposta]]'));
+    assert.ok(readFileSync(join(open, 'specs', 'cap', 'spec.md'), 'utf8').includes('[[08-Mudanças/o/proposta]]'));
+    assert.ok(readFileSync(join(arch, 'design.md'), 'utf8').includes('[[08-Mudanças/_arquivo/2026-07-01-a/proposta]]'));
+
+    const again = backfillArtifactLinks(vault, { apply: true });
+    assert.equal(again.changed.length, 0, 'idempotent: nothing left to heal');
   } finally { rmSync(vault, { recursive: true, force: true }); }
 });
 

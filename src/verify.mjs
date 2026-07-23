@@ -3,7 +3,7 @@
 // the VAULT. Writes 08-Mudanças/<slug>/evidencia.json; exit 1 if a critical sensor is red.
 import { readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { isAbsolute, join, resolve } from 'node:path';
-import { parseTasks, activeChange, appendFixTasks } from '../hooks/change-core.mjs';
+import { parseTasks, activeChange, appendFixTasks, healSpecBacklinks } from '../hooks/change-core.mjs';
 import { loadSensorsDetailed, findProjectRoot, requiredSensors, runSensors, evaluateGate } from '../hooks/sensors-core.mjs';
 import {
   buildEffectiveRequirementPackage,
@@ -40,6 +40,9 @@ export function runVerify(argv) {
   let tarefas = '';
   try { tarefas = readFileSync(join(changeDir, 'tarefas.md'), 'utf8'); }
   catch { process.stderr.write(`wendkeep verify: change not found: ${slug}\n`); process.exit(2); }
+
+  // Backlink dos specs escritos à mão pro hub proposta (grafo conectado). Idempotente, fail-quiet.
+  try { healSpecBacklinks(changeDir, vaultBase); } catch { /* heal é bônus */ }
 
   const ids = requiredSensors(parseTasks(tarefas));
   const loaded = loadSensorsDetailed(projectRoot);
