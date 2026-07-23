@@ -4,6 +4,19 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.48.0] — 2026-07-23
+
+### Added
+
+- **`wendkeep note relink [--apply]` — backfill de proveniência das notas derivadas
+  órfãs.** BUG/APR legadas (criadas por versão antiga, sem `source:` de sessão) ficam ilhas
+  no grafo — num vault real: 13 de 15 BUG e 3 de 8 APR sem nenhum link de entrada nem de
+  saída. A origem não está registrada no órfão, mas os irmãos não-órfãos do mesmo tipo
+  carregam a sessão-fonte real. O comando liga cada órfão herdando a sessão **modal** (mais
+  comum) dos irmãos do mesmo tipo e mês, injetando `source:` + `related:` no frontmatter.
+  Dry-run por default; `--apply` escreve; idempotente; pula e reporta o órfão sem nenhum
+  irmão-fonte pra inferir (nunca chuta). Documentado em `derived-notes` (DRV-9).
+
 ## [0.47.0] — 2026-07-23
 
 ### Added

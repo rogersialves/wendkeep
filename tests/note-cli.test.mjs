@@ -70,6 +70,22 @@ test('note new: active session goes into source: as wikilink', async () => {
   } finally { rmSync(vault, { recursive: true, force: true }); }
 });
 
+test('note relink --apply: backfills orphan derived notes with the modal session', () => {
+  const vault = freshVault();
+  try {
+    const bugDir = join(vault, '05-Bugs', '2026', '07-JUL');
+    mkdirSync(bugDir, { recursive: true });
+    writeFileSync(join(bugDir, 'BUG-0001-a.md'), '---\ntype: bug\nbug: 1\ncssclasses:\n  - topic-bug\n---\n\n# BUG-0001\n');
+    writeFileSync(join(bugDir, 'BUG-0002-b.md'), '---\ntype: bug\nbug: 2\nsource:\n  - "[[02-Sessões/2026/07-JUL/DIA 19/14-58-analise]]"\nrelated:\n  - "[[02-Sessões/2026/07-JUL/DIA 19/14-58-analise]]"\ncssclasses:\n  - topic-bug\n---\n\n# BUG-0002\n');
+    const dry = spawnNote(vault, ['relink']);
+    assert.equal(dry.status, 0, dry.stderr);
+    assert.ok(!readFileSync(join(bugDir, 'BUG-0001-a.md'), 'utf8').includes('source:'), 'dry-run não escreve');
+    const r = spawnNote(vault, ['relink', '--apply']);
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(readFileSync(join(bugDir, 'BUG-0001-a.md'), 'utf8'), /\[\[02-Sessões\/2026\/07-JUL\/DIA 19\/14-58-analise\]\]/);
+  } finally { rmSync(vault, { recursive: true, force: true }); }
+});
+
 test('note new: invalid input exits 2 and writes nothing', () => {
   const vault = freshVault();
   try {

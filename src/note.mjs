@@ -14,7 +14,7 @@ import {
   toVaultRelative,
 } from '../hooks/obsidian-common.mjs';
 import { getLocale } from '../hooks/locale.mjs';
-import { buildManualBugNote, buildManualLearningNote } from '../hooks/linked-notes.mjs';
+import { buildManualBugNote, buildManualLearningNote, relinkDerivedNotes } from '../hooks/linked-notes.mjs';
 
 const TYPES = {
   bug: { folderKey: 'bugs', prefix: 'BUG', build: buildManualBugNote },
@@ -30,8 +30,23 @@ function opt(argv, name) {
 
 export function runNote(argv) {
   const [sub, ...rest] = argv;
+
+  if (sub === 'relink') {
+    const vaultRaw = opt(rest, '--vault') || process.env.OBSIDIAN_VAULT_PATH;
+    if (!vaultRaw) { process.stderr.write('wendkeep note relink: no vault (--vault or OBSIDIAN_VAULT_PATH).\n'); process.exit(2); }
+    const vaultBase = isAbsolute(vaultRaw) ? vaultRaw : resolve(process.cwd(), vaultRaw);
+    if (!existsSync(vaultBase)) { process.stderr.write(`wendkeep note relink: vault not found: ${vaultBase}\n`); process.exit(2); }
+    const r = relinkDerivedNotes(vaultBase, { apply: rest.includes('--apply') });
+    if (rest.includes('--json')) { process.stdout.write(`${JSON.stringify(r, null, 2)}\n`); process.exit(0); }
+    process.stdout.write(`${r.linked.length} nota(s) derivada(s) órfã(s)${r.applied ? ' linkadas' : ' seriam linkadas'}\n`);
+    for (const l of r.linked) process.stdout.write(`  ${l.file} -> ${l.session}\n`);
+    for (const s of r.skipped) process.stdout.write(`  pulado: ${s.file} (${s.reason})\n`);
+    if (!r.applied && r.linked.length) process.stdout.write('\ndry-run — nada escrito. Rode com --apply para injetar os backlinks.\n');
+    process.exit(0);
+  }
+
   if (sub !== 'new') {
-    process.stderr.write('wendkeep note: subcomando desconhecido (use `note new --type bug|learning "<título>"`).\n');
+    process.stderr.write('wendkeep note: subcomando desconhecido (use `note new --type bug|learning "<título>"` ou `note relink [--apply]`).\n');
     process.exit(2);
   }
 

@@ -77,6 +77,9 @@ Usage:
   wendkeep renumber-learnings   Same for 06-Aprendizados/06-Learnings with APR-<NNNN>-<slug>.
   wendkeep note new --type bug|learning "<título>"  Create a numbered derived note (BUG-/APR-NNNN)
                            in the month folder and print its vault path. --date YYYY-MM-DD · --vault P.
+  wendkeep note relink [--apply]  Backfill orphan derived notes (BUG/APR without a source session),
+                           linking each to the modal source session of its type/month cohort. Dry-run
+                           by default; --apply writes; skips notes with no sibling to infer from.
   wendkeep lesson add "t" "l"   Record a project-local lesson (injected at SessionStart).
   wendkeep validate-memory [path]  Validate .brain/CORE.md against the compaction
                            protocol (cap 25, 3 sections, no secrets/PII). Uses
