@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { existsSync, readFileSync, readdirSync, writeFileSync } from 'fs';
-import { basename, join } from 'path';
+import { basename, join, relative } from 'path';
 import {
   monthFolderRelFromDateStr,
   derivedContentKey,
@@ -61,6 +61,77 @@ function sessionYamlLinks(sessionRel) {
     'related:',
     `  - ${yamlQuote(link)}`,
   ].join('\n');
+}
+
+// --- note relink: backfill de proveniência das notas derivadas órfãs (DRV-9) -----
+// Nota derivada legada (BUG/APR criada por wendkeep antigo) nasce sem `source:` de sessão —
+// ilha no grafo. A origem não está registrada nela, mas os irmãos NÃO-órfãos do mesmo tipo
+// carregam a sessão-fonte real: o órfão herda a sessão MODAL (mais comum) do seu (tipo, mês).
+
+// Extrai a sessão do primeiro `source: - [[...]]` do frontmatter (vazio se não houver).
+function sourceSessionOf(content) {
+  const m = content.match(/^source:\s*\n\s*-\s*"?\[\[([^\]"|]+)/m);
+  return m ? m[1].trim() : '';
+}
+
+// Injeta source+related antes do `---` de fechamento do frontmatter. Sem frontmatter, no-op.
+function insertSourceLinks(content, sessionRel) {
+  const m = content.match(/^(---\n[\s\S]*?\n)(---\n)/);
+  if (!m) return content;
+  return `${m[1]}${sessionYamlLinks(sessionRel)}\n${m[2]}${content.slice(m[0].length)}`;
+}
+
+function modalKey(counts) {
+  const entries = Object.entries(counts || {});
+  if (!entries.length) return '';
+  entries.sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  return entries[0][0];
+}
+
+export function relinkDerivedNotes(vaultBase, { apply = false } = {}) {
+  const loc = getLocale(vaultBase);
+  const monthOf = (abs) => relative(vaultBase, abs).replaceAll('\\', '/').split('/').slice(0, 3).join('/');
+  const linked = [];
+  const skipped = [];
+  for (const [folderKey, prefix] of [['bugs', 'BUG'], ['learnings', 'APR']]) {
+    const root = join(vaultBase, loc.folders[folderKey]);
+    const files = [];
+    const walk = (dir) => {
+      let entries;
+      try { entries = readdirSync(dir, { withFileTypes: true }); } catch { return; }
+      for (const e of entries) {
+        const p = join(dir, e.name);
+        if (e.isDirectory()) walk(p);
+        else if (e.name.endsWith('.md') && e.name.startsWith(`${prefix}-`)) files.push(p);
+      }
+    };
+    walk(root);
+    const byMonth = {};
+    const typeWide = {};
+    const orphans = [];
+    for (const p of files) {
+      let c;
+      try { c = readFileSync(p, 'utf8'); } catch { continue; }
+      const src = sourceSessionOf(c);
+      if (src) {
+        (byMonth[monthOf(p)] ??= {})[src] = ((byMonth[monthOf(p)] || {})[src] || 0) + 1;
+        typeWide[src] = (typeWide[src] || 0) + 1;
+      } else {
+        orphans.push({ p, c });
+      }
+    }
+    for (const o of orphans) {
+      const rel = relative(vaultBase, o.p).replaceAll('\\', '/');
+      const session = modalKey(byMonth[monthOf(o.p)]) || modalKey(typeWide);
+      if (!session) { skipped.push({ file: rel, reason: 'sem irmão com source para inferir' }); continue; }
+      if (apply) {
+        try { writeFileSync(o.p, insertSourceLinks(o.c, session), 'utf8'); }
+        catch { skipped.push({ file: rel, reason: 'escrita falhou' }); continue; }
+      }
+      linked.push({ file: rel, session: basename(session) });
+    }
+  }
+  return { applied: apply, linked, skipped };
 }
 
 function extractIssueRefs(tx) {

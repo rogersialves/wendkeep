@@ -184,6 +184,8 @@ wendkeep note new --type learning "a regex without /g only ever returns the firs
 
 It prints the created path, numbers from the current max (recursive scan), files it in the month folder for today (`--date YYYY-MM-DD` to override), and links the active session in `source:` so the graph stays connected. Agents get this rule injected at SessionStart — they call the command instead of guessing a filename.
 
+**Reconnecting legacy notes.** Derived notes created by older versions carry no `source:` session and sit as islands in the graph. `wendkeep note relink` backfills them: each orphan inherits the modal source session of its type/month cohort (the session its non-orphan siblings already point to). Dry-run by default; `--apply` writes; notes with no sibling to infer from are skipped and reported.
+
 **Migrating an existing vault.** Notes created before `0.41.0` have date-prefixed names (`2026-07-16-bug-<slug>.md`) and may sit in legacy `DIA N` subfolders. One command per tree renumbers them chronologically, moves them up into the month folder, and rewrites every wikilink across the vault:
 
 ```bash
