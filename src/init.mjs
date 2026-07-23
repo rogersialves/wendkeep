@@ -31,13 +31,7 @@ import {
 import { renderVaultReadme } from './vault-readme.mjs';
 import { seedVaultViews } from './vault-views.mjs';
 import { canInteractiveSelect, selectCompanionsInteractive } from './companion-select.mjs';
-import {
-  SNIPPET_NAME,
-  renderColorSnippetCss,
-  mergeAppearance,
-  graphColorGroups,
-  mergeGraphColorGroups,
-} from './vault-theme.mjs';
+import { syncVaultTheme } from './theme.mjs';
 import { renderCoreSkeleton, renderCompactionProtocol } from './validate-core.mjs';
 import { seedDefinitions, syncDefs } from './sync-defs.mjs';
 import { seedWkSkills } from './skills-seed.mjs';
@@ -261,33 +255,11 @@ function runCavemanInstaller(log) {
   }
 }
 
-// Install the vault color system into .obsidian: write wendkeep's CSS snippet,
-// enable it (non-destructive), and add graph color groups. Returns a short note.
-// Unparseable user JSON is left untouched (we only merge into valid/absent files).
+// Install the vault color system into .obsidian: write wendkeep's CSS snippet, enable it
+// (non-destructive), and add graph color groups. Shared installer lives in theme.mjs so
+// `init` and `theme sync` never drift. Unparseable user JSON is left untouched.
 function installVaultColors(vaultPath) {
-  const loc = getLocale(vaultPath);
-  const obsidianDir = join(vaultPath, '.obsidian');
-  const snippetsDir = join(obsidianDir, 'snippets');
-  mkdirSync(snippetsDir, { recursive: true });
-  writeFileSync(join(snippetsDir, `${SNIPPET_NAME}.css`), renderColorSnippetCss(loc), 'utf8');
-
-  let enabled = false;
-  const appPath = join(obsidianDir, 'appearance.json');
-  const appRead = readJsonSafe(appPath);
-  if (appRead.ok) {
-    writeJson(appPath, mergeAppearance(appRead.data || {}, SNIPPET_NAME));
-    enabled = true;
-  }
-
-  let groups = 0;
-  const graphPath = join(obsidianDir, 'graph.json');
-  const graphRead = readJsonSafe(graphPath);
-  if (graphRead.ok) {
-    const merged = mergeGraphColorGroups(graphRead.data || {}, graphColorGroups(loc));
-    writeJson(graphPath, merged);
-    groups = graphColorGroups(loc).length;
-  }
-  return `snippet ${SNIPPET_NAME}.css${enabled ? ' (enabled)' : ' (enable by hand: appearance.json unreadable)'} + ${groups} graph group(s)`;
+  return syncVaultTheme(vaultPath).summary;
 }
 
 // --- main -------------------------------------------------------------------

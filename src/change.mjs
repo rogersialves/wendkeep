@@ -14,6 +14,7 @@ import {
   archiveChange,
   abandonChange,
   relinkChanges,
+  backfillArtifactLinks,
   scaffoldPlaceholders,
 } from '../hooks/change-core.mjs';
 import { evaluateGate, requiredSensors } from '../hooks/sensors-core.mjs';
@@ -308,6 +309,15 @@ export function runChange(argv) {
     process.exit(0);
   }
 
+  if (sub === 'backlink') {
+    const r = backfillArtifactLinks(vaultBase, { apply: rest.includes('--apply') });
+    if (rest.includes('--json')) { process.stdout.write(`${JSON.stringify(r, null, 2)}\n`); process.exit(0); }
+    process.stdout.write(`${r.changed.length} artefato(s) órfão(s) em ${r.scanned} change(s)${r.applied ? ' · reescritos' : ''}\n`);
+    for (const f of r.changed) process.stdout.write(`  ${f}\n`);
+    if (!r.applied && r.changed.length) process.stdout.write('\ndry-run — nada escrito. Rode com --apply para injetar os backlinks.\n');
+    process.exit(0);
+  }
+
   if (sub === 'abandon') {
     const slug = slugArg() || activeChange(vaultBase);
     if (!slug) { process.stderr.write('wendkeep change abandon: missing <slug> and no active change\n'); process.exit(2); }
@@ -317,6 +327,6 @@ export function runChange(argv) {
     process.exit(0);
   }
 
-  process.stderr.write(`wendkeep change: unknown subcommand "${sub}". Known: new, use, continue, list, show, status, done, undone, diff, archive, abandon, relink.\n`);
+  process.stderr.write(`wendkeep change: unknown subcommand "${sub}". Known: new, use, continue, list, show, status, done, undone, diff, archive, abandon, relink, backlink.\n`);
   process.exit(2);
 }

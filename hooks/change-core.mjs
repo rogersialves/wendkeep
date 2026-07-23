@@ -2,10 +2,10 @@
 // Native change/spec lifecycle in the vault (Pilar B). Vault-facing lib consumed by
 // the `wendkeep change` CLI (src/change.mjs) and the brain-inject hook. No external deps.
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname, join, relative } from 'node:path';
 import { ensureDir, wikilinkFromRel, monthFolderRelFromDateStr } from './obsidian-common.mjs';
 import { parseSpecsList, promoteSpecs, discoverSpecDeltas, tasksHashOf, captureSpecBaseline, REQ_ID_RE_SRC } from './spec-core.mjs';
-import { getLocale } from './locale.mjs';
+import { getLocale, LOCALES } from './locale.mjs';
 
 export const ARCHIVE_DIR = '_arquivo';
 const POINTER = '.brain/CURRENT_CHANGE.md';
@@ -39,11 +39,20 @@ specs: []
 
 ${en ? '## Why\n\n(reason for the change)\n\n## What changes\n\n(scope of the change)' : '## Por quê\n\n(motivo da mudança)\n\n## O que muda\n\n(escopo da mudança)'}
 `;
+  // Hub backlink: design/tarefas link the change's proposta so no generated artifact is a
+  // graph island. Full-path (never basename — proposta/design exist in every change) so the
+  // archive's rewriteChangeLinks retargets it to _arquivo when the change moves.
+  const changesFolder = (LOCALES[locale] || LOCALES['pt-BR']).folders.changes;
+  const hubLink = `> ${en ? 'Change:' : 'Mudança:'} [[${changesFolder}/${slug}/proposta]]`;
   const design = `# ${slug} — design
+
+${hubLink}
 
 ${en ? '## Approach\n\n(technical approach)' : '## Abordagem\n\n(abordagem técnica)'}
 `;
   const tarefas = `# ${slug} — ${en ? 'tasks' : 'tarefas'}
+
+${hubLink}
 
 - [ ] 1.1 ${en ? '(first task)' : '(primeira tarefa)'}
 `;
@@ -419,6 +428,10 @@ export function archiveChange(vaultBase, slug, { gate = gateGreen, dateStr, adrN
   let reqIds = [];
   try { reqIds = [...new Set(parseTasks(readFileSync(join(src, 'tarefas.md'), 'utf8')).flatMap((t) => t.reqs ?? []))]; } catch { /* sem tarefas */ }
 
+  // Backlink dos artefatos escritos à mão (spec.md) ANTES do move — o rewriteChangeLinks
+  // abaixo retargeta o wikilink pro _arquivo junto com os demais. Fail-quiet.
+  try { healSpecBacklinks(src, vaultBase); } catch { /* heal é bônus */ }
+
   ensureDir(join(vaultBase, chDir, ARCHIVE_DIR));
   try {
     renameSync(src, destAbs);
@@ -510,6 +523,88 @@ function rewriteChangeLinks(vaultBase, fromRel, toRel) {
     }
   }
   return touched;
+}
+
+// --- backlinks de artefato -> hub proposta (grafo conectado) -------------------
+// design/tarefas nascem linkando o hub (renderChangeScaffold); spec.md é escrito à mão,
+// então recebe o backlink por auto-heal (verify/archive) + backfill dos vaults existentes.
+function backlinkLabel(loc) {
+  return loc.id === 'en' ? 'Change:' : 'Mudança:';
+}
+
+// Injeta a linha de backlink logo abaixo do primeiro heading (ou no topo se não houver).
+function insertBacklink(content, backlinkLine) {
+  const m = content.match(/^(#[^\n]*\n)/);
+  if (m) {
+    const rest = content.slice(m[0].length).replace(/^\n+/, '');
+    return `${m[0]}\n${backlinkLine}\n\n${rest}`;
+  }
+  return `${backlinkLine}\n\n${content}`;
+}
+
+// Auto-heal (0.47): garante o backlink pro proposta em cada specs/<cap>/spec.md do change.
+// Idempotente (pula quem já tem o link exato). Chamado no verify e no archive (antes do move,
+// pra o rewriteChangeLinks retargetar pro _arquivo). Retorna quantos arquivos healou.
+export function healSpecBacklinks(changeDir, vaultBase) {
+  const loc = getLocale(vaultBase);
+  const propRel = `${relative(vaultBase, changeDir).replaceAll('\\', '/')}/proposta`;
+  const link = `[[${propRel}]]`;
+  const line = `> ${backlinkLabel(loc)} ${link}`;
+  let caps = [];
+  try { caps = readdirSync(join(changeDir, 'specs'), { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name); }
+  catch { return 0; }
+  let healed = 0;
+  for (const cap of caps) {
+    const p = join(changeDir, 'specs', cap, 'spec.md');
+    let c;
+    try { c = readFileSync(p, 'utf8'); } catch { continue; }
+    if (c.includes(link)) continue;
+    try { writeFileSync(p, insertBacklink(c, line), 'utf8'); healed += 1; } catch { /* readonly — segue */ }
+  }
+  return healed;
+}
+
+// Backfill (0.47): cura design/tarefas/spec órfãos em changes já existentes — open e _arquivo.
+// Aponta cada artefato pro proposta no seu local atual (arquivado usa o path do _arquivo).
+// Dry-run por default; `apply` escreve. Idempotente (pula quem já linka o proposta certo).
+export function backfillArtifactLinks(vaultBase, { apply = false } = {}) {
+  const loc = getLocale(vaultBase);
+  const chDir = loc.folders.changes;
+  const label = backlinkLabel(loc);
+  const base = join(vaultBase, chDir);
+  const dirs = [];
+  try {
+    for (const name of readdirSync(base)) {
+      if (name === ARCHIVE_DIR) continue;
+      const d = join(base, name);
+      if (existsSync(join(d, 'proposta.md'))) dirs.push(d);
+    }
+  } catch { /* sem changes */ }
+  try {
+    for (const name of readdirSync(join(base, ARCHIVE_DIR))) {
+      const d = join(base, ARCHIVE_DIR, name);
+      if (existsSync(join(d, 'proposta.md'))) dirs.push(d);
+    }
+  } catch { /* sem arquivo */ }
+
+  const changed = [];
+  for (const dir of dirs) {
+    const propRel = `${relative(vaultBase, dir).replaceAll('\\', '/')}/proposta`;
+    const link = `[[${propRel}]]`;
+    const line = `> ${label} ${link}`;
+    let caps = [];
+    try { caps = readdirSync(join(dir, 'specs'), { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => join('specs', e.name, 'spec.md')); }
+    catch { /* sem specs */ }
+    for (const rel of ['design.md', 'tarefas.md', ...caps]) {
+      const p = join(dir, rel);
+      let c;
+      try { c = readFileSync(p, 'utf8'); } catch { continue; }
+      if (c.includes(link)) continue;
+      if (apply) { try { writeFileSync(p, insertBacklink(c, line), 'utf8'); } catch { continue; } }
+      changed.push(relative(vaultBase, p).replaceAll('\\', '/'));
+    }
+  }
+  return { applied: apply, scanned: dirs.length, changed };
 }
 
 // Cura retroativa (vaults pré-0.35): wikilinks para changes que já moveram sem reescrita.
