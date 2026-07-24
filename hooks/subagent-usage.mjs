@@ -2,7 +2,8 @@
 // only reads the MAIN transcript; a session that spawns subagents/workflows (e.g. a Workflow
 // run) burns tokens in sibling transcripts the note never recorded. This scans them.
 // Reuses token-usage.mjs's parser. Provider-gated by structure (Claude Code layout).
-import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { hasSessionFrontmatter, mutateSessionNote } from './session-note-io.mjs';
 import { basename, join } from 'node:path';
 import { parseTokenUsageFromTranscript, summarizeTokenUsage } from './token-usage.mjs';
 
@@ -339,39 +340,43 @@ function upsertSection(content, heading, body) {
 }
 
 // Stop-hook entry: scan the session's subagents/workflows, fold into the note. Fail-open.
-export function upsertSubagentUsage(sessionPath, transcriptPath) {
+export function upsertSubagentUsage(sessionPath, transcriptPath, { lockTimeoutMs } = {}) {
   if (!sessionPath || !existsSync(sessionPath)) return false;
   const collected = collectSubagentUsage(sessionDirFromTranscript(transcriptPath));
   if (!collected) return false;
   const a = collected.aggregate;
-  let content = readFileSync(sessionPath, 'utf8');
-  content = setFrontmatterField(content, 'subagents_count', a.count);
-  content = setFrontmatterField(content, 'subagents_tokens_total', a.tokens);
-  content = setFrontmatterField(content, 'subagents_custo_usd', a.cost);
-  content = setFrontmatterField(content, 'subagents_tools', `"${(a.tools || []).join(', ')}"`);
-  content = setFrontmatterField(content, 'subagents_wasted_usd', a.wasted || 0);
-  content = setFrontmatterField(content, 'tokens_total_incl_subagents', frontmatterNumber(content, 'tokens_total') + a.tokens);
-  content = setFrontmatterField(content, 'custo_total_incl_subagents_usd', round4(frontmatterNumber(content, 'custo_modelo_usd') + a.cost));
-  let mainRows = [];
-  try {
-    const main = summarizeTokenUsage(parseTokenUsageFromTranscript(transcriptPath));
-    mainRows = (main.modelRows || []).map((r) => ({
-      provider: r.provider || '?', model: r.model || '?', source: 'main', calls: r.calls || 0,
-      tokens: tokensTotal(r.usage), cost: round4(r.costs?.model || 0),
-    }));
-  } catch { /* preserve legacy aggregate fallback */ }
-  if (!mainRows.length) {
-    const mainModel = (content.match(/^custo_modelo_label:\s*["']?([^"'\r\n]+)["']?\s*$/m) || [])[1] || '?';
-    mainRows = [{ model: mainModel, source: 'main', cost: round4(frontmatterNumber(content, 'custo_modelo_usd')), tokens: frontmatterNumber(content, 'tokens_total') }];
-  }
-  const ledger = [...mainRows, ...(a.modelRows || [])];
-  collected.combined = {
-    tokens: frontmatterNumber(content, 'tokens_total') + a.tokens,
-    cost: round4(frontmatterNumber(content, 'custo_modelo_usd') + a.cost),
-    models: ledger,
-  };
-  content = setFrontmatterField(content, 'custo_por_modelo_json', `'${JSON.stringify(ledger).replaceAll("'", "''")}'`);
-  content = upsertSection(content, '## Subagents & Workflows', renderSubagentSection(collected));
-  writeFileSync(sessionPath, content, 'utf8');
-  return true;
+  const outcome = mutateSessionNote(sessionPath, (original) => {
+    // Fail-closed: sem frontmatter íntegro, `setFrontmatterField` viraria no-op silencioso
+    // e a gravação só reescreveria conteúdo truncado por cima do original.
+    if (!hasSessionFrontmatter(original)) return null;
+    let content = original;
+    content = setFrontmatterField(content, 'subagents_count', a.count);
+    content = setFrontmatterField(content, 'subagents_tokens_total', a.tokens);
+    content = setFrontmatterField(content, 'subagents_custo_usd', a.cost);
+    content = setFrontmatterField(content, 'subagents_tools', `"${(a.tools || []).join(', ')}"`);
+    content = setFrontmatterField(content, 'subagents_wasted_usd', a.wasted || 0);
+    content = setFrontmatterField(content, 'tokens_total_incl_subagents', frontmatterNumber(content, 'tokens_total') + a.tokens);
+    content = setFrontmatterField(content, 'custo_total_incl_subagents_usd', round4(frontmatterNumber(content, 'custo_modelo_usd') + a.cost));
+    let mainRows = [];
+    try {
+      const main = summarizeTokenUsage(parseTokenUsageFromTranscript(transcriptPath));
+      mainRows = (main.modelRows || []).map((r) => ({
+        provider: r.provider || '?', model: r.model || '?', source: 'main', calls: r.calls || 0,
+        tokens: tokensTotal(r.usage), cost: round4(r.costs?.model || 0),
+      }));
+    } catch { /* preserve legacy aggregate fallback */ }
+    if (!mainRows.length) {
+      const mainModel = (content.match(/^custo_modelo_label:\s*["']?([^"'\r\n]+)["']?\s*$/m) || [])[1] || '?';
+      mainRows = [{ model: mainModel, source: 'main', cost: round4(frontmatterNumber(content, 'custo_modelo_usd')), tokens: frontmatterNumber(content, 'tokens_total') }];
+    }
+    const ledger = [...mainRows, ...(a.modelRows || [])];
+    collected.combined = {
+      tokens: frontmatterNumber(content, 'tokens_total') + a.tokens,
+      cost: round4(frontmatterNumber(content, 'custo_modelo_usd') + a.cost),
+      models: ledger,
+    };
+    content = setFrontmatterField(content, 'custo_por_modelo_json', `'${JSON.stringify(ledger).replaceAll("'", "''")}'`);
+    return upsertSection(content, '## Subagents & Workflows', renderSubagentSection(collected));
+  }, lockTimeoutMs ? { timeoutMs: lockTimeoutMs } : {});
+  return outcome.written;
 }

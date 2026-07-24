@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { existsSync, readdirSync, readFileSync, writeFileSync } from 'fs';
+import { existsSync, readdirSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { request } from 'http';
 import { pathToFileURL } from 'url';
@@ -10,6 +10,7 @@ import { activeChangeLink, pruneChangeSentinels } from './change-core.mjs';
 import { getLocale } from './locale.mjs';
 import { updateSessionObservability } from './session-observability.mjs';
 import { resolveSessionEntry } from './session-identity.mjs';
+import { mutateSessionNote } from './session-note-io.mjs';
 import {
   ensureDir,
   findActiveSessionByTranscript,
@@ -768,20 +769,21 @@ function relocateOrphanIterations(content) {
 }
 
 export function insertIteration(sessionPath, block, turnId, tx) {
-  const original = readFileSync(sessionPath, 'utf-8');
-  // Self-heal: migrate any legacy `codex-turn` markers to the neutral name on this write.
-  let content = normalizeTurnMarkers(original);
-  if (hasTurnMarker(content, turnId)) {
-    // Turno já registrado: ainda assim repara órfãos e seções dedicadas.
-    const repaired = applyDedicatedSections(relocateOrphanIterations(content), tx);
-    if (repaired !== original) writeFileSync(sessionPath, repaired, 'utf-8');
-    return false;
-  }
-  content = relocateOrphanIterations(content);
-  content = insertIntoIteracoes(content, block);
-  content = applyDedicatedSections(content, tx);
-  if (content !== original) writeFileSync(sessionPath, content, 'utf-8');
-  return true;
+  let inserted = false;
+  // Sob lock: outro hook (subagent-stop) pode estar reescrevendo a mesma nota agora.
+  mutateSessionNote(sessionPath, (original) => {
+    // Self-heal: migrate any legacy `codex-turn` markers to the neutral name on this write.
+    let content = normalizeTurnMarkers(original);
+    if (hasTurnMarker(content, turnId)) {
+      // Turno já registrado: ainda assim repara órfãos e seções dedicadas.
+      return applyDedicatedSections(relocateOrphanIterations(content), tx);
+    }
+    content = relocateOrphanIterations(content);
+    content = insertIntoIteracoes(content, block);
+    inserted = true;
+    return applyDedicatedSections(content, tx);
+  });
+  return inserted;
 }
 
 function shouldFinalizeSession() {
@@ -921,12 +923,10 @@ ${links(created.learnings)}
 ${formatPendingClosing(pending)}
 `;
 
-  const content = readFileSync(sessionPath, 'utf-8');
-  const finalized = replaceClosingSection(
+  mutateSessionNote(sessionPath, (content) => replaceClosingSection(
     replacePendingSection(updateFrontmatter(content, endedAt), pending),
     closing,
-  );
-  writeFileSync(sessionPath, finalized, 'utf-8');
+  ));
 }
 
 // --- Vínculo Sessão ↔ Issues Linear (03-Linear) -------------------------------
@@ -1007,10 +1007,9 @@ function applyLinearLinks(sessionPath, tx, vaultBase, sessionRel) {
     .sort((a, b) => a[0].localeCompare(b[0], undefined, { numeric: true }))
     .map(([id, rel]) => `- ${id} — ${wikilinkFromRel(rel)}`);
 
-  let content = readFileSync(sessionPath, 'utf-8');
-  content = ensureSection(content, 'Issues Linear', '\n## Encerramento');
-  content = upsertListSection(content, 'Issues Linear', lines, null);
-  writeFileSync(sessionPath, content, 'utf-8');
+  mutateSessionNote(sessionPath, (original) => (
+    upsertListSection(ensureSection(original, 'Issues Linear', '\n## Encerramento'), 'Issues Linear', lines, null)
+  ));
 }
 
 // Triggers Obsidian Local REST API to re-index the vault after file writes.
@@ -1129,10 +1128,9 @@ function main() {
       : activeChangeLink(vaultBase);
     const wl = (chgLink.match(/\[\[[^\]]+\]\]/) || [])[0];
     if (wl) {
-      let cur = readFileSync(sessionPath, 'utf8');
-      cur = ensureSection(cur, 'Mudanças', '\n## Encerramento');
-      cur = upsertListSection(cur, 'Mudanças', [`- ${wl}`], null);
-      writeFileSync(sessionPath, cur, 'utf8');
+      mutateSessionNote(sessionPath, (cur) => (
+        upsertListSection(ensureSection(cur, 'Mudanças', '\n## Encerramento'), 'Mudanças', [`- ${wl}`], null)
+      ));
     }
   } catch { /* nunca derruba o Stop */ }
   writeControl(vaultBase, {

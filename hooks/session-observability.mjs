@@ -1,8 +1,9 @@
 // Single atomic writer for session usage, models, reasoning/effort and subagents.
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { collectSessionUsage } from './token-usage.mjs';
 import { collectSubagentUsage, collectCodexSubagentUsage, sessionDirFromTranscript } from './subagent-usage.mjs';
 import { inspectTranscriptIdentity } from './session-identity.mjs';
+import { hasSessionFrontmatter, mutateSessionNote } from './session-note-io.mjs';
 
 const HEADING = '## Agentes, tokens e custos';
 const LEGACY_HEADINGS = ['## Uso de tokens e custos', '## Subagents & Workflows'];
@@ -158,23 +159,33 @@ export function buildSessionObservability({ sessionContent, transcriptPath }) {
   return { snapshot, content: upsertObservabilitySection(content, renderSessionObservability(snapshot)) };
 }
 
-export function updateSessionObservability({ sessionPath, transcriptPath, caller = 'unknown', canonicalConversationId = '' }) {
+export function updateSessionObservability({ sessionPath, transcriptPath, caller = 'unknown', canonicalConversationId = '', lockTimeoutMs }) {
   if (!sessionPath || !existsSync(sessionPath)) return null;
-  const sessionContent = readFileSync(sessionPath, 'utf8');
-  const noteProvider = sessionContent.match(/^provider:\s*"?([^"\n]+)"?/m)?.[1]?.trim() || 'unknown';
   const identity = inspectTranscriptIdentity(transcriptPath);
-  if ((noteProvider === 'codex' && identity.transcriptProvider !== 'openai')
-    || (noteProvider === 'claude' && identity.transcriptProvider !== 'anthropic')) {
-    throw new Error(`observability provider mismatch: note=${noteProvider}, transcript=${identity.transcriptProvider}`);
-  }
-  let annotated = setFrontmatterField(sessionContent, 'observability_caller', `"${caller}"`);
-  annotated = setFrontmatterField(annotated, 'observability_session_id', `"${canonicalConversationId || identity.canonicalConversationId || ''}"`);
-  annotated = setFrontmatterField(annotated, 'observability_transcript_id', `"${identity.transcriptId || ''}"`);
-  if (!/^observability_updated_at:/m.test(annotated)) {
-    annotated = setFrontmatterField(annotated, 'observability_updated_at', `"${new Date().toISOString()}"`);
-  }
-  const result = buildSessionObservability({ sessionContent: annotated, transcriptPath });
-  if (!result) return null;
-  writeFileSync(sessionPath, result.content, 'utf8');
-  return result.snapshot;
+  let snapshot = null;
+
+  // `subagent-stop` dispara uma vez por subagent: sem o lock, dois processos leem a mesma
+  // nota e o segundo grava por cima — ou pior, lê o arquivo já truncado pelo primeiro.
+  const outcome = mutateSessionNote(sessionPath, (sessionContent) => {
+    // Fail-closed: leitura sem frontmatter íntegro é conteúdo truncado, não nota nova.
+    if (!hasSessionFrontmatter(sessionContent)) return null;
+    const noteProvider = sessionContent.match(/^provider:\s*"?([^"\n]+)"?/m)?.[1]?.trim() || 'unknown';
+    if ((noteProvider === 'codex' && identity.transcriptProvider !== 'openai')
+      || (noteProvider === 'claude' && identity.transcriptProvider !== 'anthropic')) {
+      throw new Error(`observability provider mismatch: note=${noteProvider}, transcript=${identity.transcriptProvider}`);
+    }
+    let annotated = setFrontmatterField(sessionContent, 'observability_caller', `"${caller}"`);
+    annotated = setFrontmatterField(annotated, 'observability_session_id', `"${canonicalConversationId || identity.canonicalConversationId || ''}"`);
+    annotated = setFrontmatterField(annotated, 'observability_transcript_id', `"${identity.transcriptId || ''}"`);
+    if (!/^observability_updated_at:/m.test(annotated)) {
+      annotated = setFrontmatterField(annotated, 'observability_updated_at', `"${new Date().toISOString()}"`);
+    }
+    const result = buildSessionObservability({ sessionContent: annotated, transcriptPath });
+    if (!result) return null;
+    snapshot = result.snapshot;
+    return result.content;
+  }, lockTimeoutMs ? { timeoutMs: lockTimeoutMs } : {});
+
+  // 'unchanged' também é sucesso: a nota já estava em dia, o snapshot vale.
+  return outcome.written || outcome.reason === 'unchanged' ? snapshot : null;
 }

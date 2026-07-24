@@ -5,12 +5,13 @@
 // change's tarefas.md N.N (id-spaces differ, fuzzy) — it's a progress trail, not a task tracker.
 // The TaskCompleted payload shape isn't fully pinned, so the task text is pulled defensively from
 // any plausible field. Fail-open.
-import { existsSync, readFileSync, writeFileSync } from 'fs';
+import { existsSync } from 'fs';
 import { join } from 'path';
 import { pathToFileURL } from 'url';
 import { readHookInput, writeHookOutput, getVaultBase, formatHourMinute, providerMeta } from './obsidian-common.mjs';
 import { getLocale } from './locale.mjs';
 import { resolveSessionEntry } from './session-identity.mjs';
+import { mutateSessionNote } from './session-note-io.mjs';
 
 // Pull the task's human text from whatever field the payload carries.
 export function taskText(input) {
@@ -51,10 +52,7 @@ export function logTask(vaultBase, input) {
 
   const heading = getLocale(vaultBase).id === 'en' ? 'Plan progress' : 'Progresso do plano';
   const line = `- [x] ${formatHourMinute(new Date()).replace('-', ':')} ${text}`;
-  const content = readFileSync(sessionPath, 'utf8');
-  const next = appendProgress(content, line, heading);
-  if (next !== content) { writeFileSync(sessionPath, next, 'utf8'); return true; }
-  return false;
+  return mutateSessionNote(sessionPath, (content) => appendProgress(content, line, heading)).written;
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { existsSync, readFileSync, writeFileSync } from 'fs';
+import { mutateSessionNote } from './session-note-io.mjs';
 import { basename, dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 import {
@@ -788,7 +789,11 @@ function buildUsageFrontmatter(agg, entries) {
 function upsertSessionFrontmatter(content, agg, entries) {
   const managedYaml = buildUsageFrontmatter(agg, entries);
   const match = content.match(/^---\n([\s\S]*?)\n---/);
-  if (!match) return `---\n${managedYaml}\n---\n\n${content}`;
+  // Fail-closed: a nota de sessão SEMPRE nasce com frontmatter (session-start). Não casar
+  // aqui significa conteúdo truncado — tipicamente uma leitura que pegou o arquivo no meio
+  // da escrita de outro hook. Prependar um bloco novo transformava essa leitura ruim em
+  // dano permanente (notas com 4 frontmatters empilhados, vistas em produção).
+  if (!match) return null;
 
   const clean = stripManagedFrontmatter(match[1]);
   const nextFrontmatter = [clean, managedYaml].filter(Boolean).join('\n');
@@ -960,6 +965,7 @@ export function collectSessionUsage({ sessionContent, transcriptPath }) {
 
   const agg = aggregateEntries(entries);
   const withFrontmatter = upsertSessionFrontmatter(sessionContent, agg, entries);
+  if (withFrontmatter === null) return null; // conteúdo corrompido: nenhum escritor grava
   return {
     summary,
     aggregate: agg,
@@ -968,13 +974,15 @@ export function collectSessionUsage({ sessionContent, transcriptPath }) {
   };
 }
 
-export function updateSessionUsage({ vaultBase, sessionRel, sessionPath, transcriptPath }) {
+export function updateSessionUsage({ vaultBase, sessionRel, sessionPath, transcriptPath, lockTimeoutMs }) {
   if (!sessionPath || !existsSync(sessionPath)) return null;
-  const result = collectSessionUsage({ sessionContent: readFileSync(sessionPath, 'utf-8'), transcriptPath });
-  if (!result) return null;
-  const withSection = upsertUsageSection(result.content, buildUsageSection(result.aggregate, result.entries, result.summary));
-  writeFileSync(sessionPath, withSection, 'utf-8');
-  return result;
+  let result = null;
+  const outcome = mutateSessionNote(sessionPath, (sessionContent) => {
+    result = collectSessionUsage({ sessionContent, transcriptPath });
+    if (!result) return null; // sem usage OU conteúdo corrompido: não grava
+    return upsertUsageSection(result.content, buildUsageSection(result.aggregate, result.entries, result.summary));
+  }, lockTimeoutMs ? { timeoutMs: lockTimeoutMs } : {});
+  return outcome.written || outcome.reason === 'unchanged' ? result : null;
 }
 
 function parseCliArgs(argv) {

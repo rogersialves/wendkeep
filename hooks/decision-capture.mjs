@@ -13,6 +13,7 @@ import {
 } from './obsidian-common.mjs';
 import { getLocale } from './locale.mjs';
 import { resolveSessionEntry } from './session-identity.mjs';
+import { mutateSessionNote } from './session-note-io.mjs';
 
 // Decision notes follow the ADR naming convention: ADR-NNNN-<slug>, NNNN a 4-digit sequential
 // number assigned in the order decisions are made (getNextAdrNumber scans the whole 04-Decisões).
@@ -189,10 +190,11 @@ export function captureDecision(vaultBase, input) {
   if (sessionRel) {
     try {
       const sessionPath = join(vaultBase, sessionRel);
-      let session = readFileSync(sessionPath, 'utf8');
       const wikilink = wikilinkFromRel(rel);
       const link = `- ${wikilink}`;
-      if (!session.includes(wikilink)) {
+      mutateSessionNote(sessionPath, (original) => {
+        if (original.includes(wikilink)) return null;
+        let session = original;
         const heading = '\n## Decisões geradas nesta sessão\n';
         const at = session.indexOf(heading);
         if (at !== -1) {
@@ -209,8 +211,8 @@ export function captureDecision(vaultBase, input) {
           const section = `\n## Decisões geradas nesta sessão\n\n${link}\n`;
           session = anchor === -1 ? `${session.trimEnd()}${section}` : `${session.slice(0, anchor).trimEnd()}${section}${session.slice(anchor)}`;
         }
-        writeFileSync(sessionPath, session, 'utf8');
-      }
+        return session;
+      });
     } catch { /* backlink auxiliar nunca derruba a captura */ }
   }
   return { rel, skipped: false };

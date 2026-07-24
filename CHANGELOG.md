@@ -4,6 +4,40 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.50.0] — 2026-07-23
+
+### Fixed
+
+- **Nota de sessão não empilha mais frontmatter.** Uma nota real fechou com 4 blocos de
+  frontmatter no topo: o Obsidian só parseia o primeiro, então `type`/`date`/`provider`/
+  `status`/`tags`/`source` sumiram do painel de propriedades e os outros 3 blocos viraram
+  texto do corpo. Duas falhas somadas: (1) `upsertSessionFrontmatter` **prependava** um
+  frontmatter novo quando o regex não casava — numa nota existente isso nunca é "faltou
+  frontmatter", é conteúdo truncado; (2) os escritores da nota faziam read-modify-write com
+  `writeFileSync` cru, sem lock. Como `subagent-stop` dispara uma vez por subagent (a sessão
+  danificada teve 46), um hook lia o arquivo já truncado por outro e caía no prepend.
+  Agora todo hook que reescreve a nota (`token-usage`, `subagent-usage`,
+  `session-observability`, `session-stop`, `session-ensure`, `decision-capture`, `task-log`)
+  grava por `mutateSessionNote`: lock por `mkdir` + escrita atômica (`tmp` + `rename`), e
+  frontmatter ilegível **aborta** a gravação em vez de prependar. Um teste-guarda estrutural
+  impede que um escritor novo volte ao `writeFileSync` cru. Capability
+  `session-observability` (OBS-5, OBS-6).
+- **Lock liberado em caminho acentuado.** `fs.rmSync(dir, { recursive: true, force: true })`
+  é um **no-op silencioso** no Windows (Node 24) quando o caminho contém caractere
+  não-ASCII — não remove e não lança (medido: 20/20 falhas em `02-Sessões`, `ação`,
+  `Mudanças`; 0/20 em ASCII). Como toda nota de sessão vive sob `02-Sessões/`, o lock ficava
+  preso e o segundo escritor desistia — perda silenciosa de turnos. A liberação passa a usar
+  `rmdirSync`. O mesmo defeito estava latente no lock do `SESSION_REGISTRY.json`, que
+  travaria após a primeira mutação num vault sob pasta acentuada.
+
+### Added
+
+- **`wendkeep doctor` surfaça notas de sessão com frontmatter empilhado.** Nova seção
+  `[notas]`: conta e lista as notas danificadas pela escrita concorrente (versões
+  anteriores a esta); quando não há nenhuma, diz `frontmatter íntegro`. `---` no corpo
+  (regra horizontal, separador de tabela) não é falso positivo. Capability `vault-doctor`
+  (DIAG-5).
+
 ## [0.49.0] — 2026-07-23
 
 ### Added

@@ -1,7 +1,7 @@
 // hooks/harness-doctor.mjs — integrity checks for the a2 harness state (Wave B).
 // Pure-ish (fs reads only). `wendkeep doctor` reports errors (exit 1) + warnings.
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, relative } from 'node:path';
 import { activeChange, parseTasks, backfillArtifactLinks } from './change-core.mjs';
 import { relinkDerivedNotes } from './linked-notes.mjs';
 import { buildEffectiveRequirementPackage, checkSpecsState, evaluateVerdict, tasksHashOf, validateSpecImpact } from './spec-core.mjs';
@@ -88,6 +88,48 @@ const unquoteControl = (v) => String(v ?? '').replace(/^"(.*)"$/, '$1').trim();
 // O control marca `inactive` quando a sessão-mãe encerra, mesmo com um workflow/subagente
 // ainda vivo em background. Se a nota da sessão foi escrita há pouco apesar do `inactive`,
 // sinaliza a atividade recente — o doctor deixa de dizer "inativa" quando não está.
+// Conta blocos de frontmatter empilhados no TOPO da nota — a assinatura do prepend que a
+// escrita concorrente sem lock produzia. `---` no corpo (regra horizontal, separador de
+// tabela) não conta: só reabertura imediata após o fechamento do bloco anterior.
+function stackedFrontmatterBlocks(content) {
+  let rest = content;
+  let blocks = 0;
+  while (/^---\n/.test(rest)) {
+    const close = rest.indexOf('\n---', 4);
+    if (close < 0) break;
+    blocks += 1;
+    rest = rest.slice(close + 4).trimStart();
+  }
+  return blocks;
+}
+
+export function checkStackedFrontmatter(vaultBase) {
+  const root = join(vaultBase, '02-Sessões');
+  const notes = [];
+  const walk = (dir) => {
+    let entries = [];
+    try { entries = readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    for (const entry of entries) {
+      const abs = join(dir, entry.name);
+      if (entry.isDirectory()) { walk(abs); continue; }
+      if (!entry.name.endsWith('.md')) continue;
+      try {
+        if (stackedFrontmatterBlocks(readFileSync(abs, 'utf-8')) > 1) notes.push(abs);
+      } catch { /* nota ilegível não é o dano que esta checagem descreve */ }
+    }
+  };
+  walk(root);
+  return { count: notes.length, notes };
+}
+
+// Formatador puro pra que a saída do doctor seja testável sem process.exit.
+export function renderStackedFrontmatterLines(vaultBase, stacked) {
+  const lines = [`[notas] ${stacked.count} sessão(ões) com frontmatter empilhado`];
+  for (const abs of stacked.notes) lines.push(`  ✗ ${relative(vaultBase, abs)}`);
+  if (!stacked.count) lines.push('  frontmatter íntegro ✓');
+  return lines;
+}
+
 export function checkSessionActivity(vaultBase, { now = Date.now(), windowMs = 5 * 60000 } = {}) {
   const control = readControl(vaultBase);
   const active = unquoteControl(control.status) === 'active';

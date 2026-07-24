@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'fs';
+import { releaseLockDir } from './session-note-io.mjs';
 import { basename, dirname, join, relative } from 'path';
 import { getLocale } from './locale.mjs';
 import { resolveProjectVault } from '../src/project-vault.mjs';
@@ -323,7 +324,7 @@ export function mutateSessionRegistry(vaultBase, mutator, { timeoutMs = 2000 } =
       if (error?.code === 'EEXIST') {
         try {
           if (Date.now() - statSync(lock).mtimeMs > 10_000) {
-            rmSync(lock, { recursive: true, force: true });
+            releaseLockDir(lock);
             continue;
           }
         } catch { /* outro processo pode ter liberado o lock */ }
@@ -342,7 +343,9 @@ export function mutateSessionRegistry(vaultBase, mutator, { timeoutMs = 2000 } =
     writeSessionRegistry(vaultBase, registry);
     return result;
   } finally {
-    rmSync(lock, { recursive: true, force: true });
+    // rmSync recursivo não remove diretório em caminho não-ASCII no Windows — ver
+    // releaseLockDir. Vault sob pasta acentuada travaria o registry após a 1ª mutação.
+    releaseLockDir(lock);
   }
 }
 

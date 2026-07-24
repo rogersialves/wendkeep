@@ -150,7 +150,7 @@ Restart Codex and Claude Code after reseeding their generated skills.
 | `wendkeep doctor [--vault P]` | Run a vault health check (integrity of sessions, registry, links). |
 | `wendkeep --version` / `--help` | Version / usage. |
 
-Session notes use one live `## Agentes, tokens e custos` snapshot. Main-agent and subagent hooks recompose it atomically, with costs, token dimensions, reasoning tokens and effort per model/source.
+Session notes use one live `## Agentes, tokens e custos` snapshot. Main-agent and subagent hooks recompose it atomically, with costs, token dimensions, reasoning tokens and effort per model/source. Every hook that rewrites a session note takes a per-file lock and writes through a temp file + rename, so the `SubagentStop` fan-out (one hook run per subagent) can never leave a note half-written; a note whose frontmatter reads back damaged is left untouched rather than patched.
 
 ## Retroactive memory (`import`) — install today, remember yesterday
 

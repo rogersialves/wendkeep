@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { existsSync, readFileSync, renameSync, statSync, writeFileSync } from 'fs';
+import { existsSync, renameSync, statSync, writeFileSync } from 'fs';
 import { basename, dirname, join } from 'path';
 import {
   controlPath,
@@ -31,6 +31,7 @@ import {
   yamlQuote,
 } from './obsidian-common.mjs';
 import { resolveSessionIdentity } from './session-identity.mjs';
+import { mutateSessionNote } from './session-note-io.mjs';
 
 function sessionIdFromInput(input) {
   return input.session_id || input.sessionId || input.codex_session_id || '';
@@ -194,11 +195,11 @@ function maybeRetitleSession({ vaultBase, relPath, startedAt, input }) {
   }
 
   const sessionPath = join(vaultBase, nextRelPath);
-  const content = readFileSync(sessionPath, 'utf-8');
-  const updated = updateSessionDescription(content, { relPath: nextRelPath, summary, startedAt });
-  if (updated !== content) writeFileSync(sessionPath, updated, 'utf-8');
+  const outcome = mutateSessionNote(sessionPath, (content) => (
+    updateSessionDescription(content, { relPath: nextRelPath, summary, startedAt })
+  ));
 
-  return { relPath: nextRelPath, summary, changed: nextRelPath !== relPath || updated !== content };
+  return { relPath: nextRelPath, summary, changed: nextRelPath !== relPath || outcome.written };
 }
 
 function stripClosingSection(content) {
@@ -209,9 +210,7 @@ function stripClosingSection(content) {
 }
 
 function reopenSessionFile(sessionPath) {
-  const content = readFileSync(sessionPath, 'utf-8');
-  const reopened = stripClosingSection(updateSessionFrontmatter(content));
-  writeFileSync(sessionPath, reopened, 'utf-8');
+  mutateSessionNote(sessionPath, (content) => stripClosingSection(updateSessionFrontmatter(content)));
 }
 
 function findSessionForInput(vaultBase, input, control) {
