@@ -26,6 +26,13 @@
       "cachedInput": 0.5,
       "output": 25
     },
+    "claude-opus-5": {
+      "label": "Claude Opus 5 API",
+      "provider": "anthropic",
+      "input": 5,
+      "cachedInput": 0.5,
+      "output": 25
+    },
     "claude-sonnet-4.6": {
       "label": "Claude Sonnet 4.6 API",
       "provider": "anthropic",
@@ -49,6 +56,13 @@
     },
     "claude-fable-5": {
       "label": "Claude Fable 5 API",
+      "provider": "anthropic",
+      "input": 10,
+      "cachedInput": 1,
+      "output": 50
+    },
+    "claude-mythos-5": {
+      "label": "Claude Mythos 5 API",
       "provider": "anthropic",
       "input": 10,
       "cachedInput": 1,

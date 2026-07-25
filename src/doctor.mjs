@@ -4,7 +4,7 @@ import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { checkHarness, checkVaultLinks, checkSessionActivity, checkStackedFrontmatter, renderStackedFrontmatterLines } from '../hooks/harness-doctor.mjs';
+import { checkHarness, checkVaultLinks, checkSessionActivity, checkStackedFrontmatter, renderStackedFrontmatterLines, checkUnpricedModels, renderUnpricedModelLines } from '../hooks/harness-doctor.mjs';
 import { checkSyncDefs } from './sync-defs.mjs';
 import { resolveProjectVault } from './project-vault.mjs';
 
@@ -72,6 +72,9 @@ export function runDoctor(argv) {
   // 3b. Notas de sessão com frontmatter empilhado — dano de escrita concorrente (pré-lock).
   const stacked = checkStackedFrontmatter(vaultBase);
   process.stdout.write(`\n${renderStackedFrontmatterLines(vaultBase, stacked).join('\n')}\n`);
+
+  // 3c. Modelo fora de pricing.json fecha a sessão com custo zero, sem erro — só aparece aqui.
+  process.stdout.write(`\n${renderUnpricedModelLines(checkUnpricedModels(vaultBase)).join('\n')}\n`);
 
   // 4. Sessão: não mente "inativa" quando há atividade recente (workflow/subagente em background).
   const act = checkSessionActivity(vaultBase);

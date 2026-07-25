@@ -4,6 +4,29 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.52.0] — 2026-07-25
+
+### Fixed
+
+- **`claude-opus-5` e `claude-mythos-5` deixam de custar $0.** Modelo ausente de
+  `hooks/pricing.json` faz `priceForModel` devolver `null` e a parcela dele do custo virar
+  zero — sem erro, sem aviso, sem nada no `doctor`. Num vault real:
+  `claude-opus-5  $0.0000` no `wendkeep cost`, enquanto Opus 4.8 e Fable 5 somavam $462.
+  Adicionados com os preços de API: Opus 5 a $5 input / $0,50 cache read / $25 output
+  (mesmo tier do Opus 4.8) e Mythos 5 a $10 / $1 / $50 (mesmo tier do Fable 5), com os
+  aliases das variantes de id. Notas já fechadas com custo zerado se corrigem com
+  `wendkeep cost rebuild`.
+
+### Added
+
+- **`wendkeep doctor` surfaça modelos sem preço.** Nova seção `[preços]`: lista os modelos
+  que aparecem nas notas de sessão com uso registrado mas sem entrada na tabela, e aponta
+  `hooks/pricing.json`. Cada modelo citado é consultado direto em `priceForModel` — **não**
+  se infere pelo sintoma "custo zerado", que não funciona: na nota que motivou a correção,
+  `modelo: "claude-opus-4.8 + claude-fable-5 + claude-opus-5"` fecha com **$415** porque os
+  dois primeiros têm preço, e só a fatia do Opus 5 está zerada. Um detector por custo zero
+  passaria batido justamente no caso real. Capability `session-observability` (OBS-9, OBS-10).
+
 ## [0.51.0] — 2026-07-25
 
 ### Added

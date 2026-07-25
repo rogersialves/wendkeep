@@ -6,6 +6,7 @@ import { activeChange, parseTasks, backfillArtifactLinks } from './change-core.m
 import { relinkDerivedNotes } from './linked-notes.mjs';
 import { buildEffectiveRequirementPackage, checkSpecsState, evaluateVerdict, tasksHashOf, validateSpecImpact } from './spec-core.mjs';
 import { getLocale } from './locale.mjs';
+import { priceForModel } from './token-usage.mjs';
 import { readControl } from './obsidian-common.mjs';
 
 export function checkHarness(vaultBase, projectRoot) {
@@ -120,6 +121,62 @@ export function checkStackedFrontmatter(vaultBase) {
   };
   walk(root);
   return { count: notes.length, notes };
+}
+
+// Um modelo fora de `pricing.json` faz `priceForModel` devolver null e a parcela dele do custo
+// virar zero — sem erro, sem aviso. Modelo novo (claude-opus-5, claude-mythos-5) cai nisso por
+// default. A checagem é sobre o vault, não sobre o caminho de cálculo: o cálculo roda em hook a
+// cada turno, onde avisar viraria ruído e lançar derrubaria a captura da sessão.
+//
+// Cada modelo citado na nota é consultado direto em `priceForModel` — NÃO se infere pelo
+// sintoma "custo zerado". Numa sessão multi-modelo (`modelo: "claude-opus-4.8 + claude-opus-5"`)
+// os modelos precificados mantêm o total acima de zero e escondem o que falta: no vault que
+// motivou esta change, a nota fecha com $415 e a fatia do Opus 5 é a única zerada.
+export function checkUnpricedModels(vaultBase) {
+  const counts = new Map();
+
+  const modelsOf = (frontmatter) => {
+    // `modelos:` é a lista canônica; `modelo:` é o rótulo agregado (junta com " + ").
+    const list = frontmatter.match(/^modelos:\n((?:\s+- .*\n?)+)/m);
+    if (list) return list[1].split('\n').map((l) => l.replace(/^\s*-\s*/, '')).filter(Boolean);
+    const label = (frontmatter.match(/^modelo:\s*(.+)$/m) || [])[1] || '';
+    return label.split('+');
+  };
+
+  const walk = (dir) => {
+    let entries = [];
+    try { entries = readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    for (const entry of entries) {
+      const abs = join(dir, entry.name);
+      if (entry.isDirectory()) { walk(abs); continue; }
+      if (!entry.name.endsWith('.md')) continue;
+      let content;
+      try { content = readFileSync(abs, 'utf-8'); } catch { continue; }
+      const fm = content.match(/^---\n([\s\S]*?)\n---/);
+      if (!fm) continue;
+      // Sessão sem uso registrado não é sintoma de nada — custo zero ali é correto.
+      if (!(Number((fm[1].match(/^tokens_total:\s*(.+)$/m) || [])[1]) > 0)) continue;
+      for (const raw of modelsOf(fm[1])) {
+        const model = raw.trim().replace(/^["']|["']$/g, '');
+        if (!model || model === 'unknown') continue;
+        if (priceForModel(model)) continue;
+        counts.set(model, (counts.get(model) || 0) + 1);
+      }
+    }
+  };
+
+  walk(join(vaultBase, '02-Sessões'));
+  return { models: [...counts].map(([model, notes]) => ({ model, notes })) };
+}
+
+export function renderUnpricedModelLines(unpriced) {
+  const lines = [`[preços] ${unpriced.models.length} modelo(s) sem preço na tabela`];
+  for (const { model, notes } of unpriced.models) {
+    lines.push(`  ✗ ${model} (${notes} nota(s) com custo zerado)`);
+  }
+  if (unpriced.models.length) lines.push('  → adicione o modelo em hooks/pricing.json');
+  else lines.push('  tabela de preços completa ✓');
+  return lines;
 }
 
 // Formatador puro pra que a saída do doctor seja testável sem process.exit.

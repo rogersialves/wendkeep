@@ -117,6 +117,9 @@ const MODEL_ALIASES = {
   'claude-opus-4-8': 'claude-opus-4.8',
   'anthropic/claude-opus-4.8': 'claude-opus-4.8',
   'anthropic/claude-opus-4-8': 'claude-opus-4.8',
+  'claude-opus-5': 'claude-opus-5',
+  'claude-opus-5-0': 'claude-opus-5',
+  'anthropic/claude-opus-5': 'claude-opus-5',
   'claude-sonnet-4.6': 'claude-sonnet-4.6',
   'claude-sonnet-4-6': 'claude-sonnet-4.6',
   'anthropic/claude-sonnet-4.6': 'claude-sonnet-4.6',
@@ -132,6 +135,8 @@ const MODEL_ALIASES = {
   'claude-fable-5': 'claude-fable-5',
   'claude-fable-5[1m]': 'claude-fable-5',
   'anthropic/claude-fable-5': 'claude-fable-5',
+  'claude-mythos-5': 'claude-mythos-5',
+  'anthropic/claude-mythos-5': 'claude-mythos-5',
 };
 
 const MANAGED_FRONTMATTER_KEYS = new Set([
