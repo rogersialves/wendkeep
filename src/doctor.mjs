@@ -34,7 +34,7 @@ export function runDoctor(argv) {
     });
   } catch (error) {
     process.stderr.write(`wendkeep doctor: ${error.message}\n`);
-    process.exit(2);
+    return 2;
   }
   const vaultBase = resolution.base;
   process.stdout.write(`[vault] ${resolution.source}: ${vaultBase} (project: ${projectRoot})\n`);
@@ -90,5 +90,7 @@ export function runDoctor(argv) {
     process.stdout.write(`[sessão] última: ${act.lastSession} (${label})\n`);
   }
 
-  process.exit(healthStatus !== 0 || errors.length ? 1 : 0);
+  // Devolve o código em vez de sair: `wendkeep sync` encadeia este comando, e um
+  // process.exit aqui mataria a cadeia. Quem faz o exit é o bin.
+  return healthStatus !== 0 || errors.length ? 1 : 0;
 }

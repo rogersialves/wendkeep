@@ -173,7 +173,7 @@ export function runSyncDefs(argv) {
   const base = vault || process.env.OBSIDIAN_VAULT_PATH;
   if (!base) {
     process.stderr.write('wendkeep sync-defs: no vault. Pass --vault <path> or set OBSIDIAN_VAULT_PATH.\n');
-    process.exit(2);
+    return 2;
   }
   const vaultBase = isAbsolute(base) ? base : resolve(process.cwd(), base);
   const projectPath = resolve(project || process.cwd());
@@ -184,7 +184,7 @@ export function runSyncDefs(argv) {
       process.stderr.write(`wendkeep sync-defs --check: drift detectado\n  - ${r.issues.join('\n  - ')}\n`);
       process.stderr.write('rode `wendkeep sync-defs --reseed` e reinicie Claude Code/Codex\n');
     }
-    process.exit(r.ok ? 0 : 1);
+    return r.ok ? 0 : 1;
   }
   // --reseed (0.31.0): sobrescreve as wk-* de .brain/skills com os seeds da versão instalada
   // ANTES de copiar — é como um vault existente recebe descriptions/HARD-GATE novos.
@@ -198,7 +198,8 @@ export function runSyncDefs(argv) {
   );
   if (r.agents.length) process.stdout.write(`  agents: ${r.agents.join(', ')}\n`);
   if (r.skills.length) process.stdout.write(`  skills: ${r.skills.join(', ')}\n`);
-  process.exit(0);
+  // Devolve o código:  encadeia este comando (ver src/sync.mjs).
+  return 0;
 }
 
 // --- seeding (init) ---------------------------------------------------------

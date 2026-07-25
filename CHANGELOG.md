@@ -4,6 +4,34 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.54.0] — 2026-07-25
+
+### Added
+
+- **`wendkeep sync [--project P]`** — roda `init` → `sync-defs` → `doctor` no **projeto
+  corrente**, num comando só. São os três passos que se repetem idênticos depois de cada
+  atualização do pacote; repetir à mão convida a esquecer o `sync-defs`, e aí as skills
+  `wk-*` ficam na versão anterior enquanto o pacote já é o novo. Para no primeiro passo que
+  falha. O `npm install` fica **fora** de propósito: um processo não se auto-substitui e
+  continua rodando, e é o passo que mais varia entre projetos (npm/pnpm/workspace/cooldown).
+  O comando opera onde é invocado, nunca sobre uma lista de repositórios — o wendkeep é um
+  pacote público. Capability `cli-safety` (CLI-SYNC-1).
+
+### Fixed
+
+- **`sync` blinda contra o *env bleed*.** O vault é re-resolvido com `resolveProjectVault`
+  **depois** do `init` (que pode tê-lo acabado de criar) e repassado explícito aos passos
+  seguintes. Sem isso, `sync-defs` cairia em `OBSIDIAN_VAULT_PATH` e, num projeto novo, o
+  env global da máquina levaria as skills para o vault de outro projeto. Capability
+  `project-vault-routing` (PVR-SYNC-1).
+
+### Changed
+
+- **`runSyncDefs` e `runDoctor` devolvem o código de saída** em vez de chamar
+  `process.exit`; quem sai é o `bin`. Ambos saíam incondicionalmente, o que matava o
+  processo no segundo passo de qualquer encadeamento. Os códigos de saída observáveis de
+  `wendkeep doctor` e `wendkeep sync-defs` não mudaram. Capability `cli-safety` (CLI-SYNC-2).
+
 ## [0.53.0] — 2026-07-25
 
 ### Fixed

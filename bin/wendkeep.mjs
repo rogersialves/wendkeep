@@ -42,6 +42,12 @@ Usage:
   wendkeep hook <name>         Run a session hook (used by settings.json). Reads the
                            agent's JSON on stdin. Names: ${RUNNABLE_HOOKS.join(', ')}.
 
+  wendkeep sync [--project P]  Run init -> sync-defs -> doctor on the CURRENT project, in one
+                           command — the three steps that repeat identically after every
+                           package update. Stops at the first failing step. Install the
+                           package first (npm i -D wendkeep@latest); a running process
+                           cannot replace itself. · --vault P · --yes.
+
   wendkeep doctor [--vault P]  Run a vault health check.
   wendkeep change <sub>        Change lifecycle: new [--simple] | use | bind <slug> --session <id> | continue | list | show |
                            status | done <id> | undone <id> | diff | archive [--force] | abandon | relink | backlink.
@@ -165,7 +171,12 @@ async function main() {
       break;
     case 'doctor': {
       const { runDoctor } = await import('../src/doctor.mjs');
-      runDoctor(rest);
+      process.exit(runDoctor(rest));
+      break;
+    }
+    case 'sync': {
+      const { runSync } = await import('../src/sync.mjs');
+      process.exit(await runSync(rest));
       break;
     }
     case 'validate-memory': {
@@ -175,7 +186,7 @@ async function main() {
     }
     case 'sync-defs': {
       const { runSyncDefs } = await import('../src/sync-defs.mjs');
-      runSyncDefs(rest);
+      process.exit(runSyncDefs(rest));
       break;
     }
     case 'change': {
