@@ -4,6 +4,22 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.55.0] — 2026-07-25
+
+### Fixed
+
+- **O `[derivadas]` do doctor deixa de acusar nota já correta.** O `doctor` reportava
+  `5 link(s) faltando` numa nota onde os cinco estavam presentes; o
+  `note repair-sections --apply` rodava, não mudava nada (`unchanged`), e o doctor voltava a
+  acusar — um vermelho que nenhum reparo fechava. Causa: detector e reparador localizavam a
+  seção por critérios diferentes — `## <heading>` como substring solta contra
+  `\n## <heading>\n` ancorado. Numa nota de sessão isso é fatal, porque ela transcreve a
+  conversa, e uma conversa **sobre** as seções cita os nomes delas: o detector casava a
+  menção em prosa e lia o texto errado. Agora existe um localizador único
+  (`findSectionBounds`) por onde detector e reparo obrigatoriamente passam — corrigir apenas
+  o marcador deixaria dois localizadores independentes, que foi como o bug nasceu.
+  Capability `vault-doctor` (DIAG-7).
+
 ## [0.54.0] — 2026-07-25
 
 ### Added

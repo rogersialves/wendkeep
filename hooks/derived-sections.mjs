@@ -108,11 +108,25 @@ export function listSessionNotes(vaultBase) {
   return out;
 }
 
+// Localizador ÚNICO da seção — detector e reparador passam por aqui.
+//
+// Um heading Markdown começa em coluna zero; casar `## X` como substring solta encontra
+// qualquer menção em prosa. A nota de sessão é justamente o lugar onde isso acontece: ela
+// transcreve a conversa, e uma conversa SOBRE as seções cita os nomes delas. Foi assim que
+// o detector passou a acusar links faltando que estavam presentes na seção verdadeira,
+// enquanto o reparo (que já usava o marcador ancorado) não achava nada a fazer.
+export function findSectionBounds(content, heading) {
+  const marker = `\n## ${heading}\n`;
+  const start = content.indexOf(marker);
+  if (start === -1) return null;
+  const bodyStart = start + marker.length;
+  const nextRel = content.slice(bodyStart).search(/\n## /);
+  return { start, bodyStart, bodyEnd: nextRel === -1 ? content.length : bodyStart + nextRel };
+}
+
 const sectionBody = (content, heading) => {
-  const i = content.indexOf(`## ${heading}`);
-  if (i < 0) return null;
-  const j = content.indexOf('\n## ', i + 3);
-  return content.slice(i, j < 0 ? content.length : j);
+  const at = findSectionBounds(content, heading);
+  return at ? content.slice(at.start, at.bodyEnd) : null;
 };
 
 // O que a nota DEVERIA listar mas não lista. Excedente (link posto à mão) não é sintoma
@@ -185,12 +199,9 @@ export const isDerivedPlaceholder = (line) => /^-?\s*Nenhum[ao]?\s+\S+.*registra
 // vault escreveu na seção não pode sumir num conserto automático.
 function defaultUpsert(content, heading, lines) {
   if (!lines.length) return content;
-  const marker = `\n## ${heading}\n`;
-  const start = content.indexOf(marker);
-  if (start === -1) return content; // heading ausente: nunca inventa seção em nota alheia
-  const bodyStart = start + marker.length;
-  const nextRel = content.slice(bodyStart).search(/\n## /);
-  const bodyEnd = nextRel === -1 ? content.length : bodyStart + nextRel;
+  const at = findSectionBounds(content, heading);
+  if (!at) return content; // heading ausente: nunca inventa seção em nota alheia
+  const { bodyStart, bodyEnd } = at;
 
   const prose = [];
   const items = [];

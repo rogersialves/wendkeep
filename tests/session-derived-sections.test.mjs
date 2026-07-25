@@ -45,10 +45,14 @@ Nenhum aprendizado registrado ainda.
 Nenhuma.
 `;
 
+// Ancorado em início de linha, como o código: casar `## X` solto encontraria uma menção do
+// heading em prosa. O helper deste arquivo tinha exatamente o defeito que DIAG-7 corrige —
+// vale como lembrete de que o critério frouxo é o escorregão fácil.
 const sectionOf = (content, heading) => {
-  const i = content.indexOf(`## ${heading}`);
+  const marker = `\n## ${heading}\n`;
+  const i = content.indexOf(marker);
   if (i < 0) return '';
-  const j = content.indexOf('\n## ', i + 3);
+  const j = content.indexOf('\n## ', i + marker.length);
   return content.slice(i, j < 0 ? content.length : j);
 };
 const linksIn = (content, heading) => (sectionOf(content, heading).match(/\[\[[^\]]+\]\]/g) || []);
@@ -324,6 +328,57 @@ test('nota sem as seções não é alterada', () => {
   try {
     repairDerivedSections(vault, { apply: true });
     assert.equal(readFileSync(notePath, 'utf8'), semSecoes, 'byte-idêntico');
+  } finally {
+    rmSync(vault, { recursive: true, force: true });
+  }
+});
+
+// --- DIAG-7: menção do heading em prosa não confunde o detector -------------
+
+// Caso real: a nota de sessão transcreve a conversa, e uma conversa SOBRE as seções cita os
+// nomes delas. O detector casava `## <heading>` como substring solta, lia a menção em prosa
+// e reportava links faltando que estavam presentes na seção verdadeira — enquanto o reparo
+// localizava a seção certa e não achava nada a fazer. Vermelho que nenhum reparo fechava.
+const COM_MENCAO_EM_PROSA = NOTE.replace(
+  '### 20:26 - início\n\ntexto',
+  '### 20:26 - início\n\n**Usuário:** resume os pontos mas ñ atualiza os tópicos: '
+  + '## Decisões geradas nesta sessão ## Bugs gerados nesta sessão ## Aprendizados gerados nesta sessão',
+);
+
+test('menção do heading em prosa não gera falso positivo no detector', () => {
+  const { vault, notePath } = vaultWithDerived({ decisions: 2, body: COM_MENCAO_EM_PROSA });
+  try {
+    repairDerivedSections(vault, { apply: true });
+    assert.deepEqual(checkStaleDerivedSections(vault).notes, [],
+      'links presentes na seção verdadeira: nada a reportar');
+
+    const out = readFileSync(notePath, 'utf8');
+    assert.equal(linksIn(out, 'Decisões geradas nesta sessão').length, 2);
+  } finally {
+    rmSync(vault, { recursive: true, force: true });
+  }
+});
+
+test('a menção em prosa nunca vira alvo de escrita', () => {
+  const { vault, notePath } = vaultWithDerived({ decisions: 2, body: COM_MENCAO_EM_PROSA });
+  try {
+    repairDerivedSections(vault, { apply: true });
+    const out = readFileSync(notePath, 'utf8');
+
+    const iteracoes = out.slice(out.indexOf('## Iterações'), out.indexOf('\n## Decisões'));
+    assert.doesNotMatch(iteracoes, /\[\[04-Decisões/, 'nenhum link injetado na transcrição da conversa');
+    assert.match(iteracoes, /ñ atualiza os tópicos/, 'e a fala do usuário fica intacta');
+  } finally {
+    rmSync(vault, { recursive: true, force: true });
+  }
+});
+
+test('detector e reparo convergem: após o --apply o doctor não acusa mais', () => {
+  const { vault } = vaultWithDerived({ decisions: 3, learnings: 2, body: COM_MENCAO_EM_PROSA });
+  try {
+    assert.equal(checkStaleDerivedSections(vault).notes.length, 1, 'pré-condição: acusa');
+    repairDerivedSections(vault, { apply: true });
+    assert.deepEqual(checkStaleDerivedSections(vault).notes, [], 'e o reparo fecha de verdade');
   } finally {
     rmSync(vault, { recursive: true, force: true });
   }

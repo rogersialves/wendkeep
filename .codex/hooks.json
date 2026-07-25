@@ -1,0 +1,84 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|clear|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "npx wendkeep hook brain-inject",
+            "timeoutSec": 45,
+            "statusMessage": "wendkeep: injecting memory + active change"
+          }
+        ]
+      },
+      {
+        "matcher": "startup",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "npx wendkeep hook session-start",
+            "timeoutSec": 30,
+            "statusMessage": "wendkeep: opening Obsidian session"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "npx wendkeep hook session-stop",
+            "timeoutSec": 60,
+            "statusMessage": "wendkeep: writing session checkpoint"
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "npx wendkeep hook change-nag",
+            "timeoutSec": 15,
+            "statusMessage": "wendkeep: open tasks check"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "npx wendkeep hook session-ensure",
+            "timeoutSec": 30,
+            "statusMessage": "wendkeep: ensuring active session"
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "npx wendkeep hook change-context",
+            "timeoutSec": 15,
+            "statusMessage": "wendkeep: change ping"
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "npx wendkeep hook subagent-stop",
+            "timeoutSec": 20,
+            "statusMessage": "wendkeep: subagent telemetry"
+          }
+        ]
+      }
+    ]
+  }
+}
