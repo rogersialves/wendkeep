@@ -121,16 +121,28 @@ O `install` fica de fora do `sync` de propósito: um processo não se auto-subst
 rodando — o código em execução continuaria sendo o antigo.
 
 Num monorepo **pnpm**, o comando de instalação é outro (`npm` num repositório pnpm falha com
-`Cannot read properties of null (reading 'matches')`):
+`Cannot read properties of null (reading 'matches')`) e a versão vai **exata**:
 
 ```bash
-pnpm add -D -w wendkeep@latest && npx --no-install wendkeep sync --project . --yes
+pnpm add -D -w wendkeep@X.Y.Z --config.minimumReleaseAge=0 && npx --no-install wendkeep sync --project . --yes
 ```
 
-> O pnpm recusa pacote publicado nas últimas ~24h (`minimumReleaseAge`, proteção de
-> supply-chain). Se você acabou de publicar e precisa instalar já, peça a versão exata com
-> `--config.minimumReleaseAge=0` e registre a exceção em `minimumReleaseAgeExclude` no
-> `pnpm-workspace.yaml`, senão o `pnpm install` do CI passa a falhar.
+> **Não peça `wendkeep@latest` ao pnpm.** O pnpm 11 ignora por padrão pacote publicado nas
+> últimas 24h (`minimumReleaseAge`, proteção de supply-chain) — e não reclama: instala a
+> versão anterior, sai 0, e a única pista é um discreto `(X.Y.Z is available)` no meio da
+> saída. Você fica com a versão velha achando que atualizou. Confira com
+> `npx wendkeep --version`.
+>
+> Depois de instalar, registre a exceção no `pnpm-workspace.yaml` — **o pnpm não escreve
+> essa linha por você**:
+>
+> ```yaml
+> minimumReleaseAgeExclude:
+>   - wendkeep@X.Y.Z
+> ```
+>
+> Sem ela, o `pnpm install` do CI falha com `ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION` até a
+> versão completar 24h.
 
 Reinicie Codex e Claude Code depois — as skills geradas são lidas no startup.
 

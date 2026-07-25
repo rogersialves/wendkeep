@@ -4,6 +4,22 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.57.2] — 2026-07-25
+
+### Fixed
+
+- **O README deixa de recomendar um `pnpm add` que não atualiza.** A seção "Atualizar"
+  mandava rodar `pnpm add -D -w wendkeep@latest`. Medido num projeto pnpm limpo, sem
+  configuração alguma: o comando devolveu `+ wendkeep 0.49.0 (0.57.1 is available)` e saiu 0.
+  O `minimumReleaseAge` de 24h é **default do pnpm 11**, não config do projeto, e ele não
+  recusa o pacote recente — instala o anterior em silêncio, com o `(X.Y.Z is available)` como
+  única pista. Quem seguia o README ficava na versão velha achando que tinha atualizado. O
+  bloco pnpm passa a mostrar a versão exata com `--config.minimumReleaseAge=0`, e o `@latest`
+  aparece como armadilha nomeada. A nota também corrige quem escreve a exceção: o
+  `minimumReleaseAgeExclude` do `pnpm-workspace.yaml` é **manual** — o pnpm não escreve essa
+  linha, e sem ela o `pnpm install` do CI falha com
+  `ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION` até a versão completar 24h. Vale nos dois idiomas.
+
 ## [0.57.1] — 2026-07-25
 
 ### Fixed
