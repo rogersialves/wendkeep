@@ -4,6 +4,25 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.57.0] — 2026-07-25
+
+### Fixed
+
+- **`wendkeep sync` deixa de mascarar o `defs stale`.** O comando chamava `sync-defs` **sem**
+  `--reseed`: copiava o conteúdo da versão anterior de `.brain/skills` para os destinos **e**
+  carimbava a versão nova no `.wendkeep-meta.json`. Como o `checkSyncDefs` compara
+  destino × `.brain` e `meta.wendkeepVersion` × versão instalada, os dois passavam a bater e
+  o `doctor` parava de acusar `defs stale` **sem que uma única skill fosse atualizada** —
+  pior que não fazer nada, porque o aviso que apontava o problema real desaparecia. O `sync`
+  agora ressemeia: as `wk-*` são artefato do pacote, e trazer os seeds da versão instalada é
+  o trabalho dele. Se você editou uma `wk-*` à mão, a edição é sobrescrita — customização
+  própria pertence a uma skill sua, que o reseed não toca. Capability `cli-safety`
+  (CLI-SYNC-1).
+- **O comando de atualização documentado abria um seletor interativo.** `wendkeep sync
+  --project` sem `--yes` cai no picker de companions a cada atualização; e `--project` sem
+  valor funcionava por acaso, contradizendo a assinatura `[--project P]` da própria tabela.
+  Os dois READMEs passam a mostrar `--project . --yes`.
+
 ## [0.56.0] — 2026-07-25
 
 ### Changed

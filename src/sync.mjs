@@ -52,9 +52,16 @@ export async function runSync(argv) {
   }
 
   // 2. sync-defs — propaga as skills/agents da versão instalada para o projeto.
+  //
+  // COM --reseed, e isso é o ponto: as `wk-*` são artefato do pacote, e o sync existe para
+  // rodar depois de instalar uma versão nova. Sem ressemear, o passo copia o conteúdo antigo
+  // de `.brain/skills` para os destinos E carimba a versão nova no .wendkeep-meta.json — o
+  // checkSyncDefs compara destino×.brain e meta×versão, os dois passam a bater, e o doctor
+  // para de acusar `defs stale` sem nenhuma skill ter sido atualizada. Silenciar o aviso sem
+  // resolver o problema é pior que não fazer nada.
   step(2, 'sync-defs');
   const { runSyncDefs } = await import('./sync-defs.mjs');
-  const defsCode = runSyncDefs(['--vault', vaultBase, '--project', projectPath]);
+  const defsCode = runSyncDefs(['--vault', vaultBase, '--project', projectPath, '--reseed']);
   if (defsCode) {
     // Seguir para o doctor aqui seria enganoso: ele acusaria um `defs stale` que este
     // passo deveria ter resolvido.

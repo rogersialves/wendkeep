@@ -114,7 +114,7 @@ reprocessar a fiação do projeto. O `sync` faz os três passos (`init` → `syn
 `doctor`) num comando:
 
 ```bash
-npm install --save-dev wendkeep@latest && npx --no-install wendkeep sync --project
+npm install --save-dev wendkeep@latest && npx --no-install wendkeep sync --project . --yes
 ```
 
 O `install` fica de fora do `sync` de propósito: um processo não se auto-substitui e segue
@@ -124,7 +124,7 @@ Num monorepo **pnpm**, o comando de instalação é outro (`npm` num repositóri
 `Cannot read properties of null (reading 'matches')`):
 
 ```bash
-pnpm add -D -w wendkeep@latest && npx --no-install wendkeep sync --project
+pnpm add -D -w wendkeep@latest && npx --no-install wendkeep sync --project . --yes
 ```
 
 > O pnpm recusa pacote publicado nas últimas ~24h (`minimumReleaseAge`, proteção de
@@ -132,9 +132,13 @@ pnpm add -D -w wendkeep@latest && npx --no-install wendkeep sync --project
 > `--config.minimumReleaseAge=0` e registre a exceção em `minimumReleaseAgeExclude` no
 > `pnpm-workspace.yaml`, senão o `pnpm install` do CI passa a falhar.
 
-Reinicie Codex e Claude Code depois — as skills geradas são lidas no startup. Para forçar a
-ressemeadura das skills `wk-*` com os seeds da versão nova:
-`npx --no-install wendkeep sync-defs --project . --reseed`.
+Reinicie Codex e Claude Code depois — as skills geradas são lidas no startup.
+
+O `sync` **ressemeia** as skills `wk-*` com os seeds da versão instalada. Isso não é um
+extra: elas são artefato do pacote, e apenas copiar `.brain/skills` propagaria o conteúdo da
+versão anterior enquanto carimba a versão nova no metadado — o `doctor` pararia de acusar
+`defs stale` sem nenhuma skill ter sido atualizada. Se você editou uma `wk-*` à mão, a
+edição é sobrescrita; customização própria pertence a uma skill sua, que o reseed não toca.
 
 ## Comandos
 

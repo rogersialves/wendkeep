@@ -117,7 +117,7 @@ and re-wiring the project. `sync` does the three steps (`init` → `sync-defs` �
 one command:
 
 ```bash
-npm install --save-dev wendkeep@latest && npx --no-install wendkeep sync --project
+npm install --save-dev wendkeep@latest && npx --no-install wendkeep sync --project . --yes
 ```
 
 The install stays outside `sync` on purpose: a running process cannot replace itself and
@@ -127,7 +127,7 @@ In a **pnpm** monorepo the install command differs (`npm` in a pnpm repo fails w
 `Cannot read properties of null (reading 'matches')`):
 
 ```bash
-pnpm add -D -w wendkeep@latest && npx --no-install wendkeep sync --project
+pnpm add -D -w wendkeep@latest && npx --no-install wendkeep sync --project . --yes
 ```
 
 > pnpm refuses packages published in the last ~24h (`minimumReleaseAge`, a supply-chain
@@ -135,9 +135,14 @@ pnpm add -D -w wendkeep@latest && npx --no-install wendkeep sync --project
 > `--config.minimumReleaseAge=0` and record the exception under `minimumReleaseAgeExclude`
 > in `pnpm-workspace.yaml` — otherwise CI's `pnpm install` starts failing.
 
-Restart Codex and Claude Code afterwards — the generated skills are read at startup. To
-force a reseed of the `wk-*` skills from the new version:
-`npx --no-install wendkeep sync-defs --project . --reseed`.
+Restart Codex and Claude Code afterwards — the generated skills are read at startup.
+
+`sync` **reseeds** the `wk-*` skills from the installed version's seeds. That is not an
+extra: they are package artifacts, and merely copying `.brain/skills` would propagate the
+previous version's content while stamping the new version into the metadata — `doctor` would
+stop reporting `defs stale` without a single skill having been updated. If you hand-edited a
+`wk-*`, that edit is overwritten; your own customisation belongs in a skill of your own,
+which the reseed never touches.
 
 ## Commands
 

@@ -178,6 +178,41 @@ test('sync não afirma que está tudo em dia por cima de um doctor com pendênci
   }
 });
 
+// O bug que este teste existe para impedir: `sync` chamava sync-defs SEM --reseed, então
+// copiava o conteúdo antigo de .brain/skills para os destinos E carimbava a versão nova no
+// .wendkeep-meta.json. O checkSyncDefs compara destino×.brain e meta×versão — os dois
+// passavam a bater, e o doctor parava de acusar `defs stale` sem uma única skill atualizada.
+// Silenciar o aviso sem resolver o problema é pior que não fazer nada.
+//
+// Discrimina pelo EFEITO (o conteúdo chega novo), não pela flag — testar que o argv contém
+// '--reseed' seria testar a implementação.
+test('sync ressemeia as skills wk-*: conteúdo antigo em .brain não sobrevive', () => {
+  const project = freshProject();
+  try {
+    const first = spawnWk(['sync', '--project', project, '--yes'], { cwd: project });
+    assert.ok(first.status === 0 || first.status === 1, first.stderr);
+
+    // O nome do vault vem do diretório do projeto (temp, aleatório) — leia do binding.
+    const vaultName = JSON.parse(readFileSync(join(project, '.wendkeep.json'), 'utf8')).vault;
+    const brainSkill = join(project, vaultName, '.brain', 'skills', 'wk-workflow', 'SKILL.md');
+    assert.ok(existsSync(brainSkill), `pré-condição: ${brainSkill} semeado pelo init`);
+    writeFileSync(brainSkill, '---\nname: wk-workflow\ndescription: versão velha\n---\ncorpo antigo\n');
+
+    const again = spawnWk(['sync', '--project', project, '--yes'], { cwd: project });
+    assert.ok(again.status === 0 || again.status === 1, again.stderr);
+
+    const after = readFileSync(brainSkill, 'utf8');
+    assert.doesNotMatch(after, /corpo antigo/, '.brain/skills recebeu o seed da versão instalada');
+
+    for (const dest of ['.claude/skills', '.agents/skills']) {
+      const copied = readFileSync(join(project, ...dest.split('/'), 'wk-workflow', 'SKILL.md'), 'utf8');
+      assert.doesNotMatch(copied, /corpo antigo/, `${dest} propagou o conteúdo novo`);
+    }
+  } finally {
+    rmSync(project, { recursive: true, force: true });
+  }
+});
+
 test('sync aparece no help', () => {
   const r = spawnWk(['--help']);
   assert.match(r.stdout, /wendkeep sync/, 'o comando é descoberto pela ajuda');
