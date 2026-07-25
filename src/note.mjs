@@ -15,6 +15,7 @@ import {
 } from '../hooks/obsidian-common.mjs';
 import { getLocale } from '../hooks/locale.mjs';
 import { buildManualBugNote, buildManualLearningNote, relinkDerivedNotes } from '../hooks/linked-notes.mjs';
+import { repairStackedFrontmatter } from '../hooks/frontmatter-repair.mjs';
 
 const TYPES = {
   bug: { folderKey: 'bugs', prefix: 'BUG', build: buildManualBugNote },
@@ -45,8 +46,22 @@ export function runNote(argv) {
     process.exit(0);
   }
 
+  if (sub === 'repair-frontmatter') {
+    const vaultRaw = opt(rest, '--vault') || process.env.OBSIDIAN_VAULT_PATH;
+    if (!vaultRaw) { process.stderr.write('wendkeep note repair-frontmatter: no vault (--vault or OBSIDIAN_VAULT_PATH).\n'); process.exit(2); }
+    const vaultBase = isAbsolute(vaultRaw) ? vaultRaw : resolve(process.cwd(), vaultRaw);
+    if (!existsSync(vaultBase)) { process.stderr.write(`wendkeep note repair-frontmatter: vault not found: ${vaultBase}\n`); process.exit(2); }
+    const r = repairStackedFrontmatter(vaultBase, { apply: rest.includes('--apply') });
+    if (rest.includes('--json')) { process.stdout.write(`${JSON.stringify(r, null, 2)}\n`); process.exit(0); }
+    process.stdout.write(`${r.repaired.length} nota(s) com frontmatter empilhado${r.applied ? ' reparada(s)' : ' seriam reparada(s)'}\n`);
+    for (const n of r.repaired) process.stdout.write(`  ${n.file} (${n.blocks} blocos -> 1)\n`);
+    for (const s of r.skipped) process.stdout.write(`  pulado: ${s.file} (${s.reason})\n`);
+    if (!r.applied && r.repaired.length) process.stdout.write('\ndry-run — nada escrito. Rode com --apply para fundir os blocos.\n');
+    process.exit(0);
+  }
+
   if (sub !== 'new') {
-    process.stderr.write('wendkeep note: subcomando desconhecido (use `note new --type bug|learning "<título>"` ou `note relink [--apply]`).\n');
+    process.stderr.write('wendkeep note: subcomando desconhecido (use `note new --type bug|learning "<título>"`, `note relink [--apply]` ou `note repair-frontmatter [--apply]`).\n');
     process.exit(2);
   }
 

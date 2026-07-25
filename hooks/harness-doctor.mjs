@@ -126,7 +126,9 @@ export function checkStackedFrontmatter(vaultBase) {
 export function renderStackedFrontmatterLines(vaultBase, stacked) {
   const lines = [`[notas] ${stacked.count} sessão(ões) com frontmatter empilhado`];
   for (const abs of stacked.notes) lines.push(`  ✗ ${relative(vaultBase, abs)}`);
-  if (!stacked.count) lines.push('  frontmatter íntegro ✓');
+  // Como as demais checagens do doctor: nunca apontar um problema sem oferecer o conserto.
+  if (stacked.count) lines.push('  → wendkeep note repair-frontmatter --apply');
+  else lines.push('  frontmatter íntegro ✓');
   return lines;
 }
 

@@ -4,6 +4,23 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.51.0] — 2026-07-25
+
+### Added
+
+- **`wendkeep note repair-frontmatter [--apply]` — conserta as notas de sessão empilhadas.**
+  A 0.50.0 fechou a causa (lock + escrita atômica) e ensinou o `doctor` a **apontar** as
+  notas danificadas, mas não havia comando para consertá-las — a única checagem do doctor
+  sem conserto ao lado. O reparo funde os blocos num só sem perder nada: as chaves-base vêm
+  do bloco original (o de baixo, o único que as tem) e os valores gerenciados do bloco mais
+  recente (o do topo, último prepend). O merge opera sobre o texto bruto de cada chave, sem
+  reserializar YAML, então listas aninhadas atravessam byte-a-byte. Dry-run por padrão como
+  o `note relink`; `--apply` grava pelo mesmo lock dos hooks. Antes de gravar valida que o
+  resultado tem um bloco só, que nenhuma chave sumiu e que o corpo sobreviveu — falhando
+  qualquer uma, pula e reporta. O `doctor` agora imprime
+  `→ wendkeep note repair-frontmatter --apply` quando a contagem é > 0. Capability
+  `session-observability` (OBS-7, OBS-8) e `vault-doctor` (DIAG-5).
+
 ## [0.50.0] — 2026-07-23
 
 ### Fixed

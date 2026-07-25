@@ -58,8 +58,9 @@ test('doctor imprime a contagem e o caminho relativo de cada nota afetada', () =
   try {
     const lines = renderStackedFrontmatterLines(vault, checkStackedFrontmatter(vault));
     assert.equal(lines[0], '[notas] 1 sessão(ões) com frontmatter empilhado');
-    assert.equal(lines.length, 2, 'contagem + uma linha por nota, sem o ✓');
+    assert.equal(lines.length, 3, 'contagem + uma linha por nota + o comando de reparo');
     assert.match(lines[1], /^ {2}✗ 02-Sessões[\\/]2026[\\/]07-JUL[\\/]DIA 23[\\/]quebrada\.md$/);
+    assert.equal(lines[2], '  → wendkeep note repair-frontmatter --apply', 'aponta o conserto');
   } finally {
     rmSync(vault, { recursive: true, force: true });
   }
@@ -70,6 +71,7 @@ test('doctor diz "frontmatter íntegro" quando não há nota empilhada', () => {
   try {
     const lines = renderStackedFrontmatterLines(vault, checkStackedFrontmatter(vault));
     assert.deepEqual(lines, ['[notas] 0 sessão(ões) com frontmatter empilhado', '  frontmatter íntegro ✓']);
+    assert.ok(!lines.some((l) => l.includes('repair-frontmatter')), 'vault são não sugere reparo');
   } finally {
     rmSync(vault, { recursive: true, force: true });
   }

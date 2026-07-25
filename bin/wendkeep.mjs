@@ -80,6 +80,10 @@ Usage:
   wendkeep note relink [--apply]  Backfill orphan derived notes (BUG/APR without a source session),
                            linking each to the modal source session of its type/month cohort. Dry-run
                            by default; --apply writes; skips notes with no sibling to infer from.
+  wendkeep note repair-frontmatter [--apply]  Merge stacked frontmatter blocks in session notes
+                           (damage from pre-lock concurrent writes) into a single block: base keys
+                           from the original block, values from the newest. Dry-run by default;
+                           --apply writes under the same lock as the hooks · --json.
   wendkeep lesson add "t" "l"   Record a project-local lesson (injected at SessionStart).
   wendkeep validate-memory [path]  Validate .brain/CORE.md against the compaction
                            protocol (cap 25, 3 sections, no secrets/PII). Uses
