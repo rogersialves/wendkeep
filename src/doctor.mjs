@@ -4,7 +4,7 @@ import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { checkHarness, checkVaultLinks, checkSessionActivity, checkStackedFrontmatter, renderStackedFrontmatterLines, checkUnpricedModels, renderUnpricedModelLines } from '../hooks/harness-doctor.mjs';
+import { checkHarness, checkVaultLinks, checkSessionActivity, checkStackedFrontmatter, renderStackedFrontmatterLines, checkUnpricedModels, renderUnpricedModelLines, checkStaleDerivedSections, renderStaleDerivedSectionLines } from '../hooks/harness-doctor.mjs';
 import { checkSyncDefs } from './sync-defs.mjs';
 import { resolveProjectVault } from './project-vault.mjs';
 
@@ -75,6 +75,9 @@ export function runDoctor(argv) {
 
   // 3c. Modelo fora de pricing.json fecha a sessão com custo zero, sem erro — só aparece aqui.
   process.stdout.write(`\n${renderUnpricedModelLines(checkUnpricedModels(vaultBase)).join('\n')}\n`);
+
+  // 3d. Seções derivadas do corpo que ficaram para trás do Encerramento (notas pré-0.53.0).
+  process.stdout.write(`\n${renderStaleDerivedSectionLines(checkStaleDerivedSections(vaultBase)).join('\n')}\n`);
 
   // 4. Sessão: não mente "inativa" quando há atividade recente (workflow/subagente em background).
   const act = checkSessionActivity(vaultBase);

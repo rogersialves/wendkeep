@@ -7,6 +7,7 @@ import { relinkDerivedNotes } from './linked-notes.mjs';
 import { buildEffectiveRequirementPackage, checkSpecsState, evaluateVerdict, tasksHashOf, validateSpecImpact } from './spec-core.mjs';
 import { getLocale } from './locale.mjs';
 import { priceForModel } from './token-usage.mjs';
+import { countMissing, indexDerivedBySession, listSessionNotes, missingDerivedLinks } from './derived-sections.mjs';
 import { readControl } from './obsidian-common.mjs';
 
 export function checkHarness(vaultBase, projectRoot) {
@@ -176,6 +177,34 @@ export function renderUnpricedModelLines(unpriced) {
   }
   if (unpriced.models.length) lines.push('  → adicione o modelo em hooks/pricing.json');
   else lines.push('  tabela de preços completa ✓');
+  return lines;
+}
+
+// As seções derivadas do corpo da nota de sessão ficavam para trás do Encerramento: num
+// vault real, 15 decisões e 5 aprendizados listados no fecho contra 3 e um placeholder no
+// corpo. Notas fechadas antes da correção não se consertam sozinhas — o doctor as aponta.
+export function checkStaleDerivedSections(vaultBase) {
+  const index = indexDerivedBySession(vaultBase);
+  const notes = [];
+
+  for (const abs of listSessionNotes(vaultBase)) {
+    const rel = relative(vaultBase, abs).replaceAll('\\', '/');
+    const entry = index.get(rel.replace(/\.md$/, '')) || index.get(rel);
+    if (!entry) continue;
+    let content;
+    try { content = readFileSync(abs, 'utf-8'); } catch { continue; }
+    // Só falta conta. Link a mais pode ser curadoria do dono do vault, não sintoma.
+    const missing = countMissing(missingDerivedLinks(content, entry));
+    if (missing) notes.push({ file: rel, missing });
+  }
+  return { notes };
+}
+
+export function renderStaleDerivedSectionLines(stale) {
+  const lines = [`[derivadas] ${stale.notes.length} sessão(ões) com seções desatualizadas`];
+  for (const { file, missing } of stale.notes) lines.push(`  ✗ ${file} (${missing} link(s) faltando)`);
+  if (stale.notes.length) lines.push('  → wendkeep note repair-sections --apply');
+  else lines.push('  seções derivadas em dia ✓');
   return lines;
 }
 

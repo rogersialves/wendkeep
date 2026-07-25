@@ -4,6 +4,37 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.53.0] — 2026-07-25
+
+### Fixed
+
+- **As seções derivadas do corpo refletem a sessão inteira.** O `## Encerramento` listava 15
+  decisões e 5 aprendizados enquanto o corpo da nota mostrava 3 decisões e *"Nenhum
+  aprendizado registrado ainda."* — medido num vault real. A causa é ausência de escrita:
+  os placeholders nascem no template e, depois disso, só `decision-capture` escrevia — e
+  apenas ADRs capturados via `AskUserQuestion`. As seções de **Bugs e Aprendizados nunca
+  tiveram writer nenhum**. O dado certo já estava no lugar certo e era descartado:
+  `finalizeSessionFile` recebe a lista mesclada (capturados + varredura) e usava só para o
+  Encerramento; agora as três seções saem do mesmo objeto, na mesma passada.
+- **A proveniência declarada manda na atribuição.** `noteReferencesSession` casava substring
+  no arquivo inteiro, então uma derivada que citava outra sessão em `related:` era atribuída
+  às duas — caso real: um BUG com `session:` de uma sessão e `source:` de outra ia para
+  ambas. Agora `source:` decide quando existe; sem ele (nota legada) qualquer referência
+  ainda vale, preservando DRV-5. Capability `derived-notes` (DRV-10, DRV-12).
+
+### Added
+
+- **`wendkeep note repair-sections [--apply] [--json]`** — reconstrói as seções derivadas
+  das notas já fechadas, que não se corrigem sozinhas (o fecho só roda em sessão que ainda
+  fecha). Lê as derivadas uma vez e indexa por sessão (O(N+M), não O(N·M)); dry-run por
+  padrão; grava sob o mesmo lock dos hooks. Descarta o placeholder em qualquer variante,
+  **preserva prosa** escrita na seção, e é no-op em nota que não tem os headings.
+  Capability `derived-notes` (DRV-11).
+- **`wendkeep doctor` surfaça seções derivadas desatualizadas.** Nova seção `[derivadas]`
+  com as notas afetadas, quantos links faltam e o comando de reparo. Só falta conta como
+  sintoma — link a mais pode ser curadoria do dono do vault. Capability `vault-doctor`
+  (DIAG-6).
+
 ## [0.52.0] — 2026-07-25
 
 ### Fixed

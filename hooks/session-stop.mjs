@@ -11,6 +11,7 @@ import { getLocale } from './locale.mjs';
 import { updateSessionObservability } from './session-observability.mjs';
 import { resolveSessionEntry } from './session-identity.mjs';
 import { mutateSessionNote } from './session-note-io.mjs';
+import { applyDerivedSections, provenanceSessions } from './derived-sections.mjs';
 import {
   ensureDir,
   findActiveSessionByTranscript,
@@ -804,6 +805,14 @@ export function extractPending(text) {
 }
 
 function noteReferencesSession(content, sessionRel) {
+  // Quando a derivada declara `source:`, ele manda: uma nota que apenas CITA outra sessão
+  // (em `related:` ou na prosa) não pertence a ela. Sem `source:` (nota legada), qualquer
+  // referência vale — é o que DRV-5 estabeleceu e o que `note relink` existe para corrigir.
+  const declared = provenanceSessions(content);
+  if (declared.length) {
+    const key = sessionRel.replace(/\.md$/, '').replaceAll('\\', '/');
+    return declared.some((target) => target.replace(/\.md$/, '') === key);
+  }
   const sessionLink = wikilinkFromRel(sessionRel);
   return content.includes(sessionRel) || content.includes(sessionLink);
 }
@@ -924,7 +933,12 @@ ${formatPendingClosing(pending)}
 `;
 
   mutateSessionNote(sessionPath, (content) => replaceClosingSection(
-    replacePendingSection(updateFrontmatter(content, endedAt), pending),
+    // As três seções derivadas saem do MESMO `created` que monta o Encerramento — antes
+    // elas ficavam de fora deste write e a nota mentia no corpo (ver hooks/derived-sections.mjs).
+    applyDerivedSections(
+      replacePendingSection(updateFrontmatter(content, endedAt), pending),
+      created,
+    ),
     closing,
   ));
 }

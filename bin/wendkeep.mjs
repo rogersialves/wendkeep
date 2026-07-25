@@ -84,6 +84,9 @@ Usage:
                            (damage from pre-lock concurrent writes) into a single block: base keys
                            from the original block, values from the newest. Dry-run by default;
                            --apply writes under the same lock as the hooks · --json.
+  wendkeep note repair-sections [--apply]  Rebuild the derived sections (decisions/bugs/learnings)
+                           in session notes from the linked derived notes — the body used to lag
+                           behind the closing block. Dry-run by default · --apply · --json.
   wendkeep lesson add "t" "l"   Record a project-local lesson (injected at SessionStart).
   wendkeep validate-memory [path]  Validate .brain/CORE.md against the compaction
                            protocol (cap 25, 3 sections, no secrets/PII). Uses
