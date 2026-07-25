@@ -33,6 +33,24 @@ test('os dois idiomas viajam no pacote', () => {
   for (const f of ['README.md', 'README.en.md']) assert.ok(files.includes(f), `${f} em files`);
 });
 
+// Medido num projeto pnpm limpo, sem configuração alguma (pnpm 11.5.2):
+//   $ pnpm add -D wendkeep@latest
+//   + wendkeep 0.49.0 (0.57.1 is available)
+// Saiu 0, sem erro, e instalou a versão de dois dias antes — `minimumReleaseAge` é default
+// do pnpm 11. Um comando que falha em silêncio não pode aparecer como recomendação.
+//
+// Teste de texto, sim: o defeito que ele guarda TAMBÉM é de texto, e o erro plausível é
+// copiar o bloco npm de cima trocando o gerenciador. Ancorado em `pnpm add` de propósito —
+// o bloco npm usa `@latest` legitimamente, npm não tem cooldown.
+test('nenhum README manda instalar por pnpm com @latest', () => {
+  for (const file of ['README.md', 'README.en.md']) {
+    const text = readFileSync(join(ROOT, file), 'utf8');
+    const armadilha = text.match(/^.*pnpm add .*wendkeep@latest.*$/m);
+    assert.equal(armadilha, null,
+      `${file} recomenda um pnpm add que instala versão antiga em silêncio:\n  ${armadilha?.[0]}`);
+  }
+});
+
 // O que realmente importa: o conteúdo do tarball, e o repo intacto depois.
 test('npm pack: o tarball leva o inglês e o repositório volta ao português', () => {
   const outDir = mkdtempSync(join(tmpdir(), 'wk-pack-'));
