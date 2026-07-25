@@ -22,3 +22,7 @@ tmp/
 # Editors
 .vscode/
 .idea/
+
+# Backups que o `wendkeep init` cria ao mesclar config (settings.json, .mcp.json).
+# Sao artefatos locais de cada execucao — nunca versionados.
+*.bak
