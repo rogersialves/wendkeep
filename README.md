@@ -1,296 +1,307 @@
 # wendkeep
 
-[Português](README.pt-BR.md) · **English**
+**Português** · [English](README.en.md)
 
-> **Your AI coding agent forgets every session. wendkeep makes it remember — in the Obsidian vault you already use.**
+> **Seu agente de código esquece cada sessão. O wendkeep faz ele lembrar — no cofre Obsidian que você já usa.**
 
 [![npm](https://img.shields.io/npm/v/wendkeep.svg)](https://www.npmjs.com/package/wendkeep)
 ![test](https://github.com/rogersialves/wendkeep/actions/workflows/test.yml/badge.svg)
-![zero deps](https://img.shields.io/badge/runtime%20deps-0-brightgreen)
+![zero deps](https://img.shields.io/badge/deps%20de%20runtime-0-brightgreen)
 ![node](https://img.shields.io/badge/node-%E2%89%A518-blue)
 
-[![wendkeep — persistent memory for AI coding agents, shown as a knowledge graph of sessions, decisions, bugs, learnings and changes](docs/assets/wendkeep-hero.svg)](docs/index.html)
+[![wendkeep — memória persistente para agentes de código, mostrada como um grafo de sessões, decisões, bugs, aprendizados e mudanças](docs/assets/wendkeep-hero.pt.svg)](docs/index.pt.html)
 
-**In the graph:** 🔵 session · 🟣 decision · 🔴 bug · 🟢 learning · 🟡 change — every note, backlinked.
+**No grafo:** 🔵 sessão · 🟣 decisão · 🔴 bug · 🟢 aprendizado · 🟡 mudança — cada nota, com backlink.
 
-**A persistent‑memory harness for AI coding agents, built on your Obsidian vault.** Every Claude Code **and Codex** session is captured turn‑by‑turn into local Markdown — `init` wires both (Codex asks you to approve its hooks once; `import` backfills past sessions either way) — with token/cost tracking, auto‑extracted decisions, bugs and learnings, and a curated memory layer injected back at the start of the next session. On top of that memory core sits a native, zero‑dependency **change lifecycle** (spec → change → TDD → sensor‑gated archive) that keeps intent, work and proof wikilinked in one graph. 100% local, open‑core.
+**Um harness de memória persistente para agentes de código, construído sobre o seu cofre Obsidian.** Cada sessão do Claude Code e do Codex é capturada turno a turno em Markdown local — o `init` wira os hooks dos dois agentes (no Codex, valendo depois que você aprovar o prompt de confiança dele); o `import` importa as sessões passadas de qualquer um dos dois — com rastreio de tokens/custo, decisões, bugs e aprendizados extraídos automaticamente, e uma camada de memória curada injetada de volta no início da próxima sessão. Sobre esse núcleo de memória fica um **ciclo de mudança** nativo e sem dependências (spec → change → TDD → archive com gate por sensor) que mantém intenção, trabalho e prova wikilinkados num só grafo. 100% local, open‑core.
 
 ```bash
-npm i -D wendkeep && npx wendkeep init      # captures from the next session on
-npx wendkeep import                          # backfill past Claude + Codex sessions
+npm i -D wendkeep && npx wendkeep init      # captura a partir da próxima sessão
+npx wendkeep import                          # importa sessões passadas do Claude + Codex
 ```
 
-**▶ Interactive demo:** [`docs/index.html`](docs/index.html) — a self-contained page with the live knowledge‑graph hero. It lives in the [GitHub repo](https://github.com/rogersialves/wendkeep/tree/main/docs) (the npm tarball ships only the runtime), so clone or download `docs/` to open it locally or serve it on any static host. The image above is a static render of it.
+**▶ Demo interativo:** [`docs/index.pt.html`](docs/index.pt.html) — uma página autocontida com o herói de grafo vivo. Ele vive no [repositório GitHub](https://github.com/rogersialves/wendkeep/tree/main/docs) (o tarball do npm leva só o runtime), então clone ou baixe o `docs/` pra abrir local ou servir em qualquer host estático. A imagem acima é um render estático dele.
 
-> **From one real production vault** (`npx wendkeep stats`): **308** sessions · **1,696** prompts · **$4,836** captured across **46 active days** (Jan–Jul 2026) · **15** models — every one a note in the graph.
+> **De um cofre de produção real** (`npx wendkeep stats`): **308** sessões · **1.696** prompts · **US$ 4.836** capturados em **46 dias ativos** (jan–jul 2026) · **15** modelos — cada uma delas uma nota no grafo.
 
-<!-- Optional: drop a real Obsidian graph screenshot at docs/assets/graph.png and add it here (see docs/21-graph-screenshot.md). -->
-
-> Extracted from a system in daily production use: the capture engine, cost tracking and graph wiring are battle‑tested; the cross‑platform installer (`wendkeep init`) and the native change loop are the newer parts. See [`docs/`](https://github.com/rogersialves/wendkeep/tree/main/docs) for the project's strategy and decision log.
+> Extraído de um sistema em uso diário de produção: o motor de captura, o rastreio de custo e a fiação do grafo são testados em batalha; o instalador multiplataforma (`wendkeep init`) e o ciclo de mudança nativo são as partes mais novas. Veja [`docs/`](https://github.com/rogersialves/wendkeep/tree/main/docs) para a estratégia e o log de decisões do projeto.
 
 ---
 
-## The problem: the context dies when the window closes
+## O problema: o contexto morre quando a janela fecha
 
-Decisions, dead ends, the reason you chose X over Y — gone next session. The pieces to fix that exist but are scattered (qmd‑sessions, memsearch, Nexus, hand‑written hooks). wendkeep ships them as one turnkey package that writes into a knowledge graph **inside the Obsidian vault you already use** — no manual setup, no snapshot to keep in sync.
+Decisões, becos sem saída, o motivo de você ter escolhido X em vez de Y — some na próxima sessão. As peças pra resolver existem, mas espalhadas (qmd‑sessions, memsearch, Nexus, hooks feitos à mão). O wendkeep entrega tudo num pacote turnkey que escreve num grafo de conhecimento **dentro do cofre Obsidian que você já usa** — sem setup manual, sem snapshot pra manter sincronizado.
 
 | | |
 |---|---|
-| **Capture** — every turn, on disk | `SessionStart` / `Stop` hooks write each session to a dated Markdown note: prompts, iterations, files touched, wikilinks. |
-| **Derive** — decisions, bugs, learnings | Pulled from the transcript into their own notes, backlinked to the session. Your history becomes navigable, not archival. |
-| **Recall** — injected back | A budget‑capped `CORE` + `DIGEST` and every open change are fed to the agent at the next `SessionStart`. It resumes where it left off. |
-| **Cost** — what it all cost | Per‑model, cache‑aware token pricing per session — plus `cost --trend` with a run‑rate projection across the whole vault. |
-| **Multi‑agent** — one vault, both agents | `init` wires the session hooks into `.claude/settings.json` *and* `.codex/hooks.json`, and every note is tagged with the agent that wrote it: Claude Code is detected from its environment, anything else is recorded as Codex. One shared graph, whichever agent you are in. |
-| **Local‑first** — no cloud, no account | Everything is plain Markdown on your disk. An optional MCP server (`@bitbonsai/mcpvault`) lets the agent read/write the vault. |
+| **Captura** — cada turno, no disco | Os hooks `SessionStart` / `Stop` escrevem cada sessão numa nota Markdown datada: prompts, iterações, arquivos tocados, wikilinks. |
+| **Deriva** — decisões, bugs, aprendizados | Puxados do transcript pra notas próprias, com backlink pra sessão. Seu histórico fica navegável, não arquivístico. |
+| **Recall** — injetado de volta | Um `CORE` + `DIGEST` com budget capado e todas as changes abertas são injetados no agente no próximo `SessionStart`. Ele retoma de onde parou. |
+| **Custo** — quanto tudo custou | Preço por modelo, ciente de cache, por sessão — mais `cost --trend` com projeção run‑rate no cofre inteiro. |
+| **Multi‑agente** — um cofre, os dois agentes | O `init` wira os hooks de sessão no `.claude/settings.json` *e* no `.codex/hooks.json`, e cada nota é marcada com o agente que a escreveu: o Claude Code é detectado pelo ambiente dele, qualquer outro é registrado como Codex. Um grafo só, esteja você em qual agente estiver. |
+| **Local‑first** — sem nuvem, sem conta | Tudo é Markdown puro no seu disco. Um MCP opcional (`@bitbonsai/mcpvault`) deixa o agente ler/escrever o cofre. |
 
-## Requirements
+## Requisitos
 
 - Node.js ≥ 18
-- An AI coding agent with hooks. `init` wires **Claude Code** and **Codex** automatically — Codex gets the seven hooks its event model supports and enumerates them untrusted, so approve its “Hooks need review” prompt once at startup (see [Notes & roadmap](#notes--roadmap))
-- Obsidian (to view the graph) — optional but the point
+- Um agente de código com hooks. O `init` wira o **Claude Code** e o **Codex** automaticamente — no Codex ele wira os sete hooks que o modelo de eventos de lá suporta, e eles nascem *Untrusted*, então aprove o "Hooks need review" no primeiro startup (veja [Notas & roadmap](#notas--roadmap))
+- Obsidian (pra ver o grafo) — opcional, mas é o ponto
 
-## Install & set up
+## Instalar & configurar
 
 ```bash
-# in your project
-npm install --save-dev wendkeep   # or: npm install -g wendkeep
+# no seu projeto
+npm install --save-dev wendkeep   # ou: npm install -g wendkeep
 npx wendkeep init
 ```
 
-`wendkeep init` is interactive and **idempotent**. It will:
+O `wendkeep init` é interativo e **idempotente**. Ele:
 
-1. Create the vault folder taxonomy and a templated `README.md` (default vault: `<project>/.<project-name>-vault`, e.g. `.MyApp-vault`; override with `--vault`).
-2. Write a provider-neutral **`.wendkeep.json`** binding at the project root and a matching `.brain/PROJECT.json` marker in the vault, then merge the session hooks into **`.claude/settings.json`**. The binding is provider-neutral by design: any agent resolves the same vault from its session `cwd`, with no machine-global environment variable. Older registrations already in `.claude/settings.json` are adopted automatically.
-3. Wire the Codex session hooks in **`.codex/hooks.json`** — seven of the twelve: `brain-inject` + `session-start` on `SessionStart`, `session-ensure` + `change-context` on `UserPromptSubmit`, `session-stop` + `change-nag` on `Stop`, `subagent-stop` on `SubagentStop`, always in the `npx wendkeep hook <name>` form. The other five are left out because Codex offers no equivalent payload, tool *or* event: `change-guard` (a `PreToolUse` gate reading `tool_input.command`, but Codex's `exec` carries `tool_input` as a raw string rather than an object, so the gate would fail *open*), `change-warn` (a `PostToolUse` nudge resolving `tool_input.file_path`, a field `apply_patch`'s envelope does not carry — nothing to resolve, and nothing to gate), `plan-capture` (there is no `ExitPlanMode`; `update_plan` is a running TODO list, not an approval), `decision-capture` (`AskUserQuestion` is a Claude-only tool) and `task-log` (`TaskCompleted` is not in Codex's event enum). See [Notes & roadmap](#notes--roadmap) for the per-hook detail. The merge is non-destructive, on the same discipline as `settings.json`: it recognizes an already-wired group and never duplicates on re-init, preserves third-party hooks, saves a `.bak`, and `--force` updates `timeoutSec`/`statusMessage` in place; an unparseable `.codex/hooks.json` is left untouched with the merge written to `.codex/hooks.json.new`. **Codex enumerates every hook as untrusted and runs none of them until you approve the “Hooks need review” prompt at startup — `init` cannot pre-approve them**, and it prints a warning saying so. Anyone who already had hand-written wendkeep hooks in Codex gets one re-review prompt: `init` migrates the legacy `timeout` key (which Codex neither rejects nor reads, falling through to a 600s default) to `timeoutSec`, and that changes the hook's hashed identity.
-4. Add the **`wendkeep-vault`** MCP server to `.mcp.json` so the agent can read/write the vault. Skip with `--no-mcp` — e.g. when the agent already has a vault MCP. (`--no-mcp` skips *only wendkeep's own* MCP; companion MCPs still follow `--companions`.)
-5. Offer to pin **companion** plugins/MCP (multi-choice; **none** pre-checked — wendkeep is a neutral harness and presumes no third-party plugin). Each is wired the most agent-agnostic way it supports:
-   - **`context-mode`** — context optimizer + FTS5 memory, wired as a Claude Code plugin. It ships its own MCP server, so wendkeep deliberately adds no `.mcp.json` entry (registering both cold-started two servers at once). On non-Claude agents, add the MCP by hand: `npx -y context-mode`.
-   - **`understand-anything`** — project domain graph, via a `understand-inject` SessionStart hook that injects the graph when generated.
-   - **`caveman`** — token-compression mode; runs its own cross-agent installer on non-Claude agents.
-   - **`dotcontext`** — *legacy, not recommended, and hidden from the picker.* wendkeep's native a2 loop (`change` / `verify` / gate) already does its job, so installing it **duplicates the harness**. Reachable only via an explicit `--companions dotcontext` for anyone already invested (tune with `--dotcontext-mcp` / `--dotcontext-hooks`).
+1. Cria a taxonomia de pastas do cofre e um `README.md` templado (cofre padrão: `<projeto>/.<nome-do-projeto>-vault`, ex.: `.MeuApp-vault`; sobrescreva com `--vault`).
+2. Grava um vínculo provider-neutral **`.wendkeep.json`** na raiz do projeto e o marcador correspondente `.brain/PROJECT.json` no cofre, e faz merge dos hooks de sessão no **`.claude/settings.json`**. O vínculo é provider-neutral de propósito: qualquer agente resolve o mesmo cofre pelo `cwd` da sessão, sem variável global da máquina. Registros antigos em `.claude/settings.json` são adotados automaticamente.
+3. Wira os hooks de sessão do Codex em **`.codex/hooks.json`** — sete dos doze: `brain-inject` + `session-start` no `SessionStart`, `session-ensure` + `change-context` no `UserPromptSubmit`, `session-stop` + `change-nag` no `Stop`, `subagent-stop` no `SubagentStop`, sempre na forma `npx wendkeep hook <name>`. Os outros cinco ficam de fora por falta de payload, ferramenta ou evento equivalente no Codex: `change-guard` (gate `PreToolUse` que lê `tool_input.command`; no `exec` do Codex o `tool_input` existe, mas como string crua em vez de objeto — o gate degradaria para liberar tudo, falhando *aberto*), `change-warn` (*nudge* `PostToolUse` que resolve `tool_input.file_path`, campo que o envelope do `apply_patch` não carrega — não há o que resolver nem o que barrar), `plan-capture` (não existe `ExitPlanMode`; o `update_plan` é a lista de TODO em andamento, não uma aprovação), `decision-capture` (`AskUserQuestion` é ferramenta só do Claude) e `task-log` (`TaskCompleted` não está no enum de eventos do Codex). O merge é não‑destrutivo, na mesma disciplina do `settings.json`: reconhece o grupo já wirado e não duplica em re‑init, preserva hooks de terceiros, salva um `.bak`, e o `--force` atualiza `timeoutSec`/`statusMessage` no lugar; um `.codex/hooks.json` ilegível não é tocado e o merge vai pro `.codex/hooks.json.new`. **O Codex enumera todo hook como Untrusted e só executa depois que você aprovar o "Hooks need review" no startup — o `init` não consegue pré-aprovar**, e ele imprime um aviso sobre isso. Quem já tinha hooks wendkeep no Codex escritos à mão leva um prompt de re-revisão: o `init` migra a chave legada `timeout` (que o Codex não rejeita nem lê, caindo no default de 600s) pra `timeoutSec`, e isso muda a identidade com hash do hook.
+4. Adiciona o servidor MCP **`wendkeep-vault`** ao `.mcp.json` pro agente ler/escrever o cofre. Pule com `--no-mcp` — ex.: quando o agente já tem um MCP de cofre. (`--no-mcp` pula *só o MCP do próprio wendkeep*; os MCPs de companion seguem `--companions`.)
+5. Oferece fixar plugins/MCP **companion** (múltipla escolha; **nenhum** pré-marcado — o wendkeep é um harness neutro e não presume plugin de terceiro). Cada um é wirado do jeito mais agnóstico que suporta:
+   - **`context-mode`** — otimizador de contexto + memória FTS5, wirado como plugin do Claude Code. Ele traz o próprio servidor MCP, então o wendkeep de propósito não adiciona entrada no `.mcp.json` (registrar os dois subia dois servidores ao mesmo tempo). Em agentes não‑Claude, adicione o MCP à mão: `npx -y context-mode`.
+   - **`understand-anything`** — grafo de domínio do projeto, via um hook `understand-inject` no SessionStart que injeta o grafo quando gerado.
+   - **`caveman`** — modo de compressão de tokens; roda seu próprio instalador cross‑agent em agentes não‑Claude.
+   - **`dotcontext`** — *legado, não recomendado, e oculto do seletor.* O loop a2 nativo do wendkeep (`change` / `verify` / gate) já faz o trabalho dele, então instalar **duplica o harness**. Alcançável só via um `--companions dotcontext` explícito, pra quem já usa (ajuste com `--dotcontext-mcp` / `--dotcontext-hooks`).
 
-   Control with `--companions <csv>` or `--no-companions`. The Claude Code plugin layer (`extraKnownMarketplaces` + `enabledPlugins`) is wired as a bonus where the companion has one.
-6. Install a **color system** into the vault's `.obsidian/`: a CSS snippet that accents notes by type (session/decision/bug/learning, via the `cssclasses` the hooks emit) plus graph color groups by folder. Non-destructive merge into `appearance.json`/`graph.json`; skip with `--no-colors`. Re-apply it any time on an existing vault with `wendkeep theme sync` — Obsidian owns `graph.json` and can drop the color groups (a grey graph); the re-sync restores them without a full re-`init`.
-7. Seed the **curated memory layer**: `.brain/CORE.md` (the hand-curated hot layer, with the 3 required sections) and `.brain/COMPACTION_PROTOCOL.md` (the protocol guide). The auto layers (`DIGEST.md`, `index.jsonl`) are generated by the hooks. Validate the curated layer with `wendkeep validate-memory` (cap 25 lines, 3 sections, no secrets/PII).
-8. Seed the **definitions + skills layer**: `.brain/agents/` + `.brain/skills/` (versioned source of truth), including the native process skills `wk-workflow` / `wk-tdd` / `wk-debugging` / `wk-brainstorming` / `wk-planning` / `wk-verify` (some ship templates — e.g. `wk-verify`'s `verdict-template.json` + reviewer prompt). `init` runs `wendkeep sync-defs` for you, delivering the skills to `.claude/skills/` and `.agents/skills/`, and the agent definitions (`.brain/agents/*.toml`) to `.codex/agents/`, plus a managed section in `AGENTS.md` that indexes the skills for Codex; `sync-defs --check` detects stale copies (re-run `sync-defs` after editing `.brain`).
-9. Seed the **change/spec lifecycle**: the `07-Specs/` + `08-Mudanças/` folders and a native `wendkeep.sensors.json` — a critical `memory-validation` sensor (`npx wendkeep validate-memory`) plus one for each of `typecheck` / `test` / `lint` / `build` found in your `package.json`. Add your own with `wendkeep sensors add`. Drives `wendkeep change` / `wendkeep verify` — see **Change lifecycle** below.
+   Controle com `--companions <csv>` ou `--no-companions`. A camada de plugin do Claude Code (`extraKnownMarketplaces` + `enabledPlugins`) é wirada como bônus onde o companion tiver uma.
+6. Instala um **sistema de cores** no `.obsidian/` do cofre: um snippet CSS que colore notas por tipo (sessão/decisão/bug/aprendizado, via as `cssclasses` que os hooks emitem) mais grupos de cor do grafo por pasta. Merge não‑destrutivo em `appearance.json`/`graph.json`; pule com `--no-colors`.
+7. Semeia a **camada de memória curada**: `.brain/CORE.md` (a camada quente curada à mão, com as 3 seções obrigatórias) e `.brain/COMPACTION_PROTOCOL.md` (o guia do protocolo). As camadas automáticas (`DIGEST.md`, `index.jsonl`) são geradas pelos hooks. Valide a camada curada com `wendkeep validate-memory` (cap 25 linhas, 3 seções, sem segredos/PII).
+8. Semeia a **camada de definições + skills**: `.brain/agents/` + `.brain/skills/` (fonte da verdade versionada), incluindo as skills de processo nativas `wk-workflow` / `wk-tdd` / `wk-debugging` / `wk-brainstorming` / `wk-planning` / `wk-verify` (algumas trazem templates, ex.: o `verdict-template.json` + prompt de revisor da `wk-verify`). O `init` roda o `wendkeep sync-defs` pra você, entregando as skills em `.claude/skills/` e `.agents/skills/`, e as definições de agent (`.brain/agents/*.toml`) em `.codex/agents/`, mais uma seção gerenciada no `AGENTS.md` que indexa as skills pro Codex; o `sync-defs --check` detecta cópias defasadas (rode `sync-defs` de novo após editar o `.brain`).
+9. Semeia o **ciclo change/spec**: as pastas `07-Specs/` + `08-Mudanças/` e um `wendkeep.sensors.json` nativo — um sensor crítico `memory-validation` (`npx wendkeep validate-memory`) mais um para cada `typecheck` / `test` / `lint` / `build` encontrado no seu `package.json`. Adicione os seus com `wendkeep sensors add`. É o que alimenta o `wendkeep change` / `wendkeep verify` — veja **Ciclo de mudança** abaixo.
 
 ```bash
-npx wendkeep init --vault "~/vaults/work" --project . --yes   # non-interactive (no companions unless you ask)
+npx wendkeep init --vault "~/vaults/work" --project . --yes   # não-interativo
 npx wendkeep init --companions "context-mode,understand-anything" --yes
-npx wendkeep init --no-companions --no-mcp --yes              # zero companions, no wendkeep MCP
+npx wendkeep init --no-companions --no-mcp --yes              # zero companions, sem MCP do wendkeep
 ```
 
-### `init` options
+### Opções do `init`
 
-| Flag | What it does |
+| Flag | O que faz |
 |---|---|
-| `--vault <path>` | Vault folder. Default `<project>/.<project-name>-vault`; interactive init asks. Point it at an existing vault to install into it. |
-| `--project <path>` | Project root to wire (default: current directory). |
-| `--locale <pt-BR\|en>` | Vault language — folder names, scaffold, skills. Interactive init asks; locked at init. |
-| `--companions <csv>` | Companions to pin: `context-mode,caveman,understand-anything` (default: **none** — opt in explicitly; `dotcontext` is legacy). |
-| `--no-companions` | Pin no companions. |
-| `--no-mcp` | Skip **wendkeep's own** vault MCP (`wendkeep-vault`). Companion MCPs still follow `--companions`. |
-| `--no-colors` | Skip the Obsidian color system (`.obsidian` snippet + graph groups). |
-| `--yes`, `-y` | Non-interactive; accept defaults (skips the language / vault / companion prompts). |
-| `--force` | Overwrite existing wendkeep config blocks. |
+| `--vault <path>` | Pasta do cofre. Padrão `<projeto>/.<nome-do-projeto>-vault`; o init interativo pergunta. Aponte pra um cofre existente pra instalar nele. |
+| `--project <path>` | Raiz do projeto a wirar (padrão: diretório atual). |
+| `--locale <pt-BR\|en>` | Idioma do cofre — nomes das pastas, scaffold, skills. O init interativo pergunta; travado no init. |
+| `--companions <csv>` | Companions a fixar: `context-mode,caveman,understand-anything` (padrão: **nenhum** — opte explicitamente; `dotcontext` é legado). |
+| `--no-companions` | Não fixa nenhum companion. |
+| `--no-mcp` | Pula o MCP de cofre **do próprio wendkeep** (`wendkeep-vault`). Os MCPs de companion seguem `--companions`. |
+| `--no-colors` | Pula o sistema de cores do Obsidian (snippet `.obsidian` + grupos do grafo). |
+| `--yes`, `-y` | Não-interativo; aceita os padrões (pula os prompts de idioma / cofre / companion). |
+| `--force` | Sobrescreve os blocos de config do wendkeep existentes. |
 
-Then open the vault in Obsidian, send a test prompt in your agent, and confirm a note appears under `02-Sessões/…` (or `02-Sessions/…` for an `en` vault).
+Depois abra o cofre no Obsidian, mande um prompt de teste no seu agente e confirme que uma nota aparece em `02-Sessões/…` (ou `02-Sessions/…` num cofre `en`).
 
-### Project isolation
+### Isolamento por projeto
 
-Each project owns a `.wendkeep.json` containing a stable `projectId` and its vault path.
-Relative paths (for example `.NutriGymBrain`) are resolved from the project root; absolute
-paths are also supported. Hooks search upward from the agent's `cwd`, so nested packages use
-the nearest binding. The vault carries the same identity in `.brain/PROJECT.json`; a mismatch
-is rejected before any session is written. If no binding exists, hooks fail closed and never
-create the historical `~/wendkeep-vault` fallback.
+Cada projeto possui um `.wendkeep.json` com `projectId` estável e caminho do vault. Caminhos
+relativos, como `.NutriGymBrain`, partem da raiz do projeto; caminhos absolutos também são
+aceitos. Os hooks procuram o vínculo mais próximo subindo a partir do `cwd`. O vault guarda a
+mesma identidade em `.brain/PROJECT.json`, e uma divergência bloqueia a escrita. Sem vínculo,
+os hooks falham de modo seguro e nunca criam o antigo fallback `~/wendkeep-vault`.
 
-`OBSIDIAN_VAULT_PATH` remains only as legacy/manual CLI compatibility. It is not used to
-route automatic Codex or Claude hooks and a project-local binding overrides an inherited
-machine value.
+`OBSIDIAN_VAULT_PATH` permanece somente como compatibilidade legada para comandos manuais.
+Ele não roteia hooks automáticos do Codex ou Claude, e o vínculo local prevalece sobre uma
+variável herdada da máquina.
 
-## Updating
+## Atualizar
 
-Because the hooks live inside the installed package, upgrade the package and re-run the
-idempotent init. The init step creates/migrates the provider-neutral project binding:
+Os hooks vivem dentro do pacote instalado, então atualizar é instalar a versão nova e
+reprocessar a fiação do projeto. O `sync` faz os três passos (`init` → `sync-defs` →
+`doctor`) num comando:
 
 ```bash
-npm install --save-dev wendkeep@latest
-npx --no-install wendkeep init --project . --vault <your-vault> --yes
-npx --no-install wendkeep sync-defs --project . --reseed
-npx --no-install wendkeep doctor --project .
+npm install --save-dev wendkeep@latest && npx --no-install wendkeep sync --project
 ```
 
-Restart Codex and Claude Code after reseeding their generated skills.
+O `install` fica de fora do `sync` de propósito: um processo não se auto-substitui e segue
+rodando — o código em execução continuaria sendo o antigo.
 
-## Commands
+Num monorepo **pnpm**, o comando de instalação é outro (`npm` num repositório pnpm falha com
+`Cannot read properties of null (reading 'matches')`):
 
-| Command | What it does |
+```bash
+pnpm add -D -w wendkeep@latest && npx --no-install wendkeep sync --project
+```
+
+> O pnpm recusa pacote publicado nas últimas ~24h (`minimumReleaseAge`, proteção de
+> supply-chain). Se você acabou de publicar e precisa instalar já, peça a versão exata com
+> `--config.minimumReleaseAge=0` e registre a exceção em `minimumReleaseAgeExclude` no
+> `pnpm-workspace.yaml`, senão o `pnpm install` do CI passa a falhar.
+
+Reinicie Codex e Claude Code depois — as skills geradas são lidas no startup. Para forçar a
+ressemeadura das skills `wk-*` com os seeds da versão nova:
+`npx --no-install wendkeep sync-defs --project . --reseed`.
+
+## Comandos
+
+| Comando | O que faz |
 |---|---|
-| `wendkeep init` | Set up wendkeep in a project (vault taxonomy + settings + MCP + skills). |
-| `wendkeep hook <name>` | Run a session hook; invoked by `settings.json` (reads agent JSON on stdin). |
-| `wendkeep change <sub>` | Change lifecycle: `new <slug> [--simple]` / `use <slug>` (switch focus) / `continue <archived> <new>` / `bind <slug> --session <id>` / `list` (global backlog) / `show <slug>` / `status [slug]` / `done <id> [--change slug]` / `undone <id> [--change slug]` / `relink [--apply] [--json]` (repair change wikilinks; preview by default) / `diff [slug]` / `archive [slug] [--force]` / `abandon [slug]` (drop it, no ADR). `diff`, `archive` and `abandon` fall back to the active change when you omit the slug; bare `status` lists every open one. |
-| `wendkeep verify [--deep] [--change s]` | Run the change's task sensors; `--deep` assembles the independent-verification package. `--change` targets a change other than the active one. |
-| `wendkeep spec <sub>` | `list` / `show <capability>` generated contracts; `effective [--change <slug>] [--json]` (living contract + delta; defaults to the active change); `migrate`; `rebase [--accept-current]` (stops on conflicts unless you accept the living spec's side). |
-| `wendkeep sensors <sub>` | `list` / `add <id> "<command>"` with `--severity` / `--type` / `--report` / `--name` / `--description` — view/edit `wendkeep.sensors.json` (JSON Schema shipped). |
-| `wendkeep cost [opts]` | Aggregate AI-coding spend across the vault's sessions — total, by model, by day. `--since <date>` / `--top [N]` (priciest) / `--trend [day\|week\|month]` (+ run-rate projection) / `--write` (generate `00-Custo.md`) / `--json`. |
-| `wendkeep cost rebuild [opts]` | Recalculate historical parent + subagent costs from `SESSION_REGISTRY`. Dry-run by default; `--apply` updates the notes and writes `.brain/COST_REBUILD.json`. Also `--session <id\|file>` / `--limit n` / `--json`. |
-| `wendkeep stats [--vault P]` | One shareable line: sessions · prompts · spend · span · models (`--json`). |
-| `wendkeep import [opts]` | **Retroactive memory** — backfill past **Claude + Codex** sessions into the vault (deduped by `session_id`). `--source all\|claude\|codex` / `--stamp-ids` / `--rescan-decisions` / `--from <dir>` / `--codex-from <dir>` / `--since d` / `--limit n` / `--dry-run` / `--json`. |
-| `wendkeep session list\|show\|use` | List the multi-session registry, show one conversation, or move only the human focus in `CURRENT_SESSION.md`. |
-| `wendkeep dashboard [--force]` | (Re)generate the vault's folder-filtered Bases + the `00-Dashboard` MOC. |
-| `wendkeep note new --type bug\|learning "<title>"` | Create a **numbered** derived note (`BUG-`/`APR-NNNN`) in the month folder and print its vault path. `--date YYYY-MM-DD`. |
-| `wendkeep renumber-decisions` | Renumber `04-Decisões` to `ADR-NNNN-<slug>` chronologically, move notes out of legacy `DIA N` subfolders into the month folder, and rewrite wikilinks. Preview by default; `--apply` / `--json`. |
-| `wendkeep renumber-bugs` | Same for `05-Bugs` → `BUG-NNNN-<slug>`. |
-| `wendkeep renumber-learnings` | Same for `06-Aprendizados`/`06-Learnings` → `APR-NNNN-<slug>`. |
-| `wendkeep lesson add "t" "l"` | Record a project-local lesson (injected at the next SessionStart). |
-| `wendkeep sync-defs` | Copy `.brain/agents\|skills` into `.codex/agents`, `.claude/skills`, `.agents/skills`; `--check` detects drift, `--reseed` refreshes the `wk-*` skills from the installed version's seeds. |
-| `wendkeep validate-memory [path]` | Validate `.brain/CORE.md` (cap 25, 3 sections, no secrets/PII). |
-| `wendkeep doctor [--vault P]` | Run a vault health check (integrity of sessions, registry, links). |
-| `wendkeep --version` / `--help` | Version / usage. |
+| `wendkeep init` | Configura o wendkeep num projeto (taxonomia do cofre + settings + MCP + skills). |
+| `wendkeep sync [--project P]` | **Atualização em um comando**: roda `init` → `sync-defs` → `doctor` no projeto atual, parando no primeiro passo que falhar. Instale o pacote antes (um processo não se auto-substitui). `--vault P` · `--yes` para não abrir o seletor de companions. |
+| `wendkeep hook <name>` | Roda um hook de sessão; invocado pelo `settings.json` (lê o JSON do agente no stdin). |
+| `wendkeep change <sub>` | Ciclo de mudança: `new <slug> [--simple]` / `use <slug>` (troca o foco) / `continue <arquivada> <nova> [--simple]` / `bind <slug> --session <id>` / `list` (backlog global) / `show <slug>` / `status [slug]` / `done <id> [--change slug]` / `undone <id> [--change slug]` / `relink [--apply] [--json]` (conserta os wikilinks das changes; prévia por padrão) / `diff [slug]` / `archive [slug] [--force]` / `abandon [slug]` (descarta sem ADR) / `backlink [--apply]` (injeta o backlink pra proposta em design/tarefas/spec órfãos). `diff`, `archive` e `abandon` caem na change ativa quando você omite o slug; o `status` pelado lista todas as abertas. |
+| `wendkeep verify [--deep] [--change s]` | Roda os sensores das tarefas da change; `--deep` monta o pacote de verificação independente. `--change` mira uma change que não é a ativa; `--project <raiz>` roda de fora da raiz. |
+| `wendkeep spec <sub>` | Specs vivos: `list` / `show <capability>` / `effective [--change <slug>] [--json]` (contrato vivo + delta; usa a change ativa por padrão) / `migrate` / `rebase [--accept-current]` (para em conflito, a não ser que você aceite o lado do spec vivo). |
+| `wendkeep sensors <sub>` | `list` / `add <id> "<comando>"` com `--severity` / `--type` / `--report` / `--name` / `--description` / `--project` — vê/edita `wendkeep.sensors.json` (JSON Schema incluso). |
+| `wendkeep cost [opts]` | Agrega o gasto de IA nas sessões do cofre — total, por modelo, por dia · `--since <data>` · `--top [N]` · `--trend [day\|week\|month]` (+ projeção) · `--write` (gera `00-Custo.md`) · `--json`. |
+| `wendkeep cost rebuild [opts]` | Reconstrói custos históricos do transcript principal e subagents via `SESSION_REGISTRY`. Dry-run por padrão; `--apply` grava notas e `.brain/COST_REBUILD.json`. Também `--session <id\|arquivo>` / `--limit n` / `--json`. |
+| `wendkeep session list\|show\|use` | Lista o registry multi-sessão, mostra uma conversa ou muda somente o foco humano de `CURRENT_SESSION.md`. |
+| `wendkeep stats [--vault P]` | Uma linha compartilhável: sessões · prompts · gasto · período · modelos (`--json`). |
+| `wendkeep import [opts]` | **Memória retroativa** — importa sessões passadas de **Claude + Codex** pro cofre (dedup por `session_id`). `--source all\|claude\|codex` / `--stamp-ids` / `--rescan-decisions` / `--from <dir>` / `--codex-from <dir>` / `--since d` / `--limit n` / `--dry-run` / `--json`. |
+| `wendkeep dashboard [--force]` | (Re)gera os Bases filtrados por pasta + o MOC `00-Dashboard`. |
+| `wendkeep note new --type bug\|learning "<título>"` | Cria uma nota derivada **numerada** (`BUG-`/`APR-NNNN`) na pasta do mês e imprime o caminho no cofre. `--date YYYY-MM-DD`. |
+| `wendkeep note relink [--apply]` | Preenche a proveniência das notas derivadas órfãs (BUG/APR sem sessão de origem), herdando a sessão modal dos irmãos do mesmo tipo e mês. Prévia por padrão. |
+| `wendkeep note repair-frontmatter [--apply]` | Funde blocos de frontmatter empilhados numa nota de sessão — dano de escrita concorrente das versões anteriores à 0.50. Chaves-base do bloco original, valores do mais recente; prévia por padrão · `--json`. |
+| `wendkeep note repair-sections [--apply]` | Reconstrói as seções `## Decisões/Bugs/Aprendizados gerados nesta sessão` a partir das notas derivadas ligadas — o corpo ficava para trás do `## Encerramento`. Prévia por padrão · `--json`. |
+| `wendkeep renumber-decisions` | Renumera `04-Decisões` pra `ADR-NNNN-<slug>` em ordem cronológica, tira as notas de subpastas legadas `DIA N` pra pasta do mês e reescreve os wikilinks. Prévia por padrão; `--apply` / `--json`. |
+| `wendkeep renumber-bugs` | Idem pra `05-Bugs` → `BUG-NNNN-<slug>`. |
+| `wendkeep renumber-learnings` | Idem pra `06-Aprendizados`/`06-Learnings` → `APR-NNNN-<slug>`. |
+| `wendkeep lesson add "t" "l"` | Registra uma lição local do projeto (injetada no próximo SessionStart). `--change <slug>` amarra a lição a uma change; `--vault P`. |
+| `wendkeep sync-defs` | Copia `.brain/agents\|skills` pro projeto (`.codex/agents`, `.claude/skills`, `.agents/skills`); `--check` detecta drift, `--reseed` ressemeia as skills `wk-*` com os seeds da versão instalada. |
+| `wendkeep validate-memory [path]` | Valida `.brain/CORE.md` (cap 25, 3 seções, sem segredos/PII). |
+| `wendkeep theme sync [--vault P]` | Reaplica o sistema de cores (snippet CSS + grupos do grafo) num cofre existente — recupera o grafo cinza sem refazer o `init`. |
+| `wendkeep doctor [--vault P]` | Check de saúde do cofre. Além da integridade de sessões e registry, reporta em seções: `[links]` (órfãos do grafo), `[notas]` (frontmatter empilhado), `[preços]` (modelo sem preço na tabela, que fecharia a sessão com custo zero) e `[derivadas]` (seções do corpo desatualizadas) — cada uma com o comando de reparo ao lado. |
+| `wendkeep --version` / `--help` | Versão / uso. |
 
-Session notes use one live `## Agentes, tokens e custos` snapshot. Main-agent and subagent hooks recompose it atomically, with costs, token dimensions, reasoning tokens and effort per model/source. Every hook that rewrites a session note takes a per-file lock and writes through a temp file + rename, so the `SubagentStop` fan-out (one hook run per subagent) can never leave a note half-written; a note whose frontmatter reads back damaged is left untouched rather than patched.
+As notas de sessão usam um único snapshot vivo `## Agentes, tokens e custos`. Os hooks do agente principal e dos subagents recompõem o bloco atomicamente, incluindo custo, dimensões de tokens, reasoning e effort por modelo/origem.
 
-## Retroactive memory (`import`) — install today, remember yesterday
+## Memória retroativa (`import`) — instale hoje, lembre de ontem
 
-Install wendkeep into an existing project and it only remembers sessions **from now on**. `wendkeep import` fixes that: one command backfills your project's past **Claude & Codex** sessions into the vault — deduped, dated, with cost — so the graph starts full, not empty. It rebuilds each transcript as a full session note in its **real** date folder — frontmatter (tagged with the transcript's real provider), one iteration block per turn, cost + subagent telemetry, derived decision/bug/learning notes, finalized closing. An offline replay of the live capture flow, so an imported note is indistinguishable from a captured one.
-
-```bash
-wendkeep import --vault .myproject-vault --dry-run   # preview what would be imported (both agents)
-wendkeep import --vault .myproject-vault             # write the notes
-wendkeep import --vault .myproject-vault --source codex   # just Codex
-```
-
-- **Both agents by default** (`--source all`). Claude sessions come from `~/.claude/projects/<slug>/`; Codex rollouts from `~/.codex/sessions/**`, scoped to this project by the `cwd` recorded in each session (case- and separator-insensitive, subdirs included). Narrow with `--source claude` / `--source codex`.
-- Every note records its **`session_id`** and **`provider`** in frontmatter (live capture and import alike). Backfill older notes with `wendkeep import --stamp-ids` (fills the id from the registry; idempotent).
-- **Deduped** by `session_id` against the vault's `SESSION_REGISTRY` **and** existing notes' frontmatter — only sessions not already present are imported, and it never overwrites an existing note. Re-running is a no-op.
-- **`--from <dir>`** / **`--codex-from <dir>`** point at the transcript folders explicitly (use if the auto-derived path misses). Also: `--since <date>`, `--limit <n>`, `--rescan-decisions`, `--json`.
-- Once imported, `wendkeep cost` aggregates your entire history — retroactively, across both agents.
-
-## Derived notes — numbered like ADRs (`note new`, `renumber-*`)
-
-Decisions, bugs and learnings are **derived notes**: they live in the month folder of their tree (`<folder>/<year>/<MM-MON>/`) and carry a sequential id — `ADR-0001`, `BUG-0001`, `APR-0001`. One glance tells you what a note is and where it sits in the project's history. No day-level subfolders: a `DIA N` folder holding one note is noise, and it hides the note from folder-wide search.
-
-**Creating one** (never write the file by hand — the command owns the number, the folder and the frontmatter):
+Instale o wendkeep num projeto existente e ele só lembra sessões **a partir de agora**. O `wendkeep import` conserta isso: um comando importa as sessões passadas de **Claude & Codex** do projeto pro cofre — dedup, datadas, com custo — então o grafo começa cheio, não vazio. Reconstrói cada transcript como uma nota de sessão completa na pasta datada **real** — frontmatter (taggeado com o provedor real), um bloco de iteração por turno, custo + telemetria de subagents, notas derivadas de decisão/bug/aprendizado, encerramento finalizado. Um replay offline do fluxo de captura vivo, então uma nota importada é indistinguível de uma capturada.
 
 ```bash
-wendkeep note new --type bug "login 500s when the token expires mid-refresh"
-# → 05-Bugs/2026/07-JUL/BUG-0007-login-500s-when-the-token-expires-mid-refresh.md
-
-wendkeep note new --type learning "a regex without /g only ever returns the first match"
-# → 06-Aprendizados/2026/07-JUL/APR-0003-a-regex-without-g-only-ever-returns-the-first-match.md
+wendkeep import --vault .meuprojeto-vault --dry-run   # prévia do que seria importado (os dois agentes)
+wendkeep import --vault .meuprojeto-vault             # escreve as notas
+wendkeep import --vault .meuprojeto-vault --source codex   # só Codex
 ```
 
-It prints the created path, numbers from the current max (recursive scan), files it in the month folder for today (`--date YYYY-MM-DD` to override), and links the active session in `source:` so the graph stays connected. Agents get this rule injected at SessionStart — they call the command instead of guessing a filename.
+- **Os dois agentes por padrão** (`--source all`). As sessões do Claude vêm de `~/.claude/projects/<slug>/`; os rollouts do Codex de `~/.codex/sessions/**`, escopados pro projeto pelo `cwd` gravado em cada sessão (insensível a case e separador, subpastas inclusas). Estreite com `--source claude` / `--source codex`.
+- Toda nota grava o **`session_id`** e o **`provider`** no frontmatter (captura live e import iguais). Carimbe notas antigas com `wendkeep import --stamp-ids` (preenche o id a partir do registry; idempotente).
+- **Dedup** por `session_id` contra o `SESSION_REGISTRY` do cofre **e** o frontmatter das notas existentes — só importa sessões ausentes e nunca sobrescreve. Rodar de novo é no‑op.
+- **`--from <dir>`** / **`--codex-from <dir>`** apontam as pastas de transcript explicitamente (use se o caminho auto‑derivado errar). Também: `--since <data>`, `--limit <n>`, `--rescan-decisions`, `--json`.
+- Depois de importar, o `wendkeep cost` agrega seu histórico inteiro — retroativamente, nos dois agentes.
 
-**Reconnecting legacy notes.** Derived notes created by older versions carry no `source:` session and sit as islands in the graph. `wendkeep note relink` backfills them: each orphan inherits the modal source session of its type/month cohort (the session its non-orphan siblings already point to). Dry-run by default; `--apply` writes; notes with no sibling to infer from are skipped and reported.
+## Notas derivadas — numeradas como ADRs (`note new`, `renumber-*`)
 
-**Migrating an existing vault.** Notes created before `0.41.0` have date-prefixed names (`2026-07-16-bug-<slug>.md`) and may sit in legacy `DIA N` subfolders. One command per tree renumbers them chronologically, moves them up into the month folder, and rewrites every wikilink across the vault:
+Decisões, bugs e aprendizados são **notas derivadas**: vivem na pasta do mês da sua árvore (`<pasta>/<ano>/<MM-MMM>/`) e carregam um id sequencial — `ADR-0001`, `BUG-0001`, `APR-0001`. Uma olhada já diz o que a nota é e onde ela cai na história do projeto. Sem subpasta por dia: uma pasta `DIA N` com uma nota só é ruído, e esconde a nota da busca por pasta.
+
+**Criando uma** (nunca escreva o arquivo à mão — o comando é dono do número, da pasta e do frontmatter):
+
+```bash
+wendkeep note new --type bug "login dá 500 quando o token expira no meio do refresh"
+# → 05-Bugs/2026/07-JUL/BUG-0007-login-da-500-quando-o-token-expira-no-meio-do-refresh.md
+
+wendkeep note new --type learning "regex sem /g só retorna o primeiro match"
+# → 06-Aprendizados/2026/07-JUL/APR-0003-regex-sem-g-so-retorna-o-primeiro-match.md
+```
+
+Ele imprime o caminho criado, numera a partir do máximo atual (varredura recursiva), arquiva na pasta do mês de hoje (`--date YYYY-MM-DD` pra sobrescrever) e linka a sessão ativa em `source:` pro grafo seguir conectado. Os agentes recebem essa regra injetada no SessionStart — chamam o comando em vez de chutar um nome de arquivo.
+
+**Migrando um cofre existente.** Notas criadas antes da `0.41.0` têm nome com prefixo de data (`2026-07-16-bug-<slug>.md`) e podem estar em subpastas legadas `DIA N`. Um comando por árvore renumera cronologicamente, sobe as notas pra pasta do mês e reescreve todos os wikilinks do cofre:
 
 ```bash
 # Bugs — 05-Bugs → BUG-NNNN
-wendkeep renumber-bugs                  # preview: prints every from → to, writes nothing
-wendkeep renumber-bugs --apply          # migrate
+wendkeep renumber-bugs                  # prévia: imprime cada de → para, não escreve nada
+wendkeep renumber-bugs --apply          # migra
 
-# Learnings — 06-Aprendizados → APR-NNNN
-wendkeep renumber-learnings             # preview
-wendkeep renumber-learnings --apply     # migrate
+# Aprendizados — 06-Aprendizados → APR-NNNN
+wendkeep renumber-learnings             # prévia
+wendkeep renumber-learnings --apply     # migra
 
-# Decisions — 04-Decisões → ADR-NNNN (since 0.30.0)
-wendkeep renumber-decisions             # preview
-wendkeep renumber-decisions --apply     # migrate
+# Decisões — 04-Decisões → ADR-NNNN (desde a 0.30.0)
+wendkeep renumber-decisions             # prévia
+wendkeep renumber-decisions --apply     # migra
 ```
 
-- **Preview is the default.** Nothing is written until `--apply` — read the `from → to` list first; that is where a mangled slug shows up, before it touches your files.
-- **One tree at a time, on purpose.** There is no `renumber-all`: each folder is migrated and reviewed on its own.
-- **Order is chronological**, derived from the note's date (frontmatter → filename prefix → folder), so `BUG-0001` is genuinely the oldest bug — not the first one the scanner happened to read.
-- **Wikilinks are rewritten vault-wide** (full-path and basename forms, aliases preserved), the body's `type`/`bug:`/`apr:`/H1 are normalized, and emptied `DIA` folders are removed. **Idempotent**: a second `--apply` renames nothing. Close Obsidian while migrating, and commit the vault first if it is under git.
+- **Prévia é o padrão.** Nada é escrito até o `--apply` — leia a lista `de → para` primeiro; é ali que um slug estropiado aparece, antes de tocar seus arquivos.
+- **Uma árvore por vez, de propósito.** Não existe `renumber-all`: cada pasta é migrada e revisada por conta própria.
+- **A ordem é cronológica**, derivada da data da nota (frontmatter → prefixo do nome → pasta), então `BUG-0001` é de fato o bug mais antigo — não o primeiro que o scanner leu.
+- **Wikilinks são reescritos no cofre inteiro** (forma com path completo e por basename, aliases preservados), o `type`/`bug:`/`apr:`/H1 do corpo são normalizados e pastas `DIA` esvaziadas são removidas. **Idempotente**: um segundo `--apply` não renomeia nada. Feche o Obsidian durante a migração, e commite o cofre antes se ele estiver sob git.
 
-## Change lifecycle — the a2 loop (spec‑driven, native)
+## Ciclo de mudança — o loop a2 (spec‑driven, nativo)
 
-Beyond capturing sessions, wendkeep is a **harness**: a native, zero‑dependency loop that keeps *intent* (specs), *work* (changes) and *proof* (sensors) together in the vault, wikilinked into the Obsidian graph.
+Além de capturar sessões, o wendkeep é um **harness**: um loop nativo e sem dependências que mantém *intenção* (specs), *trabalho* (changes) e *prova* (sensores) juntos no cofre, wikilinkados no grafo Obsidian.
 
 ```
 explore → propose → apply (TDD) → verify → archive
 ```
 
-- **Propose** — `wendkeep change new <slug>` scaffolds `08-Mudanças/<slug>/` (`proposta.md`, `design.md`, `tarefas.md`; `--simple` skips the design). It becomes the global *current* change. When the change declares `spec_impact: required`, you author the delta yourself at `specs/<capability>/spec.md` — there is no placeholder to delete. Multiple changes may remain open: `change list`/`status` and the hooks show every pending one, while commands without `--change` act on the current one alone. `change use <slug>` changes focus and `change continue <archived> <new>` creates an auditable continuation.
-- **Apply** — implement each `tarefas.md` task. Tag a task that needs machine proof with `[sensor:<id>]` — one sensor per task (a task carries a single sensor; split it in two if you need two) — and the requirement it satisfies with `[req:<ID>]`, of which a task may declare several.
-- **Verify** — `wendkeep verify` runs the sensors your tasks declared (from `wendkeep.sensors.json` at the project root) and writes `evidencia.json`. A red `critical` fails the gate; a red `warning` is advisory. `verify --deep` builds a self-contained package with complete effective requirements (living contract + this change's delta), so the independent verifier never needs to reconstruct unarchived requirements from `07-Specs`. Every change needs a `verdict.json` to archive; `verify --deep` writes a trivial one automatically when the change declares no `[req:]`.
-- **Archive** — `wendkeep change archive <slug>` **gates** on the evidence (blocks unless every declared critical sensor is green), promotes each capability's spec delta (`ADDED`/`MODIFIED`/`REMOVED`) into the living `07-Specs/<capability>.md`, moves the change to `_arquivo/`, and mints an ADR in `04-Decisões/`.
+- **Propose** — `wendkeep change new <slug>` faz o scaffold de `08-Mudanças/<slug>/` (`proposta.md`, `design.md`, `tarefas.md`; o `--simple` pula o design). A change vira a *atual* global; `change use <slug>` troca o foco e `change continue <arquivada> <nova>` cria uma continuação auditável. Várias changes podem ficar abertas: hooks e `change list/status` mostram todas as pendências, enquanto comandos sem `--change` usam somente a atual. Quando a change declara `spec_impact: required`, você mesmo escreve o delta em `specs/<capability>/spec.md` — não há placeholder pra apagar.
+- **Apply** — implemente cada tarefa de `tarefas.md`. Taggeie a tarefa que precisa de prova de máquina com `[sensor:<id>]` — um sensor por tarefa (a tarefa carrega um só; quebre em duas se precisar de dois) — e o requisito que ela satisfaz com `[req:<ID>]`, dos quais a tarefa pode declarar vários.
+- **Verify** — `wendkeep verify` roda os sensores que suas tarefas declararam (do `wendkeep.sensors.json` na raiz do projeto) e grava `evidencia.json`. Um vermelho crítico falha o gate; um vermelho `warning` é aviso. O `verify --deep` monta o pacote autocontido de verificação (contrato vivo + delta desta change). Toda change precisa de um `verdict.json` pra arquivar; quando ela não declara `[req:]`, o próprio `verify --deep` grava um verdict trivial.
+- **Archive** — `wendkeep change archive <slug>` faz **gate** na evidência (bloqueia a não ser que todo sensor crítico declarado esteja verde), promove o delta de cada capability (`ADDED`/`MODIFIED`/`REMOVED`) pro `07-Specs/<capability>.md` vivo, move a change pro `_arquivo/` e cunha um ADR em `04-Decisões/`.
 
-> The gate blocks unless the scaffold is filled, no task is open, evidence is fresh, and every declared requirement is covered. **`--force` waives exactly one of those — the open-task check — and is the human's call, never the agent's.** An unfilled scaffold, a red critical sensor, stale evidence, an orphan requirement or a missing verdict block regardless.
+> O gate bloqueia a não ser que o scaffold esteja preenchido, nenhuma tarefa aberta, evidência fresca e todo requisito declarado coberto. **O `--force` dispensa exatamente uma dessas — a checagem de tarefa aberta — e é decisão do humano, nunca do agente.** Scaffold não preenchido, sensor crítico vermelho, evidência stale, requisito órfão ou verdict ausente bloqueiam de qualquer jeito.
 
-`wendkeep init` seeds process skills into the vault's `.brain/skills` and delivers identical copies to `.claude/skills/` and `.agents/skills/`; Codex gets the agent definitions (`.brain/agents/*.toml` → `.codex/agents/`) plus a managed section in `AGENTS.md` that indexes the skills. Every skill carries source hash/version metadata; `doctor` warns when reseed + agent restart is required.
+O `wendkeep init` também semeia **skills de processo nativas** (`wk-workflow`, `wk-tdd`, `wk-debugging`, `wk-brainstorming`, `wk-planning`, `wk-verify`) no `.brain/skills` do cofre e as entrega em `.claude/skills/` e `.agents/skills/` — a camada do *como*, zero‑dep. O Codex recebe as definições de agent (`.brain/agents/*.toml` → `.codex/agents/`) mais uma seção gerenciada no `AGENTS.md` que indexa as skills. Cada skill carrega metadados de hash/versão da fonte; o `doctor` avisa quando é preciso ressemear e reiniciar o agente. Companions opcionais (`context-mode`, `dotcontext`, `understand-anything`, `caveman`) ficam como camada extra opt‑in.
 
-### The loop in five minutes
+### O loop em cinco minutos
 
 ```bash
-npx wendkeep init --yes                        # vault + hooks + sensors + skills
-npx wendkeep change new dark-mode              # proposta/design/tarefas — change is now active
+npx wendkeep init --yes                        # cofre + hooks + sensores + skills
+npx wendkeep change new dark-mode              # proposta/design/tarefas — a change fica ativa
 ```
 
-Edit `tarefas.md` — tag proof and requirement per task:
+Edite o `tarefas.md` — marque a prova e o requisito por tarefa:
 
 ```markdown
-- [ ] 1.1 toggle persists across sessions [req:UI-1] [sensor:tests]
+- [ ] 1.1 o toggle persiste entre sessões [req:UI-1] [sensor:tests]
 ```
 
-Declare the capability in `proposta.md` (`specs: [ui]`) and author its delta only in
-`08-Mudanças/<slug>/specs/ui/spec.md`. `07-Specs` is generated/read-only. Then:
+Declare a capability na `proposta.md` (`specs: [ui]`) e escreva o delta dela só em
+`08-Mudanças/<slug>/specs/ui/spec.md`. O `07-Specs` é gerado/read-only. Então:
 
 ```bash
-npx wendkeep change status                     # every open change + its pending tasks
-npx wendkeep change list                       # same backlog, plus the archived ones
-npx wendkeep change status dark-mode           # one screen for one change: specs / tasks / sensors / verdict
-npx wendkeep spec effective --change dark-mode # living contract + this change's delta
-npx wendkeep change done 1.1                   # tick a task from the CLI
-npx wendkeep verify                            # run the declared sensors -> evidencia.json
-npx wendkeep verify --deep                     # assemble the verification package
-# the wk-verify skill (fresh, read-only pass) writes verdict.json
-npx wendkeep change diff                       # preview what will land in 07-Specs
-npx wendkeep change archive dark-mode          # gate: sensors + verdict + no open tasks
+npx wendkeep change status                     # todas as changes abertas + tarefas pendentes
+npx wendkeep change list                       # o mesmo backlog, mais as arquivadas
+npx wendkeep change status dark-mode           # uma tela pra uma change: specs / tarefas / sensores / veredito
+npx wendkeep spec effective --change dark-mode # contrato vivo + delta desta change
+npx wendkeep change done 1.1                   # marca uma tarefa pela CLI
+npx wendkeep verify                            # roda os sensores declarados -> evidencia.json
+npx wendkeep verify --deep                     # monta o pacote de verificação
+# a skill wk-verify (passe fresco, read-only) grava o verdict.json
+npx wendkeep change diff                       # prévia do que vai cair no 07-Specs
+npx wendkeep change archive dark-mode          # gate: sensores + verdict + nenhuma tarefa aberta
 ```
 
-The archive promotes the delta into generated `07-Specs/ui.md`, mints an ADR, and the
-Obsidian graph now links *session ↔ change ↔ requirement ↔ decision*. Every generated
-artifact (`design`/`tarefas`) is born linking its change's `proposta` hub, and hand-authored
-`spec.md` deltas are auto-linked on `verify`/`archive` — no change artifact is a graph island.
-To backfill older changes that predate this, run `wendkeep change backlink --apply` (dry-run
-without `--apply`). A change that names no `[req:]` still runs `verify --deep`, but skips the
-`wk-verify` reading pass: the command writes a trivial verdict on its own and the sensor gate
-is the real proof.
+O archive promove o delta pro `07-Specs/ui.md` gerado, cunha um ADR, e o grafo do Obsidian
+agora liga *sessão ↔ change ↔ requisito ↔ decisão*. Uma change que não nomeia nenhum
+`[req:]` ainda roda o `verify --deep`, mas pula o passe de leitura do `wk-verify`: o próprio
+comando grava um verdict trivial e o gate de sensores é a prova real.
 
-## How it works
+## Como funciona
 
 ```
-agent session ──hooks──▶ wendkeep ──▶ Markdown in vault ──▶ .brain index + Obsidian graph
-   (Claude/Codex)        (Node)      (02-Sessões/…)        (CORE+DIGEST, backlinks)
+sessão do agente ──hooks──▶ wendkeep ──▶ Markdown no cofre ──▶ índice .brain + grafo Obsidian
+   (Claude/Codex)           (Node)      (02-Sessões/…)         (CORE+DIGEST, backlinks)
 ```
 
-The agent's settings.json points each hook at `npx wendkeep hook …`; **in Claude Code** the change-lifecycle hooks instead run the installed script directly (`node` on `${CLAUDE_PROJECT_DIR}/node_modules/wendkeep/hooks/<name>.mjs`) when the package is present locally, skipping an npx resolve on every event. `.codex/hooks.json` mirrors the same groups with PascalCase event keys, but always uses the `npx` form (`${CLAUDE_PROJECT_DIR}` does not exist in Codex) and spells its timeout `timeoutSec` — a plain `timeout` is neither a field nor an error there, it silently falls through to a 600s default, so `init` migrates that legacy key in place. On `Stop`, wendkeep parses the session transcript, appends the turn, updates the token/cost table, and (idempotently) emits any decision/bug/learning notes. On `SessionStart` — startup, `/clear` and `/compact` — `brain-inject` injects back curated memory (CORE + DIGEST), every open change with its pending tasks, the global current-change marker, project lessons, and a `<wk_process>` router. Claude, Codex, or another agent can therefore resume work started elsewhere without hiding the rest of the backlog.
+O settings.json do agente aponta cada hook pra `npx wendkeep hook …`; no Claude Code, os hooks do ciclo de mudança rodam o script instalado direto (`node` em `${CLAUDE_PROJECT_DIR}/node_modules/wendkeep/hooks/<name>.mjs`) quando o pacote está presente local, pulando uma resolução do npx a cada evento. O `.codex/hooks.json` usa sempre a forma `npx` — o `${CLAUDE_PROJECT_DIR}` não existe no Codex — com chaves de evento em PascalCase e o timeout em `timeoutSec`. No `Stop`, o wendkeep parseia o transcript, anexa o turno, atualiza a tabela de tokens/custo e (idempotentemente) emite qualquer nota de decisão/bug/aprendizado. No `SessionStart` — startup, `/clear` e `/compact` — o `brain-inject` injeta a memória curada (CORE + DIGEST), todas as changes abertas com suas pendências, o marcador global da change atual, as lições do projeto e o roteador `<wk_process>`. Claude, Codex ou outro agente podem assim retomar trabalho iniciado em outro lugar sem ocultar o restante do backlog.
 
-The archive **gate** blocks unless: the change scaffold is filled (G0), no task is open (G1), every declared critical sensor is green (with fresh evidence), and a `verdict.json` is present and current. `--force` waives G1 only — G0 is inescapable by design (a placeholder change forced through once minted a fake ADR), and no flag turns a red sensor or a missing verdict green. The agent is instructed never to use it on its own.
+O **gate** do archive bloqueia a não ser que: o scaffold da change esteja preenchido (G0), nenhuma tarefa esteja aberta (G1), todo sensor crítico declarado esteja verde (com evidência fresca) e exista um `verdict.json` presente e atual. O `--force` dispensa só o G1 — o G0 é inescapável por design (uma change placeholder forçada uma vez cunhou um ADR falso), e nenhuma flag torna verde um sensor vermelho ou um verdict ausente. O agente é instruído a nunca usar por conta própria.
 
-## Notes & roadmap
+## Notas & roadmap
 
-- **Vault folder names default to Portuguese** (`02-Sessões`, `04-Decisões`, …). Pass `wendkeep init --locale en` for an English vault (`02-Sessions`, `04-Decisions`, English scaffold/skills). The locale is a vault property, locked at init; parsers are bilingual so mixed content never breaks.
-- **Search is keyword/frontmatter scoring**, not on‑device embeddings (that's on the roadmap).
-- **Transcript formats are agent‑internal** and can change between agent versions; parsing is isolated but may need updates.
-- Installer wires **both agents**: `.claude/settings.json` + `.mcp.json` for Claude Code, `.codex/hooks.json` for Codex. **Five hooks stay Claude‑only** because Codex has no equivalent payload, tool or event: `change-guard` (a `PreToolUse` gate that reads `tool_input.command`, but Codex's `exec` carries `tool_input` as a raw string rather than an object — the gate would fail *open*), `change-warn` (a `PostToolUse` nudge that resolves `tool_input.file_path`, which `apply_patch`'s envelope simply does not carry — nothing to resolve, and nothing to gate), `plan-capture` (no `ExitPlanMode` — `update_plan` is a running TODO list, not an approval), `decision-capture` (`AskUserQuestion` is Claude‑only) and `task-log` (`TaskCompleted` is not in Codex's event enum).
-- **Codex hooks start untrusted.** They are enumerated but not executed until you approve the “Hooks need review” prompt; `init` cannot pre‑approve them (`--dangerously-bypass-hook-trust` is per‑invocation and stores no trusted hash). Trust is keyed to the hook's identity, so hand‑written wendkeep Codex hooks predating `0.46.0` — which ran at the 600s default because they used `timeout` instead of `timeoutSec` — cost one re‑review after `init` corrects the key. Expected, not a regression. `import --source codex` still backfills past Codex sessions either way.
+- **Nomes das pastas do cofre são em Português por padrão** (`02-Sessões`, `04-Decisões`, …). Passe `wendkeep init --locale en` pra um cofre em inglês (`02-Sessions`, `04-Decisions`, scaffold/skills em inglês). O locale é uma propriedade do cofre, travada no init; os parsers são bilíngues, então conteúdo misto nunca quebra.
+- **Busca é scoring por keyword/frontmatter**, não embeddings on‑device (isso está no roadmap).
+- **Formatos de transcript são internos ao agente** e podem mudar entre versões; o parsing é isolado mas pode precisar de atualizações.
+- O instalador wira settings do **Claude Code** + **`.codex/hooks.json`** + `.mcp.json`. **No Codex vão sete dos doze hooks** — os outros cinco não têm payload, ferramenta ou evento equivalente: `change-guard` (gate `PreToolUse` que lê `tool_input.command`, mas o `exec` do Codex carrega `tool_input` como string crua, não objeto — o gate falharia *aberto*), `change-warn` (*nudge* `PostToolUse` que resolve `tool_input.file_path`, campo ausente do envelope do `apply_patch` — não há o que resolver nem o que barrar), `plan-capture` (não existe `ExitPlanMode`; o `update_plan` é lista de TODO em andamento, não aprovação), `decision-capture` (`AskUserQuestion` é ferramenta só do Claude) e `task-log` (`TaskCompleted` não está no enum de eventos do Codex). Ou seja: captura de sessão, custo e memória funciona igual, mas os avisos de mudança ligados a ferramenta e a captura de plano/decisão/tarefa são só do Claude. Os hooks também só rodam depois que você aprovar o "Hooks need review" — o `init` não consegue pré-aprovar. Pra sessões Codex anteriores ao wiring, use `import --source codex`.
+- **Os hooks do Codex nascem Untrusted.** Eles são enumerados, mas não executados, até você aprovar o "Hooks need review"; o `init` não consegue pré‑aprovar (o `--dangerously-bypass-hook-trust` vale só por invocação e não grava nenhum trusted hash). A confiança é atrelada à identidade do hook, então quem tinha hooks wendkeep do Codex escritos à mão antes da `0.46.0` — que rodavam no default de 600s por usarem `timeout` em vez de `timeoutSec` — paga uma re‑revisão única depois que o `init` corrige a chave. Isso é esperado, não é regressão.
 
 ---
 
-## Stop re‑explaining your codebase every morning
+## Pare de reexplicar seu código toda manhã
 
 ```bash
 npm i -D wendkeep && npx wendkeep init
 ```
 
-**[Install from npm](https://www.npmjs.com/package/wendkeep)** · **[Star on GitHub](https://github.com/rogersialves/wendkeep)** — MIT · open‑core · your data never leaves your disk.
+**[Instalar do npm](https://www.npmjs.com/package/wendkeep)** · **[Deixar uma star no GitHub](https://github.com/rogersialves/wendkeep)** — MIT · open‑core · seus dados nunca saem do seu disco.
 
-## License
+## Licença
 
 MIT

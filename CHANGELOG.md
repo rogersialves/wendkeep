@@ -4,6 +4,31 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.56.0] — 2026-07-25
+
+### Changed
+
+- **O README do GitHub passa a ser o português.** `README.md` é o português (o que a página
+  do projeto exibe) e `README.en.md` o inglês, cada um linkando o outro. O
+  `README.pt-BR.md` deixa de existir — manter os dois nomes seria convidá-los a divergir.
+- **O npm continua em inglês.** A página do pacote sempre renderiza o `README.md` do
+  tarball, e não há campo em `package.json` que aponte para outro arquivo; sem tratamento,
+  inverter no repositório mudaria também a vitrine para o público global. Hooks
+  `prepack`/`postpack` trocam os dois no empacotamento, cobrindo `npm publish` e `npm pack`
+  — o teste confere o **conteúdo do tarball**, não os arquivos do repositório, que é
+  justamente onde os dois divergem de propósito. Capability `cli-safety` (CLI-PKG-1).
+
+### Fixed
+
+- **Os dois READMEs estavam atrás do código.** Nenhum documentava `wendkeep sync`,
+  `note repair-frontmatter`, `note repair-sections` nem as quatro seções de diagnóstico do
+  `doctor`; o português também não tinha `theme sync` nem `note relink`, e `change backlink`
+  faltava nos dois. Uma auditoria contra o CLI achou ainda quatro flags que existem no
+  código e não estavam documentadas: `verify --project`, `sensors --project`,
+  `lesson --change/--vault` e `continue --simple`. A seção de atualização prescrevia a
+  receita manual de quatro comandos que o `sync` substitui, e agora cobre npm **e** pnpm —
+  inclusive o cooldown que faz o comando de npm falhar num monorepo pnpm.
+
 ## [0.55.0] — 2026-07-25
 
 ### Fixed
