@@ -6,7 +6,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -62,5 +62,12 @@ test('npm pack: o tarball leva o inglês e o repositório volta ao português', 
       'o repositório voltou ao português após o pack');
   } finally {
     rmSync(outDir, { recursive: true, force: true });
+    // Se o postpack falhou, o assert acima já acusou — mas a árvore de trabalho não pode
+    // ficar com o inglês em README.md por causa de um teste. Restaura sem mascarar a falha.
+    const stash = join(ROOT, '.README.repo.bak');
+    if (existsSync(stash)) {
+      copyFileSync(stash, join(ROOT, 'README.md'));
+      rmSync(stash, { force: true });
+    }
   }
 });

@@ -4,6 +4,22 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.57.1] — 2026-07-25
+
+### Fixed
+
+- **A troca de README no empacotamento resiste a falha transitória de arquivo.** O CI ficou
+  vermelho em **windows-latest + node 22** (só nessa matriz — Windows 18/20 e as três de
+  Ubuntu passaram): o `postpack` não restaurou e o repositório ficou com o inglês em
+  `README.md`. É uma operação de arquivo falhando enquanto outro processo segura o handle,
+  a mesma classe do `rmSync` já conhecida neste projeto. A restauração passa a tentar
+  `rename` e, falhando, `copyFile` + `unlink`, com algumas tentativas curtas; esgotadas,
+  **falha ruidosamente** com `git checkout README.md` em vez de deixar a árvore trocada em
+  silêncio — o estado ruim aqui é o repositório de quem publica, e ele só descobriria
+  estranhando um `git status`. O teste de empacotamento passa a restaurar a árvore no
+  `finally`: continua detectando a falha pela asserção, mas deixa de ser ele próprio a causa
+  de um repositório sujo.
+
 ## [0.57.0] — 2026-07-25
 
 ### Fixed
