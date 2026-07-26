@@ -1,5 +1,5 @@
 <!-- wendkeep:skills:start -->
-<!-- wendkeep-version: 0.57.1; skills-sha256: c69f17a96cefc1f8a24a6bb6295bd4c0368c99f6d9f722f3ee6b95854729e8ad -->
+<!-- wendkeep-version: 0.58.0; skills-sha256: c69f17a96cefc1f8a24a6bb6295bd4c0368c99f6d9f722f3ee6b95854729e8ad -->
 ## wendkeep — process skills & loop
 
 This project uses the [wendkeep](https://github.com/rogersialves/wendkeep) harness. Work
@@ -38,10 +38,10 @@ CHANGELOG ↔ NPM ↔ GitHub **sempre na mesma versão**. A **tag `vX.Y.Z` é o 
 sem a tag pushada, o `release.yml` não cria a GitHub Release e a página fica atrás do npm.
 Esse foi um atrito recorrente (12/07, 16/07) — `npm publish` avulso publicava sem tag.
 
-**Automação (auto-tag-release):** `.github/workflows/auto-tag.yml` observa a `main`; quando o
-`package.json` traz uma versão sem tag correspondente, ele **cria a tag E a GitHub Release**
-(notas do CHANGELOG). Ou seja: merge de um PR que bumpa a versão → release automática. Ninguém
-mais depende de lembrar de pushar a tag.
+**Automação (auto-tag-release):** `.github/workflows/auto-tag.yml` observa a `main`, gera as
+notas da versão corrente diretamente do `CHANGELOG.md` e converge o estado remoto: cria a tag
+quando ausente e cria **ou atualiza** a GitHub Release mesmo quando a tag já existe. O job lê as
+notas publicadas de volta e falha se elas divergirem do changelog.
 
 **Fluxo do agente (só prepara):**
 1. `npm view wendkeep version` — alinhe `package.json`/`CHANGELOG`/tag a esse estado antes de bumpar.
@@ -54,6 +54,23 @@ mais depende de lembrar de pushar a tag.
 `npm publish` — neste caso a `auto-tag.yml` cobre a tag no push da `main`. Nunca deixe npm à
 frente da GitHub Release sem tag.
 
+**Fechamento obrigatório — CHANGELOG → GitHub Release:** não declare uma release concluída só
+porque npm e tag existem. A entrada `## [X.Y.Z]` do `CHANGELOG.md` deve ser o corpo efetivamente
+publicado em `vX.Y.Z`. Depois do merge/tag, confirme a execução verde do workflow e leia a Release
+de volta. Se uma entrada já publicada for corrigida, atualize a Release existente sem mover a tag:
+
+```powershell
+node scripts/print-release-notes.mjs X.Y.Z > RELEASE_NOTES.md
+gh release edit vX.Y.Z --notes-file RELEASE_NOTES.md
+gh release view vX.Y.Z --json body --jq .body
+Remove-Item RELEASE_NOTES.md
+```
+
+Para a versão corrente, `auto-tag.yml` faz create/update + readback automaticamente. Para uma
+versão histórica diferente da versão de `package.json`, o agente/mantenedor executa o fluxo acima
+explicitamente. A conclusão exige `package.json`, npm `latest`, tag e corpo da GitHub Release na
+mesma versão e com as mesmas notas relevantes do `CHANGELOG.md`.
+
 **Recuperação retroativa** (releases perdidas): `git tag -a vX.Y.Z <sha> -m "vX.Y.Z" && git push
 origin vX.Y.Z` no commit cujo `package.json` tem a versão — o `release.yml` monta a Release do
-CHANGELOG.
+CHANGELOG. Depois, aplique o fechamento obrigatório acima e confirme o corpo publicado.
