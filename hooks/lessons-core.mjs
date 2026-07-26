@@ -36,7 +36,7 @@ export function addLesson(vaultBase, { trigger, lesson, sourceChange = '', dateS
 
 // Compact <lessons> block of the most recent lessons (filename-sorted desc; a date prefix
 // makes that chronological). Budget-capped by `max`. '' when there are none.
-export function buildLessonsInjection(vaultBase, { max = 5 } = {}) {
+export function buildLessonsInjection(vaultBase, { max = 5, maxLineChars = 320 } = {}) {
   const dir = join(vaultBase, '.brain', 'lessons');
   let files;
   try { files = readdirSync(dir).filter((f) => f.endsWith('.md')).sort().reverse().slice(0, max); }
@@ -45,7 +45,13 @@ export function buildLessonsInjection(vaultBase, { max = 5 } = {}) {
   for (const f of files) {
     try {
       const body = readFileSync(join(dir, f), 'utf8').replace(/^---[\s\S]*?---\n/, '').trim().split('\n')[0];
-      if (body) lines.push(`- ${body}`);
+      if (body) {
+        const line = `- ${body}`;
+        const marker = ' … [linha resumida pelo budget]';
+        lines.push(line.length <= maxLineChars
+          ? line
+          : `${line.slice(0, Math.max(0, maxLineChars - marker.length))}${marker}`);
+      }
     } catch { /* skip */ }
   }
   return lines.length ? `<lessons>\nLições do projeto (de falhas anteriores):\n${lines.join('\n')}\n</lessons>` : '';
