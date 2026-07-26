@@ -36,7 +36,7 @@ Decisões, becos sem saída, o motivo de você ter escolhido X em vez de Y — s
 |---|---|
 | **Captura** — cada turno, no disco | Os hooks `SessionStart` / `Stop` escrevem cada sessão numa nota Markdown datada: prompts, iterações, arquivos tocados, wikilinks. |
 | **Deriva** — decisões, bugs, aprendizados | Puxados do transcript pra notas próprias, com backlink pra sessão. Seu histórico fica navegável, não arquivístico. |
-| **Recall** — injetado de volta | Um `CORE` + `DIGEST` com budget capado e todas as changes abertas são injetados no agente no próximo `SessionStart`. Ele retoma de onde parou. |
+| **Recall** — injetado de volta | O `CORE` canônico + o `SHARED_MEMORY` operacional, com budgets explícitos, são injetados no agente em `startup`, `/clear` e `/compact`; `DIGEST` fica como índice de recall profundo e fallback legado. |
 | **Custo** — quanto tudo custou | Preço por modelo, ciente de cache, por sessão — mais `cost --trend` com projeção run‑rate no cofre inteiro. |
 | **Multi‑agente** — um cofre, os dois agentes | O `init` wira os hooks de sessão no `.claude/settings.json` *e* no `.codex/hooks.json`, e cada nota é marcada com o agente que a escreveu: o Claude Code é detectado pelo ambiente dele, qualquer outro é registrado como Codex. Um grafo só, esteja você em qual agente estiver. |
 | **Local‑first** — sem nuvem, sem conta | Tudo é Markdown puro no seu disco. Um MCP opcional (`@bitbonsai/mcpvault`) deixa o agente ler/escrever o cofre. |
@@ -69,9 +69,9 @@ O `wendkeep init` é interativo e **idempotente**. Ele:
 
    Controle com `--companions <csv>` ou `--no-companions`. A camada de plugin do Claude Code (`extraKnownMarketplaces` + `enabledPlugins`) é wirada como bônus onde o companion tiver uma.
 6. Instala um **sistema de cores** no `.obsidian/` do cofre: um snippet CSS que colore notas por tipo (sessão/decisão/bug/aprendizado, via as `cssclasses` que os hooks emitem) mais grupos de cor do grafo por pasta. Merge não‑destrutivo em `appearance.json`/`graph.json`; pule com `--no-colors`.
-7. Semeia a **camada de memória curada**: `.brain/CORE.md` (a camada quente curada à mão, com as 3 seções obrigatórias) e `.brain/COMPACTION_PROTOCOL.md` (o guia do protocolo). As camadas automáticas (`DIGEST.md`, `index.jsonl`) são geradas pelos hooks. Valide a camada curada com `wendkeep validate-memory` (cap 25 linhas, 3 seções, sem segredos/PII).
+7. Semeia a **Shared Project Memory v2** sem sobrescrever artefatos existentes: `.brain/CORE.md` (verdade canônica curada à mão), `.brain/SHARED_MEMORY.md` (estado operacional gerado), `.brain/MEMORY_EVENTS.jsonl` (ledger append-only), `.brain/MEMORY_CANDIDATES.jsonl` (fila de curadoria) e `.brain/COMPACTION_PROTOCOL.md`. A outbox durável nasce sob `.brain/memory-outbox/` quando houver eventos; `DIGEST.md` e `index.jsonl` continuam como recall profundo. Tudo permanece local no cofre.
 8. Semeia a **camada de definições + skills**: `.brain/agents/` + `.brain/skills/` (fonte da verdade versionada), incluindo as skills de processo nativas `wk-workflow` / `wk-tdd` / `wk-debugging` / `wk-brainstorming` / `wk-planning` / `wk-verify` (algumas trazem templates, ex.: o `verdict-template.json` + prompt de revisor da `wk-verify`). O `init` roda o `wendkeep sync-defs` pra você, entregando as skills em `.claude/skills/` e `.agents/skills/`, e as definições de agent (`.brain/agents/*.toml`) em `.codex/agents/`, mais uma seção gerenciada no `AGENTS.md` que indexa as skills pro Codex; o `sync-defs --check` detecta cópias defasadas (rode `sync-defs` de novo após editar o `.brain`).
-9. Semeia o **ciclo change/spec**: as pastas `07-Specs/` + `08-Mudanças/` e um `wendkeep.sensors.json` nativo — um sensor crítico `memory-validation` (`npx wendkeep validate-memory`) mais um para cada `typecheck` / `test` / `lint` / `build` encontrado no seu `package.json`. Adicione os seus com `wendkeep sensors add`. É o que alimenta o `wendkeep change` / `wendkeep verify` — veja **Ciclo de mudança** abaixo.
+9. Semeia o **ciclo change/spec**: as pastas `07-Specs/` + `08-Mudanças/` e um `wendkeep.sensors.json` nativo — sensores críticos de validação/saúde da memória, mais um para cada `typecheck` / `test` / `lint` / `build` encontrado no seu `package.json`. O `memory-health` bloqueia entrega em corrupção, projeção divergente ou conflito ativo; outbox pendente e candidatos comuns geram aviso. Adicione sensores com `wendkeep sensors add`. É o que alimenta o `wendkeep change` / `wendkeep verify` — veja **Ciclo de mudança** abaixo.
 
 ```bash
 npx wendkeep init --vault "~/vaults/work" --project . --yes   # não-interativo
@@ -178,10 +178,44 @@ edição é sobrescrita; customização própria pertence a uma skill sua, que o
 | `wendkeep renumber-learnings` | Idem pra `06-Aprendizados`/`06-Learnings` → `APR-NNNN-<slug>`. |
 | `wendkeep lesson add "t" "l"` | Registra uma lição local do projeto (injetada no próximo SessionStart). `--change <slug>` amarra a lição a uma change; `--vault P`. |
 | `wendkeep sync-defs` | Copia `.brain/agents\|skills` pro projeto (`.codex/agents`, `.claude/skills`, `.agents/skills`); `--check` detecta drift, `--reseed` ressemeia as skills `wk-*` com os seeds da versão instalada. |
-| `wendkeep validate-memory [path]` | Valida `.brain/CORE.md` (cap 25, 3 seções, sem segredos/PII). |
+| `wendkeep memory status [--gate] --vault P` | Inspeciona o bundle v2 sem mutá-lo. `--gate` sai com código 1 apenas para estado bloqueante; avisos mantêm código 0. |
+| `wendkeep memory migrate [--apply] --vault P` | Converte um `SHARED_MEMORY.md` legado. É dry-run por padrão; `--apply` cria backup, transforma conteúdo legado em candidates e publica uma projeção v2 válida sem editar o CORE. |
+| `wendkeep memory repair --vault P` | Repara ledger parcial/corrompido sob lock, preservando os bytes originais em `.bak`, retendo eventos válidos e reprojetando o estado. |
+| `wendkeep memory promote <candidate> --vault P` | Promove um candidate por ID anexando um evento auditável; não edita o ledger no lugar. |
+| `wendkeep memory reject <candidate> --vault P` | Rejeita um candidate por ID anexando a decisão ao histórico auditável. |
+| `wendkeep validate-memory [path]` | Compatibilidade: valida somente `.brain/CORE.md` (cap 25, 3 seções, sem segredos/PII). Use `--vault <path>` para validar CORE + ledger + SHARED como bundle v2. |
 | `wendkeep theme sync [--vault P]` | Reaplica o sistema de cores (snippet CSS + grupos do grafo) num cofre existente — recupera o grafo cinza sem refazer o `init`. |
-| `wendkeep doctor [--vault P]` | Check de saúde do cofre. Além da integridade de sessões e registry, reporta em seções: `[links]` (órfãos do grafo), `[notas]` (frontmatter empilhado), `[preços]` (modelo sem preço na tabela, que fecharia a sessão com custo zero) e `[derivadas]` (seções do corpo desatualizadas) — cada uma com o comando de reparo ao lado. |
+| `wendkeep doctor [--vault P]` | Check read-only do cofre. Além de sessões/registry, links, notas, preços e derivadas, verifica o bundle v2 e indica `memory status --gate` ou `memory repair` quando necessário; o doctor nunca projeta nem repara por conta própria. |
 | `wendkeep --version` / `--help` | Versão / uso. |
+
+## Shared Project Memory v2
+
+A memória quente agora separa claramente autoria humana, estado operacional e evidência:
+
+- **`CORE.md` é canônico.** É o núcleo curto, curado à mão, com preferências duráveis, padrões ativos e pendências que nenhum projetor pode inferir ou sobrescrever.
+- **`SHARED_MEMORY.md` é operacional e gerado.** O hook `Stop` transforma o handoff da sessão em eventos sanitizados; o projetor reduz o ledger de modo determinístico e publica revision, cursor e hash verificáveis. Fatos só entram como `verified` quando há evidência local; relatos sem prova ficam `reported`, e disputas viram candidates para decisão humana.
+- **`MEMORY_EVENTS.jsonl` é a autoridade append-only.** Produtores publicam primeiro na outbox por criação exclusiva e o projetor serializa append + projeção sob lock. Repetir o mesmo `event_id`/payload é no-op; reutilizar o ID com bytes diferentes é corrupção observável.
+- **`MEMORY_CANDIDATES.jsonl` é a fila de curadoria.** Conflitos e conteúdo legado não são promovidos silenciosamente. `promote` e `reject` registram a decisão como novo evento.
+
+Os artefatos ficam somente em `.brain/`; a sanitização remove secrets, tokens, paths locais, transcripts e payloads de harness tanto antes da persistência quanto antes da injeção. Eventos carregam `project_id`, e um vault nunca aceita eventos de outro projeto.
+
+### Injeção e budgets
+
+`brain-inject` entrega a mesma revision/hash no `SessionStart` de `startup`, `/clear` e `/compact`, sempre com CORE e SHARED antes do contexto da change. O envelope total tem 24 KiB; CORE reserva até 4 KiB, SHARED até 6 KiB e cada linha até 320 caracteres. Sob pressão, lessons saem primeiro e depois changes não atuais. CORE e SHARED nunca sofrem corte de prefixo: uma camada ausente, inválida ou acima do budget vira um `<wk_memory_error>` visível e reparável.
+
+`DIGEST.md` não é mais o handoff operacional: permanece como ponte para `/brain-recall` e fallback de vault legado. Um vault sem SHARED recebe CORE+DIGEST com aviso de depreciação; migre durante a janela de compatibilidade:
+
+```bash
+wendkeep memory status --gate --vault .MeuApp-vault
+wendkeep memory migrate --vault .MeuApp-vault          # prévia, zero writes
+wendkeep memory migrate --apply --vault .MeuApp-vault  # backup + candidates + bundle v2
+```
+
+### Saúde e recuperação
+
+Use `wendkeep memory status --gate --vault <cofre>` no CI e antes de `verify`/`archive`. O sensor crítico `memory-health` bloqueia corrupção do ledger/outbox/bundle, lag de revision/cursor/hash e conflitos ativos. Outbox válida pendente ou candidate comum é recuperável e fica como warning, sem bloquear.
+
+Se o status bloquear, preserve a evidência e rode `wendkeep memory repair --vault <cofre>` para salvar backup do ledger corrompido, reter linhas válidas e reprojetar. Depois rode `status --gate` novamente. Conflitos exigem curadoria explícita com `memory promote <id>` ou `memory reject <id>`; o doctor apenas diagnostica.
 
 As notas de sessão usam um único snapshot vivo `## Agentes, tokens e custos`. Os hooks do agente principal e dos subagents recompõem o bloco atomicamente, incluindo custo, dimensões de tokens, reasoning e effort por modelo/origem.
 
@@ -292,11 +326,11 @@ comando grava um verdict trivial e o gate de sensores é a prova real.
 ## Como funciona
 
 ```
-sessão do agente ──hooks──▶ wendkeep ──▶ Markdown no cofre ──▶ índice .brain + grafo Obsidian
-   (Claude/Codex)           (Node)      (02-Sessões/…)         (CORE+DIGEST, backlinks)
+sessão do agente ──hooks──▶ wendkeep ──▶ Markdown no cofre ──▶ memória .brain + grafo Obsidian
+   (Claude/Codex)           (Node)      (02-Sessões/…)         (CORE+SHARED, ledger, backlinks)
 ```
 
-O settings.json do agente aponta cada hook pra `npx wendkeep hook …`; no Claude Code, os hooks do ciclo de mudança rodam o script instalado direto (`node` em `${CLAUDE_PROJECT_DIR}/node_modules/wendkeep/hooks/<name>.mjs`) quando o pacote está presente local, pulando uma resolução do npx a cada evento. O `.codex/hooks.json` usa sempre a forma `npx` — o `${CLAUDE_PROJECT_DIR}` não existe no Codex — com chaves de evento em PascalCase e o timeout em `timeoutSec`. No `Stop`, o wendkeep parseia o transcript, anexa o turno, atualiza a tabela de tokens/custo e (idempotentemente) emite qualquer nota de decisão/bug/aprendizado. No `SessionStart` — startup, `/clear` e `/compact` — o `brain-inject` injeta a memória curada (CORE + DIGEST), todas as changes abertas com suas pendências, o marcador global da change atual, as lições do projeto e o roteador `<wk_process>`. Claude, Codex ou outro agente podem assim retomar trabalho iniciado em outro lugar sem ocultar o restante do backlog.
+O settings.json do agente aponta cada hook pra `npx wendkeep hook …`; no Claude Code, os hooks do ciclo de mudança rodam o script instalado direto (`node` em `${CLAUDE_PROJECT_DIR}/node_modules/wendkeep/hooks/<name>.mjs`) quando o pacote está presente local, pulando uma resolução do npx a cada evento. O `.codex/hooks.json` usa sempre a forma `npx` — o `${CLAUDE_PROJECT_DIR}` não existe no Codex — com chaves de evento em PascalCase e o timeout em `timeoutSec`. No `Stop`, o wendkeep parseia o transcript, anexa o turno, atualiza tokens/custo, emite notas derivadas e publica o handoff sanitizado na outbox da memória. No `SessionStart` — startup, `/clear` e `/compact` — o `brain-inject` injeta CORE + SHARED, todas as changes abertas com suas pendências, o marcador global da change atual, as lições do projeto e o roteador `<wk_process>`. Claude, Codex ou outro agente podem assim retomar trabalho iniciado em outro lugar sem ocultar o restante do backlog.
 
 O **gate** do archive bloqueia a não ser que: o scaffold da change esteja preenchido (G0), nenhuma tarefa esteja aberta (G1), todo sensor crítico declarado esteja verde (com evidência fresca) e exista um `verdict.json` presente e atual. O `--force` dispensa só o G1 — o G0 é inescapável por design (uma change placeholder forçada uma vez cunhou um ADR falso), e nenhuma flag torna verde um sensor vermelho ou um verdict ausente. O agente é instruído a nunca usar por conta própria.
 
