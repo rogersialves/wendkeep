@@ -22,7 +22,7 @@ Process skills (full text in `.claude/skills/`, `.agents/skills/`, and the vault
 
 ## Contribuição — PR por implementação (regra do projeto)
 
-**Toda implementação vai por Pull Request. Nunca commite direto na `main`.** Cada change do
+**Toda implementação vai por Pull Request por padrão.** Commits diretos na `main` são permitidos quando o mantenedor os solicitar expressamente. Sem essa solicitação, cada change do
 loop a2 (ou correção de infra) nasce num branch `wk/<slug>`, vira PR e é revisada/merged pelo
 mantenedor. O merge na `main` é o gatilho da release (ver automação abaixo).
 
