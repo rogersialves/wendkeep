@@ -1,6 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { extractReleaseNotes } from '../src/release-changelog.mjs';
+
+const AUTO_TAG_WORKFLOW = readFileSync(new URL('../.github/workflows/auto-tag.yml', import.meta.url), 'utf8');
+const AGENT_RULES = readFileSync(new URL('../AGENTS.md', import.meta.url), 'utf8');
 
 const FIXTURE = `# Changelog
 
@@ -60,4 +64,35 @@ test('extractReleaseNotes: body is trimmed (no leading/trailing blank lines)', (
 
 test('extractReleaseNotes: throws when the version is absent', () => {
   assert.throws(() => extractReleaseNotes(FIXTURE, '9.9.9'), /9\.9\.9/);
+});
+
+test('auto-tag: existing tag still refreshes the GitHub Release from CHANGELOG', () => {
+  const tagBranch = AUTO_TAG_WORKFLOW.match(/if git rev-parse[\s\S]*?^\s*fi$/m)?.[0] || '';
+  assert.ok(tagBranch, 'workflow has an explicit existing/new tag branch');
+  assert.doesNotMatch(tagBranch, /\bexit\s+0\b/, 'an existing tag must not skip release refresh');
+  assert.ok(
+    AUTO_TAG_WORKFLOW.indexOf('scripts/print-release-notes.mjs') < AUTO_TAG_WORKFLOW.indexOf('if git rev-parse'),
+    'release notes are generated before the tag branch',
+  );
+  assert.ok(
+    AUTO_TAG_WORKFLOW.indexOf('gh release edit') > AUTO_TAG_WORKFLOW.indexOf(tagBranch),
+    'the existing-tag path reaches release edit',
+  );
+});
+
+test('auto-tag: release readback normalizes the extra newline emitted by gh', () => {
+  assert.match(AUTO_TAG_WORKFLOW, /PUBLISHED_RELEASE_NOTES\.md/);
+  assert.doesNotMatch(
+    AUTO_TAG_WORKFLOW,
+    /diff -u RELEASE_NOTES\.md PUBLISHED_RELEASE_NOTES\.md/,
+    'raw diff rejects an otherwise identical gh body because --jq appends one newline',
+  );
+  assert.match(AUTO_TAG_WORKFLOW, /trimEnd\(\)/, 'comparison canonicalizes trailing newlines');
+});
+
+test('AGENTS: release closure requires updating and reading back notes from CHANGELOG', () => {
+  assert.match(AGENT_RULES, /Fechamento obrigatório[\s\S]*CHANGELOG[\s\S]*GitHub Release/i);
+  assert.match(AGENT_RULES, /gh release edit\s+vX\.Y\.Z/);
+  assert.match(AGENT_RULES, /gh release view\s+vX\.Y\.Z/);
+  assert.match(AGENT_RULES, /não (?:declare|considere)[\s\S]*release[\s\S]*concluída/i);
 });
