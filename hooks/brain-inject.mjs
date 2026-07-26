@@ -12,6 +12,7 @@ import { buildLessonsInjection } from './lessons-core.mjs';
 import { getLocale } from './locale.mjs';
 import { resolveSessionEntry } from './session-identity.mjs';
 import { sanitizeMemoryText, validateSharedMemory } from './memory-schema.mjs';
+import { detectMemoryMode } from './memory-mode.mjs';
 import { validateCore } from '../src/validate-core.mjs';
 
 // The process ROUTER — the enforcement layer. The wk-* skills are passive files; without a
@@ -186,7 +187,7 @@ function budgetNotice(priority, layer, message) {
 
 export function buildInjection(vaultBase, input = {}) {
   const dir = brainDir(vaultBase);
-  const brain = existsSync(join(dir, 'SHARED_MEMORY.md')) ? buildV2Memory(dir) : buildLegacyMemory(dir);
+  const brain = detectMemoryMode(vaultBase).mode === 'v2' ? buildV2Memory(dir) : buildLegacyMemory(dir);
   const router = processRouter(getLocale(vaultBase).id);
   const { identity, entry } = resolveSessionEntry(vaultBase, input);
   const focus = identity.state === 'resolved' && entry?.change_slug

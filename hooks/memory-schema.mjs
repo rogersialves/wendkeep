@@ -293,3 +293,18 @@ export function validateSharedMemory(content, { eventIds } = {}) {
     sections: parsed.sections,
   };
 }
+
+/**
+ * Classify SHARED from its own bytes without accepting malformed v2 as legacy.
+ * Empty v2 sidecar files are intentionally not part of this pure classification;
+ * vault-level operational evidence is handled by memory-mode.mjs.
+ */
+export function classifySharedMemory(content) {
+  const text = String(content ?? '').replace(/\r\n/g, '\n');
+  if (validateSharedMemory(text).ok) return { mode: 'v2', reason: 'valid-v2' };
+  const hasV2Signature = /^(?:schema_version|event_cursor|state_hash)\s*:/m.test(text)
+    || /^# SHARED_MEMORY\s+[—-]\s+proje[cç][aã]o operacional gerada\s*$/mi.test(text);
+  return hasV2Signature
+    ? { mode: 'v2', reason: 'v2-signature' }
+    : { mode: 'legacy', reason: text.trim() ? 'legacy-shared' : 'shared-absent' };
+}

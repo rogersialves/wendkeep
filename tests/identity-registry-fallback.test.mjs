@@ -8,6 +8,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { resolveSessionIdentity } from '../hooks/session-identity.mjs';
 
+const AMBIENT_CODEX_THREAD_ID = process.env.CODEX_THREAD_ID;
+test.beforeEach(() => { delete process.env.CODEX_THREAD_ID; });
+test.afterEach(() => {
+  if (AMBIENT_CODEX_THREAD_ID === undefined) delete process.env.CODEX_THREAD_ID;
+  else process.env.CODEX_THREAD_ID = AMBIENT_CODEX_THREAD_ID;
+});
+
 const SID = '019f7764-7627-79a3-b609-65abaa36eedd';
 const TX = join(tmpdir(), 'wk-fallback-rollout.jsonl');
 

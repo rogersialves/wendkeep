@@ -92,6 +92,9 @@ test('init preserva SHARED legado byte-idêntico e apenas semeia artefatos ausen
     assert.equal(readFileSync(join(vault, '.brain', 'SHARED_MEMORY.md'), 'utf8'), legacy);
     assert.ok(existsSync(join(vault, '.brain', 'MEMORY_EVENTS.jsonl')));
     assert.ok(existsSync(join(vault, '.brain', 'MEMORY_CANDIDATES.jsonl')));
+    const gate = spawnSync(process.execPath, [BIN, 'memory', 'status', '--gate', '--vault', vault], { encoding: 'utf8' });
+    assert.equal(gate.status, 0, gate.stderr || gate.stdout);
+    assert.equal(JSON.parse(gate.stdout).status, 'legacy');
   } finally { rmSync(proj, { recursive: true, force: true }); }
 });
 

@@ -14,6 +14,7 @@ import { mutateSessionNote } from './session-note-io.mjs';
 import { applyDerivedSections, provenanceSessions } from './derived-sections.mjs';
 import { buildSessionMemoryEvents, collectLifecycleEvidence } from './memory-handoff.mjs';
 import { enqueueMemoryEvent, projectMemoryOutbox } from './memory-store.mjs';
+import { detectMemoryMode } from './memory-mode.mjs';
 import { sanitizeMemoryText } from './memory-schema.mjs';
 import {
   ensureDir,
@@ -799,6 +800,9 @@ function shouldFinalizeSession() {
 }
 
 export function commitSessionMemory(vaultBase, handoff, { projectOptions = {} } = {}) {
+  if (detectMemoryMode(vaultBase).mode === 'legacy') {
+    return { status: 'legacy', eventCount: 0, eventIds: [], checkpoint: null };
+  }
   const events = buildSessionMemoryEvents(handoff);
   const eventIds = events.map((event) => event.event_id);
   try {
