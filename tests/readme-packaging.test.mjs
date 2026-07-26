@@ -14,6 +14,20 @@ import { fileURLToPath } from 'node:url';
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const isPt = (s) => /Seu agente de código esquece/.test(s);
 const isEn = (s) => /Your AI coding agent forgets/.test(s);
+const GUIDE_SLUGS = [
+  'getting-started.md', 'changes-and-verification.md', 'memory.md',
+  'sessions-and-import.md', 'notes-and-knowledge.md', 'costs-and-observability.md',
+  'maintenance-and-diagnostics.md', 'verify.md', 'memory-migration.md',
+  'retroactive-import.md',
+];
+
+function filesUnder(dir, base = dir) {
+  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const absolute = join(dir, entry.name);
+    if (entry.isDirectory()) return filesUnder(absolute, base);
+    return [absolute.slice(base.length + 1).replaceAll('\\', '/')];
+  });
+}
 
 test('o repositório guarda o português como README.md e o inglês ao lado', () => {
   assert.ok(isPt(readFileSync(join(ROOT, 'README.md'), 'utf8')), 'README.md em português (GitHub)');
@@ -31,6 +45,13 @@ test('os dois READMEs apontam um para o outro, sem link morto', () => {
 test('os dois idiomas viajam no pacote', () => {
   const files = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')).files;
   for (const f of ['README.md', 'README.en.md']) assert.ok(files.includes(f), `${f} em files`);
+});
+
+test('DOC-5: somente os diretórios de guias bilíngues são adicionados ao pacote', () => {
+  const files = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')).files;
+  assert.ok(files.includes('docs/pt-BR/commands/*.md'), 'glob PT-BR em files');
+  assert.ok(files.includes('docs/en/commands/*.md'), 'glob EN em files');
+  assert.ok(!files.includes('docs'), 'o acervo histórico inteiro não pode viajar por acidente');
 });
 
 // Medido num projeto pnpm limpo, sem configuração alguma (pnpm 11.5.2):
@@ -71,9 +92,22 @@ test('npm pack: o tarball leva o inglês e o repositório volta ao português', 
     assert.equal(untar.status, 0, untar.stderr);
 
     const pkg = join(outDir, 'package');
+    const packedManifest = JSON.parse(readFileSync(join(pkg, 'package.json'), 'utf8'));
+    assert.equal(packedManifest.version, '0.58.2', 'DOC-5: o tarball deve declarar exatamente a release 0.58.2');
     assert.ok(isEn(readFileSync(join(pkg, 'README.md'), 'utf8')),
       'o README.md DO TARBALL é o inglês — é o que a página do npm renderiza');
     assert.ok(existsSync(join(pkg, 'README.en.md')), 'e o inglês também viaja pelo nome próprio');
+    for (const locale of ['pt-BR', 'en']) {
+      for (const guide of GUIDE_SLUGS) {
+        assert.ok(existsSync(join(pkg, 'docs', locale, 'commands', guide)),
+          `guia ausente no tarball: docs/${locale}/commands/${guide}`);
+      }
+    }
+    const expectedDocs = ['pt-BR', 'en']
+      .flatMap((locale) => GUIDE_SLUGS.map((guide) => `${locale}/commands/${guide}`))
+      .sort();
+    assert.deepEqual(filesUnder(join(pkg, 'docs')).sort(), expectedDocs,
+      'o tarball não pode incluir o acervo histórico de docs');
 
     // O prepack troca os arquivos; o postpack tem de restaurar.
     assert.ok(isPt(readFileSync(join(ROOT, 'README.md'), 'utf8')),

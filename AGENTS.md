@@ -32,6 +32,15 @@ mantenedor. O merge na `main` é o gatilho da release (ver automação abaixo).
 3. `git push origin wk/<slug>` e abra o PR (`gh pr create`) com resumo + entrada do CHANGELOG.
 4. Mantenedor revisa e faz merge. **Não faça self-merge sem revisão se a branch protection exigir.**
 
+## Documentação bilíngue (regra do projeto)
+
+Toda alteração em comando, flag, código de saída, fluxo, hook ou comportamento observável deve
+atualizar, no mesmo commit, o resumo do `README.md`/`README.en.md` e o par de guias PT-BR/EN
+correspondente sob `docs/pt-BR/commands/` e `docs/en/commands/`. Nenhum idioma pode ficar atrás.
+
+Esta regra é exclusiva do repositório WendKeep e fica fora do bloco gerenciado acima. Ela não deve
+ser propagada por `init`, `sync` ou `sync-defs` para o `AGENTS.md` de projetos consumidores.
+
 ## Release & publicação (regra do projeto)
 
 CHANGELOG ↔ NPM ↔ GitHub **sempre na mesma versão**. A **tag `vX.Y.Z` é o elo** que fecha isso:

@@ -156,41 +156,23 @@ stop reporting `defs stale` without a single skill having been updated. If you h
 `wk-*`, that edit is overwritten; your own customisation belongs in a skill of your own,
 which the reseed never touches.
 
-## Commands
+## Features by group
 
-| Command | What it does |
-|---|---|
-| `wendkeep init` | Set up wendkeep in a project (vault taxonomy + settings + MCP + skills). |
-| `wendkeep sync [--project P]` | **One-command update**: runs `init` → `sync-defs` → `doctor` on the current project, stopping at the first failing step. Install the package first (a running process cannot replace itself). `--vault P` · `--yes` to skip the companions picker. |
-| `wendkeep hook <name>` | Run a session hook; invoked by `settings.json` (reads agent JSON on stdin). |
-| `wendkeep change <sub>` | Change lifecycle: `new <slug> [--simple]` / `use <slug>` (switch focus) / `continue <archived> <new> [--simple]` / `bind <slug> --session <id>` / `list` (global backlog) / `show <slug>` / `status [slug]` / `done <id> [--change slug]` / `undone <id> [--change slug]` / `relink [--apply] [--json]` (repair change wikilinks; preview by default) / `diff [slug]` / `archive [slug] [--force]` / `abandon [slug]` (drop it, no ADR) / `backlink [--apply]` (inject the proposal backlink into orphan design/tasks/spec files). `diff`, `archive` and `abandon` fall back to the active change when you omit the slug; bare `status` lists every open one. |
-| `wendkeep verify [--deep] [--change s]` | Run the change's task sensors; `--deep` assembles the independent-verification package. `--change` targets a change other than the active one; `--project <root>` runs it from outside the root. |
-| `wendkeep spec <sub>` | `list` / `show <capability>` generated contracts; `effective [--change <slug>] [--json]` (living contract + delta; defaults to the active change); `migrate`; `rebase [--accept-current]` (stops on conflicts unless you accept the living spec's side). |
-| `wendkeep sensors <sub>` | `list` / `add <id> "<command>"` with `--severity` / `--type` / `--report` / `--name` / `--description` / `--project` — view/edit `wendkeep.sensors.json` (JSON Schema shipped). |
-| `wendkeep cost [opts]` | Aggregate AI-coding spend across the vault's sessions — total, by model, by day. `--since <date>` / `--top [N]` (priciest) / `--trend [day\|week\|month]` (+ run-rate projection) / `--write` (generate `00-Custo.md`) / `--json`. |
-| `wendkeep cost rebuild [opts]` | Recalculate historical parent + subagent costs from `SESSION_REGISTRY`. Dry-run by default; `--apply` updates the notes and writes `.brain/COST_REBUILD.json`. Also `--session <id\|file>` / `--limit n` / `--json`. |
-| `wendkeep stats [--vault P]` | One shareable line: sessions · prompts · spend · span · models (`--json`). |
-| `wendkeep import [opts]` | **Retroactive memory** — backfill past **Claude + Codex** sessions into the vault (deduped by `session_id`). `--source all\|claude\|codex` / `--stamp-ids` / `--rescan-decisions` / `--from <dir>` / `--codex-from <dir>` / `--since d` / `--limit n` / `--dry-run` / `--json`. |
-| `wendkeep session list\|show\|use` | List the multi-session registry, show one conversation, or move only the human focus in `CURRENT_SESSION.md`. |
-| `wendkeep dashboard [--force]` | (Re)generate the vault's folder-filtered Bases + the `00-Dashboard` MOC. |
-| `wendkeep note new --type bug\|learning "<title>"` | Create a **numbered** derived note (`BUG-`/`APR-NNNN`) in the month folder and print its vault path. `--date YYYY-MM-DD`. |
-| `wendkeep note relink [--apply]` | Backfill provenance on orphan derived notes (BUG/APR with no source session), inheriting the modal session of their type/month cohort. Preview by default. |
-| `wendkeep note repair-frontmatter [--apply]` | Merge stacked frontmatter blocks in a session note — damage from the concurrent writes of pre-0.50 versions. Base keys from the original block, values from the newest; preview by default · `--json`. |
-| `wendkeep note repair-sections [--apply]` | Rebuild the `## Decisions/Bugs/Learnings generated in this session` sections from the linked derived notes — the body used to lag behind the closing block. Preview by default · `--json`. |
-| `wendkeep renumber-decisions` | Renumber `04-Decisões` to `ADR-NNNN-<slug>` chronologically, move notes out of legacy `DIA N` subfolders into the month folder, and rewrite wikilinks. Preview by default; `--apply` / `--json`. |
-| `wendkeep renumber-bugs` | Same for `05-Bugs` → `BUG-NNNN-<slug>`. |
-| `wendkeep renumber-learnings` | Same for `06-Aprendizados`/`06-Learnings` → `APR-NNNN-<slug>`. |
-| `wendkeep lesson add "t" "l"` | Record a project-local lesson (injected at the next SessionStart). `--change <slug>` ties the lesson to a change; `--vault P`. |
-| `wendkeep sync-defs` | Copy `.brain/agents\|skills` into `.codex/agents`, `.claude/skills`, `.agents/skills`; `--check` detects drift, `--reseed` refreshes the `wk-*` skills from the installed version's seeds. |
-| `wendkeep memory status [--gate] --vault P` | Inspect the v2 bundle without mutating it. `--gate` exits 1 only for a blocking state; warnings keep exit code 0. |
-| `wendkeep memory migrate [--apply] --vault P` | Convert a legacy `SHARED_MEMORY.md`. Dry-run by default; `--apply` creates a backup, turns legacy content into candidates, and publishes a valid v2 projection without editing CORE. |
-| `wendkeep memory repair --vault P` | Repair a partial/corrupt ledger under lock, preserving the original bytes in a `.bak`, retaining valid events, and re-projecting state. |
-| `wendkeep memory promote <candidate> --vault P` | Promote a candidate by ID by appending an auditable event; never edits the ledger in place. |
-| `wendkeep memory reject <candidate> --vault P` | Reject a candidate by ID by appending the decision to the audit history. |
-| `wendkeep validate-memory [path]` | Compatibility mode: validate `.brain/CORE.md` only (cap 25, 3 sections, no secrets/PII). Use `--vault <path>` to validate CORE + ledger + SHARED as a v2 bundle. |
-| `wendkeep theme sync [--vault P]` | Re-apply the colour system (CSS snippet + graph groups) to an existing vault — recovers a grey graph without re-running `init`. |
-| `wendkeep doctor [--vault P]` | Read-only vault health check. Beyond sessions/registry, links, notes, prices, and derived sections, it checks the v2 bundle and points to `memory status --gate` or `memory repair`; doctor never projects or repairs by itself. |
-| `wendkeep --version` / `--help` | Version / usage. |
+The README is the map; the guides provide syntax, options, exit codes, examples, and diagnosis.
+
+| Group | Use it for | Detailed guide |
+|---|---|---|
+| **Installation and updates** | `init`, `sync`, companions, and the first project↔vault binding | [Installation and first use](https://github.com/rogersialves/wendkeep/blob/main/docs/en/commands/getting-started.md) |
+| **Changes and verification** | `change`, specs, sensors, TDD, evidence, and archive | [Changes and verification](https://github.com/rogersialves/wendkeep/blob/main/docs/en/commands/changes-and-verification.md) |
+| **Shared memory** | CORE, SHARED, status, validation, repair, and curation | [Memory](https://github.com/rogersialves/wendkeep/blob/main/docs/en/commands/memory.md) |
+| **Sessions and import** | hooks, registry, session focus, and Claude/Codex backfill | [Sessions and import](https://github.com/rogersialves/wendkeep/blob/main/docs/en/commands/sessions-and-import.md) |
+| **Notes and knowledge** | BUG/APR/ADR, repairs, renumbering, lessons, and dashboard | [Notes and knowledge](https://github.com/rogersialves/wendkeep/blob/main/docs/en/commands/notes-and-knowledge.md) |
+| **Costs and observability** | stats, aggregation, trends, and historical rebuild | [Costs and observability](https://github.com/rogersialves/wendkeep/blob/main/docs/en/commands/costs-and-observability.md) |
+| **Maintenance and diagnostics** | doctor, definition drift, theme, version, and help | [Maintenance and diagnostics](https://github.com/rogersialves/wendkeep/blob/main/docs/en/commands/maintenance-and-diagnostics.md) |
+
+Operations that deserve step-by-step guidance: [verify and exits 0/1/2](https://github.com/rogersialves/wendkeep/blob/main/docs/en/commands/verify.md),
+[legacy-memory migration](https://github.com/rogersialves/wendkeep/blob/main/docs/en/commands/memory-migration.md), and
+[safe retroactive import](https://github.com/rogersialves/wendkeep/blob/main/docs/en/commands/retroactive-import.md).
 
 ## Shared Project Memory v2
 
