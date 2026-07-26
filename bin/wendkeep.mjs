@@ -94,9 +94,11 @@ Usage:
                            in session notes from the linked derived notes — the body used to lag
                            behind the closing block. Dry-run by default · --apply · --json.
   wendkeep lesson add "t" "l"   Record a project-local lesson (injected at SessionStart).
+  wendkeep memory <sub>          Shared memory v2: status | migrate [--apply] | repair |
+                           promote <candidate> | reject <candidate>. --vault P.
   wendkeep validate-memory [path]  Validate .brain/CORE.md against the compaction
-                           protocol (cap 25, 3 sections, no secrets/PII). Uses
-                           --vault <path> or OBSIDIAN_VAULT_PATH if no path given.
+                           protocol (cap 25, 3 sections, no secrets/PII).
+                           --vault <path> validates the complete v2 bundle.
   wendkeep sync-defs [opts]    Copy versioned defs from the vault's .brain into the
                            project: .brain/agents/*.toml -> .codex/agents,
                            .brain/skills/<name> -> .claude/skills + .agents/skills. --vault P --project P.
@@ -180,8 +182,18 @@ async function main() {
       break;
     }
     case 'validate-memory': {
-      const { runValidateMemory } = await import('../src/validate-core.mjs');
-      runValidateMemory(rest);
+      if (rest.includes('--vault') || rest.some((item) => item.startsWith('--vault='))) {
+        const { runValidateMemoryBundle } = await import('../src/memory.mjs');
+        runValidateMemoryBundle(rest);
+      } else {
+        const { runValidateMemory } = await import('../src/validate-core.mjs');
+        runValidateMemory(rest);
+      }
+      break;
+    }
+    case 'memory': {
+      const { runMemory } = await import('../src/memory.mjs');
+      runMemory(rest);
       break;
     }
     case 'sync-defs': {

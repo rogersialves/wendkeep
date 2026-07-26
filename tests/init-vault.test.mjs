@@ -65,6 +65,36 @@ test('init persists a provider-neutral project binding and stable vault identity
   } finally { rmSync(proj, { recursive: true, force: true }); }
 });
 
+test('init semeia memória v2 só quando ausente e re-init preserva todos os bytes', () => {
+  const proj = mkdtempSync(join(tmpdir(), 'wk-memory-v2-init-'));
+  const vault = join(proj, '.vault');
+  const run = () => spawnSync(process.execPath, [BIN, 'init', '--project', proj, '--vault', vault, '--no-mcp', '--no-companions', '--no-colors', '--yes'], { encoding: 'utf8' });
+  try {
+    assert.equal(run().status, 0);
+    const names = ['CORE.md', 'SHARED_MEMORY.md', 'MEMORY_EVENTS.jsonl', 'MEMORY_CANDIDATES.jsonl'];
+    const before = Object.fromEntries(names.map((name) => [name, readFileSync(join(vault, '.brain', name), 'utf8')]));
+    writeFileSync(join(vault, '.brain', 'MEMORY_EVENTS.jsonl'), '{"user":"owned"}\n');
+    before['MEMORY_EVENTS.jsonl'] = '{"user":"owned"}\n';
+    assert.equal(run().status, 0);
+    for (const name of names) assert.equal(readFileSync(join(vault, '.brain', name), 'utf8'), before[name], `${name} byte-idêntico`);
+  } finally { rmSync(proj, { recursive: true, force: true }); }
+});
+
+test('init preserva SHARED legado byte-idêntico e apenas semeia artefatos ausentes', () => {
+  const proj = mkdtempSync(join(tmpdir(), 'wk-memory-legacy-init-'));
+  const vault = join(proj, '.vault');
+  mkdirSync(join(vault, '.brain'), { recursive: true });
+  const legacy = '# memória compartilhada legada\n\n- não reescrever\n';
+  writeFileSync(join(vault, '.brain', 'SHARED_MEMORY.md'), legacy);
+  try {
+    const result = spawnSync(process.execPath, [BIN, 'init', '--project', proj, '--vault', vault, '--no-mcp', '--no-companions', '--no-colors', '--yes'], { encoding: 'utf8' });
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(readFileSync(join(vault, '.brain', 'SHARED_MEMORY.md'), 'utf8'), legacy);
+    assert.ok(existsSync(join(vault, '.brain', 'MEMORY_EVENTS.jsonl')));
+    assert.ok(existsSync(join(vault, '.brain', 'MEMORY_CANDIDATES.jsonl')));
+  } finally { rmSync(proj, { recursive: true, force: true }); }
+});
+
 test('init migrates a legacy Claude-only vault registration without creating a second vault', () => {
   const proj = mkdtempSync(join(tmpdir(), 'wk-legacy-binding-'));
   const legacyVault = join(proj, '.ExistingBrain');
