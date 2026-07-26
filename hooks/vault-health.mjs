@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { existsSync, readFileSync } from 'fs';
+import { existsSync, readFileSync, readdirSync } from 'fs';
 import { join } from 'path';
 import { pathToFileURL } from 'url';
 import {
@@ -11,6 +11,9 @@ import {
   wikilinkFromRel,
 } from './obsidian-common.mjs';
 import { getLocale } from './locale.mjs';
+import { parseSharedMemory, validateMemoryEvent } from './memory-schema.mjs';
+import { reduceMemoryEvents } from './memory-store.mjs';
+import { validateMemoryBundle } from '../src/validate-memory.mjs';
 
 const DEFAULT_PENDING_PATTERNS = [
   /^- \[ \] Revisar resumo da sessão$/i,
@@ -91,6 +94,124 @@ function linkedNotesFromSession(content) {
     if (!notes.includes(match[1])) notes.push(match[1]);
   }
   return notes;
+}
+
+const MEMORY_STATUS_COMMAND = 'wendkeep memory status --gate --vault <vault>';
+const MEMORY_REPAIR_COMMAND = 'wendkeep memory repair --vault <vault>';
+
+function readJsonLines(path, label) {
+  if (!existsSync(path)) return { items: [], errors: [] };
+  const raw = readFileSync(path, 'utf8').replace(/\r\n/g, '\n');
+  const lines = raw.endsWith('\n') ? raw.split('\n').slice(0, -1) : raw.split('\n');
+  const items = [];
+  const errors = [];
+  lines.forEach((line, index) => {
+    if (!line.trim()) {
+      if (raw) errors.push(`${label} linha ${index + 1} está vazia.`);
+      return;
+    }
+    try { items.push(JSON.parse(line)); }
+    catch (error) { errors.push(`${label} linha ${index + 1} contém JSON inválido/parcial: ${error.message}`); }
+  });
+  return { items, errors };
+}
+
+function inspectOutbox(vaultBase, projectId) {
+  const dir = join(vaultBase, '.brain', 'memory-outbox');
+  if (!existsSync(dir)) return { count: 0, errors: [] };
+  const files = readdirSync(dir).filter((name) => name.endsWith('.json')).sort();
+  const errors = [];
+  for (const name of files) {
+    const path = join(dir, name);
+    try {
+      const event = JSON.parse(readFileSync(path, 'utf8'));
+      const validation = validateMemoryEvent(event, projectId ? { projectId } : {});
+      if (!validation.ok) errors.push(`${name}: ${validation.errors.join(' ')}`);
+    } catch (error) {
+      errors.push(`${name}: JSON inválido: ${error.message}`);
+    }
+  }
+  return { count: files.length, errors };
+}
+
+/**
+ * Read-only consistency check for the local memory-v2 bundle. It intentionally
+ * does not acquire MEMORY.lock or invoke the projector/repair paths.
+ */
+export function checkMemoryBundle(vaultBase) {
+  const brain = join(vaultBase, '.brain');
+  const bundle = validateMemoryBundle(vaultBase);
+  const failures = [];
+  const warnings = [];
+  const parsedShared = typeof bundle.shared?.content === 'string'
+    ? parseSharedMemory(bundle.shared.content)
+    : { metadata: {} };
+  const metadata = parsedShared.metadata || {};
+  const outbox = inspectOutbox(vaultBase, bundle.project?.projectId);
+  const candidates = readJsonLines(join(brain, 'MEMORY_CANDIDATES.jsonl'), 'MEMORY_CANDIDATES.jsonl');
+
+  const ledgerCorrupt = (bundle.ledger?.errors || []).length > 0;
+  if (ledgerCorrupt) {
+    for (const error of bundle.ledger.errors) {
+      failures.push(`${error} Execute com segurança: ${MEMORY_REPAIR_COMMAND}.`);
+    }
+  }
+  for (const error of bundle.errors || []) {
+    if (error.startsWith('ledger:')) continue;
+    failures.push(`${error} Inspecione com: ${MEMORY_STATUS_COMMAND}.`);
+  }
+
+  if (outbox.errors.length) {
+    failures.push(`Outbox corrompida (${outbox.errors.join('; ')}). Inspecione com: ${MEMORY_STATUS_COMMAND}.`);
+  }
+  if (candidates.errors.length) {
+    failures.push(`${candidates.errors.join('; ')} Execute com segurança: ${MEMORY_REPAIR_COMMAND}.`);
+  }
+
+  let replay = null;
+  if (bundle.ledger?.ok) {
+    try { replay = reduceMemoryEvents(bundle.ledger.events); }
+    catch (error) {
+      failures.push(`Ledger não pode ser reduzido: ${error.message}. Execute com segurança: ${MEMORY_REPAIR_COMMAND}.`);
+    }
+  }
+  if (replay && bundle.shared?.ok) {
+    const divergences = [];
+    if (metadata.revision !== replay.revision) divergences.push(`revision ${metadata.revision} != ${replay.revision}`);
+    if (metadata.event_cursor !== replay.eventCursor) divergences.push(`event_cursor ${metadata.event_cursor} != ${replay.eventCursor}`);
+    if (metadata.state_hash !== replay.stateHash) divergences.push(`state_hash ${metadata.state_hash} != ${replay.stateHash}`);
+    if (divergences.length) {
+      failures.push(`Projeção SHARED stale/lag (${divergences.join('; ')}). Inspecione com: ${MEMORY_STATUS_COMMAND}.`);
+    }
+  }
+
+  const unresolved = candidates.items.filter((item) => !['resolved', 'rejected', 'superseded'].includes(item?.status));
+  const activeConflicts = unresolved.filter((item) => item?.reason === 'conflict');
+  const ordinaryCandidates = unresolved.filter((item) => item?.reason !== 'conflict');
+  if (activeConflicts.length) {
+    failures.push(`${activeConflicts.length} conflito ativo em chave operacional (${activeConflicts.map((item) => item.memory_key || item.candidate_id).join(', ')}). Inspecione com: ${MEMORY_STATUS_COMMAND}.`);
+  }
+  if (outbox.count) warnings.push(`${outbox.count} evento(s) pendente(s) na outbox; execute o projector quando seguro.`);
+  if (ordinaryCandidates.length) warnings.push(`${ordinaryCandidates.length} candidate(s) aguardando curadoria humana.`);
+  for (const warning of bundle.warnings || []) warnings.push(warning);
+
+  const ok = failures.length === 0;
+  return {
+    ok,
+    status: ok ? (warnings.length ? 'warning' : 'healthy') : 'blocked',
+    failures,
+    warnings,
+    metrics: {
+      schemaVersion: metadata.schema_version ?? null,
+      revision: metadata.revision ?? null,
+      eventCursor: metadata.event_cursor ?? null,
+      stateHash: metadata.state_hash ?? null,
+      ledgerEvents: bundle.ledger?.events?.length || 0,
+      pendingOutbox: outbox.count,
+      candidates: candidates.items.length,
+      activeConflicts: activeConflicts.length,
+    },
+  };
 }
 
 function checkSession({ vaultBase, sessionRel, control, registry }) {
@@ -181,6 +302,21 @@ export function runVaultHealth({ vaultBase, session = '' }) {
     return total + (existsSync(dir) ? listMarkdownFiles(dir).length : 0);
   }, 0);
 
+  const memoryMarkers = [
+    join(vaultBase, '.brain', 'SHARED_MEMORY.md'),
+    join(vaultBase, '.brain', 'MEMORY_EVENTS.jsonl'),
+    join(vaultBase, '.brain', 'MEMORY_CANDIDATES.jsonl'),
+    join(vaultBase, '.brain', 'memory-outbox'),
+  ];
+  let memory = { status: 'legacy', metrics: {} };
+  if (memoryMarkers.some((path) => existsSync(path))) {
+    memory = checkMemoryBundle(vaultBase);
+    failures.push(...memory.failures.map((item) => `Memória: ${item}`));
+    warnings.push(...memory.warnings.map((item) => `Memória: ${item}`));
+  } else {
+    warnings.push(`Bundle de memória v2 ausente (vault legado); inspecione com: ${MEMORY_STATUS_COMMAND}.`);
+  }
+
   return {
     ok: failures.length === 0,
     session: sessionRel,
@@ -190,7 +326,9 @@ export function runVaultHealth({ vaultBase, session = '' }) {
       ...sessionResult.metrics,
       registrySessions: Object.keys(registry.sessions || {}).length,
       derivedNotes: derivedCount,
+      memory: memory.metrics,
     },
+    memoryStatus: memory.status,
   };
 }
 

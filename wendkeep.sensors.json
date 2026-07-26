@@ -24,6 +24,14 @@
       "severity": "critical",
       "type": "command",
       "command": "node --test tests/release-changelog.test.mjs"
+    },
+    {
+      "id": "memory-health",
+      "name": "Shared memory health",
+      "description": "Blocks delivery only on memory corruption, projection lag or active conflict",
+      "severity": "critical",
+      "type": "command",
+      "command": "node bin/wendkeep.mjs memory status --gate --vault .WendKeep-vault"
     }
   ]
 }
