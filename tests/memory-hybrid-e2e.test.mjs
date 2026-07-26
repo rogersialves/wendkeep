@@ -1,264 +1,227 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { renderSharedMemory } from '../hooks/memory-schema.mjs';
+
+import {
+  SYNTHETIC_MEMORY,
+  SYNTHETIC_MEMORY_FACTS,
+  cleanSyntheticHookEnv,
+  seedSyntheticHybridLifecycle,
+} from './fixtures/synthetic-memory-lifecycle.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const STOP = join(ROOT, 'hooks', 'session-stop.mjs');
 const START = join(ROOT, 'hooks', 'session-start.mjs');
 const INJECT = join(ROOT, 'hooks', 'brain-inject.mjs');
-const SID = '019f9cea-b7c1-79d0-9ac5-931e56192b52';
-const SUMMARY = [
-  'Concluído. Halley finalizou com verdict ok:true, cobrindo 7/7 requisitos.',
-  'Change arquivada como ADR-0107. Sensores backend-unit, contracts-openapi e campaign-import-backend verdes.',
-  'E2E confirmou worker, OCR, MinIO privado e materialização 1|1|1|1.',
-  'Commit local em main: 9fbbbb1bdad630cd4145ea4a916ef8f240ed603f. Nenhum push realizado.',
-  'A próxima change será a interface de revisão.',
-].join(' ');
 
-const NOTE = `---
-type: session
-session_id: "${SID}"
-provider: codex
-status: active
-ended_at:
----
-
-# 22:22 - files mentioned by the user
-
-## Iterações
-
-## Decisões geradas nesta sessão
-
-Nenhuma decisão registrada ainda.
-
-## Bugs gerados nesta sessão
-
-Nenhum bug registrado ainda.
-
-## Aprendizados gerados nesta sessão
-
-Nenhum aprendizado registrado ainda.
-
-## Pendências
-
-Nenhuma.
-`;
-
-function seed({ withSeededSession = true } = {}) {
-  const project = mkdtempSync(join(tmpdir(), 'wk-memory-e2e-project-'));
-  const vault = join(project, '.Vendiva-vault');
-  const brain = join(vault, '.brain');
-  const sessionRel = '02-Sessões/2026/07-JUL/DIA 25/22-22-files-mentioned-by-the-user.md';
-  const sessionPath = join(vault, ...sessionRel.split('/'));
-  const transcript = join(project, `rollout-${SID}.jsonl`);
-  const archived = join(vault, '08-Mudanças', '_arquivo', '2026-07-25-campanhas-importacao');
-  const decisions = join(vault, '04-Decisões', '2026', '07-JUL');
-  mkdirSync(brain, { recursive: true });
-  mkdirSync(dirname(sessionPath), { recursive: true });
-  mkdirSync(archived, { recursive: true });
-  mkdirSync(decisions, { recursive: true });
-
-  writeFileSync(join(project, '.wendkeep.json'), JSON.stringify({ schemaVersion: 1, projectId: 'vendiva', vault: '.Vendiva-vault' }));
-  writeFileSync(join(brain, 'PROJECT.json'), JSON.stringify({ schemaVersion: 1, projectId: 'vendiva' }));
-  writeFileSync(join(brain, 'CORE.md'), [
-    '# CORE', '', '## Preferências do Usuário', '- responder em pt-BR', '',
-    '## Padrões Ativos', '- memória local e auditável', '', '## Pendências Abertas', '- consultar SHARED diretamente', '',
-  ].join('\n'));
-  if (withSeededSession) writeFileSync(sessionPath, NOTE);
-  writeFileSync(join(archived, 'verdict.json'), JSON.stringify({
-    ok: true,
-    coverage: Array.from({ length: 7 }, (_, index) => ({ req: `REQ-${index + 1}`, covered: true })),
-  }));
-  writeFileSync(join(archived, 'evidencia.json'), JSON.stringify([
-    { id: 'backend-unit', status: 'green' },
-    { id: 'contracts-openapi', status: 'green' },
-    { id: 'campaign-import-backend', status: 'green' },
-  ]));
-  writeFileSync(join(decisions, 'ADR-0107-campanhas-importacao.md'), '# ADR-0107 — campanhas-importacao\n');
-
-  const events = [
-    { type: 'session_meta', timestamp: '2026-07-25T22:22:00.000Z', payload: { id: SID, cwd: project, model: 'gpt-5.6-sol', model_provider: 'openai' } },
-    { type: 'event_msg', timestamp: '2026-07-26T03:20:40.000Z', payload: { type: 'task_started', turn_id: 'turn-final' } },
-    { type: 'event_msg', timestamp: '2026-07-26T03:20:41.000Z', payload: { type: 'user_message', turn_id: 'turn-final', message: 'Finalize e registre o handoff.' } },
-    { type: 'event_msg', timestamp: '2026-07-26T03:20:47.000Z', payload: { type: 'agent_message', turn_id: 'turn-final', message: SUMMARY } },
-  ];
-  writeFileSync(transcript, `${events.map((event) => JSON.stringify(event)).join('\n')}\n`);
-  writeFileSync(join(brain, 'MEMORY_EVENTS.jsonl'), '');
-  writeFileSync(join(brain, 'MEMORY_CANDIDATES.jsonl'), '');
-  writeFileSync(join(brain, 'SHARED_MEMORY.md'), renderSharedMemory());
-  if (withSeededSession) {
-    writeFileSync(join(brain, 'SESSION_REGISTRY.json'), JSON.stringify({
-      version: 2,
-      sessions: {
-        [SID]: {
-          session_file: sessionRel,
-          status: 'active',
-          provider: 'codex',
-          transcript_path: transcript,
-          transcript_id: SID,
-          change_slug: 'campanhas-importacao',
-          activation_id: 'activation-1',
-          active_activation_id: 'activation-1',
-          activation_epoch: 1,
-          last_turn_sequence: 1,
-          activations: {
-            'activation-1': {
-              activation_id: 'activation-1', epoch: 1, status: 'active', last_turn_sequence: 1,
-              transcript_id: SID, transcript_path: transcript, provider: 'codex',
-            },
-          },
-        },
-      },
-    }));
-  }
-  return { project, vault, brain, sessionPath, transcript };
+function stopInput(project, transcript, activationId = SYNTHETIC_MEMORY.activationOne) {
+  return {
+    hook_event_name: 'Stop',
+    cwd: project,
+    session_id: SYNTHETIC_MEMORY.sessionId,
+    transcript_path: transcript,
+    turn_id: SYNTHETIC_MEMORY.turnOne,
+    turn_sequence: 1,
+    activation_id: activationId,
+  };
 }
 
-function cleanEnv(vault) {
-  const env = { ...process.env, OBSIDIAN_VAULT_PATH: vault, CLAUDECODE: '', CLAUDE_CODE_SESSION_ID: '' };
-  delete env.CODEX_THREAD_ID;
-  return env;
+function runHook(script, { project, vault, input }) {
+  return spawnSync(process.execPath, [script], {
+    cwd: project,
+    env: cleanSyntheticHookEnv(vault),
+    encoding: 'utf8',
+    input: JSON.stringify(input),
+  });
 }
 
-test('[req:MEM-HYB-1] [req:MEM-HYB-2] [req:MEM-HYB-3] Vendiva-like Stop becomes direct memory in the next SessionStart', () => {
-  const { project, vault, brain, sessionPath, transcript } = seed();
+function escapeRegExp(value) {
+  return value.replace(/[|\\{}()[\]^$+*?.-]/g, '\\$&');
+}
+
+test('[req:MEM-STOP-7] synthetic Stop projects lifecycle memory and remains idempotent', () => {
+  const { project, vault, brain, sessionPath, transcript } = seedSyntheticHybridLifecycle();
   const corePath = join(brain, 'CORE.md');
   const coreBeforeStop = readFileSync(corePath);
-  const stop = spawnSync(process.execPath, [STOP], {
-    cwd: project,
-    env: cleanEnv(vault),
-    encoding: 'utf8',
-    input: JSON.stringify({
-      hook_event_name: 'Stop', cwd: project, session_id: SID, transcript_path: transcript,
-      turn_id: 'turn-final', turn_sequence: 1, activation_id: 'activation-1',
-    }),
+  const stop = runHook(STOP, {
+    project,
+    vault,
+    input: stopInput(project, transcript),
   });
 
   assert.equal(stop.status, 0, stop.stderr);
   assert.doesNotThrow(() => JSON.parse(stop.stdout || '{}'));
   const stopOutput = JSON.parse(stop.stdout || '{}');
-  assert.equal(stopOutput.systemMessage, undefined, `${stop.stderr}\n${stop.stdout}`);
+  assert.equal(stopOutput.systemMessage, undefined, '[wk-fixture] successful Stop stays silent');
   assert.match(readFileSync(sessionPath, 'utf8'), /status: done/);
-  const registry = JSON.parse(readFileSync(join(brain, 'SESSION_REGISTRY.json'), 'utf8'));
-  assert.equal(registry.sessions[SID].memory_status, 'projected');
-  assert.equal(registry.sessions[SID].memory_checkpoint.revision >= 5, true);
-  assert.deepEqual(readFileSync(corePath), coreBeforeStop, 'Stop alterou bytes do CORE curado');
+
+  const registryPath = join(brain, 'SESSION_REGISTRY.json');
+  const registry = JSON.parse(readFileSync(registryPath, 'utf8'));
+  assert.equal(registry.sessions[SYNTHETIC_MEMORY.sessionId].memory_status, 'projected');
+  assert.equal(
+    registry.sessions[SYNTHETIC_MEMORY.sessionId].memory_checkpoint.revision >= 5,
+    true,
+  );
+  assert.deepEqual(
+    readFileSync(corePath),
+    coreBeforeStop,
+    '[wk-fixture] runtime projection must not curate CORE',
+  );
 
   const shared = readFileSync(join(brain, 'SHARED_MEMORY.md'), 'utf8');
-  for (const fact of ['ADR-0107', '7/7', 'backend-unit', 'MinIO privado', '9fbbbb1bdad630cd4145ea4a916ef8f240ed603f', 'Nenhum push', 'interface de revisão']) {
-    assert.match(shared, new RegExp(fact.replace(/[|]/g, '\\|'), 'i'), `SHARED perdeu: ${fact}`);
+  for (const fact of SYNTHETIC_MEMORY_FACTS) {
+    assert.match(
+      shared,
+      new RegExp(escapeRegExp(fact), 'i'),
+      '[wk-fixture] projected fact is present in shared memory',
+    );
   }
 
   const noteMtime = statSync(sessionPath).mtimeMs;
-  const ledgerBefore = readFileSync(join(brain, 'MEMORY_EVENTS.jsonl'), 'utf8');
-  const repeated = spawnSync(process.execPath, [STOP], {
-    cwd: project,
-    env: cleanEnv(vault),
-    encoding: 'utf8',
-    input: JSON.stringify({
-      hook_event_name: 'Stop', cwd: project, session_id: SID, transcript_path: transcript,
-      turn_id: 'turn-final', turn_sequence: 1, activation_id: 'activation-1',
-    }),
+  const ledgerPath = join(brain, 'MEMORY_EVENTS.jsonl');
+  const ledgerBefore = readFileSync(ledgerPath);
+  const repeated = runHook(STOP, {
+    project,
+    vault,
+    input: stopInput(project, transcript),
   });
-  assert.equal(repeated.status, 0);
-  assert.equal(statSync(sessionPath).mtimeMs, noteMtime, 'Stop repetido não reescreve a nota');
-  assert.equal(readFileSync(join(brain, 'MEMORY_EVENTS.jsonl'), 'utf8'), ledgerBefore, 'Stop repetido não reapenda memória');
 
-  const start = spawnSync(process.execPath, [INJECT], {
-    cwd: project,
-    env: cleanEnv(vault),
-    encoding: 'utf8',
-    input: JSON.stringify({ hook_event_name: 'SessionStart', source: 'startup', cwd: project, session_id: 'next-session' }),
+  assert.equal(repeated.status, 0, repeated.stderr);
+  assert.equal(
+    statSync(sessionPath).mtimeMs,
+    noteMtime,
+    '[wk-fixture] repeated Stop must not rewrite the note',
+  );
+  assert.equal(
+    readFileSync(ledgerPath, 'utf8'),
+    ledgerBefore.toString('utf8'),
+    '[wk-fixture] repeated Stop must not duplicate ledger events',
+  );
+
+  const inject = runHook(INJECT, {
+    project,
+    vault,
+    input: {
+      hook_event_name: 'UserPromptSubmit',
+      source: 'startup',
+      cwd: project,
+      session_id: 'wk-fixture-example-injected-session',
+    },
   });
-  assert.equal(start.status, 0, start.stderr);
-  assert.deepEqual(readFileSync(corePath), coreBeforeStop, 'SessionStart seguinte alterou bytes do CORE curado');
-  const context = JSON.parse(start.stdout).hookSpecificOutput.additionalContext;
+  assert.equal(inject.status, 0, inject.stderr);
+  assert.deepEqual(
+    readFileSync(corePath),
+    coreBeforeStop,
+    '[wk-fixture] injection must not mutate CORE',
+  );
+  const context = JSON.parse(inject.stdout).hookSpecificOutput.additionalContext;
   assert.match(context, /<brain_memory version="2"/);
-  for (const fact of ['ADR-0107', '7/7', 'backend-unit', 'MinIO privado', '9fbbbb1bdad630cd4145ea4a916ef8f240ed603f', 'Nenhum push', 'interface de revisão']) {
-    assert.match(context, new RegExp(fact.replace(/[|]/g, '\\|'), 'i'), `SessionStart perdeu: ${fact}`);
+  for (const fact of SYNTHETIC_MEMORY_FACTS) {
+    assert.match(
+      context,
+      new RegExp(escapeRegExp(fact), 'i'),
+      '[wk-fixture] injected context contains projected memory',
+    );
   }
 });
 
-test('[req:MEM-HYB-7] [req:HOOK-MEM-1] real Stop stays exit-0/JSON and records degraded checkpoint when projector lock is busy', () => {
-  const { project, vault, brain, transcript } = seed();
+test('[req:MEM-STOP-7] synthetic busy projector preserves active session and durable outbox', () => {
+  const { project, vault, brain, transcript } = seedSyntheticHybridLifecycle();
   mkdirSync(join(brain, 'MEMORY.lock'));
-  const stop = spawnSync(process.execPath, [STOP], {
-    cwd: project,
-    env: cleanEnv(vault),
-    encoding: 'utf8',
-    input: JSON.stringify({
-      hook_event_name: 'Stop', cwd: project, session_id: SID, transcript_path: transcript,
-      turn_id: 'turn-final', turn_sequence: 1, activation_id: 'activation-1',
-    }),
+  const stop = runHook(STOP, {
+    project,
+    vault,
+    input: stopInput(project, transcript),
   });
 
   assert.equal(stop.status, 0, stop.stderr);
   const output = JSON.parse(stop.stdout || '{}');
   assert.match(output.systemMessage, /memória compartilhada degradada|outbox/i);
   const registry = JSON.parse(readFileSync(join(brain, 'SESSION_REGISTRY.json'), 'utf8'));
-  assert.equal(registry.sessions[SID].status, 'done');
-  assert.equal(registry.sessions[SID].memory_status, 'degraded');
-  assert.equal(registry.sessions[SID].memory_checkpoint, undefined);
+  assert.equal(registry.sessions[SYNTHETIC_MEMORY.sessionId].status, 'active');
+  assert.equal(registry.sessions[SYNTHETIC_MEMORY.sessionId].memory_status, 'degraded');
+  assert.equal(registry.sessions[SYNTHETIC_MEMORY.sessionId].memory_checkpoint, undefined);
   assert.ok(readdirSync(join(brain, 'memory-outbox')).some((name) => name.endsWith('.json')));
 });
 
-test('[req:HOOK-MEM-1] real late Stop N cannot rewrite activation N+1 note, registry, ledger or checkpoint', () => {
-  const { project, vault, brain, transcript } = seed({ withSeededSession: false });
-  const startN = spawnSync(process.execPath, [START], {
-    cwd: project,
-    env: cleanEnv(vault),
-    encoding: 'utf8',
-    input: JSON.stringify({
-      hook_event_name: 'SessionStart', cwd: project, session_id: SID, transcript_path: transcript,
-      activation_id: 'activation-1', source: 'startup',
-    }),
+test('[req:MEM-STOP-7] synthetic late Stop cannot overwrite a newer activation', () => {
+  const { project, vault, brain, transcript } = seedSyntheticHybridLifecycle({
+    withSeededSession: false,
   });
-  assert.equal(startN.status, 0, startN.stderr);
-  assert.doesNotThrow(() => JSON.parse(startN.stdout || '{}'));
+  const startOne = runHook(START, {
+    project,
+    vault,
+    input: {
+      hook_event_name: 'SessionStart',
+      cwd: project,
+      session_id: SYNTHETIC_MEMORY.sessionId,
+      transcript_path: transcript,
+      activation_id: SYNTHETIC_MEMORY.activationOne,
+      source: 'startup',
+    },
+  });
+  assert.equal(startOne.status, 0, startOne.stderr);
+  assert.doesNotThrow(() => JSON.parse(startOne.stdout || '{}'));
 
   const registryPath = join(brain, 'SESSION_REGISTRY.json');
-  const registryN = JSON.parse(readFileSync(registryPath, 'utf8'));
-  assert.equal(registryN.sessions[SID].active_activation_id, 'activation-1');
-  assert.equal(registryN.sessions[SID].activations['activation-1'].epoch, 1);
+  const registryOne = JSON.parse(readFileSync(registryPath, 'utf8'));
+  assert.equal(
+    registryOne.sessions[SYNTHETIC_MEMORY.sessionId].active_activation_id,
+    SYNTHETIC_MEMORY.activationOne,
+  );
+  assert.equal(
+    registryOne.sessions[SYNTHETIC_MEMORY.sessionId]
+      .activations[SYNTHETIC_MEMORY.activationOne].epoch,
+    1,
+  );
 
-  const startNPlusOne = spawnSync(process.execPath, [START], {
-    cwd: project,
-    env: cleanEnv(vault),
-    encoding: 'utf8',
-    input: JSON.stringify({
-      hook_event_name: 'SessionStart', cwd: project, session_id: SID, transcript_path: transcript,
-      activation_id: 'activation-2', source: 'compact',
-    }),
+  const startTwo = runHook(START, {
+    project,
+    vault,
+    input: {
+      hook_event_name: 'SessionStart',
+      cwd: project,
+      session_id: SYNTHETIC_MEMORY.sessionId,
+      transcript_path: transcript,
+      activation_id: SYNTHETIC_MEMORY.activationTwo,
+      source: 'startup',
+    },
   });
-  assert.equal(startNPlusOne.status, 0, startNPlusOne.stderr);
-  assert.doesNotThrow(() => JSON.parse(startNPlusOne.stdout || '{}'));
+  assert.equal(startTwo.status, 0, startTwo.stderr);
+  assert.doesNotThrow(() => JSON.parse(startTwo.stdout || '{}'));
 
   const ledgerPath = join(brain, 'MEMORY_EVENTS.jsonl');
-  const registryNPlusOne = JSON.parse(readFileSync(registryPath, 'utf8'));
-  assert.equal(registryNPlusOne.sessions[SID].active_activation_id, 'activation-2');
-  assert.equal(registryNPlusOne.sessions[SID].activations['activation-2'].epoch, 2);
-  const sessionPath = join(vault, ...registryNPlusOne.sessions[SID].session_file.split('/'));
-
+  const registryTwo = JSON.parse(readFileSync(registryPath, 'utf8'));
+  assert.equal(
+    registryTwo.sessions[SYNTHETIC_MEMORY.sessionId].active_activation_id,
+    SYNTHETIC_MEMORY.activationTwo,
+  );
+  assert.equal(
+    registryTwo.sessions[SYNTHETIC_MEMORY.sessionId]
+      .activations[SYNTHETIC_MEMORY.activationTwo].epoch,
+    2,
+  );
+  const sessionPath = join(
+    vault,
+    ...registryTwo.sessions[SYNTHETIC_MEMORY.sessionId].session_file.split('/'),
+  );
   const before = {
     note: readFileSync(sessionPath),
     registry: readFileSync(registryPath),
     ledger: readFileSync(ledgerPath),
-    checkpoint: Buffer.from(JSON.stringify(registryNPlusOne.sessions[SID].memory_checkpoint ?? null)),
+    checkpoint: Buffer.from(JSON.stringify(
+      registryTwo.sessions[SYNTHETIC_MEMORY.sessionId].memory_checkpoint ?? null,
+    )),
   };
+
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 25);
-  const late = spawnSync(process.execPath, [STOP], {
-    cwd: project,
-    env: cleanEnv(vault),
-    encoding: 'utf8',
-    input: JSON.stringify({
-      hook_event_name: 'Stop', cwd: project, session_id: SID, transcript_path: transcript,
-      turn_id: 'turn-final', turn_sequence: 1, activation_id: 'activation-1',
-    }),
+  const late = runHook(STOP, {
+    project,
+    vault,
+    input: stopInput(project, transcript, SYNTHETIC_MEMORY.activationOne),
   });
 
   assert.equal(late.status, 0, late.stderr);
@@ -268,8 +231,10 @@ test('[req:HOOK-MEM-1] real late Stop N cannot rewrite activation N+1 note, regi
   assert.deepEqual(readFileSync(ledgerPath), before.ledger);
   const registryAfterLateStop = JSON.parse(readFileSync(registryPath, 'utf8'));
   assert.deepEqual(
-    Buffer.from(JSON.stringify(registryAfterLateStop.sessions[SID].memory_checkpoint ?? null)),
+    Buffer.from(JSON.stringify(
+      registryAfterLateStop.sessions[SYNTHETIC_MEMORY.sessionId].memory_checkpoint ?? null,
+    )),
     before.checkpoint,
-    'Stop N não pode alterar o checkpoint de N+1',
+    '[wk-fixture] stale Stop must preserve the newer checkpoint',
   );
 });

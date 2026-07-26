@@ -33,6 +33,12 @@ npx wendkeep --help
 ## Opções e códigos de saída
 
 - `doctor` é read-only; exit `0` aceita warnings recuperáveis e exit não zero indica falha.
+- Em v2, `doctor`/`memory status --gate` correlacionam `last_memory_attempt` (mode, disposition,
+  event IDs e checkpoint) com outbox, ledger e SHARED; não inferem saúde só pela revision atual.
+- `revision: 0` após migração válida, sem attempt v2, é saudável. Attempt `degraded` cujos eventos
+  continuam duráveis na outbox/ledger é warning recuperável.
+- Attempt ambíguo, event ID perdido (ausente de ledger e outbox), estado `projected` apenas na
+  outbox ou checkpoint divergente são falhas bloqueantes.
 - `sync-defs --check` detecta drift sem gravar; `--reseed` restaura skills `wk-*` do pacote.
 - `theme sync` reaplica snippet CSS e grupos do grafo sem recriar o cofre.
 - `wendkeep --version` imprime a versão executada; `wendkeep --help` lista a interface pública.
@@ -51,13 +57,18 @@ npx wendkeep memory status --gate --vault .MeuApp-vault
 ## Resultado esperado
 
 O doctor nomeia sessões, registry, links, notas, preços, derivadas e memória como saudáveis ou
-fornece um comando específico de diagnóstico/reparo. Nenhum reparo é aplicado implicitamente.
+fornece um comando específico de diagnóstico/reparo. Na memória, ele distingue vazio inicial
+válido, replay pendente recuperável e lifecycle perdido/divergente. Nenhum reparo é aplicado
+implicitamente nem o conteúdo privado do erro do projector é reproduzido no relatório.
 
 ## Erros comuns e diagnóstico
 
 - `no vault`: execute da raiz vinculada ou passe `--vault`.
 - `defs stale`: confirme a versão e rode `sync-defs --reseed`.
 - Vault legado: é warning não bloqueante; planeje `memory migrate --apply` separadamente.
+- `degraded` + outbox íntegra: warning; preserve a outbox e permita replay idempotente.
+- `ambiguous`, publicação perdida ou checkpoint divergente: bloqueante; preserve registry, ledger,
+  outbox e SHARED para correlacionar `last_memory_attempt` antes de reparar.
 - Bundle corrompido: preserve a evidência e use `memory status --gate` antes de `memory repair`.
 
 ## Próximos passos

@@ -42,13 +42,14 @@ function runHook(script, vault, input) {
   });
 }
 
-test('[req:MEM-HYB-4] [req:HOOK-MEM-1] late stop cannot close or promote over a newer activation', () => {
+test('[req:MEM-HYB-4] [req:MEM-STOP-4] late stop cannot close or promote over a newer activation', () => {
   const first = openActivation(emptyRegistry(), session('s1', 'act-1', 4));
   const second = openActivation(first, session('s1', 'act-2', 0));
 
   const result = applyStopActivation(second, {
     session_id: 's1',
     activation_id: 'act-1',
+    turn_id: 'turn-4',
     turn_sequence: 4,
     ended_at: '2026-07-26T03:30:00Z',
   });
@@ -61,14 +62,14 @@ test('[req:MEM-HYB-4] [req:HOOK-MEM-1] late stop cannot close or promote over a 
   assert.equal(result.canPromoteMemory, false);
 });
 
-test('[req:MEM-HYB-4] current activation rejects a stop older than its last observed turn', () => {
+test('[req:MEM-HYB-4] [req:MEM-STOP-4] current activation rejects a stop older than its last observed turn', () => {
   const opened = openActivation(emptyRegistry(), session('s1', 'act-1', 3));
   const advanced = advanceActivationTurn(opened, {
     session_id: 's1', activation_id: 'act-1', turn_sequence: 7,
   });
 
   const result = applyStopActivation(advanced, {
-    session_id: 's1', activation_id: 'act-1', turn_sequence: 6,
+    session_id: 's1', activation_id: 'act-1', turn_id: 'turn-6', turn_sequence: 6,
   });
 
   assert.equal(result.sessions.s1.active_activation_id, 'act-1');
@@ -77,23 +78,88 @@ test('[req:MEM-HYB-4] current activation rejects a stop older than its last obse
   assert.equal(result.canPromoteMemory, false);
 });
 
-test('[req:HOOK-MEM-1] matching activation and non-older turn closes exactly that activation', () => {
+test('[req:MEM-STOP-2] non-consecutive native prompt replay is a causal no-op', () => {
+  const opened = openActivation(emptyRegistry(), session('s1', 'act-1'));
+  const first = advanceActivationTurn(opened, {
+    session_id: 's1', turn_id: 'turn-a',
+  });
+  const second = advanceActivationTurn(first, {
+    session_id: 's1', turn_id: 'turn-b',
+  });
+  const replay = advanceActivationTurn(second, {
+    session_id: 's1', turn_id: 'turn-a',
+  });
+
+  assert.equal(replay.sessions.s1.last_turn_sequence, 2);
+  assert.equal(replay.sessions.s1.last_prompt_turn_id, 'turn-b');
+  assert.deepEqual(replay.sessions.s1.turn_sequences, { 'turn-a': 1, 'turn-b': 2 });
+  assert.equal(replay.sessions.s1.activations['act-1'].last_turn_sequence, 2);
+  assert.equal(replay.sessions.s1.activations['act-1'].last_prompt_turn_id, 'turn-b');
+
+  const stop = applyStopActivation(replay, {
+    session_id: 's1', activation_id: 'act-1', turn_id: 'turn-b', turn_sequence: 2,
+  });
+  assert.equal(stop.stopDisposition, 'applied');
+  assert.equal(stop.canPromoteMemory, true);
+});
+
+test('[req:MEM-STOP-2] pre-patch registry deduplicates its last native turn before recovery', () => {
+  const prePatch = openActivation(emptyRegistry(), {
+    ...session('s1', 'legacy-act', 1), transcript_id: 'rollout-1', transcript_path: 'one.jsonl',
+  });
+  const legacyEntry = prePatch.sessions.s1;
+  legacyEntry.last_turn_id = 'turn-a';
+  legacyEntry.last_turn_sequence = 1;
+  legacyEntry.active_activation_id = '';
+  legacyEntry.activations['legacy-act'].status = 'done';
+  delete legacyEntry.last_prompt_turn_id;
+  delete legacyEntry.turn_sequences;
+
+  const replay = advanceActivationTurn(prePatch, {
+    session_id: 's1',
+    turn_id: 'turn-a',
+    recovery_activation_id: 'must-not-open',
+    transcript_id: 'rollout-1',
+    transcript_path: 'one.jsonl',
+  });
+  assert.equal(replay.sessions.s1.last_turn_sequence, 1);
+  assert.equal(replay.sessions.s1.active_activation_id, '');
+  assert.equal(replay.sessions.s1.activations['must-not-open'], undefined);
+
+  const nextTurn = advanceActivationTurn(replay, {
+    session_id: 's1',
+    turn_id: 'turn-b',
+    recovery_activation_id: 'recovery-act',
+    transcript_id: 'rollout-1',
+    transcript_path: 'one.jsonl',
+  });
+  assert.equal(nextTurn.sessions.s1.last_turn_sequence, 2);
+  assert.equal(nextTurn.sessions.s1.active_activation_id, 'recovery-act');
+  const stop = applyStopActivation(nextTurn, {
+    session_id: 's1', activation_id: 'recovery-act', turn_id: 'turn-b', turn_sequence: 2,
+  });
+  assert.equal(stop.stopDisposition, 'applied');
+});
+
+test('[req:HOOK-MEM-1] [req:MEM-STOP-2] matching turn is acknowledged without closing its SessionStart epoch', () => {
   const opened = openActivation(emptyRegistry(), session('s1', 'act-1', 3));
   const result = applyStopActivation(opened, {
     session_id: 's1',
     activation_id: 'act-1',
+    turn_id: 'turn-4',
     turn_sequence: 4,
     ended_at: '2026-07-26T03:30:00Z',
   });
 
-  assert.equal(result.sessions.s1.active_activation_id, '');
-  assert.equal(result.sessions.s1.activations['act-1'].status, 'done');
+  assert.equal(result.sessions.s1.active_activation_id, 'act-1');
+  assert.equal(result.sessions.s1.activations['act-1'].status, 'active');
   assert.equal(result.sessions.s1.activations['act-1'].last_turn_sequence, 4);
+  assert.equal(result.sessions.s1.activations['act-1'].last_stop_turn_id, 'turn-4');
   assert.equal(result.stopDisposition, 'applied');
   assert.equal(result.canPromoteMemory, true);
 });
 
-test('[req:HOOK-MEM-1] Stop resolves only the activation proven by its transcript identity', () => {
+test('[req:HOOK-MEM-1] [req:MEM-STOP-4] implicit Stop resolves only the active transcript-compatible activation', () => {
   const first = openActivation(emptyRegistry(), {
     ...session('s1', 'act-1', 4), transcript_id: 'rollout-1', transcript_path: 'one.jsonl',
   });
@@ -103,7 +169,10 @@ test('[req:HOOK-MEM-1] Stop resolves only the activation proven by its transcrip
 
   assert.equal(resolveStopActivation(second, {
     session_id: 's1', transcript_id: 'rollout-1', transcript_path: 'one.jsonl',
-  }), 'act-1');
+  }), '');
+  assert.equal(resolveStopActivation(second, {
+    session_id: 's1', transcript_id: 'rollout-2', transcript_path: 'two.jsonl',
+  }), 'act-2');
   assert.equal(resolveStopActivation(second, {
     session_id: 's1', transcript_id: 'unknown', transcript_path: 'unknown.jsonl',
   }), '');
@@ -113,7 +182,75 @@ test('[req:HOOK-MEM-1] Stop resolves only the activation proven by its transcrip
   });
   assert.equal(resolveStopActivation(ambiguous, {
     session_id: 's1', transcript_id: 'rollout-1', transcript_path: 'one.jsonl',
-  }), '');
+  }), 'act-2');
+});
+
+test('[req:MEM-STOP-3] repeated Stop for the same native turn is an explicit duplicate', () => {
+  const opened = openActivation(emptyRegistry(), {
+    ...session('s1', 'act-1', 2), transcript_id: 'rollout-1', transcript_path: 'one.jsonl',
+  });
+  const first = applyStopActivation(opened, {
+    session_id: 's1', activation_id: 'act-1', turn_id: 'turn-2', turn_sequence: 2,
+  });
+  const duplicate = applyStopActivation(first, {
+    session_id: 's1', activation_id: 'act-1', turn_id: 'turn-2', turn_sequence: 2,
+  });
+
+  assert.equal(first.stopDisposition, 'applied');
+  assert.equal(duplicate.stopDisposition, 'duplicate');
+  assert.equal(duplicate.canPromoteMemory, false);
+  assert.equal(duplicate.sessions.s1.active_activation_id, 'act-1');
+});
+
+test('[req:MEM-STOP-2] recovery activation opens exactly once when a prompt finds a closed legacy epoch', () => {
+  const legacy = openActivation(emptyRegistry(), {
+    ...session('s1', 'legacy-act', 1), transcript_id: 'rollout-1', transcript_path: 'one.jsonl',
+  });
+  legacy.sessions.s1.activations['legacy-act'].status = 'done';
+  legacy.sessions.s1.active_activation_id = '';
+  legacy.sessions.s1.last_turn_id = 'turn-1';
+
+  const recovered = advanceActivationTurn(legacy, {
+    session_id: 's1',
+    turn_id: 'turn-2',
+    turn_sequence: 2,
+    recovery_activation_id: 'recovery-act-1',
+    transcript_id: 'rollout-1',
+    transcript_path: 'one.jsonl',
+  });
+  const duplicatePrompt = advanceActivationTurn(recovered, {
+    session_id: 's1',
+    turn_id: 'turn-2',
+    turn_sequence: 2,
+    recovery_activation_id: 'recovery-act-2',
+    transcript_id: 'rollout-1',
+    transcript_path: 'one.jsonl',
+  });
+
+  assert.equal(recovered.sessions.s1.active_activation_id, 'recovery-act-1');
+  assert.equal(duplicatePrompt.sessions.s1.active_activation_id, 'recovery-act-1');
+  assert.equal(duplicatePrompt.sessions.s1.activation_epoch, 2);
+  assert.equal(duplicatePrompt.sessions.s1.activations['recovery-act-2'], undefined);
+});
+
+test('[req:MEM-STOP-4] Stop from before the active epoch floor is superseded without an external activation id', () => {
+  const first = openActivation(emptyRegistry(), {
+    ...session('s1', 'act-1', 4), transcript_id: 'rollout-1', transcript_path: 'one.jsonl',
+  });
+  first.sessions.s1.last_turn_id = 'turn-4';
+  const second = openActivation(first, {
+    ...session('s1', 'act-2', 5), transcript_id: 'rollout-1', transcript_path: 'one.jsonl',
+  });
+  const activeId = resolveStopActivation(second, {
+    session_id: 's1', transcript_id: 'rollout-1', transcript_path: 'one.jsonl',
+  });
+  const late = applyStopActivation(second, {
+    session_id: 's1', activation_id: activeId, turn_id: 'turn-4', turn_sequence: 4,
+  });
+
+  assert.equal(activeId, 'act-2');
+  assert.equal(late.stopDisposition, 'superseded');
+  assert.equal(late.sessions.s1.active_activation_id, 'act-2');
 });
 
 test('[req:MEM-HYB-4] registry v2 without activation fields remains readable', () => {
@@ -183,7 +320,7 @@ test('[req:HOOK-MEM-1] SessionStart opens epochs and UserPromptSubmit only advan
     const entry = registry.sessions[sessionId];
     assert.equal(entry.activation_epoch, 2);
     assert.equal(entry.active_activation_id, 'act-2');
-    assert.equal(entry.last_turn_sequence, 0);
+    assert.equal(entry.last_turn_sequence, 3);
     assert.equal(entry.activations['act-1'].last_turn_sequence, 3);
     assert.equal(entry.activations['act-1'].status, 'superseded');
     assert.equal(entry.activations['act-2'].status, 'active');

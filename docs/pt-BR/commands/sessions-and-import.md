@@ -4,8 +4,8 @@
 
 ## Objetivo
 
-Entender como hooks capturam sessões ao vivo, como o registry seleciona conversas e quando usar a
-importação retroativa.
+Entender como os hooks capturam sessões ao vivo, como activation/turno preservam causalidade no
+registry e quando usar a importação retroativa.
 
 ## Quando usar
 
@@ -35,6 +35,16 @@ npx wendkeep import [opções]
 ## Opções e códigos de saída
 
 - `wendkeep hook <name>` lê o payload do agente em stdin; nomes válidos aparecem em `--help`.
+- `SessionStart` abre uma activation, isto é, um epoch que continua ativo por vários `Stop`; só um
+  novo `SessionStart` torna o epoch anterior superseded.
+- `UserPromptSubmit` avança o turno nativo da activation ativa. Se encontrar um registry legado
+  com o epoch fechado, abre exatamente uma activation de recuperação; repetir o mesmo prompt não
+  abre outra.
+- No Codex, `session_id`, o `turn_id` nativo e a ordem observada no transcript bastam para resolver
+  o turno. O payload do hook não precisa inventar `activation_id` nem `turn_sequence`.
+- `Stop` aceita somente o turno comprovado pelo transcript e pela activation ativa compatível.
+  Duplicatas são no-op; Stops stale/superseded não publicam memória nem sobrescrevem o checkpoint
+  de um epoch mais novo.
 - `session list` lê `SESSION_REGISTRY`; `show` exibe uma sessão e `use` muda apenas o foco humano
   em `CURRENT_SESSION.md`.
 - `import --source all|claude|codex`, `--since`, `--limit`, `--from` e `--codex-from` limitam escopo.
@@ -54,12 +64,17 @@ npx wendkeep import --source codex --since 2026-07-01 --dry-run --json
 ## Resultado esperado
 
 Cada sessão canônica aponta para provider, transcript, arquivo de nota e custos correspondentes.
-Importações repetidas do mesmo `session_id` são deduplicadas; o foco humano não encerra nem altera
-a identidade da sessão ativa dos hooks.
+O registry mantém um epoch de `SessionStart` por activation e o turno nativo mais recente; vários
+`Stop` podem confirmar turnos do mesmo epoch sem fechá-lo. Importações repetidas do mesmo
+`session_id` são deduplicadas; o foco humano não encerra nem altera a identidade dos hooks.
 
 ## Erros comuns e diagnóstico
 
 - Sessão ausente: confira provider, path do transcript e registry antes de importar novamente.
+- `Stop ambiguous`: o `turn_id` não foi comprovado pelo transcript ou nenhuma activation ativa
+  compatível foi encontrada; o attempt fica observável, mas não publica memória.
+- Stop atrasado aparece como `stale_turn`/`superseded`: o epoch mais novo e seu checkpoint são
+  preservados; não force a reaplicação do payload antigo.
 - Duplicatas de forks: limite por fonte/data e revise `forked_from_id`/`source.subagent`.
 - Codex não captura: aprove os hooks e reinicie a sessão após `sync`.
 - Custo contaminado: valide `session_id → session_file → transcript_path → provider`.

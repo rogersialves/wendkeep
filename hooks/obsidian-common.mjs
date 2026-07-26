@@ -355,7 +355,7 @@ export function mutateSessionRegistry(vaultBase, mutator, { timeoutMs = 2000 } =
 function meaningfulPatch(patch = {}) {
   const protectedNonEmpty = new Set(['session_file', 'transcript_path', 'transcript_id', 'provider', 'started_at', 'change_slug', 'activation_id']);
   return Object.fromEntries(Object.entries(patch).filter(([key, value]) => {
-    if (key === 'advance_turn_sequence' || key === 'turn_sequence') return false;
+    if (['advance_turn_sequence', 'turn_sequence', 'turn_id', 'last_turn_sequence', 'recovery_activation_id', 'recovery_started_at'].includes(key)) return false;
     if (value === undefined || value === null) return false;
     if (value === '' && protectedNonEmpty.has(key)) return false;
     return true;
@@ -390,9 +390,13 @@ export function openActivation(registry, session = {}, explicitActivationId = ''
 
   const current = next.sessions[sessionId] || {};
   const activations = { ...(current.activations || {}) };
+  const openedAfterSequence = nonNegativeSequence(
+    session.opened_after_turn_sequence,
+    nonNegativeSequence(current.last_turn_sequence, 0),
+  );
   const requestedSequence = nonNegativeSequence(
     session.turn_sequence ?? session.last_turn_sequence,
-    0,
+    openedAfterSequence,
   );
 
   if (current.active_activation_id === activationId && activations[activationId]?.status === 'active') {
@@ -430,7 +434,9 @@ export function openActivation(registry, session = {}, explicitActivationId = ''
     epoch,
     status: 'active',
     started_at: session.activation_started_at || session.started_at || '',
-    last_turn_sequence: requestedSequence,
+    opened_after_turn_sequence: openedAfterSequence,
+    ...(current.last_turn_id ? { opened_after_turn_id: current.last_turn_id } : {}),
+    last_turn_sequence: Math.max(openedAfterSequence, requestedSequence),
     ...(session.transcript_id ? { transcript_id: session.transcript_id } : {}),
     ...(session.transcript_path ? { transcript_path: session.transcript_path } : {}),
     ...(session.provider ? { provider: session.provider } : {}),
@@ -441,19 +447,40 @@ export function openActivation(registry, session = {}, explicitActivationId = ''
     active_activation_id: activationId,
     activation_epoch: epoch,
     activation_started_at: session.activation_started_at || session.started_at || '',
-    last_turn_sequence: requestedSequence,
+    last_turn_sequence: Math.max(openedAfterSequence, requestedSequence),
     activations,
   };
   return next;
 }
 
 export function advanceActivationTurn(registry, turn = {}) {
-  const next = cloneRegistry(registry);
+  let next = cloneRegistry(registry);
   const sessionId = turn.session_id || turn.canonical_session_id || '';
-  const current = next.sessions[sessionId];
+  let current = next.sessions[sessionId];
   if (!current) return next;
 
-  const activeId = current.active_activation_id || '';
+  const turnId = String(turn.turn_id || '');
+  const knownTurn = Boolean(turnId && (
+    current.last_turn_id === turnId
+    || current.last_prompt_turn_id === turnId
+    || Object.prototype.hasOwnProperty.call(current.turn_sequences || {}, turnId)
+  ));
+  if (knownTurn) return next;
+
+  let activeId = current.active_activation_id || '';
+  if ((!activeId || current.activations?.[activeId]?.status !== 'active') && turn.recovery_activation_id) {
+    next = openActivation(next, {
+      session_id: sessionId,
+      activation_id: turn.recovery_activation_id,
+      activation_started_at: turn.recovery_started_at || turn.started_at || '',
+      turn_sequence: turn.turn_sequence ?? current.last_turn_sequence,
+      transcript_id: turn.transcript_id || current.transcript_id,
+      transcript_path: turn.transcript_path || current.transcript_path,
+      provider: turn.provider || current.provider,
+    });
+    current = next.sessions[sessionId];
+    activeId = current.active_activation_id || '';
+  }
   if (turn.activation_id && activeId && turn.activation_id !== activeId) return next;
   const previous = nonNegativeSequence(current.last_turn_sequence, 0);
   const explicit = nonNegativeSequence(turn.turn_sequence ?? turn.last_turn_sequence);
@@ -466,9 +493,18 @@ export function advanceActivationTurn(registry, turn = {}) {
         nonNegativeSequence(activations[activeId].last_turn_sequence, 0),
         sequence,
       ),
+      ...(turnId ? { last_prompt_turn_id: turnId } : {}),
     };
   }
-  next.sessions[sessionId] = { ...current, last_turn_sequence: sequence, activations };
+  next.sessions[sessionId] = {
+    ...current,
+    last_turn_sequence: sequence,
+    ...(turnId ? {
+      last_prompt_turn_id: turnId,
+      turn_sequences: { ...(current.turn_sequences || {}), [turnId]: sequence },
+    } : {}),
+    activations,
+  };
   return next;
 }
 
@@ -478,23 +514,22 @@ export function resolveStopActivation(registry, stop = {}) {
   if (!entry) return '';
   if (stop.activation_id) return String(stop.activation_id);
 
+  const activeId = entry.active_activation_id || '';
+  const active = entry.activations?.[activeId];
+  if (!activeId || active?.status !== 'active') return '';
   const transcriptId = String(stop.transcript_id || '');
   const transcriptPath = String(stop.transcript_path || '');
   if (!transcriptId && !transcriptPath) return '';
-  const matches = Object.entries(entry.activations || {}).filter(([, activation]) => {
-    if (!activation) return false;
-    if (transcriptId && activation.transcript_id && activation.transcript_id !== transcriptId) return false;
-    const paths = [
-      ...(Array.isArray(activation.transcript_paths) ? activation.transcript_paths : []),
-      activation.transcript_path,
-    ].filter(Boolean);
-    if (transcriptPath && paths.length && !paths.some((path) => transcriptsMatch(path, transcriptPath))) return false;
-    return Boolean(
-      (transcriptId && activation.transcript_id === transcriptId)
-      || (transcriptPath && paths.some((path) => transcriptsMatch(path, transcriptPath))),
-    );
-  });
-  return matches.length === 1 ? matches[0][0] : '';
+  if (transcriptId && active.transcript_id && active.transcript_id !== transcriptId) return '';
+  const paths = [
+    ...(Array.isArray(active.transcript_paths) ? active.transcript_paths : []),
+    active.transcript_path,
+  ].filter(Boolean);
+  if (transcriptPath && paths.length && !paths.some((path) => transcriptsMatch(path, transcriptPath))) return '';
+  return (
+    (transcriptId && active.transcript_id === transcriptId)
+    || (transcriptPath && paths.some((path) => transcriptsMatch(path, transcriptPath)))
+  ) ? activeId : '';
 }
 
 function stopResult(registry, stopDisposition, canPromoteMemory = false) {
@@ -531,21 +566,31 @@ export function applyStopActivation(registry, stop = {}) {
   const stopSequence = nonNegativeSequence(stop.turn_sequence ?? stop.last_turn_sequence);
   const lastSequence = nonNegativeSequence(current.last_turn_sequence, 0);
   if (stopSequence === null) return stopResult(next, 'ambiguous');
+  const active = current.activations?.[activeId] || {};
+  const openedAfterSequence = nonNegativeSequence(active.opened_after_turn_sequence, 0);
+  if (stopSequence <= openedAfterSequence && active.epoch > 1) {
+    return stopResult(next, 'superseded');
+  }
+  const stopTurnId = String(stop.turn_id || '');
+  if (stopTurnId && active.last_stop_turn_id === stopTurnId) {
+    return stopResult(next, 'duplicate');
+  }
   if (stopSequence < lastSequence) return stopResult(next, 'stale_turn');
 
   const activations = { ...(current.activations || {}) };
   activations[activeId] = {
     ...(activations[activeId] || { activation_id: activeId, epoch: current.activation_epoch }),
-    status: 'done',
-    ended_at: stop.ended_at || '',
+    status: 'active',
     last_turn_sequence: stopSequence,
+    last_stop_turn_sequence: stopSequence,
+    ...(stopTurnId ? { last_stop_turn_id: stopTurnId } : {}),
   };
   next.sessions[sessionId] = {
     ...current,
-    status: 'done',
-    ended_at: stop.ended_at || current.ended_at || '',
-    active_activation_id: '',
-    last_turn_sequence: stopSequence,
+    status: 'active',
+    active_activation_id: activeId,
+    last_turn_sequence: Math.max(lastSequence, stopSequence),
+    ...(stopTurnId ? { last_turn_id: stopTurnId } : {}),
     activations,
   };
   return stopResult(next, 'applied', true);
@@ -584,7 +629,7 @@ export function upsertSessionRegistry(vaultBase, sessionId, patch) {
           activation_id: clean.activation_id,
           activation_started_at: clean.activation_started_at,
           started_at: clean.activation_started_at || clean.started_at,
-          last_turn_sequence: clean.last_turn_sequence,
+          last_turn_sequence: patch.last_turn_sequence,
           transcript_id: clean.transcript_id || current.transcript_id,
           transcript_path: clean.transcript_path || current.transcript_path,
           provider: clean.provider || current.provider,
@@ -597,7 +642,13 @@ export function upsertSessionRegistry(vaultBase, sessionId, patch) {
         {
           session_id: sessionId,
           activation_id: causalCurrent.active_activation_id || '',
+          recovery_activation_id: patch.recovery_activation_id || '',
+          recovery_started_at: patch.recovery_started_at || '',
+          turn_id: patch.turn_id || '',
           turn_sequence: patch.turn_sequence,
+          transcript_id: clean.transcript_id || causalCurrent.transcript_id,
+          transcript_path: clean.transcript_path || causalCurrent.transcript_path,
+          provider: clean.provider || causalCurrent.provider,
         },
       ).sessions[sessionId];
     }

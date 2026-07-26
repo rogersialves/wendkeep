@@ -4,6 +4,35 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.58.3] — 2026-07-26
+
+### Fixed
+
+- **O primeiro `SessionStop` elegível após a migração legacy → v2 volta a publicar o handoff.**
+  A activation passa a representar um epoch com múltiplos Stops, e `UserPromptSubmit` recupera
+  uma única activation ausente sob lock. Identidade nativa de sessão/turno e a ordem física do
+  transcript impedem que Stops duplicados, atrasados ou de uma activation anterior publiquem de
+  novo ou sobrescrevam checkpoints mais recentes.
+- **A publicação de memória ficou durável e observável de ponta a ponta.** O evento é enfileirado
+  antes de registrar `enqueued`, a projeção ocorre fora do lock e retries reutilizam a tentativa
+  congelada. Falhas preservam a outbox como `degraded`, enquanto retornos ambíguos deixam evidência
+  diagnóstica em vez de encerrar silenciosamente.
+- **`wendkeep doctor` agora detecta memória v2 realmente estagnada sem acusar uma migração nova.**
+  O diagnóstico correlaciona tentativa, ledger, outbox, revisão e checkpoint; revision 0 logo após
+  uma migração válida continua saudável, mas perda causal, ambiguidade e divergência bloqueiam.
+
+### Changed
+
+- **Os guias bilíngues de memória, sessões, migração e diagnóstico descrevem o lifecycle real.**
+  A documentação cobre epochs multi-Stop, recuperação única, retries idempotentes, estados
+  `enqueued|projected|degraded|ambiguous` e como interpretar revision 0.
+
+### Security
+
+- **Fixtures persistíveis de lifecycle são integralmente sintéticas.** Um gate de privacidade
+  verifica arquivos rastreados e novos e reporta somente arquivo, linha e categoria, evitando que
+  caminhos ou identificadores locais entrem em testes, commits e artefatos.
+
 ## [0.58.2] — 2026-07-26
 
 ### Added

@@ -17,6 +17,11 @@ import { enqueueMemoryEvent, projectMemoryOutbox } from './memory-store.mjs';
 import { detectMemoryMode } from './memory-mode.mjs';
 import { sanitizeMemoryText } from './memory-schema.mjs';
 import {
+  projectStopMemoryAttempt,
+  recordStopMemoryOutcome,
+  stageStopMemoryAttempt,
+} from './session-memory-lifecycle.mjs';
+import {
   ensureDir,
   findActiveSessionByTranscript,
   formatDate,
@@ -525,6 +530,26 @@ export function parseTranscript(transcriptPath) {
     if (looksLikeClaudeEvent(event)) return parseClaudeTranscript(transcriptPath);
   }
   return parseCodexTranscript(transcriptPath);
+}
+
+export function resolveTurnIdentity(transcript, requestedTurnId = '') {
+  const turns = Array.isArray(transcript?.turns) ? transcript.turns : [];
+  const requested = String(requestedTurnId || '');
+  let index = requested
+    ? turns.findIndex((turn) => String(turn?.turnId || '') === requested)
+    : -1;
+  if (requested && index < 0) return null;
+  if (index < 0 && transcript?.latestTurnId) {
+    index = turns.findIndex((turn) => String(turn?.turnId || '') === String(transcript.latestTurnId));
+  }
+  if (index < 0) index = turns.length - 1;
+  const turn = turns[index];
+  if (!turn?.turnId) return null;
+  return {
+    id: String(turn.turnId),
+    order: index + 1,
+    observedAt: String(turn.timestamp || ''),
+  };
 }
 
 function compactText(text, max = 600) {
@@ -1095,7 +1120,18 @@ function pingObsidianVault(apiKey) {
   } catch {}
 }
 
-function main() {
+export function shouldAbortStopAfterStaging(causalStop, memoryAttempt) {
+  const rejectedByV2Revalidation = memoryAttempt?.memory_mode === 'v2'
+    && memoryAttempt?.state === 'skipped';
+  if (rejectedByV2Revalidation) return true;
+  return Boolean(
+    causalStop
+    && !causalStop.canPromoteMemory
+    && memoryAttempt?.state !== 'enqueued'
+  );
+}
+
+export function main({ stageMemory = stageStopMemoryAttempt } = {}) {
   const input = readHookInput();
   if (input.stop_hook_active) {
     writeHookOutput({});
@@ -1132,15 +1168,34 @@ function main() {
     return;
   }
 
-  const tx = parseTranscript(input.transcript_path || input.transcriptPath);
-  const turnId = input.turn_id || tx.latestTurnId || String(Date.now());
+  const tx = parseTranscript(identity.transcriptPath || input.transcript_path || input.transcriptPath);
+  const requestedTurnId = String(input.turn_id || input.turnId || '');
   const sessionId = identity.canonicalConversationId;
   const finalizing = shouldFinalizeSession();
+  const turnIdentity = resolveTurnIdentity(tx, requestedTurnId);
+  if (!turnIdentity) {
+    if (finalizing) {
+      const activeId = String(entry.active_activation_id || '');
+      const active = entry.activations?.[activeId] || {};
+      stageMemory(vaultBase, {
+        sessionId,
+        activationId: activeId,
+        activationEpoch: Number(active.epoch || entry.activation_epoch || 0),
+        turnId: requestedTurnId || 'unresolved-turn',
+        turnSequence: Number(entry.last_turn_sequence || 0),
+        disposition: 'ambiguous',
+        observedAt: new Date(0).toISOString(),
+      });
+    }
+    const message = 'wendkeep: Stop ambiguous; o turno solicitado não foi provado pelo transcript.';
+    process.stderr.write(`[wendkeep] ${message}\n`);
+    writeHookOutput({ systemMessage: message });
+    return;
+  }
+  const turnId = turnIdentity.id;
   const now = finalizing ? new Date() : null;
   const endedAt = finalizing ? formatLocalIso(now) : '';
-  const stopTurnSequence = Number.isSafeInteger(Number(input.turn_sequence))
-    ? Number(input.turn_sequence)
-    : Number(entry.last_turn_sequence || 0);
+  const stopTurnSequence = turnIdentity.order;
   const causalStop = finalizing
     ? mutateSessionRegistry(vaultBase, (registry) => {
       const activationId = resolveStopActivation(registry, {
@@ -1152,6 +1207,7 @@ function main() {
       const cas = applyStopActivation(registry, {
         session_id: sessionId,
         activation_id: activationId,
+        turn_id: turnId,
         turn_sequence: stopTurnSequence,
         ended_at: endedAt,
       });
@@ -1176,8 +1232,44 @@ function main() {
       };
     })
     : null;
-  if (causalStop && !causalStop.canPromoteMemory) {
-    const message = `wendkeep: Stop ${causalStop.stopDisposition}; uma activation mais nova foi preservada e a memória não foi promovida.`;
+  let memoryHandoff = null;
+  let memoryAttempt = null;
+  if (finalizing) {
+    let projectId = '';
+    try {
+      projectId = JSON.parse(readFileSync(join(vaultBase, '.brain', 'PROJECT.json'), 'utf8')).projectId || '';
+    } catch { /* the staging validator exposes an observable failure below */ }
+    const finalSummary = sessionFinalSummary(tx);
+    const memoryEvidence = collectLifecycleEvidence(vaultBase, {
+      changeSlug: entry.change_slug,
+      summary: finalSummary,
+      noteRel: sessionRel,
+    });
+    memoryHandoff = {
+      projectId,
+      identity,
+      activation: {
+        id: causalStop?.activationId || '',
+        epoch: Number(causalStop?.activation?.epoch || entry.activation_epoch || 0),
+      },
+      turn: { id: turnId, sequence: stopTurnSequence },
+      noteRel: sessionRel,
+      observedAt: turnIdentity.observedAt || new Date(0).toISOString(),
+      summary: finalSummary,
+      evidence: memoryEvidence,
+    };
+    memoryAttempt = stageMemory(vaultBase, {
+      handoff: memoryHandoff,
+      disposition: causalStop?.stopDisposition || 'ambiguous',
+    });
+  }
+  if (shouldAbortStopAfterStaging(causalStop, memoryAttempt)) {
+    const disposition = memoryAttempt?.disposition || causalStop?.stopDisposition || 'ambiguous';
+    if (disposition === 'duplicate' && memoryAttempt?.state === 'duplicate') {
+      writeHookOutput({});
+      return;
+    }
+    const message = `wendkeep: Stop ${disposition}; uma activation mais nova foi preservada e a memória não foi promovida.`;
     process.stderr.write(`[wendkeep] ${message}\n`);
     writeHookOutput({ systemMessage: message });
     return;
@@ -1252,40 +1344,24 @@ function main() {
     last_logged_turn_id: turnId,
   });
 
-  let projectId = '';
-  try {
-    projectId = JSON.parse(readFileSync(join(vaultBase, '.brain', 'PROJECT.json'), 'utf8')).projectId || '';
-  } catch { /* store validator reports a degraded handoff below */ }
-  const finalSummary = sessionFinalSummary(tx);
-  const memoryEvidence = collectLifecycleEvidence(vaultBase, {
-    changeSlug: entry.change_slug,
-    summary: finalSummary,
-    noteRel: sessionRel,
-  });
-  const memoryResult = commitSessionMemory(vaultBase, {
-    projectId,
-    identity,
-    activation: {
-      id: causalStop.activationId,
-      epoch: Number(causalStop.activation?.epoch || entry.activation_epoch || 0),
-    },
-    turn: { id: turnId, sequence: stopTurnSequence },
-    noteRel: sessionRel,
-    observedAt: new Date().toISOString(),
-    summary: finalSummary,
-    evidence: memoryEvidence,
-  });
-  mutateSessionRegistry(vaultBase, (registry) => {
-    const current = registry.sessions[sessionId];
-    if (!current) return null;
-    registry.sessions[sessionId] = {
-      ...current,
-      memory_status: memoryResult.status,
-      memory_activation_id: causalStop.activationId,
-      ...(memoryResult.checkpoint ? { memory_checkpoint: memoryResult.checkpoint } : {}),
-    };
-    return null;
-  });
+  const memoryResult = projectStopMemoryAttempt(vaultBase, memoryAttempt);
+  if (memoryResult.status === 'legacy') {
+    mutateSessionRegistry(vaultBase, (registry) => {
+      const current = registry.sessions[sessionId];
+      const active = current?.activations?.[current.active_activation_id || ''];
+      if (!current
+        || current.active_activation_id !== memoryAttempt.activation_id
+        || Number(active?.epoch || 0) !== Number(memoryAttempt.activation_epoch || 0)) return null;
+      registry.sessions[sessionId] = {
+        ...current,
+        memory_status: 'legacy',
+        memory_activation_id: memoryAttempt.activation_id,
+      };
+      return null;
+    });
+  } else {
+    recordStopMemoryOutcome(vaultBase, memoryAttempt, memoryResult);
+  }
 
   // Reconstrói índice (camada fria) + digest (camada quente) ao finalizar. Nunca derruba o Stop.
   try {
