@@ -18,7 +18,7 @@ const context = {
 test('[req:MEM-HYB-1] the final handoff is always preserved as reported with source provenance', () => {
   const events = buildSessionMemoryEvents({
     ...context,
-    summary: 'Concluído; PASSWORD=hunter2. Commit local; nenhum push. C:\\Users\\Roger\\rollout.jsonl',
+    summary: 'Concluído; PASSWORD=hunter2. Commit local; nenhum push. C:\\Users\\Example\\rollout.jsonl',
     evidence: {},
   });
 
