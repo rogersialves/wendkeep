@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { dirname } from 'node:path';
@@ -73,6 +73,28 @@ test('cada conteúdo legado distinto recebe seu próprio backup antes do apply',
     const second = migrateMemory(vault, { apply: true });
     assert.notEqual(second.backupPath, first.backupPath);
     assert.match(readFileSync(second.backupPath, 'utf8'), /decisão B/);
+  } finally { rmSync(vault, { recursive: true, force: true }); }
+});
+
+test('migrate --apply reverte toda publicação quando a validação final falha', async () => {
+  const vault = fixture();
+  const brain = join(vault, '.brain');
+  const legacy = readFileSync(join(brain, 'SHARED_MEMORY.md'), 'utf8');
+  try {
+    const { migrateMemory } = await import('../src/memory.mjs');
+    assert.throws(
+      () => migrateMemory(vault, {
+        apply: true,
+        validateBundle: () => ({ ok: false, errors: ['falha final injetada'] }),
+      }),
+      /falha final injetada/,
+    );
+    assert.equal(readFileSync(join(brain, 'SHARED_MEMORY.md'), 'utf8'), legacy);
+    assert.equal(existsSync(join(brain, 'MEMORY_EVENTS.jsonl')), false);
+    assert.equal(existsSync(join(brain, 'MEMORY_CANDIDATES.jsonl')), false);
+    const backups = readdirSync(brain).filter((name) => name.includes('.legacy-') && name.endsWith('.bak'));
+    assert.equal(backups.length, 1);
+    assert.equal(readFileSync(join(brain, backups[0]), 'utf8'), legacy);
   } finally { rmSync(vault, { recursive: true, force: true }); }
 });
 

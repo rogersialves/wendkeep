@@ -338,9 +338,12 @@ export function mutateSessionRegistry(vaultBase, mutator, { timeoutMs = 2000 } =
 
   try {
     const registry = readSessionRegistry(vaultBase);
+    const before = JSON.stringify(registry);
     registry.version = 2;
     const result = mutator(registry);
-    writeSessionRegistry(vaultBase, registry);
+    if (JSON.stringify(registry) !== before) {
+      writeSessionRegistry(vaultBase, registry);
+    }
     return result;
   } finally {
     // rmSync recursivo não remove diretório em caminho não-ASCII no Windows — ver

@@ -62,6 +62,10 @@ function sharedPath(vaultBase) {
   return join(brainDir(vaultBase), 'SHARED_MEMORY.md');
 }
 
+function corePath(vaultBase) {
+  return join(brainDir(vaultBase), 'CORE.md');
+}
+
 function candidatesPath(vaultBase) {
   return join(brainDir(vaultBase), 'MEMORY_CANDIDATES.jsonl');
 }
@@ -260,6 +264,47 @@ function candidateId(reason, memoryKey, eventIds) {
   return `memcand-${sha256(`${reason}\u0000${memoryKey}\u0000${eventIds.join('\u0000')}`).slice(0, 16)}`;
 }
 
+// CORE is prose, not an operational data store. Only an explicit, single-line marker
+// participates in precedence so the projector never guesses meaning from human text:
+//   <!-- wk-memory: release.push="manual-only" -->
+function readCoreInvariants(vaultBase) {
+  let core;
+  try {
+    core = readFileSync(corePath(vaultBase), 'utf8').replace(/\r\n/g, '\n');
+  } catch {
+    return new Map();
+  }
+  const invariants = new Map();
+  const marker = /^<!--\s*wk-memory:\s*([A-Za-z0-9][A-Za-z0-9._-]*)=(.+)\s*-->$/;
+  for (const line of core.split('\n')) {
+    const match = line.trim().match(marker);
+    if (!match) continue;
+    try {
+      invariants.set(match[1], JSON.parse(match[2].trim()));
+    } catch { /* malformed prose markers do not become implicit authority */ }
+  }
+  return invariants;
+}
+
+function blockedByCoreCandidate(event, coreValue) {
+  return {
+    v: 1,
+    candidate_id: candidateId('blocked_by_core', event.memory_key, [event.event_id]),
+    reason: 'blocked_by_core',
+    status: 'blocked_by_core',
+    memory_key: event.memory_key,
+    event_ids: [event.event_id],
+    proposed_value: event.value,
+    core_value: coreValue,
+    provenance: {
+      authority: 'core',
+      source: '.brain/CORE.md',
+      core_value_hash: hashMemoryValue(coreValue),
+    },
+    events: [event],
+  };
+}
+
 function conflictCandidate(memoryKey, events, currentEvent = null) {
   const ordered = [...events].sort(eventOrder);
   const eventIds = ordered.map((item) => item.event_id).sort();
@@ -305,7 +350,10 @@ function isCausallyOlder(event, current) {
  * Pure deterministic reducer. It pre-detects incomparable scalar siblings so replay order
  * never turns one concurrent writer into an accidental winner.
  */
-export function reduceMemoryEvents(inputEvents = []) {
+export function reduceMemoryEvents(inputEvents = [], { coreInvariants = new Map() } = {}) {
+  const protectedValues = coreInvariants instanceof Map
+    ? coreInvariants
+    : new Map(Object.entries(coreInvariants || {}));
   const unique = new Map();
   for (const raw of inputEvents) {
     const event = assertValidEvent(raw);
@@ -343,6 +391,16 @@ export function reduceMemoryEvents(inputEvents = []) {
   let revision = 0;
 
   for (const item of events) {
+    if (protectedValues.has(item.memory_key)) {
+      const coreValue = protectedValues.get(item.memory_key);
+      const agreesWithCore = item.operation === 'assert'
+        && hashMemoryValue(item.value) === hashMemoryValue(coreValue);
+      if (!agreesWithCore) {
+        candidates.push(blockedByCoreCandidate(item, coreValue));
+        continue;
+      }
+    }
+
     const groupKey = conflictGroupKey(item);
     if (conflictingIds.has(item.event_id)) {
       if (!emittedGroups.has(groupKey)) {
@@ -530,7 +588,7 @@ function projectLocked(vaultBase, { faultAt } = {}) {
   injectFault(faultAt, 'after-ledger');
 
   const allEvents = [...ledger.events, ...newEvents];
-  const reduced = reduceMemoryEvents(allEvents);
+  const reduced = reduceMemoryEvents(allEvents, { coreInvariants: readCoreInvariants(vaultBase) });
   const updatedAt = allEvents
     .map((item) => item.observed_at)
     .filter(Boolean)

@@ -1131,6 +1131,53 @@ function main() {
   const tx = parseTranscript(input.transcript_path || input.transcriptPath);
   const turnId = input.turn_id || tx.latestTurnId || String(Date.now());
   const sessionId = identity.canonicalConversationId;
+  const finalizing = shouldFinalizeSession();
+  const now = finalizing ? new Date() : null;
+  const endedAt = finalizing ? formatLocalIso(now) : '';
+  const stopTurnSequence = Number.isSafeInteger(Number(input.turn_sequence))
+    ? Number(input.turn_sequence)
+    : Number(entry.last_turn_sequence || 0);
+  const causalStop = finalizing
+    ? mutateSessionRegistry(vaultBase, (registry) => {
+      const activationId = resolveStopActivation(registry, {
+        session_id: sessionId,
+        activation_id: input.activation_id || input.activationId || '',
+        transcript_id: identity.transcriptId,
+        transcript_path: identity.transcriptPath || transcriptPath,
+      });
+      const cas = applyStopActivation(registry, {
+        session_id: sessionId,
+        activation_id: activationId,
+        turn_sequence: stopTurnSequence,
+        ended_at: endedAt,
+      });
+      const activation = cas.registry.sessions[sessionId]?.activations?.[activationId] || null;
+      if (cas.canPromoteMemory) {
+        registry.version = cas.registry.version;
+        registry.sessions = cas.registry.sessions;
+        registry.sessions[sessionId] = {
+          ...registry.sessions[sessionId],
+          session_file: sessionRel,
+          last_turn_id: turnId,
+          transcript_path: transcriptPath,
+          transcript_id: identity.transcriptId,
+          provider: identity.provider,
+        };
+      }
+      return {
+        activationId,
+        activation,
+        stopDisposition: cas.stopDisposition,
+        canPromoteMemory: cas.canPromoteMemory,
+      };
+    })
+    : null;
+  if (causalStop && !causalStop.canPromoteMemory) {
+    const message = `wendkeep: Stop ${causalStop.stopDisposition}; uma activation mais nova foi preservada e a memória não foi promovida.`;
+    process.stderr.write(`[wendkeep] ${message}\n`);
+    writeHookOutput({ systemMessage: message });
+    return;
+  }
   const logged = insertIteration(sessionPath, buildIterationBlock(tx, input), turnId, tx);
 
   try {
@@ -1145,7 +1192,7 @@ function main() {
     process.stderr.write(`[wendkeep] Token usage falhou: ${error.message}\n`);
   }
 
-  if (!shouldFinalizeSession()) {
+  if (!finalizing) {
     writeControl(vaultBase, {
       ...control,
       status: 'active',
@@ -1171,49 +1218,6 @@ function main() {
     return;
   }
 
-  const now = new Date();
-  const endedAt = formatLocalIso(now);
-  const stopTurnSequence = Number.isSafeInteger(Number(input.turn_sequence))
-    ? Number(input.turn_sequence)
-    : Number(entry.last_turn_sequence || 0);
-  const causalStop = mutateSessionRegistry(vaultBase, (registry) => {
-    const activationId = resolveStopActivation(registry, {
-      session_id: sessionId,
-      activation_id: input.activation_id || input.activationId || '',
-      transcript_id: identity.transcriptId,
-      transcript_path: identity.transcriptPath || transcriptPath,
-    });
-    const cas = applyStopActivation(registry, {
-      session_id: sessionId,
-      activation_id: activationId,
-      turn_sequence: stopTurnSequence,
-      ended_at: endedAt,
-    });
-    registry.version = cas.registry.version;
-    registry.sessions = cas.registry.sessions;
-    if (cas.canPromoteMemory) {
-      registry.sessions[sessionId] = {
-        ...registry.sessions[sessionId],
-        session_file: sessionRel,
-        last_turn_id: turnId,
-        transcript_path: transcriptPath,
-        transcript_id: identity.transcriptId,
-        provider: identity.provider,
-      };
-    }
-    return {
-      activationId,
-      activation: registry.sessions[sessionId]?.activations?.[activationId] || null,
-      stopDisposition: cas.stopDisposition,
-      canPromoteMemory: cas.canPromoteMemory,
-    };
-  });
-  if (!causalStop.canPromoteMemory) {
-    const message = `wendkeep: Stop ${causalStop.stopDisposition}; uma activation mais nova foi preservada e a memória não foi promovida.`;
-    process.stderr.write(`[wendkeep] ${message}\n`);
-    writeHookOutput({ systemMessage: message });
-    return;
-  }
   const created = mergeCreatedNotes(
     createLinkedNotes(vaultBase, formatDate(now), sessionRel, tx),
     findLinkedDerivedNotes(vaultBase, sessionRel),

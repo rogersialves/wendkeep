@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const STOP = join(ROOT, 'hooks', 'session-stop.mjs');
+const START = join(ROOT, 'hooks', 'session-start.mjs');
 const INJECT = join(ROOT, 'hooks', 'brain-inject.mjs');
 const SID = '019f9cea-b7c1-79d0-9ac5-931e56192b52';
 const SUMMARY = [
@@ -194,4 +195,51 @@ test('[req:MEM-HYB-7] [req:HOOK-MEM-1] real Stop stays exit-0/JSON and records d
   assert.equal(registry.sessions[SID].memory_status, 'degraded');
   assert.equal(registry.sessions[SID].memory_checkpoint, undefined);
   assert.ok(readdirSync(join(brain, 'memory-outbox')).some((name) => name.endsWith('.json')));
+});
+
+test('[req:HOOK-MEM-1] real late Stop N cannot rewrite activation N+1 note, registry, ledger or checkpoint', () => {
+  const { project, vault, brain, sessionPath, transcript } = seed();
+  const started = spawnSync(process.execPath, [START], {
+    cwd: project,
+    env: cleanEnv(vault),
+    encoding: 'utf8',
+    input: JSON.stringify({
+      hook_event_name: 'SessionStart', cwd: project, session_id: SID, transcript_path: transcript,
+      activation_id: 'activation-2', source: 'compact',
+    }),
+  });
+  assert.equal(started.status, 0, started.stderr);
+
+  const registryPath = join(brain, 'SESSION_REGISTRY.json');
+  const ledgerPath = join(brain, 'MEMORY_EVENTS.jsonl');
+  const registry = JSON.parse(readFileSync(registryPath, 'utf8'));
+  assert.equal(registry.sessions[SID].active_activation_id, 'activation-2');
+  registry.sessions[SID].memory_checkpoint = { revision: 12, event_cursor: 'n-plus-1', state_hash: 'a'.repeat(64) };
+  registry.sessions[SID].memory_status = 'projected';
+  writeFileSync(registryPath, `${JSON.stringify(registry, null, 2)}\n`);
+  writeFileSync(ledgerPath, 'N+1 ledger sentinel\n');
+
+  const before = {
+    note: readFileSync(sessionPath),
+    registry: readFileSync(registryPath),
+    ledger: readFileSync(ledgerPath),
+    registryMtime: statSync(registryPath).mtimeMs,
+  };
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 25);
+  const late = spawnSync(process.execPath, [STOP], {
+    cwd: project,
+    env: cleanEnv(vault),
+    encoding: 'utf8',
+    input: JSON.stringify({
+      hook_event_name: 'Stop', cwd: project, session_id: SID, transcript_path: transcript,
+      turn_id: 'turn-final', turn_sequence: 1, activation_id: 'activation-1',
+    }),
+  });
+
+  assert.equal(late.status, 0, late.stderr);
+  assert.match(JSON.parse(late.stdout || '{}').systemMessage, /activation mais nova|superseded/i);
+  assert.deepEqual(readFileSync(sessionPath), before.note);
+  assert.deepEqual(readFileSync(registryPath), before.registry);
+  assert.deepEqual(readFileSync(ledgerPath), before.ledger);
+  assert.equal(statSync(registryPath).mtimeMs, before.registryMtime, 'Stop N não pode nem reescrever registry N+1');
 });

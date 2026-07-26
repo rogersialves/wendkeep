@@ -180,6 +180,10 @@ function boundAncillaryText(text, reservedChars = 0) {
   return `${text.slice(0, INJECTION_LIMITS.lineChars - reservedChars - marker.length)}${marker}`;
 }
 
+function budgetNotice(priority, layer, message) {
+  return `<wk_budget_notice priority="${priority}" layer="${layer}">${message}</wk_budget_notice>`;
+}
+
 export function buildInjection(vaultBase, input = {}) {
   const dir = brainDir(vaultBase);
   const brain = existsSync(join(dir, 'SHARED_MEMORY.md')) ? buildV2Memory(dir) : buildLegacyMemory(dir);
@@ -196,26 +200,37 @@ export function buildInjection(vaultBase, input = {}) {
   if (byteLength(output) <= INJECTION_LIMITS.totalBytes) return output;
 
   // First pressure step: lessons are fully removable and remain available in the vault.
-  output = joinInjection([brain, router, focus, allChanges, '<wk_budget_notice>Lessons omitidas pelo budget global.</wk_budget_notice>']);
+  const lessonsEvicted = budgetNotice(1, 'lessons', 'Lessons omitidas primeiro pelo budget global.');
+  output = joinInjection([brain, router, focus, allChanges, lessonsEvicted]);
   if (byteLength(output) <= INJECTION_LIMITS.totalBytes) return output;
 
   // Second pressure step: non-current changes leave the hot context before the current one.
+  const nonCurrentEvicted = budgetNotice(2, 'non-current-changes', 'Changes não atuais omitidas depois das lessons.');
   const currentChange = buildActiveChangeInjection(vaultBase, {
     currentOnly: true,
     maxLineChars: INJECTION_LIMITS.lineChars,
   });
-  output = joinInjection([brain, router, focus, currentChange, '<wk_budget_notice>Lessons e changes não atuais omitidas pelo budget global.</wk_budget_notice>']);
+  output = joinInjection([brain, router, focus, currentChange, lessonsEvicted, nonCurrentEvicted]);
   if (byteLength(output) <= INJECTION_LIMITS.totalBytes) return output;
 
   // Last step caps only the current change block, with an explicit marker and closed wrapper.
-  const fixed = joinInjection([brain, router, focus, '<wk_budget_notice>Lessons e changes não atuais omitidas pelo budget global.</wk_budget_notice>']);
+  const currentSummarized = budgetNotice(3, 'current-change', 'Change atual resumida por último; blocker e início da fila foram preservados.');
+  const fixed = joinInjection([brain, router, focus, lessonsEvicted, nonCurrentEvicted, currentSummarized]);
   const remaining = Math.max(512, INJECTION_LIMITS.totalBytes - byteLength(fixed) - 1);
   const boundedCurrent = buildActiveChangeInjection(vaultBase, {
     currentOnly: true,
     maxBytes: remaining,
     maxLineChars: INJECTION_LIMITS.lineChars,
   });
-  return joinInjection([brain, router, focus, boundedCurrent, '<wk_budget_notice>Lessons e changes não atuais omitidas pelo budget global.</wk_budget_notice>']);
+  return joinInjection([
+    brain,
+    router,
+    focus,
+    lessonsEvicted,
+    nonCurrentEvicted,
+    boundedCurrent,
+    currentSummarized,
+  ]);
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

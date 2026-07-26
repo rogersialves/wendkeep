@@ -120,7 +120,17 @@ test('[req:MEM-HYB-6] [req:MEM-HYB-7] global pressure drops lessons then non-cur
     '## Pendências Abertas', ...Array.from({ length: 16 }, (_, i) => `- durable-${i}`),
   ];
   assert.equal(coreLines.length, 25);
-  const vault = makeVault({ core: `${coreLines.join('\n')}\n` });
+  const coreAtLimit = `${coreLines.join('\n')}\n`;
+  const baseShared = sharedMemory();
+  const fillCount = 48 - baseShared.trimEnd().split('\n').length;
+  const fullShared = sharedMemory({
+    extra: Array.from({ length: fillCount }, (_, i) => (
+      `- shared-fill-${i} ${'s'.repeat(240)}${i === fillCount - 1 ? ' SHARED_TAIL_MUST_SURVIVE' : ''}`
+    )),
+  });
+  assert.equal(fullShared.trimEnd().split('\n').length, 48, 'SHARED exactly reaches its line budget');
+  assert.ok(Buffer.byteLength(fullShared, 'utf8') <= 6 * 1024, 'SHARED remains inside its byte budget');
+  const vault = makeVault({ core: coreAtLimit, shared: fullShared });
   try {
     mkdirSync(join(vault, '.brain', 'lessons'), { recursive: true });
     for (let i = 0; i < 12; i += 1) {
@@ -137,11 +147,23 @@ test('[req:MEM-HYB-6] [req:MEM-HYB-7] global pressure drops lessons then non-cur
     writeFileSync(join(vault, '.brain', 'CURRENT_CHANGE.md'), 'change: current\n');
 
     const out = buildInjection(vault, { source: 'compact' });
+    assert.ok(out.includes(coreAtLimit.trim()), 'CORE at the exact limit remains byte-for-byte integral');
+    assert.ok(out.includes(fullShared.trim()), 'full SHARED remains byte-for-byte integral');
     assert.match(out, /BLOCKER_MUST_SURVIVE/);
     assert.match(out, /<\/open_changes>/);
-    assert.match(out, /budget|omitid|resumid|truncad/i, 'pressure is visible, never silent');
+    assert.doesNotMatch(out, /lesson-pressure/, 'lessons are evicted');
+    assert.doesNotMatch(out, /NON_CURRENT_other-[ab]_/, 'non-current changes are evicted after lessons');
+    assert.match(out, /conteúdo restante omitido pelo budget de injeção/i, 'current change is summarized explicitly');
+
+    const lessonsNotice = out.indexOf('<wk_budget_notice priority="1" layer="lessons">');
+    const nonCurrentNotice = out.indexOf('<wk_budget_notice priority="2" layer="non-current-changes">');
+    const currentNotice = out.indexOf('<wk_budget_notice priority="3" layer="current-change">');
+    assert.ok(lessonsNotice >= 0, 'eviction stage 1 is observable');
+    assert.ok(nonCurrentNotice > lessonsNotice, 'non-current eviction is observably second');
+    assert.ok(currentNotice > nonCurrentNotice, 'current summarization is observably last');
     assert.ok(Buffer.byteLength(out, 'utf8') <= 24 * 1024, `actual=${Buffer.byteLength(out, 'utf8')}`);
     assert.ok(out.split('\n').every((line) => line.length <= 320), 'every injected line respects the line budget');
+    assert.match(out, /<\/wk_core>[\s\S]*<\/wk_shared_state>[\s\S]*<\/brain_memory>/, 'critical wrappers remain closed');
   } finally { rmSync(vault, { recursive: true, force: true }); }
 });
 

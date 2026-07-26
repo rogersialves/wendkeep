@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import {
-  copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync,
+  copyFileSync, existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
 import { sanitizeMemoryText, renderSharedMemory, validateSharedMemory } from '../hooks/memory-schema.mjs';
@@ -75,7 +75,7 @@ export function memoryStatus(vault) {
   return checkMemoryBundle(vault);
 }
 
-export function migrateMemory(vault, { apply = false } = {}) {
+export function migrateMemory(vault, { apply = false, validateBundle = validateMemoryBundle } = {}) {
   projectId(vault);
   const sharedPath = brainPath(vault, SHARED);
   const hadShared = existsSync(sharedPath);
@@ -95,12 +95,25 @@ export function migrateMemory(vault, { apply = false } = {}) {
   const sharedValidation = validateSharedMemory(emptyShared, { eventIds: new Set() });
   if (!sharedValidation.ok) throw new Error(`Migração inválida: ${sharedValidation.errors.join(' ')}`);
   if (backupPath && !existsSync(backupPath)) copyFileSync(sharedPath, backupPath);
-  if (!existsSync(brainPath(vault, LEDGER))) writeFileAtomic(brainPath(vault, LEDGER), '');
-  writeFileAtomic(sharedPath, emptyShared);
-  writeFileAtomic(brainPath(vault, CANDIDATES), candidateText(candidates));
-  const validation = validateMemoryBundle(vault);
-  if (!validation.ok) throw new Error(`Bundle migrado inválido: ${validation.errors.join(' ')}`);
-  return { status: 'migrated', alreadyV2: false, candidates: candidates.length, backupPath, validation };
+  const targets = [LEDGER, SHARED, CANDIDATES].map((name) => brainPath(vault, name));
+  const before = new Map(targets.map((path) => [path, {
+    existed: existsSync(path),
+    content: existsSync(path) ? readFileSync(path, 'utf8') : '',
+  }]));
+  try {
+    if (!existsSync(brainPath(vault, LEDGER))) writeFileAtomic(brainPath(vault, LEDGER), '');
+    writeFileAtomic(sharedPath, emptyShared);
+    writeFileAtomic(brainPath(vault, CANDIDATES), candidateText(candidates));
+    const validation = validateBundle(vault);
+    if (!validation.ok) throw new Error(`Bundle migrado inválido: ${validation.errors.join(' ')}`);
+    return { status: 'migrated', alreadyV2: false, candidates: candidates.length, backupPath, validation };
+  } catch (error) {
+    for (const [path, snapshot] of before) {
+      if (snapshot.existed) writeFileAtomic(path, snapshot.content);
+      else if (existsSync(path)) unlinkSync(path);
+    }
+    throw error;
+  }
 }
 
 function readCandidates(vault) {
