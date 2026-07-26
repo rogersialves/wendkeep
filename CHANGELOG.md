@@ -4,6 +4,20 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.58.1] — 2026-07-26
+
+### Fixed
+
+- **Vaults com `SHARED_MEMORY.md` legado voltam a atualizar sem bloquear o doctor.** `init` e
+  `sync` ainda preservam todos os bytes existentes e podem criar os sidecars v2 ausentes,
+  mas sidecars vazios não ativam a memória v2. `memory status --gate` reporta o estado
+  `legacy` como aviso não bloqueante e `brain-inject` mantém CORE+DIGEST durante a janela de
+  compatibilidade.
+- **`SessionStop` não migra memória implicitamente.** Enquanto o vault permanecer legado, o
+  Stop não grava outbox, ledger, candidates nem reescreve SHARED. A transição acontece somente
+  com `wendkeep memory migrate --apply`; conteúdo com assinatura/evidência v2 corrompida continua
+  visível e bloqueante, sem fallback silencioso.
+
 ## [0.58.0] — 2026-07-26
 
 ### Added

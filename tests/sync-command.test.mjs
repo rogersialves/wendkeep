@@ -162,6 +162,31 @@ test('[req:MEM-HYB-9] re-init via sync preserva CORE/SHARED/ledger/candidates by
   } finally { rmSync(project, { recursive: true, force: true }); }
 });
 
+test('[req:MEM-HYB-9] sync de SHARED legado com sidecars vazios conclui com doctor não bloqueante', () => {
+  const project = freshProject();
+  try {
+    const first = spawnWk(['sync', '--project', project, '--yes'], { cwd: project });
+    assert.ok(first.status === 0 || first.status === 1, first.stderr);
+    const vaultName = JSON.parse(readFileSync(join(project, '.wendkeep.json'), 'utf8')).vault;
+    const vault = join(project, vaultName);
+    const brain = join(vault, '.brain');
+    const legacy = '# SHARED legado\n\n## Estado\n- preservar durante upgrade\n';
+    writeFileSync(join(brain, 'SHARED_MEMORY.md'), legacy);
+    writeFileSync(join(brain, 'MEMORY_EVENTS.jsonl'), '');
+    writeFileSync(join(brain, 'MEMORY_CANDIDATES.jsonl'), '');
+
+    const second = spawnWk(['sync', '--project', project, '--yes'], { cwd: project });
+    assert.ok(second.status === 0 || second.status === 1, second.stderr || second.stdout);
+    assert.match(second.stdout, /"memoryStatus": "legacy"/);
+    assert.doesNotMatch(second.stdout, /schema_version deve ser 2|event_cursor .*n[aã]o existe no ledger/i);
+    assert.equal(readFileSync(join(brain, 'SHARED_MEMORY.md'), 'utf8'), legacy);
+
+    const gate = spawnWk(['memory', 'status', '--gate', '--vault', vault], { cwd: project });
+    assert.equal(gate.status, 0, gate.stderr || gate.stdout);
+    assert.equal(JSON.parse(gate.stdout).status, 'legacy');
+  } finally { rmSync(project, { recursive: true, force: true }); }
+});
+
 // --- PVR-SYNC-1: env bleed --------------------------------------------------
 
 // sync-defs resolve o vault por `--vault || OBSIDIAN_VAULT_PATH`. Num projeto novo, o env

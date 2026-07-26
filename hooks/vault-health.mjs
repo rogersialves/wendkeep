@@ -12,6 +12,7 @@ import {
 } from './obsidian-common.mjs';
 import { getLocale } from './locale.mjs';
 import { parseSharedMemory, validateMemoryEvent } from './memory-schema.mjs';
+import { detectMemoryMode, LEGACY_MEMORY_WARNING } from './memory-mode.mjs';
 import { reduceMemoryEvents } from './memory-store.mjs';
 import { validateMemoryBundle } from '../src/validate-memory.mjs';
 
@@ -101,7 +102,9 @@ const MEMORY_REPAIR_COMMAND = 'wendkeep memory repair --vault <vault>';
 
 function readJsonLines(path, label) {
   if (!existsSync(path)) return { items: [], errors: [] };
-  const raw = readFileSync(path, 'utf8').replace(/\r\n/g, '\n');
+  let raw;
+  try { raw = readFileSync(path, 'utf8').replace(/\r\n/g, '\n'); }
+  catch (error) { return { items: [], errors: [`${label} ilegível: ${error?.message || error}`] }; }
   const lines = raw.endsWith('\n') ? raw.split('\n').slice(0, -1) : raw.split('\n');
   const items = [];
   const errors = [];
@@ -140,6 +143,25 @@ function inspectOutbox(vaultBase, projectId) {
  */
 export function checkMemoryBundle(vaultBase) {
   const brain = join(vaultBase, '.brain');
+  const mode = detectMemoryMode(vaultBase);
+  if (mode.mode === 'legacy') {
+    return {
+      ok: true,
+      status: 'legacy',
+      failures: [],
+      warnings: [LEGACY_MEMORY_WARNING],
+      metrics: {
+        schemaVersion: null,
+        revision: null,
+        eventCursor: null,
+        stateHash: null,
+        ledgerEvents: 0,
+        pendingOutbox: 0,
+        candidates: 0,
+        activeConflicts: 0,
+      },
+    };
+  }
   const bundle = validateMemoryBundle(vaultBase);
   const failures = [];
   const warnings = [];

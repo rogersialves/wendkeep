@@ -5,6 +5,7 @@ import { mkdtempSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileS
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { renderSharedMemory } from '../hooks/memory-schema.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const STOP = join(ROOT, 'hooks', 'session-stop.mjs');
@@ -88,6 +89,8 @@ function seed({ withSeededSession = true } = {}) {
   ];
   writeFileSync(transcript, `${events.map((event) => JSON.stringify(event)).join('\n')}\n`);
   writeFileSync(join(brain, 'MEMORY_EVENTS.jsonl'), '');
+  writeFileSync(join(brain, 'MEMORY_CANDIDATES.jsonl'), '');
+  writeFileSync(join(brain, 'SHARED_MEMORY.md'), renderSharedMemory());
   if (withSeededSession) {
     writeFileSync(join(brain, 'SESSION_REGISTRY.json'), JSON.stringify({
       version: 2,

@@ -284,3 +284,29 @@ test('[req:MEM-HYB-9] a legacy vault keeps CORE+DIGEST for one release with an e
     assert.doesNotMatch(out, /version="2"/);
   } finally { rmSync(vault, { recursive: true, force: true }); }
 });
+
+test('[req:MEM-HYB-9] a legacy SHARED preserved by sync does not activate v2 when seeded artifacts are empty', () => {
+  const vault = makeVault({ shared: '# SHARED legado\n\n## Estado\n- não migrado\n', digest: '- DIGEST_LEGACY_FALLBACK' });
+  try {
+    writeFileSync(join(vault, '.brain', 'MEMORY_EVENTS.jsonl'), '');
+    writeFileSync(join(vault, '.brain', 'MEMORY_CANDIDATES.jsonl'), '');
+    const out = buildInjection(vault, { source: 'startup' });
+    assert.match(out, /<wk_memory_legacy_warning>/);
+    assert.match(out, /CORE_CANONICAL_DIRECT/);
+    assert.match(out, /DIGEST_LEGACY_FALLBACK/);
+    assert.doesNotMatch(out, /version="2"|wk_memory_error layer="shared"/);
+  } finally { rmSync(vault, { recursive: true, force: true }); }
+});
+
+test('[req:MEM-HYB-7] unreadable SHARED stays in degraded v2 instead of silently falling back', () => {
+  const vault = makeVault({ shared: null, digest: '- MUST_NOT_MASK_V2_DAMAGE' });
+  try {
+    mkdirSync(join(vault, '.brain', 'SHARED_MEMORY.md'));
+    writeFileSync(join(vault, '.brain', 'MEMORY_EVENTS.jsonl'), '');
+    writeFileSync(join(vault, '.brain', 'MEMORY_CANDIDATES.jsonl'), '');
+    const out = buildInjection(vault, { source: 'startup' });
+    assert.match(out, /<brain_memory version="2"/);
+    assert.match(out, /<wk_memory_error layer="shared"/);
+    assert.doesNotMatch(out, /wk_memory_legacy_warning|MUST_NOT_MASK_V2_DAMAGE/);
+  } finally { rmSync(vault, { recursive: true, force: true }); }
+});
