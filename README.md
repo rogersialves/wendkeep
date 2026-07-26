@@ -176,10 +176,16 @@ A memória quente agora separa claramente autoria humana, estado operacional e e
 
 - **`CORE.md` é canônico.** É o núcleo curto, curado à mão, com preferências duráveis, padrões ativos e pendências que nenhum projetor pode inferir ou sobrescrever.
 - **`SHARED_MEMORY.md` é operacional e gerado.** O hook `Stop` transforma o handoff da sessão em eventos sanitizados; o projetor reduz o ledger de modo determinístico e publica revision, cursor e hash verificáveis. Fatos só entram como `verified` quando há evidência local; relatos sem prova ficam `reported`, e disputas viram candidates para decisão humana.
-- **`MEMORY_EVENTS.jsonl` é a autoridade append-only.** Produtores publicam primeiro na outbox por criação exclusiva e o projetor serializa append + projeção sob lock. Repetir o mesmo `event_id`/payload é no-op; reutilizar o ID com bytes diferentes é corrupção observável.
+- **`MEMORY_EVENTS.jsonl` é a autoridade append-only.** O `Stop` torna os eventos duráveis na outbox antes de reconhecer o attempt; o projector roda fora do lock do registry e retries reutilizam os mesmos IDs. Repetir o mesmo `event_id`/payload é no-op; reutilizar o ID com bytes diferentes é corrupção observável.
 - **`MEMORY_CANDIDATES.jsonl` é a fila de curadoria.** Conflitos e conteúdo legado não são promovidos silenciosamente. `promote` e `reject` registram a decisão como novo evento.
 
 Os artefatos ficam somente em `.brain/`; a sanitização remove secrets, tokens, paths locais, transcripts e payloads de harness tanto antes da persistência quanto antes da injeção. Eventos carregam `project_id`, e um vault nunca aceita eventos de outro projeto.
+
+Lifecycle resumido: cada `SessionStart` abre um epoch que atravessa vários `Stop`;
+`UserPromptSubmit` avança o turno nativo e recupera uma única activation legada fechada. Codex usa
+`session_id`/`turn_id` + ordem do transcript, sem campos causais artificiais. Veja os guias de
+[sessões e hooks](docs/pt-BR/commands/sessions-and-import.md) e
+[memória](docs/pt-BR/commands/memory.md).
 
 ### Injeção e budgets
 
@@ -195,7 +201,11 @@ wendkeep memory migrate --apply --vault .MeuApp-vault  # backup + candidates + b
 
 ### Saúde e recuperação
 
-Use `wendkeep memory status --gate --vault <cofre>` no CI e antes de `verify`/`archive`. O sensor crítico `memory-health` bloqueia corrupção do ledger/outbox/bundle, lag de revision/cursor/hash e conflitos ativos. Outbox válida pendente ou candidate comum é recuperável e fica como warning, sem bloquear.
+Use `wendkeep memory status --gate --vault <cofre>` no CI e antes de `verify`/`archive`. Revision 0
+logo após migração válida é saudável. O gate correlaciona `last_memory_attempt`, outbox, ledger,
+SHARED e checkpoint: `degraded` com outbox durável é warning; attempt ambíguo, publicação perdida
+ou checkpoint divergente bloqueiam. Veja [migração](docs/pt-BR/commands/memory-migration.md) e
+[diagnóstico](docs/pt-BR/commands/maintenance-and-diagnostics.md).
 
 Se o status bloquear, preserve a evidência e rode `wendkeep memory repair --vault <cofre>` para salvar backup do ledger corrompido, reter linhas válidas e reprojetar. Depois rode `status --gate` novamente. Conflitos exigem curadoria explícita com `memory promote <id>` ou `memory reject <id>`; o doctor apenas diagnostica.
 

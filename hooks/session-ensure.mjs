@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { randomUUID } from 'crypto';
 import { existsSync, renameSync, statSync, writeFileSync } from 'fs';
 import { basename, dirname, join } from 'path';
 import {
@@ -41,6 +42,16 @@ function turnSequenceFromInput(input = {}) {
   const value = input.turn_sequence ?? input.turnSequence;
   const parsed = Number(value);
   return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : undefined;
+}
+
+function causalTurnPatch(input, now) {
+  return {
+    advance_turn_sequence: true,
+    turn_sequence: turnSequenceFromInput(input),
+    turn_id: input.turn_id || input.turnId || '',
+    recovery_activation_id: randomUUID(),
+    recovery_started_at: formatLocalIso(now),
+  };
 }
 
 function buildSessionContent({ relPath, now, summary = 'session', sessionId = '', reason = 'Sessão criada automaticamente pelo hook UserPromptSubmit.' }) {
@@ -268,8 +279,7 @@ function activateExistingSession({ vaultBase, relPath, startedAt, sessionId, inp
     transcript_path: identity.transcriptPath,
     transcript_id: identity.transcriptId,
     provider: identity.provider,
-    advance_turn_sequence: true,
-    turn_sequence: turnSequenceFromInput(input),
+    ...causalTurnPatch(input, now),
   });
   return true;
 }
@@ -296,8 +306,7 @@ function createSession({ vaultBase, sessionId, input, now, identity }) {
     transcript_path: identity.transcriptPath,
     transcript_id: identity.transcriptId,
     provider: identity.provider,
-    advance_turn_sequence: true,
-    turn_sequence: turnSequenceFromInput(input),
+    ...causalTurnPatch(input, now),
   });
   return { relPath, startedAt };
 }
@@ -348,8 +357,7 @@ function main() {
           transcript_path: identity.transcriptPath,
           transcript_id: identity.transcriptId,
           provider: identity.provider,
-          advance_turn_sequence: true,
-          turn_sequence: turnSequenceFromInput(input),
+          ...causalTurnPatch(input, now),
         });
         writeHookOutput({});
         return;
@@ -393,8 +401,7 @@ function main() {
         transcript_path: identity.transcriptPath,
         transcript_id: identity.transcriptId,
         provider: identity.provider,
-        advance_turn_sequence: true,
-        turn_sequence: turnSequenceFromInput(input),
+        ...causalTurnPatch(input, now),
       });
       writeHookOutput({});
       return;

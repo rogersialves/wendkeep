@@ -34,6 +34,8 @@ npx wendkeep memory migrate --apply --vault <vault>
 
 - Without `--apply`, `wendkeep memory migrate` is a zero-write dry run.
 - `--apply` creates a backup, converts legacy content into candidates, and publishes valid v2.
+- A newly migrated bundle may start healthy at `revision: 0`: no v2 attempt or eligible event has
+  happened yet, so zero does not mean the lifecycle is stalled.
 - Exit `0` means a consistent preview/application; non-zero preserves original state and reports
   the failure.
 
@@ -50,11 +52,18 @@ npx wendkeep memory status --gate --vault .MyApp-vault
 
 The vault receives a coherent v2 ledger/projection, a backup of legacy SHARED, and candidates for
 unsupported facts. CORE is untouched and unverified content is not activated automatically.
+After migration, the next `UserPromptSubmit` opens exactly one recovery activation when the
+legacy registry was closed; the first transcript-proven `Stop` publishes once and advances SHARED
+to revision 1. Replaying that prompt or Stop does not duplicate the event/revision.
 
 ## Common errors and diagnosis
 
 - Dry run says already v2: do not apply again.
+- `revision: 0` immediately after a valid apply: this is healthy; wait for an eligible prompt and
+  Stop instead of repairing or repeating migration.
 - Partial/corrupt v2 bundle: use status and repair; migration is not a corruption tool.
+- First post-migration Stop is `ambiguous`: verify that its `turn_id` belongs to the transcript and
+  that `UserPromptSubmit` opened/advanced the recovery activation.
 - Many candidates: curate gradually with `memory promote`/`memory reject`.
 - Legacy warning remains after apply: verify the selected vault and project binding.
 

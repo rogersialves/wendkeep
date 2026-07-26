@@ -180,10 +180,16 @@ Hot memory now separates human authorship, operational state, and evidence:
 
 - **`CORE.md` is canonical.** It is the short, hand-curated nucleus for durable preferences, active patterns, and open issues; no projector may infer or overwrite it.
 - **`SHARED_MEMORY.md` is generated operational state.** The `Stop` hook turns the session handoff into sanitized events; the projector deterministically reduces the ledger and publishes a verifiable revision, cursor, and hash. Facts are `verified` only with local evidence; unsupported reports remain `reported`, and disagreements become candidates for human judgment.
-- **`MEMORY_EVENTS.jsonl` is the append-only authority.** Producers publish to the outbox with exclusive creation, then the projector serializes append + projection under a lock. Repeating an identical `event_id`/payload is a no-op; reusing the ID with different bytes is observable corruption.
+- **`MEMORY_EVENTS.jsonl` is the append-only authority.** `Stop` makes events durable in the outbox before acknowledging the attempt; the projector runs outside the registry lock and retries reuse the same IDs. Repeating an identical `event_id`/payload is a no-op; reusing the ID with different bytes is observable corruption.
 - **`MEMORY_CANDIDATES.jsonl` is the curation queue.** Conflicts and legacy content are never silently promoted. `promote` and `reject` record the decision as a new event.
 
 Artifacts stay under `.brain/` only. Sanitization strips secrets, tokens, local paths, transcripts, and harness payloads both before persistence and before injection. Events carry a `project_id`, and one vault never accepts another project's events.
+
+Lifecycle in brief: each `SessionStart` opens an epoch that spans multiple `Stop` events;
+`UserPromptSubmit` advances the native turn and recovers exactly one closed legacy activation.
+Codex uses `session_id`/`turn_id` plus transcript order, with no artificial causal fields. See
+[sessions and hooks](docs/en/commands/sessions-and-import.md) and
+[memory](docs/en/commands/memory.md).
 
 ### Injection and budgets
 
@@ -199,7 +205,11 @@ wendkeep memory migrate --apply --vault .MyApp-vault  # backup + candidates + v2
 
 ### Health and recovery
 
-Use `wendkeep memory status --gate --vault <vault>` in CI and before `verify`/`archive`. The critical `memory-health` sensor blocks ledger/outbox/bundle corruption, revision/cursor/hash lag, and active conflicts. A valid pending outbox or ordinary candidate is recoverable and remains a warning rather than blocking.
+Use `wendkeep memory status --gate --vault <vault>` in CI and before `verify`/`archive`. Revision 0
+immediately after valid migration is healthy. The gate correlates `last_memory_attempt`, outbox,
+ledger, SHARED, and checkpoint: `degraded` with a durable outbox is a warning; an ambiguous attempt,
+lost publication, or mismatched checkpoint blocks. See [migration](docs/en/commands/memory-migration.md)
+and [diagnostics](docs/en/commands/maintenance-and-diagnostics.md).
 
 If status blocks, preserve the evidence and run `wendkeep memory repair --vault <vault>` to save a backup of the corrupt ledger, retain valid lines, and re-project. Then run `status --gate` again. Conflicts require explicit curation with `memory promote <id>` or `memory reject <id>`; doctor only diagnoses.
 

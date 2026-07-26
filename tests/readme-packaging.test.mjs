@@ -93,7 +93,9 @@ test('npm pack: o tarball leva o inglês e o repositório volta ao português', 
 
     const pkg = join(outDir, 'package');
     const packedManifest = JSON.parse(readFileSync(join(pkg, 'package.json'), 'utf8'));
-    assert.equal(packedManifest.version, '0.58.2', 'DOC-5: o tarball deve declarar exatamente a release 0.58.2');
+    const sourceManifest = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8'));
+    assert.equal(packedManifest.version, sourceManifest.version,
+      `DOC-5: o tarball deve declarar exatamente a release ${sourceManifest.version}`);
     assert.ok(isEn(readFileSync(join(pkg, 'README.md'), 'utf8')),
       'o README.md DO TARBALL é o inglês — é o que a página do npm renderiza');
     assert.ok(existsSync(join(pkg, 'README.en.md')), 'e o inglês também viaja pelo nome próprio');

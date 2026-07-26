@@ -43,7 +43,10 @@ function createBundle(events = [event()]) {
   const reduced = reduceMemoryEvents(events);
   writeFileSync(join(brain, 'PROJECT.json'), `${JSON.stringify({ schemaVersion: 1, projectId: PROJECT_ID })}\n`);
   writeFileSync(join(brain, 'CORE.md'), renderCoreSkeleton());
-  writeFileSync(join(brain, 'MEMORY_EVENTS.jsonl'), events.map((item) => JSON.stringify(item)).join('\n') + '\n');
+  writeFileSync(
+    join(brain, 'MEMORY_EVENTS.jsonl'),
+    events.length ? `${events.map((item) => JSON.stringify(item)).join('\n')}\n` : '',
+  );
   writeFileSync(join(brain, 'SHARED_MEMORY.md'), renderSharedMemory({
     revision: reduced.revision,
     eventCursor: reduced.eventCursor,
@@ -71,6 +74,44 @@ function byteSnapshot(vault) {
   return entries;
 }
 
+function writeLastMemoryAttempt(vault, attempt, sessionId = 'example-session-health') {
+  writeFileSync(join(vault, '.brain', 'SESSION_REGISTRY.json'), `${JSON.stringify({
+    version: 2,
+    sessions: {
+      [sessionId]: {
+        status: 'done',
+        session_file: '02-Sessions/example-session.md',
+        last_memory_attempt: attempt,
+      },
+    },
+  })}\n`);
+}
+
+function memoryAttempt(overrides = {}) {
+  return {
+    v: 1,
+    memory_mode: 'v2',
+    activation_id: 'example-activation-health',
+    activation_epoch: 1,
+    turn_id: 'example-turn-health',
+    turn_sequence: 1,
+    disposition: 'applied',
+    state: 'enqueued',
+    event_ids: ['mem-health-1'],
+    observed_at: '2000-01-01T00:00:00.000Z',
+    ...overrides,
+  };
+}
+
+function checkpointFor(events) {
+  const reduced = reduceMemoryEvents(events);
+  return {
+    revision: reduced.revision,
+    event_cursor: reduced.eventCursor,
+    state_hash: reduced.stateHash,
+  };
+}
+
 test('[req:DIAG-8] doctor names a healthy bundle and reports schema/revision/cursor/hash', () => {
   const vault = createBundle();
   try {
@@ -86,6 +127,177 @@ test('[req:DIAG-8] doctor names a healthy bundle and reports schema/revision/cur
     assert.match(result.metrics.stateHash, /^[a-f0-9]{64}$/);
     assert.equal(result.metrics.ledgerEvents, 1);
     assert.deepEqual(byteSnapshot(vault), before, 'doctor must be byte-for-byte read-only');
+  } finally { rmSync(vault, { recursive: true, force: true }); }
+});
+
+test('[req:MEM-STOP-6] [sensor:memory-health] valid revision 0 stays healthy with no attempt or a legacy attempt', () => {
+  const vault = createBundle([]);
+  try {
+    const absent = checkMemoryBundle(vault);
+    assert.equal(absent.ok, true, absent.failures.join('; '));
+    assert.equal(absent.status, 'healthy');
+
+    writeLastMemoryAttempt(vault, memoryAttempt({
+      memory_mode: 'legacy',
+      state: 'skipped',
+      event_ids: [],
+    }));
+    const legacy = checkMemoryBundle(vault);
+    assert.equal(legacy.ok, true, legacy.failures.join('; '));
+    assert.equal(legacy.status, 'healthy');
+  } finally { rmSync(vault, { recursive: true, force: true }); }
+});
+
+test('[req:MEM-STOP-6] [sensor:memory-health] ambiguous v2 skip is blocking', () => {
+  const vault = createBundle([]);
+  try {
+    writeLastMemoryAttempt(vault, memoryAttempt({
+      disposition: 'ambiguous',
+      state: 'skipped',
+      event_ids: [],
+    }));
+    const result = checkMemoryBundle(vault);
+    assert.equal(result.ok, false);
+    assert.equal(result.status, 'blocked');
+    assert.match(result.failures.join('\n'), /amb[ií]gu|lifecycle/i);
+  } finally { rmSync(vault, { recursive: true, force: true }); }
+});
+
+test('[req:MEM-STOP-5] [req:MEM-STOP-6] [sensor:memory-health] degraded attempt split across ledger and valid outbox is recoverable', () => {
+  const projected = event('mem-example-projected', {
+    memory_key: 'example.projected', value: 'synthetic projected state',
+  });
+  const pending = event('mem-example-pending', {
+    memory_key: 'example.pending', value: 'synthetic pending state', turn_sequence: 2,
+  });
+  const vault = createBundle([projected]);
+  try {
+    const outbox = join(vault, '.brain', 'memory-outbox');
+    mkdirSync(outbox);
+    writeFileSync(join(outbox, `${pending.event_id}.json`), `${JSON.stringify(pending)}\n`);
+    writeLastMemoryAttempt(vault, memoryAttempt({
+      state: 'degraded',
+      event_ids: [projected.event_id, pending.event_id],
+      error: 'example-private-payload-must-not-be-rendered',
+    }));
+
+    const result = checkMemoryBundle(vault);
+    assert.equal(result.ok, true, result.failures.join('; '));
+    assert.equal(result.status, 'warning');
+    assert.match(result.warnings.join('\n'), /recuper|attempt/i);
+    assert.doesNotMatch(JSON.stringify(result), /example-private-payload-must-not-be-rendered/);
+  } finally { rmSync(vault, { recursive: true, force: true }); }
+});
+
+test('[req:MEM-STOP-6] [sensor:memory-health] applied v2 attempt with no event ids is blocking', () => {
+  const vault = createBundle([]);
+  try {
+    writeLastMemoryAttempt(vault, memoryAttempt({ event_ids: [] }));
+    const result = checkMemoryBundle(vault);
+    assert.equal(result.ok, false);
+    assert.match(result.failures.join('\n'), /event_ids|publica[cç][aã]o perdida/i);
+  } finally { rmSync(vault, { recursive: true, force: true }); }
+});
+
+test('[req:MEM-STOP-6] [sensor:memory-health] attempt event absent from both ledger and outbox is blocking', () => {
+  const vault = createBundle([]);
+  try {
+    writeLastMemoryAttempt(vault, memoryAttempt({ event_ids: ['mem-example-missing'] }));
+    const result = checkMemoryBundle(vault);
+    assert.equal(result.ok, false);
+    assert.match(result.failures.join('\n'), /ausente|ledger.*outbox|publica[cç][aã]o perdida/i);
+  } finally { rmSync(vault, { recursive: true, force: true }); }
+});
+
+test('[req:MEM-STOP-6] [sensor:memory-health] projected checkpoint remains valid when the current projection is newer', () => {
+  const attemptEvent = event('mem-example-prefix', {
+    memory_key: 'example.prefix', value: 'synthetic prefix state',
+  });
+  const concurrentCursor = event('mem-example-concurrent-cursor', {
+    memory_key: 'example.concurrent', value: 'synthetic concurrent state', turn_sequence: 2,
+  });
+  const later = event('mem-example-later', {
+    memory_key: 'example.later', value: 'synthetic later state', turn_sequence: 3,
+  });
+  const vault = createBundle([attemptEvent, concurrentCursor, later]);
+  try {
+    writeLastMemoryAttempt(vault, memoryAttempt({
+      state: 'projected',
+      event_ids: [attemptEvent.event_id],
+      checkpoint: checkpointFor([attemptEvent, concurrentCursor]),
+    }));
+    const result = checkMemoryBundle(vault);
+    assert.equal(result.ok, true, result.failures.join('; '));
+    assert.equal(result.status, 'healthy');
+  } finally { rmSync(vault, { recursive: true, force: true }); }
+});
+
+test('[req:MEM-STOP-5] [req:MEM-STOP-6] [sensor:memory-health] projected attempt requires its events in the ledger, not only the outbox', () => {
+  const pending = event('mem-example-projected-outbox-only', {
+    memory_key: 'example.outbox-only', value: 'synthetic outbox-only state',
+  });
+  const vault = createBundle([]);
+  try {
+    const outbox = join(vault, '.brain', 'memory-outbox');
+    mkdirSync(outbox);
+    writeFileSync(join(outbox, `${pending.event_id}.json`), `${JSON.stringify(pending)}\n`);
+    writeLastMemoryAttempt(vault, memoryAttempt({
+      state: 'projected',
+      event_ids: [pending.event_id],
+      checkpoint: checkpointFor([pending]),
+    }));
+
+    const result = checkMemoryBundle(vault);
+    assert.equal(result.ok, false);
+    assert.match(result.failures.join('\n'), /projetado.*ledger|ledger.*projetado/i);
+  } finally { rmSync(vault, { recursive: true, force: true }); }
+});
+
+test('[req:MEM-STOP-6] [sensor:memory-health] projected checkpoint mismatch is blocking', () => {
+  const first = event('mem-example-checkpoint', {
+    memory_key: 'example.checkpoint', value: 'synthetic checkpoint state',
+  });
+  const vault = createBundle([first]);
+  try {
+    writeLastMemoryAttempt(vault, memoryAttempt({
+      state: 'projected',
+      event_ids: [first.event_id],
+      checkpoint: { ...checkpointFor([first]), state_hash: '0'.repeat(64) },
+    }));
+    const result = checkMemoryBundle(vault);
+    assert.equal(result.ok, false);
+    assert.match(result.failures.join('\n'), /checkpoint|proje[cç][aã]o/i);
+  } finally { rmSync(vault, { recursive: true, force: true }); }
+});
+
+test('[req:MEM-STOP-6] [sensor:memory-health] stale or superseded skip is non-blocking without emitted events', () => {
+  const vault = createBundle([]);
+  try {
+    writeLastMemoryAttempt(vault, memoryAttempt({
+      disposition: 'superseded',
+      state: 'skipped',
+      event_ids: [],
+    }));
+    const result = checkMemoryBundle(vault);
+    assert.equal(result.ok, true, result.failures.join('; '));
+    assert.doesNotMatch(result.failures.join('\n'), /publica[cç][aã]o perdida|ausente|checkpoint/i);
+  } finally { rmSync(vault, { recursive: true, force: true }); }
+});
+
+test('[req:MEM-STOP-5] [req:MEM-STOP-6] [sensor:memory-health] rejected stale attempt with emitted ids is blocking', () => {
+  const emitted = event('mem-example-causal-leak', {
+    memory_key: 'example.causal-leak', value: 'synthetic rejected state',
+  });
+  const vault = createBundle([emitted]);
+  try {
+    writeLastMemoryAttempt(vault, memoryAttempt({
+      disposition: 'stale_turn',
+      state: 'skipped',
+      event_ids: [emitted.event_id],
+    }));
+    const result = checkMemoryBundle(vault);
+    assert.equal(result.ok, false);
+    assert.match(result.failures.join('\n'), /stale|superseded|causal/i);
   } finally { rmSync(vault, { recursive: true, force: true }); }
 });
 

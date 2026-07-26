@@ -40,6 +40,14 @@
       "severity": "critical",
       "type": "command",
       "command": "node --test tests/docs-bilingual.test.mjs tests/readme-packaging.test.mjs"
+    },
+    {
+      "id": "session-memory-lifecycle",
+      "name": "Session memory lifecycle",
+      "description": "Exercises the full legacy-to-v2 SessionStop lifecycle, causal retries and memory diagnostics",
+      "severity": "critical",
+      "type": "command",
+      "command": "node --test tests/session-stop-migration-lifecycle.test.mjs tests/memory-activation.test.mjs tests/session-memory-lifecycle.test.mjs tests/vault-health-memory.test.mjs"
     }
   ]
 }

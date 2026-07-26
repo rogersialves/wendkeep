@@ -121,27 +121,117 @@ function readJsonLines(path, label) {
 
 function inspectOutbox(vaultBase, projectId) {
   const dir = join(vaultBase, '.brain', 'memory-outbox');
-  if (!existsSync(dir)) return { count: 0, errors: [] };
+  if (!existsSync(dir)) return { count: 0, errors: [], eventIds: new Set() };
   const files = readdirSync(dir).filter((name) => name.endsWith('.json')).sort();
   const errors = [];
+  const eventIds = new Set();
   for (const name of files) {
     const path = join(dir, name);
     try {
       const event = JSON.parse(readFileSync(path, 'utf8'));
       const validation = validateMemoryEvent(event, projectId ? { projectId } : {});
       if (!validation.ok) errors.push(`${name}: ${validation.errors.join(' ')}`);
+      else eventIds.add(event.event_id);
     } catch (error) {
       errors.push(`${name}: JSON inválido: ${error.message}`);
     }
   }
-  return { count: files.length, errors };
+  return { count: files.length, errors, eventIds };
+}
+
+function checkpointMatchesLedgerPrefix(checkpoint, eventIds, ledgerEvents) {
+  if (!checkpoint || typeof checkpoint !== 'object') return false;
+  if (!Number.isInteger(checkpoint.revision) || checkpoint.revision < 0) return false;
+  if (typeof checkpoint.event_cursor !== 'string' || !checkpoint.event_cursor) return false;
+  if (typeof checkpoint.state_hash !== 'string' || !checkpoint.state_hash) return false;
+
+  const cursorIndex = ledgerEvents.findIndex((event) => event?.event_id === checkpoint.event_cursor);
+  if (cursorIndex < 0) return false;
+  const prefix = ledgerEvents.slice(0, cursorIndex + 1);
+  const prefixIds = new Set(prefix.map((event) => event.event_id));
+  if (eventIds.some((eventId) => !prefixIds.has(eventId))) return false;
+
+  try {
+    const replay = reduceMemoryEvents(prefix);
+    return checkpoint.revision === replay.revision
+      && checkpoint.event_cursor === replay.eventCursor
+      && checkpoint.state_hash === replay.stateHash;
+  } catch {
+    return false;
+  }
+}
+
+function checkMemoryAttempts(registry, { ledgerEvents = [], outboxEventIds = new Set() } = {}) {
+  const failures = [];
+  const warnings = [];
+  const ledgerEventIds = new Set(ledgerEvents.map((event) => event?.event_id).filter(Boolean));
+  const attempts = Object.values(registry?.sessions || {})
+    .map((entry) => entry?.last_memory_attempt)
+    .filter((attempt) => attempt && typeof attempt === 'object' && attempt.memory_mode === 'v2');
+
+  for (const attempt of attempts) {
+    const state = String(attempt.state || '');
+    const disposition = String(attempt.disposition || '');
+    const eventIds = Array.isArray(attempt.event_ids)
+      ? [...new Set(attempt.event_ids.filter((eventId) => typeof eventId === 'string' && eventId))]
+      : [];
+
+    if (state === 'skipped' && disposition === 'ambiguous') {
+      failures.push(`Lifecycle de memória v2 ambíguo: Stop pulou a publicação sem identidade causal suficiente. Inspecione com: ${MEMORY_STATUS_COMMAND}.`);
+      continue;
+    }
+
+    if (state === 'skipped' && ['stale_turn', 'superseded'].includes(disposition)) {
+      if (eventIds.length) {
+        failures.push(`Stop stale/superseded emitiu event_ids apesar da rejeição causal. Inspecione com: ${MEMORY_STATUS_COMMAND}.`);
+      } else {
+        warnings.push('Stop stale/superseded foi descartado sem publicar memória.');
+      }
+      continue;
+    }
+
+    if (disposition !== 'applied') {
+      if (state === 'skipped') warnings.push('Attempt de memória v2 foi descartado sem publicação.');
+      else failures.push(`Attempt de memória v2 possui disposition não reconhecida para o estado informado. Inspecione com: ${MEMORY_STATUS_COMMAND}.`);
+      continue;
+    }
+
+    if (!eventIds.length) {
+      failures.push(`Attempt v2 aplicado não declarou event_ids; publicação perdida. Inspecione com: ${MEMORY_STATUS_COMMAND}.`);
+      continue;
+    }
+
+    if (state === 'enqueued' || state === 'degraded') {
+      const missing = eventIds.filter((eventId) => !ledgerEventIds.has(eventId) && !outboxEventIds.has(eventId));
+      if (missing.length) {
+        failures.push(`Attempt v2 perdeu ${missing.length} evento(s): ausentes do ledger e da outbox. Inspecione com: ${MEMORY_STATUS_COMMAND}.`);
+      } else {
+        warnings.push(`Attempt de memória v2 ${state} permanece recuperável: ${eventIds.length} evento(s) durável(is) no ledger e/ou outbox.`);
+      }
+      continue;
+    }
+
+    if (state === 'projected') {
+      const outsideLedger = eventIds.filter((eventId) => !ledgerEventIds.has(eventId));
+      if (outsideLedger.length) {
+        failures.push(`Attempt projetado perdeu ${outsideLedger.length} evento(s) no ledger. Inspecione com: ${MEMORY_STATUS_COMMAND}.`);
+      } else if (!checkpointMatchesLedgerPrefix(attempt.checkpoint, eventIds, ledgerEvents)) {
+        failures.push(`Checkpoint do attempt projetado diverge do prefixo rederivado do ledger. Inspecione com: ${MEMORY_STATUS_COMMAND}.`);
+      }
+      continue;
+    }
+
+    failures.push(`Attempt de memória v2 possui state inválido. Inspecione com: ${MEMORY_STATUS_COMMAND}.`);
+  }
+
+  return { failures, warnings };
 }
 
 /**
  * Read-only consistency check for the local memory-v2 bundle. It intentionally
  * does not acquire MEMORY.lock or invoke the projector/repair paths.
  */
-export function checkMemoryBundle(vaultBase) {
+export function checkMemoryBundle(vaultBase, { registry } = {}) {
   const brain = join(vaultBase, '.brain');
   const mode = detectMemoryMode(vaultBase);
   if (mode.mode === 'legacy') {
@@ -206,6 +296,13 @@ export function checkMemoryBundle(vaultBase) {
       failures.push(`Projeção SHARED stale/lag (${divergences.join('; ')}). Inspecione com: ${MEMORY_STATUS_COMMAND}.`);
     }
   }
+
+  const lifecycle = checkMemoryAttempts(registry || readSessionRegistry(vaultBase), {
+    ledgerEvents: bundle.ledger?.events || [],
+    outboxEventIds: outbox.eventIds,
+  });
+  failures.push(...lifecycle.failures);
+  warnings.push(...lifecycle.warnings);
 
   const unresolved = candidates.items.filter((item) => !['resolved', 'rejected', 'superseded'].includes(item?.status));
   const activeConflicts = unresolved.filter((item) => item?.reason === 'conflict');
@@ -332,7 +429,7 @@ export function runVaultHealth({ vaultBase, session = '' }) {
   ];
   let memory = { status: 'legacy', metrics: {} };
   if (memoryMarkers.some((path) => existsSync(path))) {
-    memory = checkMemoryBundle(vaultBase);
+    memory = checkMemoryBundle(vaultBase, { registry });
     failures.push(...memory.failures.map((item) => `Memória: ${item}`));
     warnings.push(...memory.warnings.map((item) => `Memória: ${item}`));
   } else {

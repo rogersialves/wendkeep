@@ -37,6 +37,7 @@ export const HOOK_FILES = [
   'memory-schema.mjs',
   'memory-store.mjs',
   'memory-handoff.mjs',
+  'session-memory-lifecycle.mjs',
   'change-core.mjs',
   'spec-core.mjs',
   'sensors-core.mjs',
