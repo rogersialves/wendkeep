@@ -12,6 +12,9 @@ import { updateSessionObservability } from './session-observability.mjs';
 import { resolveSessionEntry } from './session-identity.mjs';
 import { mutateSessionNote } from './session-note-io.mjs';
 import { applyDerivedSections, provenanceSessions } from './derived-sections.mjs';
+import { buildSessionMemoryEvents, collectLifecycleEvidence } from './memory-handoff.mjs';
+import { enqueueMemoryEvent, projectMemoryOutbox } from './memory-store.mjs';
+import { sanitizeMemoryText } from './memory-schema.mjs';
 import {
   ensureDir,
   findActiveSessionByTranscript,
@@ -37,6 +40,9 @@ import {
   turnMarker,
   hasTurnMarker,
   normalizeTurnMarkers,
+  mutateSessionRegistry,
+  resolveStopActivation,
+  applyStopActivation,
 } from './obsidian-common.mjs';
 
 function extractContentText(content) {
@@ -792,6 +798,42 @@ function shouldFinalizeSession() {
   return process.env.OBSIDIAN_NO_AUTO_FINALIZE !== '1';
 }
 
+export function commitSessionMemory(vaultBase, handoff, { projectOptions = {} } = {}) {
+  const events = buildSessionMemoryEvents(handoff);
+  const eventIds = events.map((event) => event.event_id);
+  try {
+    for (const event of events) enqueueMemoryEvent(vaultBase, event);
+    const projection = projectMemoryOutbox(vaultBase, projectOptions);
+    if (projection.status === 'busy') {
+      return {
+        status: 'degraded',
+        error: 'memory projector busy; outbox preserved for replay',
+        eventCount: events.length,
+        eventIds,
+        checkpoint: null,
+      };
+    }
+    return {
+      status: 'projected',
+      eventCount: events.length,
+      eventIds,
+      checkpoint: {
+        revision: projection.revision,
+        event_cursor: projection.eventCursor,
+        state_hash: projection.stateHash,
+      },
+    };
+  } catch (error) {
+    return {
+      status: 'degraded',
+      error: sanitizeMemoryText(error?.message || String(error)),
+      eventCount: events.length,
+      eventIds,
+      checkpoint: null,
+    };
+  }
+}
+
 // Só captura checkboxes de tarefa reais (`- [ ] ...`). Antes casava as palavras
 // `todo`/`pendência`/`pendente` em prosa (ex.: "todo" dentro de "todos"), o que
 // despejava trechos de conversa na seção Pendências.
@@ -913,9 +955,7 @@ function replaceClosingSection(content, closing) {
 export function finalizeSessionFile(sessionPath, tx, created, endedAt) {
   const pending = extractPending(tx.rawTextForDetection);
   const links = (items) => items.length ? items.map((rel) => `  - ${wikilinkFromRel(rel)}`).join('\n') : '  - Nenhuma';
-  const summary = tx.latestAssistantMessage
-    ? truncate(tx.latestAssistantMessage, 500)
-    : `Sessão encerrada com ${tx.userPrompts.length} prompts e ${tx.tools.length} ferramentas registradas.`;
+  const summary = sessionFinalSummary(tx);
 
   const closing = `## Encerramento
 
@@ -941,6 +981,12 @@ ${formatPendingClosing(pending)}
     ),
     closing,
   ));
+}
+
+export function sessionFinalSummary(tx) {
+  return tx.latestAssistantMessage
+    ? truncate(tx.latestAssistantMessage, 500)
+    : `Sessão encerrada com ${tx.userPrompts.length} prompts e ${tx.tools.length} ferramentas registradas.`;
 }
 
 // --- Vínculo Sessão ↔ Issues Linear (03-Linear) -------------------------------
@@ -1127,6 +1173,47 @@ function main() {
 
   const now = new Date();
   const endedAt = formatLocalIso(now);
+  const stopTurnSequence = Number.isSafeInteger(Number(input.turn_sequence))
+    ? Number(input.turn_sequence)
+    : Number(entry.last_turn_sequence || 0);
+  const causalStop = mutateSessionRegistry(vaultBase, (registry) => {
+    const activationId = resolveStopActivation(registry, {
+      session_id: sessionId,
+      activation_id: input.activation_id || input.activationId || '',
+      transcript_id: identity.transcriptId,
+      transcript_path: identity.transcriptPath || transcriptPath,
+    });
+    const cas = applyStopActivation(registry, {
+      session_id: sessionId,
+      activation_id: activationId,
+      turn_sequence: stopTurnSequence,
+      ended_at: endedAt,
+    });
+    registry.version = cas.registry.version;
+    registry.sessions = cas.registry.sessions;
+    if (cas.canPromoteMemory) {
+      registry.sessions[sessionId] = {
+        ...registry.sessions[sessionId],
+        session_file: sessionRel,
+        last_turn_id: turnId,
+        transcript_path: transcriptPath,
+        transcript_id: identity.transcriptId,
+        provider: identity.provider,
+      };
+    }
+    return {
+      activationId,
+      activation: registry.sessions[sessionId]?.activations?.[activationId] || null,
+      stopDisposition: cas.stopDisposition,
+      canPromoteMemory: cas.canPromoteMemory,
+    };
+  });
+  if (!causalStop.canPromoteMemory) {
+    const message = `wendkeep: Stop ${causalStop.stopDisposition}; uma activation mais nova foi preservada e a memória não foi promovida.`;
+    process.stderr.write(`[wendkeep] ${message}\n`);
+    writeHookOutput({ systemMessage: message });
+    return;
+  }
   const created = mergeCreatedNotes(
     createLinkedNotes(vaultBase, formatDate(now), sessionRel, tx),
     findLinkedDerivedNotes(vaultBase, sessionRel),
@@ -1156,15 +1243,40 @@ function main() {
     session_id: sessionId,
     last_logged_turn_id: turnId,
   });
-  upsertSessionRegistry(vaultBase, sessionId, {
-    session_file: sessionRel,
-    status: 'done',
-    // started_at omitido: preserva o da própria entry (ver branch acima).
-    ended_at: endedAt,
-    last_turn_id: turnId,
-    transcript_path: transcriptPath,
-    transcript_id: identity.transcriptId,
-    provider: identity.provider,
+
+  let projectId = '';
+  try {
+    projectId = JSON.parse(readFileSync(join(vaultBase, '.brain', 'PROJECT.json'), 'utf8')).projectId || '';
+  } catch { /* store validator reports a degraded handoff below */ }
+  const finalSummary = sessionFinalSummary(tx);
+  const memoryEvidence = collectLifecycleEvidence(vaultBase, {
+    changeSlug: entry.change_slug,
+    summary: finalSummary,
+    noteRel: sessionRel,
+  });
+  const memoryResult = commitSessionMemory(vaultBase, {
+    projectId,
+    identity,
+    activation: {
+      id: causalStop.activationId,
+      epoch: Number(causalStop.activation?.epoch || entry.activation_epoch || 0),
+    },
+    turn: { id: turnId, sequence: stopTurnSequence },
+    noteRel: sessionRel,
+    observedAt: new Date().toISOString(),
+    summary: finalSummary,
+    evidence: memoryEvidence,
+  });
+  mutateSessionRegistry(vaultBase, (registry) => {
+    const current = registry.sessions[sessionId];
+    if (!current) return null;
+    registry.sessions[sessionId] = {
+      ...current,
+      memory_status: memoryResult.status,
+      memory_activation_id: causalStop.activationId,
+      ...(memoryResult.checkpoint ? { memory_checkpoint: memoryResult.checkpoint } : {}),
+    };
+    return null;
   });
 
   // Reconstrói índice (camada fria) + digest (camada quente) ao finalizar. Nunca derruba o Stop.
@@ -1179,7 +1291,9 @@ function main() {
   try { pruneChangeSentinels(vaultBase); } catch { /* bônus */ }
 
   pingObsidianVault(input.obsidian_api_key);
-  writeHookOutput({});
+  writeHookOutput(memoryResult.status === 'degraded'
+    ? { systemMessage: `wendkeep: sessão salva; memória compartilhada degradada (${memoryResult.error}). Outbox preservada para replay.` }
+    : {});
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
