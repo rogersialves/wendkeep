@@ -338,9 +338,12 @@ export function mutateSessionRegistry(vaultBase, mutator, { timeoutMs = 2000 } =
 
   try {
     const registry = readSessionRegistry(vaultBase);
+    const before = JSON.stringify(registry);
     registry.version = 2;
     const result = mutator(registry);
-    writeSessionRegistry(vaultBase, registry);
+    if (JSON.stringify(registry) !== before) {
+      writeSessionRegistry(vaultBase, registry);
+    }
     return result;
   } finally {
     // rmSync recursivo não remove diretório em caminho não-ASCII no Windows — ver
@@ -350,12 +353,202 @@ export function mutateSessionRegistry(vaultBase, mutator, { timeoutMs = 2000 } =
 }
 
 function meaningfulPatch(patch = {}) {
-  const protectedNonEmpty = new Set(['session_file', 'transcript_path', 'transcript_id', 'provider', 'started_at', 'change_slug']);
+  const protectedNonEmpty = new Set(['session_file', 'transcript_path', 'transcript_id', 'provider', 'started_at', 'change_slug', 'activation_id']);
   return Object.fromEntries(Object.entries(patch).filter(([key, value]) => {
+    if (key === 'advance_turn_sequence' || key === 'turn_sequence') return false;
     if (value === undefined || value === null) return false;
     if (value === '' && protectedNonEmpty.has(key)) return false;
     return true;
   }));
+}
+
+function nonNegativeSequence(value, fallback = null) {
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : fallback;
+}
+
+function cloneRegistry(registry = {}) {
+  const sessions = Object.fromEntries(Object.entries(registry.sessions || {}).map(([id, entry]) => [
+    id,
+    {
+      ...(entry || {}),
+      ...(entry?.activations && typeof entry.activations === 'object'
+        ? { activations: Object.fromEntries(Object.entries(entry.activations).map(([activationId, activation]) => [activationId, { ...(activation || {}) }])) }
+        : {}),
+    },
+  ]));
+  return { ...registry, version: Math.max(2, registry.version || 1), sessions };
+}
+
+// Pure causal helpers. Keeping them independent from filesystem I/O lets Stop perform its
+// compare-and-swap under the same registry lock used by the existing upsert path.
+export function openActivation(registry, session = {}, explicitActivationId = '') {
+  const next = cloneRegistry(registry);
+  const sessionId = session.session_id || session.canonical_session_id || session.id || '';
+  const activationId = explicitActivationId || session.activation_id || '';
+  if (!sessionId || !activationId) throw new TypeError('session_id and activation_id are required');
+
+  const current = next.sessions[sessionId] || {};
+  const activations = { ...(current.activations || {}) };
+  const requestedSequence = nonNegativeSequence(
+    session.turn_sequence ?? session.last_turn_sequence,
+    0,
+  );
+
+  if (current.active_activation_id === activationId && activations[activationId]?.status === 'active') {
+    const sequence = Math.max(nonNegativeSequence(current.last_turn_sequence, 0), requestedSequence);
+    activations[activationId] = {
+      ...activations[activationId],
+      last_turn_sequence: sequence,
+    };
+    next.sessions[sessionId] = {
+      ...current,
+      activation_id: activationId,
+      active_activation_id: activationId,
+      last_turn_sequence: sequence,
+      activations,
+    };
+    return next;
+  }
+
+  const previousId = current.active_activation_id || '';
+  if (previousId && activations[previousId]?.status === 'active') {
+    activations[previousId] = {
+      ...activations[previousId],
+      status: 'superseded',
+      superseded_by: activationId,
+      superseded_at: session.started_at || session.activation_started_at || '',
+    };
+  }
+
+  const epoch = Math.max(
+    nonNegativeSequence(current.activation_epoch, 0),
+    ...Object.values(activations).map((activation) => nonNegativeSequence(activation?.epoch, 0)),
+  ) + 1;
+  activations[activationId] = {
+    activation_id: activationId,
+    epoch,
+    status: 'active',
+    started_at: session.activation_started_at || session.started_at || '',
+    last_turn_sequence: requestedSequence,
+    ...(session.transcript_id ? { transcript_id: session.transcript_id } : {}),
+    ...(session.transcript_path ? { transcript_path: session.transcript_path } : {}),
+    ...(session.provider ? { provider: session.provider } : {}),
+  };
+  next.sessions[sessionId] = {
+    ...current,
+    activation_id: activationId,
+    active_activation_id: activationId,
+    activation_epoch: epoch,
+    activation_started_at: session.activation_started_at || session.started_at || '',
+    last_turn_sequence: requestedSequence,
+    activations,
+  };
+  return next;
+}
+
+export function advanceActivationTurn(registry, turn = {}) {
+  const next = cloneRegistry(registry);
+  const sessionId = turn.session_id || turn.canonical_session_id || '';
+  const current = next.sessions[sessionId];
+  if (!current) return next;
+
+  const activeId = current.active_activation_id || '';
+  if (turn.activation_id && activeId && turn.activation_id !== activeId) return next;
+  const previous = nonNegativeSequence(current.last_turn_sequence, 0);
+  const explicit = nonNegativeSequence(turn.turn_sequence ?? turn.last_turn_sequence);
+  const sequence = explicit === null ? previous + 1 : Math.max(previous, explicit);
+  const activations = { ...(current.activations || {}) };
+  if (activeId && activations[activeId]) {
+    activations[activeId] = {
+      ...activations[activeId],
+      last_turn_sequence: Math.max(
+        nonNegativeSequence(activations[activeId].last_turn_sequence, 0),
+        sequence,
+      ),
+    };
+  }
+  next.sessions[sessionId] = { ...current, last_turn_sequence: sequence, activations };
+  return next;
+}
+
+export function resolveStopActivation(registry, stop = {}) {
+  const sessionId = stop.session_id || stop.canonical_session_id || '';
+  const entry = registry?.sessions?.[sessionId];
+  if (!entry) return '';
+  if (stop.activation_id) return String(stop.activation_id);
+
+  const transcriptId = String(stop.transcript_id || '');
+  const transcriptPath = String(stop.transcript_path || '');
+  if (!transcriptId && !transcriptPath) return '';
+  const matches = Object.entries(entry.activations || {}).filter(([, activation]) => {
+    if (!activation) return false;
+    if (transcriptId && activation.transcript_id && activation.transcript_id !== transcriptId) return false;
+    const paths = [
+      ...(Array.isArray(activation.transcript_paths) ? activation.transcript_paths : []),
+      activation.transcript_path,
+    ].filter(Boolean);
+    if (transcriptPath && paths.length && !paths.some((path) => transcriptsMatch(path, transcriptPath))) return false;
+    return Boolean(
+      (transcriptId && activation.transcript_id === transcriptId)
+      || (transcriptPath && paths.some((path) => transcriptsMatch(path, transcriptPath))),
+    );
+  });
+  return matches.length === 1 ? matches[0][0] : '';
+}
+
+function stopResult(registry, stopDisposition, canPromoteMemory = false) {
+  return {
+    ...registry,
+    registry,
+    stopDisposition,
+    canPromoteMemory,
+  };
+}
+
+export function applyStopActivation(registry, stop = {}) {
+  const next = cloneRegistry(registry);
+  const sessionId = stop.session_id || stop.canonical_session_id || '';
+  const current = next.sessions[sessionId];
+  const activeId = current?.active_activation_id || '';
+  const stopActivationId = stop.activation_id || '';
+  if (!current || !activeId || !stopActivationId) return stopResult(next, 'ambiguous');
+  if (current.activations?.[activeId]?.status !== 'active') return stopResult(next, 'ambiguous');
+
+  if (activeId !== stopActivationId) {
+    const activations = { ...(current.activations || {}) };
+    if (activations[stopActivationId]?.status === 'active') {
+      activations[stopActivationId] = {
+        ...activations[stopActivationId],
+        status: 'superseded',
+        superseded_by: activeId,
+      };
+      next.sessions[sessionId] = { ...current, activations };
+    }
+    return stopResult(next, 'superseded');
+  }
+
+  const stopSequence = nonNegativeSequence(stop.turn_sequence ?? stop.last_turn_sequence);
+  const lastSequence = nonNegativeSequence(current.last_turn_sequence, 0);
+  if (stopSequence === null) return stopResult(next, 'ambiguous');
+  if (stopSequence < lastSequence) return stopResult(next, 'stale_turn');
+
+  const activations = { ...(current.activations || {}) };
+  activations[activeId] = {
+    ...(activations[activeId] || { activation_id: activeId, epoch: current.activation_epoch }),
+    status: 'done',
+    ended_at: stop.ended_at || '',
+    last_turn_sequence: stopSequence,
+  };
+  next.sessions[sessionId] = {
+    ...current,
+    status: 'done',
+    ended_at: stop.ended_at || current.ended_at || '',
+    active_activation_id: '',
+    last_turn_sequence: stopSequence,
+    activations,
+  };
+  return stopResult(next, 'applied', true);
 }
 
 // Remove one registry entry, but ONLY when its transcript matches the given path — this is
@@ -382,16 +575,58 @@ export function upsertSessionRegistry(vaultBase, sessionId, patch) {
   const clean = meaningfulPatch(patch);
   const next = mutateSessionRegistry(vaultBase, (registry) => {
     const current = registry.sessions[sessionId] || {};
+    let causalCurrent = current;
+    if (clean.activation_id) {
+      causalCurrent = openActivation(
+        { version: registry.version, sessions: { [sessionId]: current } },
+        {
+          session_id: sessionId,
+          activation_id: clean.activation_id,
+          activation_started_at: clean.activation_started_at,
+          started_at: clean.activation_started_at || clean.started_at,
+          last_turn_sequence: clean.last_turn_sequence,
+          transcript_id: clean.transcript_id || current.transcript_id,
+          transcript_path: clean.transcript_path || current.transcript_path,
+          provider: clean.provider || current.provider,
+        },
+      ).sessions[sessionId];
+    }
+    if (patch?.advance_turn_sequence === true || patch?.turn_sequence !== undefined) {
+      causalCurrent = advanceActivationTurn(
+        { version: registry.version, sessions: { [sessionId]: causalCurrent } },
+        {
+          session_id: sessionId,
+          activation_id: causalCurrent.active_activation_id || '',
+          turn_sequence: patch.turn_sequence,
+        },
+      ).sessions[sessionId];
+    }
+    const activeId = causalCurrent.active_activation_id || '';
+    if (activeId && causalCurrent.activations?.[activeId]) {
+      const active = causalCurrent.activations[activeId];
+      causalCurrent = {
+        ...causalCurrent,
+        activations: {
+          ...causalCurrent.activations,
+          [activeId]: {
+            ...active,
+            ...(!active.transcript_id && clean.transcript_id ? { transcript_id: clean.transcript_id } : {}),
+            ...(!active.transcript_path && clean.transcript_path ? { transcript_path: clean.transcript_path } : {}),
+            ...(!active.provider && clean.provider ? { provider: clean.provider } : {}),
+          },
+        },
+      };
+    }
     const transcriptPaths = [...new Set([
-      ...(Array.isArray(current.transcript_paths) ? current.transcript_paths : []),
-      current.transcript_path,
+      ...(Array.isArray(causalCurrent.transcript_paths) ? causalCurrent.transcript_paths : []),
+      causalCurrent.transcript_path,
       ...(Array.isArray(clean.transcript_paths) ? clean.transcript_paths : []),
       clean.transcript_path,
     ].filter(Boolean))];
     const value = {
-      ...current,
+      ...causalCurrent,
       ...clean,
-      ...(transcriptPaths.length ? { transcript_paths: transcriptPaths, transcript_path: clean.transcript_path || current.transcript_path || transcriptPaths.at(-1) } : {}),
+      ...(transcriptPaths.length ? { transcript_paths: transcriptPaths, transcript_path: clean.transcript_path || causalCurrent.transcript_path || transcriptPaths.at(-1) } : {}),
       last_seen: clean.last_seen || clean.updated_at || formatLocalIso(new Date()),
       updated_at: clean.updated_at || formatLocalIso(new Date()),
     };

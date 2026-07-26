@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { existsSync, writeFileSync } from 'fs';
+import { randomUUID } from 'crypto';
 import { basename, join } from 'path';
 import { pathToFileURL } from 'url';
 import {
@@ -169,6 +170,14 @@ function main() {
   const sessionId = identity.canonicalConversationId;
   const transcriptPath = identity.transcriptPath;
   const control = readControl(vaultBase);
+  const activationId = input.activation_id || input.activationId || randomUUID();
+  const activationStartedAt = formatLocalIso(now);
+  const registerActivation = (canonicalSessionId, patch) => upsertSessionRegistry(vaultBase, canonicalSessionId, {
+    ...patch,
+    activation_id: activationId,
+    activation_started_at: activationStartedAt,
+    last_turn_sequence: 0,
+  });
 
   // Fecha sessões `active` órfãs (sem evento de fim — janela fechada/crash) antes
   // de seguir. Preserva a deste transcript: pode ser reaproveitada logo abaixo.
@@ -186,7 +195,7 @@ function main() {
   if (control.status === 'active' && control.session_file && control.session_id === sessionId) {
     const activePath = join(vaultBase, control.session_file);
     if (existsSync(activePath)) {
-      upsertSessionRegistry(vaultBase, sessionId, {
+      registerActivation(sessionId, {
         session_file: control.session_file,
         status: 'active',
         started_at: control.started_at,
@@ -232,7 +241,7 @@ function main() {
         session_id: sessionId,
         last_logged_turn_id: control.last_logged_turn_id || '',
       });
-      upsertSessionRegistry(vaultBase, sessionId, {
+      registerActivation(sessionId, {
         session_file: known.session_file,
         status: 'active',
         started_at: startedAt,
@@ -275,7 +284,7 @@ function main() {
         session_id: sessionId || match.sessionId,
         last_logged_turn_id: control.last_logged_turn_id || '',
       });
-      upsertSessionRegistry(vaultBase, sessionId || match.sessionId, {
+      registerActivation(sessionId || match.sessionId, {
         session_file: match.session_file,
         status: 'active',
         started_at: startedAt,
@@ -305,7 +314,7 @@ function main() {
     started_at: startedAt,
     session_id: sessionId,
   });
-  upsertSessionRegistry(vaultBase, sessionId, {
+  registerActivation(sessionId, {
     session_file: relPath,
     status: 'active',
     started_at: startedAt,

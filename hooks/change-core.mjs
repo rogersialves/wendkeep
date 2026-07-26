@@ -245,30 +245,67 @@ export function allChangesState(vaultBase) {
   return { current, changes, pointerWarning, hash: tasksHashOf(fingerprint.join('\n')) };
 }
 
-export function renderOpenChanges(state, { tag = 'open_changes' } = {}) {
+function boundInjectionLine(line, maxLineChars) {
+  if (!Number.isFinite(maxLineChars) || line.length <= maxLineChars) return line;
+  const marker = ' … [linha resumida pelo budget]';
+  return `${line.slice(0, Math.max(0, maxLineChars - marker.length))}${marker}`;
+}
+
+function capInjectionBlock(lines, { tag, maxBytes, maxLineChars }) {
+  const bounded = lines.map((line) => boundInjectionLine(line, maxLineChars));
+  if (!Number.isFinite(maxBytes) || Buffer.byteLength(bounded.join('\n'), 'utf8') <= maxBytes) {
+    return bounded.join('\n');
+  }
+  const closing = tag ? `</${tag}>` : '';
+  const marker = '- … conteúdo restante omitido pelo budget de injeção.';
+  const body = tag ? bounded.slice(0, -1) : bounded;
+  const out = [];
+  for (const line of body) {
+    const candidate = [...out, line, marker, closing].filter(Boolean).join('\n');
+    if (Buffer.byteLength(candidate, 'utf8') > maxBytes) break;
+    out.push(line);
+  }
+  // The tag itself and an explicit marker are the minimum valid degraded block.
+  if (!out.length && tag) out.push(`<${tag}>`);
+  out.push(marker);
+  if (closing) out.push(closing);
+  return out.join('\n');
+}
+
+export function renderOpenChanges(state, {
+  tag = 'open_changes',
+  currentOnly = false,
+  maxBytes = Number.POSITIVE_INFINITY,
+  maxLineChars = 320,
+} = {}) {
   if (!state?.changes?.length && !state?.pointerWarning) return '';
   const lines = [];
   if (tag) lines.push(`<${tag}>`);
   if (state.current) lines.push(`Change atual (comandos sem --change): ${state.current}.`);
   else lines.push('Nenhuma change atual selecionada; comandos sem --change continuam recusados.');
   if (state.pointerWarning) lines.push(`Aviso: ${state.pointerWarning}.`);
-  for (const change of state.changes || []) {
+  const visibleChanges = currentOnly
+    ? (state.changes || []).filter((change) => change.current)
+    : (state.changes || []);
+  for (const change of visibleChanges) {
     const label = change.current ? 'ATUAL' : 'ABERTA';
     lines.push(`### ${label} — ${change.slug} (${change.openCount} aberta(s), ${change.doneCount} concluída(s))`);
     if (change.warning) lines.push(`- Aviso: ${change.warning}.`);
     else if (!change.openTasks.length) lines.push('- Nenhuma tarefa aberta.');
     else for (const task of change.openTasks) lines.push(`- [ ] ${task.id} ${task.text}`);
   }
+  const omittedChanges = (state.changes || []).length - visibleChanges.length;
+  if (omittedChanges > 0) lines.push(`- ${omittedChanges} change(s) não atual(is) omitida(s) pelo budget global.`);
   if (state.current) lines.push('Para change atual: `wendkeep change done <id>`; antes de archive: `wendkeep verify`.');
   lines.push('Qualquer agente pode assumir uma change: selecione-a com `wendkeep change use <slug>` ou use `--change <slug>` quando disponível.');
   if (tag) lines.push(`</${tag}>`);
-  return lines.join('\n');
+  return capInjectionBlock(lines, { tag, maxBytes, maxLineChars });
 }
 
 // Mantém o nome exportado para consumidores internos existentes, mas agora injeta o backlog
 // completo em vez de ocultar changes não selecionadas.
-export function buildActiveChangeInjection(vaultBase) {
-  return renderOpenChanges(allChangesState(vaultBase));
+export function buildActiveChangeInjection(vaultBase, options = {}) {
+  return renderOpenChanges(allChangesState(vaultBase), options);
 }
 
 export function activeChangeLink(vaultBase) {

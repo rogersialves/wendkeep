@@ -39,6 +39,7 @@ import { LOCALES, DEFAULT_LOCALE, getLocale, clearLocaleCache, vaultFolders } fr
 import { seedDotcontext, globalHasDotcontext, resolveDotcontextSkipMcp, renderSensorsJson } from './dotcontext-seed.mjs';
 import { adoptSpecsState, ensureSpecsReadme, SPECS_STATE_FILE } from '../hooks/spec-core.mjs';
 import { bindProjectVault, readProjectBinding } from './project-vault.mjs';
+import { seedMemoryV2 } from './memory.mjs';
 
 function parseArgs(argv) {
   const args = { mcp: true, yes: false, force: false };
@@ -506,6 +507,7 @@ export async function runInit(argv) {
   if (!existsSync(corePath)) writeFileSync(corePath, renderCoreSkeleton(loc.id), 'utf8');
   const protoPath = join(brainDir, 'COMPACTION_PROTOCOL.md');
   if (!existsSync(protoPath)) writeFileSync(protoPath, renderCompactionProtocol(), 'utf8');
+  seedMemoryV2(vaultPath);
   // Seed the definitions layer (.brain/agents + .brain/skills): versioned source of
   // truth for custom agents/skills. `wendkeep sync-defs` copies them to the agent dirs.
   seedDefinitions(brainDir);

@@ -4,6 +4,27 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.58.0] — 2026-07-26
+
+### Added
+
+- **Shared Project Memory v2 torna o handoff entre agentes causal, auditável e diretamente
+  injetável.** O `SessionStop` publica eventos locais imutáveis numa outbox, o projector
+  serializa o ledger `MEMORY_EVENTS.jsonl` e gera `SHARED_MEMORY.md`; o próximo
+  `startup|clear|compact` recebe CORE + SHARED completos antes do contexto da change. Epochs
+  de activation impedem um Stop atrasado de fechar ou promover sobre uma sessão mais nova.
+- **Curadoria operacional ganhou comandos e gate próprios.** `wendkeep memory` oferece
+  `status`, migração dry-run/apply com backup, `repair` e decisões append-only de
+  `promote|reject`; `memory-health` bloqueia verify/archive em corrupção, lag ou conflito
+  ativo e mantém outbox/candidates comuns como avisos recuperáveis.
+
+### Security
+
+- **Memória v2 permanece local-only e sanitizada em duas fronteiras.** Secrets, tokens, PII,
+  paths de transcript e payloads do harness são removidos antes da persistência e novamente
+  antes da injeção; eventos são isolados por `project_id`, CORE/SHARED nunca são truncados
+  silenciosamente e o envelope total possui budget rígido de 24 KiB.
+
 ## [0.57.2] — 2026-07-25
 
 ### Fixed

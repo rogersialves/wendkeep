@@ -37,6 +37,12 @@ function sessionIdFromInput(input) {
   return input.session_id || input.sessionId || input.codex_session_id || '';
 }
 
+function turnSequenceFromInput(input = {}) {
+  const value = input.turn_sequence ?? input.turnSequence;
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : undefined;
+}
+
 function buildSessionContent({ relPath, now, summary = 'session', sessionId = '', reason = 'Sessão criada automaticamente pelo hook UserPromptSubmit.' }) {
   const date = formatDate(now);
   const startedAt = formatLocalIso(now);
@@ -262,6 +268,8 @@ function activateExistingSession({ vaultBase, relPath, startedAt, sessionId, inp
     transcript_path: identity.transcriptPath,
     transcript_id: identity.transcriptId,
     provider: identity.provider,
+    advance_turn_sequence: true,
+    turn_sequence: turnSequenceFromInput(input),
   });
   return true;
 }
@@ -288,6 +296,8 @@ function createSession({ vaultBase, sessionId, input, now, identity }) {
     transcript_path: identity.transcriptPath,
     transcript_id: identity.transcriptId,
     provider: identity.provider,
+    advance_turn_sequence: true,
+    turn_sequence: turnSequenceFromInput(input),
   });
   return { relPath, startedAt };
 }
@@ -333,6 +343,14 @@ function main() {
         existsSync(join(vaultBase, ctrl.session_file)) &&
         ctrl.session_id === sessionId
       ) {
+        upsertSessionRegistry(vaultBase, sessionId, {
+          status: 'active',
+          transcript_path: identity.transcriptPath,
+          transcript_id: identity.transcriptId,
+          provider: identity.provider,
+          advance_turn_sequence: true,
+          turn_sequence: turnSequenceFromInput(input),
+        });
         writeHookOutput({});
         return;
       }
@@ -375,6 +393,8 @@ function main() {
         transcript_path: identity.transcriptPath,
         transcript_id: identity.transcriptId,
         provider: identity.provider,
+        advance_turn_sequence: true,
+        turn_sequence: turnSequenceFromInput(input),
       });
       writeHookOutput({});
       return;

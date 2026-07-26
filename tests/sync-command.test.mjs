@@ -139,6 +139,29 @@ test('sync num projeto novo: o init cria o que falta em vez de falhar', () => {
   }
 });
 
+test('[req:MEM-HYB-9] re-init via sync preserva CORE/SHARED/ledger/candidates byte-idênticos', () => {
+  const project = freshProject();
+  try {
+    const first = spawnWk(['sync', '--project', project, '--yes'], { cwd: project });
+    assert.ok(first.status === 0 || first.status === 1, first.stderr);
+    const vaultName = JSON.parse(readFileSync(join(project, '.wendkeep.json'), 'utf8')).vault;
+    const brain = join(project, vaultName, '.brain');
+    const owned = {
+      'CORE.md': '# CORE do usuário\n',
+      'SHARED_MEMORY.md': '# SHARED do usuário\n',
+      'MEMORY_EVENTS.jsonl': '{"bytes":"do usuário"}\n',
+      'MEMORY_CANDIDATES.jsonl': '{"candidate":"do usuário"}\n',
+    };
+    for (const [name, bytes] of Object.entries(owned)) writeFileSync(join(brain, name), bytes);
+
+    const second = spawnWk(['sync', '--project', project, '--yes'], { cwd: project });
+    assert.ok(second.status === 0 || second.status === 1, second.stderr);
+    for (const [name, bytes] of Object.entries(owned)) {
+      assert.equal(readFileSync(join(brain, name), 'utf8'), bytes, `${name} preservado byte a byte`);
+    }
+  } finally { rmSync(project, { recursive: true, force: true }); }
+});
+
 // --- PVR-SYNC-1: env bleed --------------------------------------------------
 
 // sync-defs resolve o vault por `--vault || OBSIDIAN_VAULT_PATH`. Num projeto novo, o env
