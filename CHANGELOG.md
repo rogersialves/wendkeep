@@ -4,6 +4,24 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.58.2] — 2026-07-26
+
+### Added
+
+- **Referência completa dos comandos agora é bilíngue e orientada por tarefa.** Sete guias por
+  domínio e três guias profundos cobrem instalação, changes, verificação, memória, sessões,
+  importação, notas, custos e manutenção em PT-BR e inglês, com sintaxe, exits, exemplos,
+  resultados esperados e diagnóstico.
+- **Paridade documental virou gate automatizado.** O novo sensor `docs-bilingual` bloqueia pares
+  ausentes, comandos públicos sem cobertura, links quebrados, estrutura divergente, drift da regra
+  local e guias ausentes no tarball.
+
+### Changed
+
+- **Os READMEs agora apresentam as funcionalidades por grupos.** A referência extensa deu lugar a
+  um mapa navegável que leva ao guia correto no GitHub e no npm. O fluxo de `verify` deixa explícito
+  que exit 2 por ausência de change é contexto ocioso, não falha de saúde do projeto.
+
 ## [0.58.1] — 2026-07-26
 
 ### Fixed

@@ -32,6 +32,14 @@
       "severity": "critical",
       "type": "command",
       "command": "node bin/wendkeep.mjs memory status --gate --vault .WendKeep-vault"
+    },
+    {
+      "id": "docs-bilingual",
+      "name": "Bilingual command documentation",
+      "description": "Checks mirrored PT-BR/EN guides, public command coverage, navigation, governance and tarball contents",
+      "severity": "critical",
+      "type": "command",
+      "command": "node --test tests/docs-bilingual.test.mjs tests/readme-packaging.test.mjs"
     }
   ]
 }
