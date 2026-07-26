@@ -48,7 +48,7 @@ Nenhum aprendizado registrado ainda.
 Nenhuma.
 `;
 
-function seed() {
+function seed({ withSeededSession = true } = {}) {
   const project = mkdtempSync(join(tmpdir(), 'wk-memory-e2e-project-'));
   const vault = join(project, '.Vendiva-vault');
   const brain = join(vault, '.brain');
@@ -68,7 +68,7 @@ function seed() {
     '# CORE', '', '## Preferências do Usuário', '- responder em pt-BR', '',
     '## Padrões Ativos', '- memória local e auditável', '', '## Pendências Abertas', '- consultar SHARED diretamente', '',
   ].join('\n'));
-  writeFileSync(sessionPath, NOTE);
+  if (withSeededSession) writeFileSync(sessionPath, NOTE);
   writeFileSync(join(archived, 'verdict.json'), JSON.stringify({
     ok: true,
     coverage: Array.from({ length: 7 }, (_, index) => ({ req: `REQ-${index + 1}`, covered: true })),
@@ -87,29 +87,32 @@ function seed() {
     { type: 'event_msg', timestamp: '2026-07-26T03:20:47.000Z', payload: { type: 'agent_message', turn_id: 'turn-final', message: SUMMARY } },
   ];
   writeFileSync(transcript, `${events.map((event) => JSON.stringify(event)).join('\n')}\n`);
-  writeFileSync(join(brain, 'SESSION_REGISTRY.json'), JSON.stringify({
-    version: 2,
-    sessions: {
-      [SID]: {
-        session_file: sessionRel,
-        status: 'active',
-        provider: 'codex',
-        transcript_path: transcript,
-        transcript_id: SID,
-        change_slug: 'campanhas-importacao',
-        activation_id: 'activation-1',
-        active_activation_id: 'activation-1',
-        activation_epoch: 1,
-        last_turn_sequence: 1,
-        activations: {
-          'activation-1': {
-            activation_id: 'activation-1', epoch: 1, status: 'active', last_turn_sequence: 1,
-            transcript_id: SID, transcript_path: transcript, provider: 'codex',
+  writeFileSync(join(brain, 'MEMORY_EVENTS.jsonl'), '');
+  if (withSeededSession) {
+    writeFileSync(join(brain, 'SESSION_REGISTRY.json'), JSON.stringify({
+      version: 2,
+      sessions: {
+        [SID]: {
+          session_file: sessionRel,
+          status: 'active',
+          provider: 'codex',
+          transcript_path: transcript,
+          transcript_id: SID,
+          change_slug: 'campanhas-importacao',
+          activation_id: 'activation-1',
+          active_activation_id: 'activation-1',
+          activation_epoch: 1,
+          last_turn_sequence: 1,
+          activations: {
+            'activation-1': {
+              activation_id: 'activation-1', epoch: 1, status: 'active', last_turn_sequence: 1,
+              transcript_id: SID, transcript_path: transcript, provider: 'codex',
+            },
           },
         },
       },
-    },
-  }));
+    }));
+  }
   return { project, vault, brain, sessionPath, transcript };
 }
 
@@ -121,6 +124,8 @@ function cleanEnv(vault) {
 
 test('[req:MEM-HYB-1] [req:MEM-HYB-2] [req:MEM-HYB-3] Vendiva-like Stop becomes direct memory in the next SessionStart', () => {
   const { project, vault, brain, sessionPath, transcript } = seed();
+  const corePath = join(brain, 'CORE.md');
+  const coreBeforeStop = readFileSync(corePath);
   const stop = spawnSync(process.execPath, [STOP], {
     cwd: project,
     env: cleanEnv(vault),
@@ -139,6 +144,7 @@ test('[req:MEM-HYB-1] [req:MEM-HYB-2] [req:MEM-HYB-3] Vendiva-like Stop becomes 
   const registry = JSON.parse(readFileSync(join(brain, 'SESSION_REGISTRY.json'), 'utf8'));
   assert.equal(registry.sessions[SID].memory_status, 'projected');
   assert.equal(registry.sessions[SID].memory_checkpoint.revision >= 5, true);
+  assert.deepEqual(readFileSync(corePath), coreBeforeStop, 'Stop alterou bytes do CORE curado');
 
   const shared = readFileSync(join(brain, 'SHARED_MEMORY.md'), 'utf8');
   for (const fact of ['ADR-0107', '7/7', 'backend-unit', 'MinIO privado', '9fbbbb1bdad630cd4145ea4a916ef8f240ed603f', 'Nenhum push', 'interface de revisão']) {
@@ -167,6 +173,7 @@ test('[req:MEM-HYB-1] [req:MEM-HYB-2] [req:MEM-HYB-3] Vendiva-like Stop becomes 
     input: JSON.stringify({ hook_event_name: 'SessionStart', source: 'startup', cwd: project, session_id: 'next-session' }),
   });
   assert.equal(start.status, 0, start.stderr);
+  assert.deepEqual(readFileSync(corePath), coreBeforeStop, 'SessionStart seguinte alterou bytes do CORE curado');
   const context = JSON.parse(start.stdout).hookSpecificOutput.additionalContext;
   assert.match(context, /<brain_memory version="2"/);
   for (const fact of ['ADR-0107', '7/7', 'backend-unit', 'MinIO privado', '9fbbbb1bdad630cd4145ea4a916ef8f240ed603f', 'Nenhum push', 'interface de revisão']) {
@@ -198,8 +205,25 @@ test('[req:MEM-HYB-7] [req:HOOK-MEM-1] real Stop stays exit-0/JSON and records d
 });
 
 test('[req:HOOK-MEM-1] real late Stop N cannot rewrite activation N+1 note, registry, ledger or checkpoint', () => {
-  const { project, vault, brain, sessionPath, transcript } = seed();
-  const started = spawnSync(process.execPath, [START], {
+  const { project, vault, brain, transcript } = seed({ withSeededSession: false });
+  const startN = spawnSync(process.execPath, [START], {
+    cwd: project,
+    env: cleanEnv(vault),
+    encoding: 'utf8',
+    input: JSON.stringify({
+      hook_event_name: 'SessionStart', cwd: project, session_id: SID, transcript_path: transcript,
+      activation_id: 'activation-1', source: 'startup',
+    }),
+  });
+  assert.equal(startN.status, 0, startN.stderr);
+  assert.doesNotThrow(() => JSON.parse(startN.stdout || '{}'));
+
+  const registryPath = join(brain, 'SESSION_REGISTRY.json');
+  const registryN = JSON.parse(readFileSync(registryPath, 'utf8'));
+  assert.equal(registryN.sessions[SID].active_activation_id, 'activation-1');
+  assert.equal(registryN.sessions[SID].activations['activation-1'].epoch, 1);
+
+  const startNPlusOne = spawnSync(process.execPath, [START], {
     cwd: project,
     env: cleanEnv(vault),
     encoding: 'utf8',
@@ -208,22 +232,20 @@ test('[req:HOOK-MEM-1] real late Stop N cannot rewrite activation N+1 note, regi
       activation_id: 'activation-2', source: 'compact',
     }),
   });
-  assert.equal(started.status, 0, started.stderr);
+  assert.equal(startNPlusOne.status, 0, startNPlusOne.stderr);
+  assert.doesNotThrow(() => JSON.parse(startNPlusOne.stdout || '{}'));
 
-  const registryPath = join(brain, 'SESSION_REGISTRY.json');
   const ledgerPath = join(brain, 'MEMORY_EVENTS.jsonl');
-  const registry = JSON.parse(readFileSync(registryPath, 'utf8'));
-  assert.equal(registry.sessions[SID].active_activation_id, 'activation-2');
-  registry.sessions[SID].memory_checkpoint = { revision: 12, event_cursor: 'n-plus-1', state_hash: 'a'.repeat(64) };
-  registry.sessions[SID].memory_status = 'projected';
-  writeFileSync(registryPath, `${JSON.stringify(registry, null, 2)}\n`);
-  writeFileSync(ledgerPath, 'N+1 ledger sentinel\n');
+  const registryNPlusOne = JSON.parse(readFileSync(registryPath, 'utf8'));
+  assert.equal(registryNPlusOne.sessions[SID].active_activation_id, 'activation-2');
+  assert.equal(registryNPlusOne.sessions[SID].activations['activation-2'].epoch, 2);
+  const sessionPath = join(vault, ...registryNPlusOne.sessions[SID].session_file.split('/'));
 
   const before = {
     note: readFileSync(sessionPath),
     registry: readFileSync(registryPath),
     ledger: readFileSync(ledgerPath),
-    registryMtime: statSync(registryPath).mtimeMs,
+    checkpoint: Buffer.from(JSON.stringify(registryNPlusOne.sessions[SID].memory_checkpoint ?? null)),
   };
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 25);
   const late = spawnSync(process.execPath, [STOP], {
@@ -241,5 +263,10 @@ test('[req:HOOK-MEM-1] real late Stop N cannot rewrite activation N+1 note, regi
   assert.deepEqual(readFileSync(sessionPath), before.note);
   assert.deepEqual(readFileSync(registryPath), before.registry);
   assert.deepEqual(readFileSync(ledgerPath), before.ledger);
-  assert.equal(statSync(registryPath).mtimeMs, before.registryMtime, 'Stop N não pode nem reescrever registry N+1');
+  const registryAfterLateStop = JSON.parse(readFileSync(registryPath, 'utf8'));
+  assert.deepEqual(
+    Buffer.from(JSON.stringify(registryAfterLateStop.sessions[SID].memory_checkpoint ?? null)),
+    before.checkpoint,
+    'Stop N não pode alterar o checkpoint de N+1',
+  );
 });

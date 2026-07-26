@@ -61,6 +61,59 @@ function makeVault({ core = CORE, shared = sharedMemory(), digest = 'DIGEST_RECA
   return vault;
 }
 
+function criticalMemoryAtLimits() {
+  const coreLines = [
+    '# CORE', '', '## Preferências do Usuário', '- pt-BR', '', '## Padrões Ativos', '- canonical', '',
+    '## Pendências Abertas', ...Array.from({ length: 16 }, (_, i) => `- durable-${i}`),
+  ];
+  const core = `${coreLines.join('\n')}\n`;
+  const baseShared = sharedMemory();
+  const fillCount = 48 - baseShared.trimEnd().split('\n').length;
+  const shared = sharedMemory({
+    extra: Array.from({ length: fillCount }, (_, i) => (
+      `- shared-fill-${i} ${'s'.repeat(240)}${i === fillCount - 1 ? ' SHARED_TAIL_MUST_SURVIVE' : ''}`
+    )),
+  });
+  assert.equal(core.trimEnd().split('\n').length, 25);
+  assert.equal(shared.trimEnd().split('\n').length, 48);
+  assert.ok(Buffer.byteLength(shared, 'utf8') <= 6 * 1024);
+  return { core, shared };
+}
+
+function makeThresholdVault({ currentTasks, nonCurrentTasks }) {
+  const critical = criticalMemoryAtLimits();
+  const vault = makeVault(critical);
+  mkdirSync(join(vault, '.brain', 'lessons'), { recursive: true });
+  for (let i = 0; i < 12; i += 1) {
+    writeFileSync(
+      join(vault, '.brain', 'lessons', `2026-08-${String(i + 1).padStart(2, '0')}-threshold.md`),
+      `---\ntype: lesson\n---\nLESSON_PRESSURE_SENTINEL_${i} ${'l'.repeat(360)}\n`,
+    );
+  }
+  for (const [slug, count, current] of [
+    ['current-threshold', currentTasks, true],
+    ['other-threshold', nonCurrentTasks, false],
+  ]) {
+    mkdirSync(join(vault, '08-Mudanças', slug), { recursive: true });
+    writeFileSync(join(vault, '08-Mudanças', slug, 'proposta.md'), `# ${slug}\n`);
+    const lines = current ? ['- [ ] 1.1 THRESHOLD_BLOCKER_MUST_SURVIVE'] : [];
+    for (let i = 0; i < count; i += 1) {
+      const tail = i === count - 1 ? ` ${current ? 'CURRENT_TAIL_MUST_SURVIVE' : 'NON_CURRENT_TAIL_MUST_SURVIVE'}` : '';
+      lines.push(`- [ ] ${current ? '2' : '3'}.${i} ${slug} ${'x'.repeat(220)}${tail}`);
+    }
+    writeFileSync(join(vault, '08-Mudanças', slug, 'tarefas.md'), `${lines.join('\n')}\n`);
+  }
+  writeFileSync(join(vault, '.brain', 'CURRENT_CHANGE.md'), 'change: current-threshold\n');
+  return { vault, ...critical };
+}
+
+function assertCriticalMemoryIntegral(out, { core, shared }) {
+  assert.ok(out.includes(core.trim()), 'CORE remains integral at every threshold');
+  assert.ok(out.includes(shared.trim()), 'SHARED remains integral at every threshold');
+  assert.match(out, /THRESHOLD_BLOCKER_MUST_SURVIVE/);
+  assert.ok(Buffer.byteLength(out, 'utf8') <= 24 * 1024);
+}
+
 test('[req:MEM-HYB-2] [req:HOOK-MEM-1] startup, clear and compact receive the same direct CORE+SHARED revision before session change', () => {
   const vault = makeVault();
   try {
@@ -165,6 +218,46 @@ test('[req:MEM-HYB-6] [req:MEM-HYB-7] global pressure drops lessons then non-cur
     assert.ok(out.split('\n').every((line) => line.length <= 320), 'every injected line respects the line budget');
     assert.match(out, /<\/wk_core>[\s\S]*<\/wk_shared_state>[\s\S]*<\/brain_memory>/, 'critical wrappers remain closed');
   } finally { rmSync(vault, { recursive: true, force: true }); }
+});
+
+test('[req:MEM-HYB-6] threshold A: removing lessons alone preserves both changes integrally', () => {
+  const fixture = makeThresholdVault({ currentTasks: 33, nonCurrentTasks: 33 });
+  try {
+    const out = buildInjection(fixture.vault, { source: 'startup' });
+    assertCriticalMemoryIntegral(out, fixture);
+    assert.doesNotMatch(out, /LESSON_PRESSURE_SENTINEL_/);
+    assert.match(out, /CURRENT_TAIL_MUST_SURVIVE/);
+    assert.match(out, /NON_CURRENT_TAIL_MUST_SURVIVE/);
+    assert.match(out, /priority="1" layer="lessons"/);
+    assert.doesNotMatch(out, /layer="non-current-changes"|layer="current-change"/);
+    assert.doesNotMatch(out, /conteúdo restante omitido pelo budget de injeção/i);
+  } finally { rmSync(fixture.vault, { recursive: true, force: true }); }
+});
+
+test('[req:MEM-HYB-6] threshold B: removing non-current preserves the current change integrally', () => {
+  const fixture = makeThresholdVault({ currentTasks: 30, nonCurrentTasks: 45 });
+  try {
+    const out = buildInjection(fixture.vault, { source: 'clear' });
+    assertCriticalMemoryIntegral(out, fixture);
+    assert.doesNotMatch(out, /LESSON_PRESSURE_SENTINEL_|NON_CURRENT_TAIL_MUST_SURVIVE/);
+    assert.match(out, /CURRENT_TAIL_MUST_SURVIVE/);
+    assert.match(out, /priority="1" layer="lessons"/);
+    assert.match(out, /priority="2" layer="non-current-changes"/);
+    assert.doesNotMatch(out, /layer="current-change"|conteúdo restante omitido pelo budget de injeção/i);
+  } finally { rmSync(fixture.vault, { recursive: true, force: true }); }
+});
+
+test('[req:MEM-HYB-6] threshold C: current is summarized only after lower-priority layers are gone', () => {
+  const fixture = makeThresholdVault({ currentTasks: 90, nonCurrentTasks: 45 });
+  try {
+    const out = buildInjection(fixture.vault, { source: 'compact' });
+    assertCriticalMemoryIntegral(out, fixture);
+    assert.doesNotMatch(out, /LESSON_PRESSURE_SENTINEL_|NON_CURRENT_TAIL_MUST_SURVIVE|CURRENT_TAIL_MUST_SURVIVE/);
+    assert.match(out, /conteúdo restante omitido pelo budget de injeção/i);
+    assert.match(out, /priority="1" layer="lessons"/);
+    assert.match(out, /priority="2" layer="non-current-changes"/);
+    assert.match(out, /priority="3" layer="current-change"/);
+  } finally { rmSync(fixture.vault, { recursive: true, force: true }); }
 });
 
 test('[req:MEM-HYB-8] reinjection sanitizes secrets, transcript paths and harness blocks before output', () => {

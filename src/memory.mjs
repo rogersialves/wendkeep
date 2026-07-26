@@ -1,8 +1,8 @@
 import { createHash } from 'node:crypto';
 import {
-  copyFileSync, existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync,
+  copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync,
 } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { sanitizeMemoryText, renderSharedMemory, validateSharedMemory } from '../hooks/memory-schema.mjs';
 import {
   enqueueMemoryEvent, projectMemoryOutbox, repairMemoryLedger,
@@ -75,7 +75,11 @@ export function memoryStatus(vault) {
   return checkMemoryBundle(vault);
 }
 
-export function migrateMemory(vault, { apply = false, validateBundle = validateMemoryBundle } = {}) {
+export function migrateMemory(vault, {
+  apply = false,
+  validateBundle = validateMemoryBundle,
+  publishArtifact = writeFileAtomic,
+} = {}) {
   projectId(vault);
   const sharedPath = brainPath(vault, SHARED);
   const hadShared = existsSync(sharedPath);
@@ -95,16 +99,37 @@ export function migrateMemory(vault, { apply = false, validateBundle = validateM
   const sharedValidation = validateSharedMemory(emptyShared, { eventIds: new Set() });
   if (!sharedValidation.ok) throw new Error(`Migração inválida: ${sharedValidation.errors.join(' ')}`);
   if (backupPath && !existsSync(backupPath)) copyFileSync(sharedPath, backupPath);
+
+  // Build and validate a complete candidate vault away from the live paths. This makes
+  // the validation callback incapable of observing a half-published live bundle.
+  const stagingVault = mkdtempSync(join(dirname(vault), '.wendkeep-memory-stage-'));
+  const stagingBrain = join(stagingVault, BRAIN);
+  let stagedValidation;
+  try {
+    mkdirSync(stagingBrain, { recursive: true });
+    copyFileSync(brainPath(vault, 'CORE.md'), join(stagingBrain, 'CORE.md'));
+    copyFileSync(brainPath(vault, 'PROJECT.json'), join(stagingBrain, 'PROJECT.json'));
+    writeFileSync(join(stagingBrain, LEDGER), '', 'utf8');
+    writeFileSync(join(stagingBrain, SHARED), emptyShared, 'utf8');
+    writeFileSync(join(stagingBrain, CANDIDATES), candidateText(candidates), 'utf8');
+    stagedValidation = validateBundle(stagingVault);
+    if (!stagedValidation.ok) {
+      throw new Error(`Bundle migrado inválido: ${(stagedValidation.errors || []).join(' ')}`);
+    }
+  } finally {
+    rmSync(stagingVault, { recursive: true, force: true });
+  }
+
   const targets = [LEDGER, SHARED, CANDIDATES].map((name) => brainPath(vault, name));
   const before = new Map(targets.map((path) => [path, {
     existed: existsSync(path),
     content: existsSync(path) ? readFileSync(path, 'utf8') : '',
   }]));
   try {
-    if (!existsSync(brainPath(vault, LEDGER))) writeFileAtomic(brainPath(vault, LEDGER), '');
-    writeFileAtomic(sharedPath, emptyShared);
-    writeFileAtomic(brainPath(vault, CANDIDATES), candidateText(candidates));
-    const validation = validateBundle(vault);
+    if (!existsSync(brainPath(vault, LEDGER))) publishArtifact(brainPath(vault, LEDGER), '');
+    publishArtifact(sharedPath, emptyShared);
+    publishArtifact(brainPath(vault, CANDIDATES), candidateText(candidates));
+    const validation = validateMemoryBundle(vault);
     if (!validation.ok) throw new Error(`Bundle migrado inválido: ${validation.errors.join(' ')}`);
     return { status: 'migrated', alreadyV2: false, candidates: candidates.length, backupPath, validation };
   } catch (error) {

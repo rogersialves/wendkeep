@@ -98,6 +98,61 @@ test('migrate --apply reverte toda publicação quando a validação final falha
   } finally { rmSync(vault, { recursive: true, force: true }); }
 });
 
+test('migrate valida bundle completo em staging antes de tocar nos paths finais', async () => {
+  const vault = fixture();
+  const brain = join(vault, '.brain');
+  const legacy = readFileSync(join(brain, 'SHARED_MEMORY.md'), 'utf8');
+  let staging = '';
+  try {
+    const { migrateMemory } = await import('../src/memory.mjs');
+    const { validateMemoryBundle } = await import('../src/validate-memory.mjs');
+    const result = migrateMemory(vault, {
+      apply: true,
+      validateBundle: (candidateVault) => {
+        staging = candidateVault;
+        assert.notEqual(candidateVault, vault, 'validação recebe um vault de staging');
+        assert.equal(readFileSync(join(brain, 'SHARED_MEMORY.md'), 'utf8'), legacy, 'SHARED final ainda é legado');
+        assert.equal(existsSync(join(brain, 'MEMORY_EVENTS.jsonl')), false, 'ledger final ainda não foi criado');
+        assert.equal(existsSync(join(brain, 'MEMORY_CANDIDATES.jsonl')), false, 'candidates final ainda não foi criado');
+        const stagedBrain = join(candidateVault, '.brain');
+        assert.equal(readFileSync(join(stagedBrain, 'CORE.md'), 'utf8'), readFileSync(join(brain, 'CORE.md'), 'utf8'));
+        assert.equal(readFileSync(join(stagedBrain, 'PROJECT.json'), 'utf8'), readFileSync(join(brain, 'PROJECT.json'), 'utf8'));
+        assert.match(readFileSync(join(stagedBrain, 'SHARED_MEMORY.md'), 'utf8'), /schema_version: 2/);
+        assert.match(readFileSync(join(stagedBrain, 'MEMORY_CANDIDATES.jsonl'), 'utf8'), /backend entregue/);
+        return validateMemoryBundle(candidateVault);
+      },
+    });
+    assert.equal(result.status, 'migrated');
+    assert.ok(staging);
+    assert.equal(existsSync(staging), false, 'staging removido após validação/publicação');
+  } finally { rmSync(vault, { recursive: true, force: true }); }
+});
+
+test('falha durante publish restaura todos os paths finais e mantém backup', async () => {
+  const vault = fixture();
+  const brain = join(vault, '.brain');
+  const legacy = readFileSync(join(brain, 'SHARED_MEMORY.md'), 'utf8');
+  try {
+    const { migrateMemory } = await import('../src/memory.mjs');
+    const { writeFileAtomic } = await import('../hooks/session-note-io.mjs');
+    let writes = 0;
+    assert.throws(() => migrateMemory(vault, {
+      apply: true,
+      publishArtifact: (path, content) => {
+        writes += 1;
+        if (writes === 2) throw new Error('publish injetado');
+        writeFileAtomic(path, content);
+      },
+    }), /publish injetado/);
+    assert.equal(readFileSync(join(brain, 'SHARED_MEMORY.md'), 'utf8'), legacy);
+    assert.equal(existsSync(join(brain, 'MEMORY_EVENTS.jsonl')), false);
+    assert.equal(existsSync(join(brain, 'MEMORY_CANDIDATES.jsonl')), false);
+    const backups = readdirSync(brain).filter((name) => name.includes('.legacy-') && name.endsWith('.bak'));
+    assert.equal(backups.length, 1);
+    assert.equal(readFileSync(join(brain, backups[0]), 'utf8'), legacy);
+  } finally { rmSync(vault, { recursive: true, force: true }); }
+});
+
 test('promote e reject referenciam candidate e apenas acrescentam eventos ao ledger', async () => {
   const vault = fixture();
   try {
