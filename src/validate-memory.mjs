@@ -1,16 +1,29 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { validateMemoryEvent, validateSharedMemory } from '../hooks/memory-schema.mjs';
+import { assertVaultPathSafe } from '../hooks/vault-path-safety.mjs';
 import { validateCore } from './validate-core.mjs';
 
 function failedComponent(errors, extra = {}) {
   return { ok: false, errors: Array.isArray(errors) ? errors : [errors], warnings: [], ...extra };
 }
 
-function readRequired(path, label) {
-  if (!existsSync(path)) return { ok: false, error: `${label} ausente: ${path}` };
+function readRequired(vaultBase, path, label) {
+  let checked;
   try {
-    return { ok: true, content: readFileSync(path, 'utf8') };
+    checked = assertVaultPathSafe(vaultBase, path, {
+      expectedType: 'file', label: `artefato ${label}`,
+    });
+  } catch (error) {
+    return { ok: false, error: `${label} inseguro: ${error?.message || error}` };
+  }
+  if (!checked.exists) return { ok: false, error: `${label} ausente: ${path}` };
+  try {
+    // Deliberately adjacent to the open performed by readFileSync.
+    checked = assertVaultPathSafe(vaultBase, checked.target, {
+      allowMissing: false, expectedType: 'file', label: `artefato ${label}`,
+    });
+    return { ok: true, content: readFileSync(checked.target, 'utf8') };
   } catch (error) {
     return { ok: false, error: `${label} ilegível: ${error?.message || error}` };
   }
@@ -18,7 +31,7 @@ function readRequired(path, label) {
 
 export function readProjectForValidation(vaultBase) {
   const path = join(vaultBase, '.brain', 'PROJECT.json');
-  const read = readRequired(path, 'PROJECT.json');
+  const read = readRequired(vaultBase, path, 'PROJECT.json');
   if (!read.ok) return failedComponent(read.error, { projectId: '', path });
   try {
     const marker = JSON.parse(read.content);
@@ -34,7 +47,7 @@ export function readProjectForValidation(vaultBase) {
 /** Read and validate the append-only JSONL authority without repairing or mutating it. */
 export function readLedgerForValidation(vaultBase, { projectId } = {}) {
   const path = join(vaultBase, '.brain', 'MEMORY_EVENTS.jsonl');
-  const read = readRequired(path, 'MEMORY_EVENTS.jsonl');
+  const read = readRequired(vaultBase, path, 'MEMORY_EVENTS.jsonl');
   if (!read.ok) return failedComponent(read.error, { events: [], eventIds: new Set(), path });
 
   const errors = [];
@@ -79,14 +92,14 @@ export function readLedgerForValidation(vaultBase, { projectId } = {}) {
 
 function validateCoreArtifact(vaultBase) {
   const path = join(vaultBase, '.brain', 'CORE.md');
-  const read = readRequired(path, 'CORE.md');
+  const read = readRequired(vaultBase, path, 'CORE.md');
   if (!read.ok) return failedComponent(read.error, { lineCount: 0, path });
   return { ...validateCore(read.content), path, content: read.content };
 }
 
 function validateSharedArtifact(vaultBase, eventIds) {
   const path = join(vaultBase, '.brain', 'SHARED_MEMORY.md');
-  const read = readRequired(path, 'SHARED_MEMORY.md');
+  const read = readRequired(vaultBase, path, 'SHARED_MEMORY.md');
   if (!read.ok) return failedComponent(read.error, { path });
   return { ...validateSharedMemory(read.content, { eventIds }), path, content: read.content };
 }

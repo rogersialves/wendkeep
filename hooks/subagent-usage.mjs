@@ -340,7 +340,7 @@ function upsertSection(content, heading, body) {
 }
 
 // Stop-hook entry: scan the session's subagents/workflows, fold into the note. Fail-open.
-export function upsertSubagentUsage(sessionPath, transcriptPath, { lockTimeoutMs } = {}) {
+export function upsertSubagentUsage(sessionPath, transcriptPath, { lockTimeoutMs, vaultBase = '' } = {}) {
   if (!sessionPath || !existsSync(sessionPath)) return false;
   const collected = collectSubagentUsage(sessionDirFromTranscript(transcriptPath));
   if (!collected) return false;
@@ -377,6 +377,6 @@ export function upsertSubagentUsage(sessionPath, transcriptPath, { lockTimeoutMs
     };
     content = setFrontmatterField(content, 'custo_por_modelo_json', `'${JSON.stringify(ledger).replaceAll("'", "''")}'`);
     return upsertSection(content, '## Subagents & Workflows', renderSubagentSection(collected));
-  }, lockTimeoutMs ? { timeoutMs: lockTimeoutMs } : {});
+  }, { ...(lockTimeoutMs ? { timeoutMs: lockTimeoutMs } : {}), vaultBase });
   return outcome.written;
 }

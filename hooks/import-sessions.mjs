@@ -245,12 +245,12 @@ export function importSession(vaultBase, txPath, opts = {}) {
   // One iteration block per turn (insertIteration dedups by turn marker -> re-import safe).
   for (const turn of turns) {
     const block = buildIterationBlock(tx, { turn_id: turn.turnId, now: turn.timestamp });
-    insertIteration(absPath, block, turn.turnId, tx);
+    insertIteration(absPath, block, turn.turnId, tx, vaultBase);
   }
 
   // Cost + subagent telemetry, exactly like the live Stop hook. Fail-open.
   try {
-    updateSessionObservability({ sessionPath: absPath, transcriptPath: txPath });
+    updateSessionObservability({ vaultBase, sessionPath: absPath, transcriptPath: txPath });
   } catch { /* observability is best-effort */ }
 
   // Finalize: derived notes + closing section + ended_at from the last turn.
@@ -259,7 +259,7 @@ export function importSession(vaultBase, txPath, opts = {}) {
     createLinkedNotes(vaultBase, formatDate(endDate), relPath, tx),
     findLinkedDerivedNotes(vaultBase, relPath),
   );
-  finalizeSessionFile(absPath, tx, created, endedAt);
+  finalizeSessionFile(absPath, tx, created, endedAt, vaultBase);
 
   upsertSessionRegistry(vaultBase, sessionId, {
     session_file: relPath,
@@ -399,9 +399,14 @@ export function runImport(vaultBase, opts = {}) {
       }
       try {
         for (const turn of missing) {
-          insertIteration(existingNote, buildIterationBlock(tx, { turn_id: turn.turnId, now: turn.timestamp }), turn.turnId, tx);
+          insertIteration(
+            existingNote, buildIterationBlock(tx, { turn_id: turn.turnId, now: turn.timestamp }),
+            turn.turnId, tx, vaultBase,
+          );
         }
-        try { updateSessionObservability({ sessionPath: existingNote, transcriptPath: t.path }); } catch { /* best-effort */ }
+        try {
+          updateSessionObservability({ vaultBase, sessionPath: existingNote, transcriptPath: t.path });
+        } catch { /* best-effort */ }
         report.sessions.push({ sessionId: t.sessionId, turns: missing.length, repaired: true });
         report.repaired++;
         done++;

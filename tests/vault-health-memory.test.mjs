@@ -2,12 +2,15 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   existsSync,
+  linkSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
   readdirSync,
   rmSync,
   statSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -28,8 +31,11 @@ function event(eventId = 'mem-health-1', extra = {}) {
     operation: 'assert',
     value: 'review',
     authority: 'verified',
-    activation_id: 'activation-health',
+    canonical_session_id: 'example-session-health',
+    activation_id: 'example-activation-health',
+    activation_epoch: 1,
     turn_sequence: 1,
+    source_turn_id: 'example-turn-health',
     observed_at: '2026-07-26T04:00:00Z',
     evidence: ['tests/vault-health-memory.test.mjs'],
     ...extra,
@@ -91,6 +97,7 @@ function memoryAttempt(overrides = {}) {
   return {
     v: 1,
     memory_mode: 'v2',
+    canonical_session_id: 'example-session-health',
     activation_id: 'example-activation-health',
     activation_epoch: 1,
     turn_id: 'example-turn-health',
@@ -112,6 +119,20 @@ function checkpointFor(events) {
   };
 }
 
+function createAlias(t, source, target, type = 'hardlink') {
+  try {
+    if (type === 'hardlink') linkSync(source, target);
+    else symlinkSync(source, target, process.platform === 'win32' ? 'junction' : 'dir');
+    return true;
+  } catch (error) {
+    if (['EPERM', 'EACCES', 'ENOTSUP', 'EXDEV'].includes(error?.code)) {
+      t.skip(`${type}s indisponíveis neste filesystem: ${error.code}`);
+      return false;
+    }
+    throw error;
+  }
+}
+
 test('[req:DIAG-8] doctor names a healthy bundle and reports schema/revision/cursor/hash', () => {
   const vault = createBundle();
   try {
@@ -130,18 +151,73 @@ test('[req:DIAG-8] doctor names a healthy bundle and reports schema/revision/cur
   } finally { rmSync(vault, { recursive: true, force: true }); }
 });
 
-test('[req:MEM-STOP-6] [sensor:memory-health] valid revision 0 stays healthy with no attempt or a legacy attempt', () => {
+test('[req:OP-10] memory health bloqueia .brain junction antes de diagnosticar conteúdo externo', (t) => {
+  const sourceVault = createBundle();
+  const vault = mkdtempSync(join(tmpdir(), 'wk-health-memory-junction-'));
+  const sourceBrain = join(sourceVault, '.brain');
+  const brain = join(vault, '.brain');
+  try {
+    const before = byteSnapshot(sourceVault);
+    if (!createAlias(t, sourceBrain, brain, 'junction')) return;
+
+    const result = checkMemoryBundle(vault);
+
+    assert.equal(result.ok, false);
+    assert.equal(result.status, 'blocked');
+    assert.match(result.failures.join('\n'), /link simbólico|junction|reparse|Vault/i);
+    assert.deepEqual(byteSnapshot(sourceVault), before);
+    assert.equal(lstatSync(brain).isSymbolicLink(), true);
+  } finally {
+    rmSync(vault, { recursive: true, force: true });
+    rmSync(sourceVault, { recursive: true, force: true });
+  }
+});
+
+test('[req:OP-10] memory health bloqueia hardlinks de candidates e outbox sem ocultá-los como estado válido', async (t) => {
+  for (const artifact of ['MEMORY_CANDIDATES.jsonl', 'memory-outbox/event.json']) {
+    await t.test(artifact, (subtest) => {
+      const vault = createBundle();
+      const outside = mkdtempSync(join(tmpdir(), 'wk-health-memory-hardlink-outside-'));
+      const brain = join(vault, '.brain');
+      try {
+        const source = join(outside, 'source');
+        const target = join(brain, ...artifact.split('/'));
+        if (artifact.startsWith('memory-outbox/')) {
+          mkdirSync(join(brain, 'memory-outbox'));
+          writeFileSync(source, `${JSON.stringify(event('mem-health-hardlink-outbox'))}\n`);
+        } else {
+          rmSync(target);
+          writeFileSync(source, '');
+        }
+        const before = readFileSync(source);
+        if (!createAlias(subtest, source, target)) return;
+
+        const result = checkMemoryBundle(vault);
+
+        assert.equal(result.ok, false);
+        assert.equal(result.status, 'blocked');
+        assert.match(result.failures.join('\n'), /hardlink|nlink|Vault/i);
+        assert.deepEqual(readFileSync(source), before);
+      } finally {
+        rmSync(vault, { recursive: true, force: true });
+        rmSync(outside, { recursive: true, force: true });
+      }
+    });
+  }
+});
+
+test('[req:MEM-STOP-6] [sensor:memory-health] valid revision 0 stays healthy with no attempt or a legacy pre-upgrade attempt', () => {
   const vault = createBundle([]);
   try {
     const absent = checkMemoryBundle(vault);
     assert.equal(absent.ok, true, absent.failures.join('; '));
     assert.equal(absent.status, 'healthy');
 
-    writeLastMemoryAttempt(vault, memoryAttempt({
+    writeLastMemoryAttempt(vault, {
       memory_mode: 'legacy',
       state: 'skipped',
       event_ids: [],
-    }));
+    });
     const legacy = checkMemoryBundle(vault);
     assert.equal(legacy.ok, true, legacy.failures.join('; '));
     assert.equal(legacy.status, 'healthy');
@@ -168,7 +244,7 @@ test('[req:MEM-STOP-5] [req:MEM-STOP-6] [sensor:memory-health] degraded attempt 
     memory_key: 'example.projected', value: 'synthetic projected state',
   });
   const pending = event('mem-example-pending', {
-    memory_key: 'example.pending', value: 'synthetic pending state', turn_sequence: 2,
+    memory_key: 'example.pending', value: 'synthetic pending state',
   });
   const vault = createBundle([projected]);
   try {
@@ -187,6 +263,52 @@ test('[req:MEM-STOP-5] [req:MEM-STOP-6] [sensor:memory-health] degraded attempt 
     assert.match(result.warnings.join('\n'), /recuper|attempt/i);
     assert.doesNotMatch(JSON.stringify(result), /example-private-payload-must-not-be-rendered/);
   } finally { rmSync(vault, { recursive: true, force: true }); }
+});
+
+test('[req:OP-10] [sensor:memory-health] projected attempt fails on registry or event causal identity mismatch', async (t) => {
+  const cases = [
+    {
+      name: 'registry key',
+      sessionId: 'borrowed-session-health',
+      override: {},
+      error: /canonical_session_id|identidade causal/i,
+    },
+    {
+      name: 'activation',
+      sessionId: 'example-session-health',
+      override: { activation_id: 'borrowed-activation' },
+      error: /activation_id|identidade causal/i,
+    },
+    {
+      name: 'epoch',
+      sessionId: 'example-session-health',
+      override: { activation_epoch: 2 },
+      error: /activation_epoch|identidade causal/i,
+    },
+    {
+      name: 'turn',
+      sessionId: 'example-session-health',
+      override: { turn_id: 'borrowed-turn' },
+      error: /source_turn_id|identidade causal/i,
+    },
+  ];
+
+  for (const scenario of cases) {
+    await t.test(scenario.name, () => {
+      const item = event();
+      const vault = createBundle([item]);
+      try {
+        writeLastMemoryAttempt(vault, memoryAttempt({
+          state: 'projected',
+          checkpoint: checkpointFor([item]),
+          ...scenario.override,
+        }), scenario.sessionId);
+        const result = checkMemoryBundle(vault);
+        assert.equal(result.status, 'blocked');
+        assert.match(result.failures.join('\n'), scenario.error);
+      } finally { rmSync(vault, { recursive: true, force: true }); }
+    });
+  }
 });
 
 test('[req:MEM-STOP-6] [sensor:memory-health] applied v2 attempt with no event ids is blocking', () => {

@@ -15,7 +15,7 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const isPt = (s) => /Seu agente de código esquece/.test(s);
 const isEn = (s) => /Your AI coding agent forgets/.test(s);
 const GUIDE_SLUGS = [
-  'getting-started.md', 'changes-and-verification.md', 'memory.md',
+  'getting-started.md', 'operating-profiles.md', 'changes-and-verification.md', 'memory.md',
   'sessions-and-import.md', 'notes-and-knowledge.md', 'costs-and-observability.md',
   'maintenance-and-diagnostics.md', 'verify.md', 'memory-migration.md',
   'retroactive-import.md',
@@ -47,6 +47,20 @@ test('os dois idiomas viajam no pacote', () => {
   for (const f of ['README.md', 'README.en.md']) assert.ok(files.includes(f), `${f} em files`);
 });
 
+test('[req:OP-9] package, lockfile raiz e primeira release do CHANGELOG convergem em 0.59.0', () => {
+  const manifest = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8'));
+  const lockfile = JSON.parse(readFileSync(join(ROOT, 'package-lock.json'), 'utf8'));
+  const changelog = readFileSync(join(ROOT, 'CHANGELOG.md'), 'utf8');
+  const firstRelease = changelog.match(/^## \[([^\]]+)\]/m)?.[1];
+
+  assert.equal(manifest.version, '0.59.0', 'esta branch prepara exatamente a release minor 0.59.0');
+  assert.equal(lockfile.version, manifest.version, 'package-lock.json.version acompanha package.json');
+  assert.equal(lockfile.packages[''].version, manifest.version,
+    'packages[""].version acompanha package.json');
+  assert.equal(firstRelease, manifest.version,
+    'a primeira entrada versionada do CHANGELOG acompanha package.json');
+});
+
 test('DOC-5: somente os diretórios de guias bilíngues são adicionados ao pacote', () => {
   const files = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')).files;
   assert.ok(files.includes('docs/pt-BR/commands/*.md'), 'glob PT-BR em files');
@@ -73,7 +87,7 @@ test('nenhum README manda instalar por pnpm com @latest', () => {
 });
 
 // O que realmente importa: o conteúdo do tarball, e o repo intacto depois.
-test('npm pack: o tarball leva o inglês e o repositório volta ao português', () => {
+test('[req:OP-9] npm pack leva módulos de profile/FLOW, docs bilíngues e restaura o README', () => {
   const outDir = mkdtempSync(join(tmpdir(), 'wk-pack-'));
   try {
     const packed = spawnSync('npm', ['pack', '--pack-destination', outDir], {
@@ -99,11 +113,27 @@ test('npm pack: o tarball leva o inglês e o repositório volta ao português', 
     assert.ok(isEn(readFileSync(join(pkg, 'README.md'), 'utf8')),
       'o README.md DO TARBALL é o inglês — é o que a página do npm renderiza');
     assert.ok(existsSync(join(pkg, 'README.en.md')), 'e o inglês também viaja pelo nome próprio');
+    for (const modulePath of [
+      'src/profile.mjs',
+      'src/flow.mjs',
+      'hooks/flow-core.mjs',
+      'hooks/vault-path-safety.mjs',
+    ]) {
+      assert.ok(
+        existsSync(join(pkg, ...modulePath.split('/'))),
+        `módulo público de Perfis de Operação ausente no tarball: ${modulePath}`,
+      );
+    }
     for (const locale of ['pt-BR', 'en']) {
       for (const guide of GUIDE_SLUGS) {
         assert.ok(existsSync(join(pkg, 'docs', locale, 'commands', guide)),
           `guia ausente no tarball: docs/${locale}/commands/${guide}`);
       }
+      const profiles = readFileSync(join(pkg, 'docs', locale, 'commands', 'operating-profiles.md'), 'utf8');
+      for (const token of [
+        'OFF', 'FLOW', 'GUIDE', 'GOVERN', 'ASSURE', 'Keep Core',
+        'wendkeep profile status', 'wendkeep flow finish', 'wendkeep flow promote',
+      ]) assert.match(profiles, new RegExp(token), `guia empacotado ${locale} sem ${token}`);
     }
     const expectedDocs = ['pt-BR', 'en']
       .flatMap((locale) => GUIDE_SLUGS.map((guide) => `${locale}/commands/${guide}`))

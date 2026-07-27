@@ -18,6 +18,14 @@
       "command": "npm run check"
     },
     {
+      "id": "operating-profiles",
+      "name": "Operating profiles",
+      "description": "Exercises profile routing, always-on Vault boundaries, OFF hooks and FLOW contracts",
+      "severity": "critical",
+      "type": "command",
+      "command": "node --test tests/operating-profile.test.mjs tests/project-vault.test.mjs tests/profile-cli.test.mjs tests/init-sync-operating-profile.test.mjs tests/operating-profile-hooks.test.mjs tests/operating-profile-boundaries.test.mjs tests/flow-cli.test.mjs tests/flow-core.test.mjs tests/flow-promotion.test.mjs tests/git-snapshot.test.mjs tests/session-iteration.test.mjs tests/vault-runtime-store.test.mjs"
+    },
+    {
       "id": "release-tests",
       "name": "release-tests",
       "description": "node --test tests/release-changelog.test.mjs",
@@ -31,7 +39,7 @@
       "description": "Blocks delivery only on memory corruption, projection lag or active conflict",
       "severity": "critical",
       "type": "command",
-      "command": "node bin/wendkeep.mjs memory status --gate --vault .WendKeep-vault"
+      "command": "node bin/wendkeep.mjs memory status --gate"
     },
     {
       "id": "docs-bilingual",

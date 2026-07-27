@@ -123,7 +123,9 @@ export function repairStackedFrontmatter(vaultBase, { apply = false, lockTimeout
     }
 
     // Sob o mesmo lock dos hooks: reparar enquanto um subagente escreve seria repetir o bug.
-    const outcome = mutateSessionNote(abs, () => merged, lockTimeoutMs ? { timeoutMs: lockTimeoutMs } : {});
+    const outcome = mutateSessionNote(abs, () => merged, {
+      ...(lockTimeoutMs ? { timeoutMs: lockTimeoutMs } : {}), vaultBase,
+    });
     if (!outcome.written) {
       skipped.push({ file: rel, reason: `gravação não ocorreu (${outcome.reason})` });
       continue;

@@ -1,4 +1,4 @@
-// DOC-1..DOC-7 — the public CLI documentation is a bilingual, navigable package surface.
+// DOC-1..DOC-9 — the public CLI documentation is a bilingual, navigable package surface.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const GUIDES = [
   'getting-started.md',
+  'operating-profiles.md',
   'changes-and-verification.md',
   'memory.md',
   'sessions-and-import.md',
@@ -37,6 +38,7 @@ const REQUIRED_SECTIONS = {
 };
 const README_GROUPS = [
   { pt: 'Instalação e atualização', en: 'Installation and updates', guide: 'getting-started.md' },
+  { pt: 'Perfis de operação', en: 'Operating profiles', guide: 'operating-profiles.md' },
   { pt: 'Changes e verificação', en: 'Changes and verification', guide: 'changes-and-verification.md' },
   { pt: 'Memória compartilhada', en: 'Shared memory', guide: 'memory.md' },
   { pt: 'Sessões e importação', en: 'Sessions and import', guide: 'sessions-and-import.md' },
@@ -47,6 +49,7 @@ const README_GROUPS = [
 const DEEP_GUIDES = ['verify.md', 'memory-migration.md', 'retroactive-import.md'];
 const GUIDE_FOR_FAMILY = new Map([
   ['wendkeep init', 'getting-started.md'], ['wendkeep sync', 'getting-started.md'],
+  ['wendkeep profile', 'operating-profiles.md'], ['wendkeep flow', 'operating-profiles.md'],
   ['wendkeep hook', 'sessions-and-import.md'], ['wendkeep doctor', 'maintenance-and-diagnostics.md'],
   ['wendkeep change', 'changes-and-verification.md'], ['wendkeep theme sync', 'maintenance-and-diagnostics.md'],
   ['wendkeep session', 'sessions-and-import.md'], ['wendkeep spec', 'changes-and-verification.md'],
@@ -64,6 +67,7 @@ const GUIDE_FOR_FAMILY = new Map([
 ]);
 const SEMANTIC_CONCEPTS = {
   'getting-started.md': { pt: [/instala/i, /atualiza/i, /vínculo|vincul/i], en: [/install/i, /updat/i, /bind/i] },
+  'operating-profiles.md': { pt: [/perfil/i, /Keep Core/i, /microcontrato|FLOW/i], en: [/profile/i, /Keep Core/i, /microcontract|FLOW/i] },
   'changes-and-verification.md': { pt: [/change/i, /sensor/i, /evidência/i], en: [/change/i, /sensor/i, /evidence/i] },
   'memory.md': { pt: [/canônic/i, /operacional/i, /curadoria/i], en: [/canonical/i, /operational/i, /curation/i] },
   'sessions-and-import.md': { pt: [/sess/i, /registro|registry/i, /import/i], en: [/session/i, /registry/i, /import/i] },
@@ -129,7 +133,7 @@ function normalizedCommandSurface(text, heading) {
 function assertReadmeGroups(text, locale) {
   const body = section(text, locale === 'pt' ? 'Funcionalidades por grupo' : 'Features by group');
   const rows = body.split(/\r?\n/).filter((line) => /^\| \*\*/.test(line));
-  assert.equal(rows.length, README_GROUPS.length, `${locale}: deve haver exatamente sete grupos`);
+  assert.equal(rows.length, README_GROUPS.length, `${locale}: quantidade de grupos divergente`);
   README_GROUPS.forEach((group, index) => {
     assert.match(rows[index], new RegExp(`\\*\\*${group[locale]}\\*\\*`), `${locale}: grupo ${index + 1}`);
     assert.ok(rows[index].includes(`/docs/${locale === 'pt' ? 'pt-BR' : 'en'}/commands/${group.guide}`),
@@ -170,7 +174,7 @@ function assertVerifyExitSemantics(text, locale) {
   }
 }
 
-test('DOC-2: PT-BR e EN têm exatamente os mesmos dez guias', () => {
+test('DOC-2: PT-BR e EN têm exatamente os mesmos onze guias', () => {
   for (const dir of Object.values(GUIDE_DIR)) assert.ok(existsSync(dir), `diretório ausente: ${dir}`);
   const pt = readdirSync(GUIDE_DIR.pt).filter((f) => f.endsWith('.md')).sort();
   const en = readdirSync(GUIDE_DIR.en).filter((f) => f.endsWith('.md')).sort();
@@ -199,7 +203,7 @@ test('DOC-2: cada par mantém estrutura editorial e alternador de idioma', () =>
   }
 });
 
-test('DOC-1: READMEs preservam primeiro uso e navegam pelos dez guias do próprio idioma', () => {
+test('DOC-1: READMEs preservam primeiro uso e navegam pelos onze guias do próprio idioma', () => {
   const pt = readFileSync(join(ROOT, 'README.md'), 'utf8');
   const en = readFileSync(join(ROOT, 'README.en.md'), 'utf8');
   assert.match(pt, /^## Instalar & configurar$/m);
@@ -214,6 +218,88 @@ test('DOC-1: READMEs preservam primeiro uso e navegam pelos dez guias do própri
   }
   assert.doesNotMatch(pt, /docs\/en\/commands\//, 'README PT-BR não deve navegar para guias EN');
   assert.doesNotMatch(en, /docs\/pt-BR\/commands\//, 'README EN não deve navegar para guias PT-BR');
+});
+
+test('[req:OP-9] DOC-8: perfis, Keep Core e FLOW têm contrato público bilíngue equivalente', () => {
+  const cases = {
+    pt: {
+      readme: readFileSync(join(ROOT, 'README.md'), 'utf8'),
+      guide: readFileSync(join(GUIDE_DIR.pt, 'operating-profiles.md'), 'utf8'),
+      changes: readFileSync(join(GUIDE_DIR.pt, 'changes-and-verification.md'), 'utf8'),
+      verify: readFileSync(join(GUIDE_DIR.pt, 'verify.md'), 'utf8'),
+      sessions: readFileSync(join(GUIDE_DIR.pt, 'sessions-and-import.md'), 'utf8'),
+      keepCore: /Keep Core[\s\S]*(?:sempre ativo|permanece ativo)/i,
+      explicitOff: /OFF[\s\S]*(?:explicitamente|seleção explícita)/i,
+      flowNoChange: /FLOW[\s\S]*(?:sem change|não cria[^\n]*change)/i,
+      simpleCompat: /--simple[\s\S]*(?:não é|não equivale)[\s\S]*FLOW/i,
+      vaultAlways: /OFF[\s\S]*(?:Vault|cofre)[\s\S]*(?:continua|permanece|ativo)/i,
+    },
+    en: {
+      readme: readFileSync(join(ROOT, 'README.en.md'), 'utf8'),
+      guide: readFileSync(join(GUIDE_DIR.en, 'operating-profiles.md'), 'utf8'),
+      changes: readFileSync(join(GUIDE_DIR.en, 'changes-and-verification.md'), 'utf8'),
+      verify: readFileSync(join(GUIDE_DIR.en, 'verify.md'), 'utf8'),
+      sessions: readFileSync(join(GUIDE_DIR.en, 'sessions-and-import.md'), 'utf8'),
+      keepCore: /Keep Core[\s\S]*(?:always active|remains active)/i,
+      explicitOff: /OFF[\s\S]*(?:explicitly|explicit selection)/i,
+      flowNoChange: /FLOW[\s\S]*(?:without a change|does not create[^\n]*change)/i,
+      simpleCompat: /--simple[\s\S]*(?:is not|does not equal)[\s\S]*FLOW/i,
+      vaultAlways: /OFF[\s\S]*Vault[\s\S]*(?:continues|remains|active)/i,
+    },
+  };
+
+  for (const [locale, docs] of Object.entries(cases)) {
+    for (const profile of ['OFF', 'FLOW', 'GUIDE', 'GOVERN', 'ASSURE']) {
+      assert.match(docs.readme, new RegExp(`\\b${profile}\\b`), `${locale}: README sem ${profile}`);
+      assert.match(docs.guide, new RegExp(`\\b${profile}\\b`), `${locale}: guia sem ${profile}`);
+    }
+    for (const command of [
+      'wendkeep profile status', 'wendkeep profile use',
+      'wendkeep flow start', 'wendkeep flow status', 'wendkeep flow show',
+      'wendkeep flow finish', 'wendkeep flow promote',
+    ]) assert.match(docs.guide, new RegExp(command), `${locale}: guia sem ${command}`);
+
+    assert.match(
+      docs.guide,
+      /\$flow\s*=\s*npx wendkeep flow start[^\n]*--json\s*\|\s*ConvertFrom-Json/i,
+      `${locale}: exemplo FLOW não captura a resposta JSON de start`,
+    );
+    assert.match(
+      docs.guide,
+      /\$flowId\s*=\s*\$flow\.contract\.flow_id/i,
+      `${locale}: exemplo FLOW não extrai flow_id do contrato retornado`,
+    );
+    assert.doesNotMatch(
+      docs.guide,
+      /\$flowId\s*=\s*\$flow\.flow_id/i,
+      `${locale}: exemplo FLOW não pode procurar flow_id na raiz inexistente`,
+    );
+    assert.match(docs.guide, /wendkeep flow finish \$flowId/i, `${locale}: finish não reutiliza flow_id`);
+    assert.match(docs.guide, /wendkeep flow promote \$flowId/i, `${locale}: promote não reutiliza flow_id`);
+    assert.doesNotMatch(
+      docs.guide,
+      /wendkeep flow (?:finish|promote) (?:corrige-copy|fix-copy)/i,
+      `${locale}: exemplo FLOW trata slug como flow_id`,
+    );
+    assert.match(
+      docs.guide,
+      /\.wendkeep\.json[\s\S]*harness[\s\S]*flow[\s\S]*protectedRoots/i,
+      `${locale}: guia não documenta harness.flow.protectedRoots`,
+    );
+    assert.match(docs.readme, /harness\.flow\.protectedRoots/, `${locale}: README sem resumo de protectedRoots`);
+
+    assert.match(docs.readme, docs.keepCore, `${locale}: README não promete Keep Core`);
+    assert.match(docs.guide, docs.explicitOff, `${locale}: OFF não está explícito`);
+    assert.match(docs.guide, docs.flowNoChange, `${locale}: FLOW não está separado de change`);
+    assert.match(docs.guide, /allowlist/i, `${locale}: FLOW sem allowlist`);
+    assert.match(docs.guide, /baseline Git|Git baseline/i, `${locale}: FLOW sem baseline Git`);
+    assert.match(docs.guide, /sensor/i, `${locale}: FLOW sem sensor`);
+    assert.match(docs.guide, /promov|promot/i, `${locale}: FLOW sem promoção`);
+    assert.match(docs.guide, /(?:não existe|no)[^\n]*--force/i, `${locale}: FLOW permite --force`);
+    assert.match(docs.changes, docs.simpleCompat, `${locale}: --simple confundido com FLOW`);
+    assert.match(docs.verify, /flow finish/i, `${locale}: verify não encaminha FLOW`);
+    assert.match(docs.sessions, docs.vaultAlways, `${locale}: sessões não garantem Vault em OFF`);
+  }
 });
 
 test('DOC-3: verify documenta contexto, alternativas de saúde e exits 0/1/2', () => {

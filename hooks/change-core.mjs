@@ -1,11 +1,15 @@
 // hooks/change-core.mjs
 // Native change/spec lifecycle in the vault (Pilar B). Vault-facing lib consumed by
 // the `wendkeep change` CLI (src/change.mjs) and the brain-inject hook. No external deps.
-import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
-import { ensureDir, wikilinkFromRel, monthFolderRelFromDateStr } from './obsidian-common.mjs';
+import { wikilinkFromRel, monthFolderRelFromDateStr } from './obsidian-common.mjs';
 import { parseSpecsList, promoteSpecs, discoverSpecDeltas, tasksHashOf, captureSpecBaseline, REQ_ID_RE_SRC } from './spec-core.mjs';
 import { getLocale, LOCALES } from './locale.mjs';
+import {
+  assertVaultPathSafe, assertVaultPathsSafe, mkdirVaultPath, renameVaultPath,
+  unlinkVaultFile, writeVaultFileSync,
+} from './vault-path-safety.mjs';
 
 export const ARCHIVE_DIR = '_arquivo';
 const POINTER = '.brain/CURRENT_CHANGE.md';
@@ -97,24 +101,83 @@ export function activeChange(vaultBase) {
 }
 
 export function setActiveChange(vaultBase, slug) {
-  mkdirSync(join(vaultBase, '.brain'), { recursive: true });
-  writeFileSync(join(vaultBase, POINTER), `change: ${slug}\n`, 'utf8');
+  mkdirVaultPath(vaultBase, join(vaultBase, '.brain'), { label: 'raiz de controle da change' });
+  writeVaultFileSync(
+    vaultBase,
+    join(vaultBase, POINTER),
+    `change: ${slug}\n`,
+    'utf8',
+    { label: 'ponteiro CURRENT_CHANGE.md' },
+  );
 }
 
 export function clearActiveChange(vaultBase) {
   const p = join(vaultBase, POINTER);
-  if (existsSync(p)) writeFileSync(p, 'change:\n', 'utf8');
+  const checked = assertVaultPathSafe(vaultBase, p, {
+    expectedType: 'file', label: 'ponteiro CURRENT_CHANGE.md',
+  });
+  if (checked.exists) {
+    writeVaultFileSync(vaultBase, p, 'change:\n', 'utf8', { label: 'ponteiro CURRENT_CHANGE.md' });
+  }
+}
+
+export function assertChangeScaffoldTargetsSafe(vaultBase, slug, {
+  simple = false,
+  mustNotExist = false,
+  includeSessionControl = false,
+  code = 'VAULT_PATH_UNSAFE',
+} = {}) {
+  const loc = getLocale(vaultBase);
+  const dir = join(vaultBase, loc.folders.changes, slug);
+  const fileNames = [
+    'proposta.md',
+    'tarefas.md',
+    '.spec-impact-v1',
+    '.spec-impact-v1.json',
+    '.spec-base.json',
+    'flow-origin.json',
+    ...(!simple ? ['design.md'] : []),
+  ];
+  assertVaultPathsSafe(vaultBase, [
+    { path: join(vaultBase, loc.folders.changes), expectedType: 'directory', label: 'raiz de changes', code },
+    {
+      path: dir,
+      expectedType: 'directory',
+      mustNotExist,
+      label: 'destino da change',
+      code,
+    },
+    ...fileNames.map((name) => ({
+      path: join(dir, name), expectedType: 'file', label: `artefato ${name} da change`, code,
+    })),
+    { path: join(vaultBase, '.brain'), expectedType: 'directory', label: 'raiz de controle da change', code },
+    {
+      path: join(vaultBase, POINTER), expectedType: 'file', label: 'ponteiro CURRENT_CHANGE.md', code,
+    },
+    ...(includeSessionControl ? [{
+      path: join(vaultBase, '.brain', 'CURRENT_SESSION.md'),
+      expectedType: 'file',
+      label: 'projeção CURRENT_SESSION.md',
+      code,
+    }] : []),
+  ]);
+  return { dir, rel: changeDirRel(slug, vaultBase) };
 }
 
 export function newChange(vaultBase, slug, { sessionRel = '', dateStr, simple = false }) {
   const loc = getLocale(vaultBase);
-  const dir = join(vaultBase, loc.folders.changes, slug);
+  const { dir } = assertChangeScaffoldTargetsSafe(vaultBase, slug, { simple });
   const existed = existsSync(join(dir, 'proposta.md'));
-  mkdirSync(dir, { recursive: true });
+  mkdirVaultPath(vaultBase, dir, { label: 'destino da change' });
   const files = renderChangeScaffold({ slug, sessionRel, dateStr, locale: loc.id, simple });
   const write = (name, content) => {
     const f = join(dir, name);
-    if (!existsSync(f)) writeFileSync(f, content, 'utf8');
+    const checked = assertVaultPathSafe(vaultBase, f, {
+      expectedType: 'file', label: `artefato ${name} da change`,
+    });
+    if (!checked.exists) {
+      writeVaultFileSync(vaultBase, f, content, 'utf8', { label: `artefato ${name} da change` });
+    }
   };
   write('proposta.md', files.proposta);
   write('tarefas.md', files.tarefas);
@@ -160,26 +223,27 @@ export function continueChange(vaultBase, archivedSlug, newSlug, options = {}) {
     ? `Continues ${wikilinkFromRel(archivedProposal)}. Archived evidence and verdict are not inherited.`
     : `Continua ${wikilinkFromRel(archivedProposal)}. Evidências e verdict da change arquivada não são herdados.`;
   proposal = `${proposal.trimEnd()}\n\n${heading}\n\n${note}\n`;
-  writeFileSync(proposalPath, proposal, 'utf8');
+  writeVaultFileSync(vaultBase, proposalPath, proposal, 'utf8', { label: 'proposta da change continuada' });
   return { ok: true, ...result, archived: archivedName };
 }
 
 export function parseTasks(md) {
   const tasks = [];
   const re = /^-\s+\[( |x)\]\s+(\S+)\s+(.*)$/gm;
-  const sensorRe = /\[sensor:\s*([\w.-]+)\]/;
+  const sensorReG = /\[sensor:\s*([\w.-]+)\]/g;
   const reqReG = new RegExp(`\\[req:\\s*(${REQ_ID_RE_SRC})\\]`, 'g');
   let m;
   while ((m = re.exec(String(md))) !== null) {
     let text = m[3].trim();
-    const sm = text.match(sensorRe);
+    const sensors = [...new Set([...text.matchAll(sensorReG)].map((entry) => entry[1]))];
     const reqs = [...text.matchAll(reqReG)].map((r) => r[1]);
-    const sensor = sm ? sm[1] : undefined;
-    if (sm) text = text.replace(sensorRe, '');
+    const sensor = sensors[0];
+    if (sensors.length) text = text.replace(sensorReG, '');
     if (reqs.length) text = text.replace(reqReG, '');
     text = text.replace(/\s+/g, ' ').trim();
+    // `sensor` stays as alias of the first id — older consumers keep working.
     // `req` stays as alias of the first id — older consumers keep working.
-    tasks.push({ id: m[2], text, done: m[1] === 'x', ...(sensor ? { sensor } : {}), ...(reqs.length ? { req: reqs[0], reqs } : {}) });
+    tasks.push({ id: m[2], text, done: m[1] === 'x', ...(sensor ? { sensor, sensors } : {}), ...(reqs.length ? { req: reqs[0], reqs } : {}) });
   }
   return tasks;
 }
@@ -191,7 +255,14 @@ export function setTaskDone(changeDir, taskId, done = true) {
   const esc = String(taskId).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const re = new RegExp(`^(-\\s+\\[)( |x)(\\]\\s+${esc}\\s)`, 'm');
   if (!re.test(md)) return false;
-  writeFileSync(path, md.replace(re, `$1${done ? 'x' : ' '}$3`), 'utf8');
+  const vaultBase = dirname(dirname(changeDir));
+  writeVaultFileSync(
+    vaultBase,
+    path,
+    md.replace(re, `$1${done ? 'x' : ' '}$3`),
+    'utf8',
+    { label: 'tarefas.md da change' },
+  );
   return true;
 }
 
@@ -350,8 +421,14 @@ export function readSentinel(vaultBase, kind, sid) {
 
 export function writeSentinel(vaultBase, kind, sid, value = '1') {
   try {
-    mkdirSync(join(vaultBase, '.brain'), { recursive: true });
-    writeFileSync(sentinelPath(vaultBase, kind, sid), value, 'utf8');
+    mkdirVaultPath(vaultBase, join(vaultBase, '.brain'), { label: 'raiz de sentinelas de change' });
+    writeVaultFileSync(
+      vaultBase,
+      sentinelPath(vaultBase, kind, sid),
+      value,
+      'utf8',
+      { label: 'sentinela de change' },
+    );
   } catch { /* fail-open: pior caso = aviso repetido */ }
 }
 
@@ -386,7 +463,10 @@ export function pruneChangeSentinels(vaultBase, { now = Date.now() } = {}) {
       .filter(Boolean);
   } catch { return []; }
   const stale = staleSentinelNames(entries, now);
-  for (const name of stale) { try { unlinkSync(join(dir, name)); } catch { /* fail-quiet */ } }
+  for (const name of stale) {
+    try { unlinkVaultFile(vaultBase, join(dir, name), { label: 'sentinela stale de change' }); }
+    catch { /* fail-quiet */ }
+  }
   return stale;
 }
 
@@ -412,7 +492,14 @@ export function appendFixTasks(changeDir, mutants, sensorId) {
   }
   if (!lines.length) return 0;
   const sep = md === '' || md.endsWith('\n') ? '' : '\n';
-  writeFileSync(path, `${md}${sep}${lines.join('\n')}\n`, 'utf8');
+  const vaultBase = dirname(dirname(changeDir));
+  writeVaultFileSync(
+    vaultBase,
+    path,
+    `${md}${sep}${lines.join('\n')}\n`,
+    'utf8',
+    { label: 'tarefas.md com mutantes sobreviventes' },
+  );
   return lines.length;
 }
 
@@ -431,11 +518,29 @@ export function archiveChange(vaultBase, slug, { gate = gateGreen, dateStr, adrN
   const destRel = join(chDir, ARCHIVE_DIR, `${dateStr}-${slug}`);
   const destAbs = join(vaultBase, destRel);
   const changeWikilink = wikilinkFromRel(join(destRel, 'proposta'));
+  const archiveRoot = join(vaultBase, chDir, ARCHIVE_DIR);
+  const adrDirRel = monthFolderRelFromDateStr(loc.folders.decisions, dateStr, vaultBase);
+  const num = String(adrNum).padStart(4, '0');
+  const adrRel = join(adrDirRel, `ADR-${num}-${slug}.md`);
+
+  // Validate every later mutation target before spec promotion can change living state.
+  const [checkedSource, checkedDestination] = assertVaultPathsSafe(vaultBase, [
+    { path: src, allowMissing: false, expectedType: 'directory', label: 'change a arquivar' },
+    { path: destAbs, expectedType: 'directory', label: 'destino da change arquivada' },
+    { path: archiveRoot, expectedType: 'directory', label: 'raiz de changes arquivadas' },
+    { path: join(vaultBase, adrDirRel), expectedType: 'directory', label: 'pasta mensal de ADR' },
+    { path: join(vaultBase, adrRel), expectedType: 'file', label: 'ADR da change arquivada' },
+    { path: join(vaultBase, POINTER), expectedType: 'file', label: 'ponteiro CURRENT_CHANGE.md' },
+  ]);
+  assertVaultPathsSafe(vaultBase, [
+    { path: join(checkedSource.target, 'proposta.md'), expectedType: 'file', label: 'proposta da change' },
+    { path: join(checkedSource.target, 'tarefas.md'), expectedType: 'file', label: 'tarefas da change' },
+  ]);
 
   // Atomicity guard: fail BEFORE promoting specs if the destination already exists (e.g. a slug
   // reused after a same-day archive). Otherwise promoteSpecs would commit to 07-Specs and the
   // later renameSync would fail, leaving a half-archived state.
-  if (existsSync(destAbs)) {
+  if (checkedDestination.exists) {
     return { ok: false, failing: [`destino de arquivo já existe: ${destRel} — renomeie o slug ou remova o arquivo antigo`] };
   }
 
@@ -469,9 +574,11 @@ export function archiveChange(vaultBase, slug, { gate = gateGreen, dateStr, adrN
   // abaixo retargeta o wikilink pro _arquivo junto com os demais. Fail-quiet.
   try { healSpecBacklinks(src, vaultBase); } catch { /* heal é bônus */ }
 
-  ensureDir(join(vaultBase, chDir, ARCHIVE_DIR));
+  mkdirVaultPath(vaultBase, archiveRoot, { label: 'raiz de changes arquivadas' });
   try {
-    renameSync(src, destAbs);
+    renameVaultPath(vaultBase, src, destAbs, {
+      sourceType: 'directory', label: 'archive da change',
+    });
   } catch (error) {
     return { ok: false, failing: [`falha ao mover a mudança para ${destRel}: ${error.message} (07-Specs pode ter sido promovido — verifique)`] };
   }
@@ -480,7 +587,7 @@ export function archiveChange(vaultBase, slug, { gate = gateGreen, dateStr, adrN
   try {
     const pp = join(destAbs, 'proposta.md');
     const c = readFileSync(pp, 'utf8').replace(/^status:\s*active\s*$/m, 'status: archived');
-    writeFileSync(pp, c, 'utf8');
+    writeVaultFileSync(vaultBase, pp, c, 'utf8', { label: 'proposta arquivada' });
   } catch { /* proposta ilegível — segue */ }
 
   // O move quebrava TODO wikilink gravado antes (sessões fechadas, decisões, outras changes —
@@ -490,10 +597,7 @@ export function archiveChange(vaultBase, slug, { gate = gateGreen, dateStr, adrN
 
   // ADR goes in the same dated month folder as session-derived decisions (04-Decisões/ano/MM-MMM/)
   // — not the year root — so all ADRs sit together in the vault's convention.
-  const adrDirRel = monthFolderRelFromDateStr(loc.folders.decisions, dateStr, vaultBase);
-  ensureDir(join(vaultBase, adrDirRel));
-  const num = String(adrNum).padStart(4, '0');
-  const adrRel = join(adrDirRel, `ADR-${num}-${slug}.md`);
+  mkdirVaultPath(vaultBase, join(vaultBase, adrDirRel), { label: 'pasta mensal de ADR' });
   const capLine = promoted.length
     ? `\n\nCapabilities: ${promoted.map((c) => wikilinkFromRel(join(loc.folders.specs, c))).join(', ')}.`
     : '';
@@ -501,7 +605,7 @@ export function archiveChange(vaultBase, slug, { gate = gateGreen, dateStr, adrN
   // Rastro auditável (0.31.0): um archive forçado ou sem prova declarada fica marcado no ADR.
   const flagLines = `${adrFlags.forced ? '\nforced: true' : ''}${adrFlags.trivial ? '\ntrivial: true' : ''}`;
   const forcedNote = adrFlags.forced ? '\n\n> ⚠️ Arquivada com --force — havia tarefa(s) aberta(s) pulada(s) no gate.' : '';
-  writeFileSync(join(vaultBase, adrRel), `---
+  writeVaultFileSync(vaultBase, join(vaultBase, adrRel), `---
 type: decision
 status: accepted
 date: ${dateStr}${flagLines}
@@ -516,7 +620,7 @@ tags:
 ## Decisão
 
 Mudança ${changeWikilink} concluída e arquivada.${capLine}${reqLine}${forcedNote}
-`, 'utf8');
+`, 'utf8', { label: 'ADR da change arquivada' });
 
   // Only clear the pointer when the archived change IS the active one — archiving some other
   // slug explicitly must not blank the pointer of a different, still-active change.
@@ -530,6 +634,11 @@ function allVaultMarkdown(vaultBase) {
   const out = [];
   const skip = new Set(['.git', '.obsidian', 'node_modules']);
   const walk = (dir) => {
+    try {
+      assertVaultPathSafe(vaultBase, dir, {
+        allowMissing: false, expectedType: 'directory', label: 'diretório varrido para wikilinks',
+      });
+    } catch { return; }
     let entries;
     try { entries = readdirSync(dir, { withFileTypes: true }); } catch { return; }
     for (const e of entries) {
@@ -556,7 +665,10 @@ function rewriteChangeLinks(vaultBase, fromRel, toRel) {
       .split(`[[${fromRel}]]`).join(`[[${toRel}]]`)
       .split(`[[${fromRel}|`).join(`[[${toRel}|`);
     if (next !== content) {
-      try { writeFileSync(abs, next, 'utf8'); touched += 1; } catch { /* nota readonly — segue */ }
+      try {
+        writeVaultFileSync(vaultBase, abs, next, 'utf8', { label: 'nota com wikilink reescrito' });
+        touched += 1;
+      } catch { /* nota readonly/unsafe — segue */ }
     }
   }
   return touched;
@@ -604,7 +716,10 @@ export function healSpecBacklinks(changeDir, vaultBase) {
     let c;
     try { c = readFileSync(p, 'utf8'); } catch { continue; }
     if (c.includes(link)) continue;
-    try { writeFileSync(p, insertBacklink(c, line), 'utf8'); healed += 1; } catch { /* readonly — segue */ }
+    try {
+      writeVaultFileSync(vaultBase, p, insertBacklink(c, line), 'utf8', { label: 'delta de spec com backlink' });
+      healed += 1;
+    } catch { /* readonly/unsafe — segue */ }
   }
   return healed;
 }
@@ -645,7 +760,11 @@ export function backfillArtifactLinks(vaultBase, { apply = false } = {}) {
       let c;
       try { c = readFileSync(p, 'utf8'); } catch { continue; }
       if (c.includes(link)) continue;
-      if (apply) { try { writeFileSync(p, insertBacklink(c, line), 'utf8'); } catch { continue; } }
+      if (apply) {
+        try {
+          writeVaultFileSync(vaultBase, p, insertBacklink(c, line), 'utf8', { label: 'artefato com backlink' });
+        } catch { continue; }
+      }
       changed.push(relative(vaultBase, p).replaceAll('\\', '/'));
     }
   }
@@ -701,15 +820,33 @@ export function relinkChanges(vaultBase, { apply = false } = {}) {
 export function abandonChange(vaultBase, slug, { dateStr }) {
   const chDir = getLocale(vaultBase).folders.changes;
   const src = join(vaultBase, chDir, slug);
-  if (!existsSync(join(src, 'proposta.md'))) return { ok: false, failing: [`change não encontrada: ${slug}`] };
+  const checkedProposal = assertVaultPathSafe(vaultBase, join(src, 'proposta.md'), {
+    expectedType: 'file', label: 'proposta da change abandonada',
+  });
+  if (!checkedProposal.exists) return { ok: false, failing: [`change não encontrada: ${slug}`] };
   const destRel = join(chDir, ARCHIVE_DIR, `${dateStr}-${slug}-abandonada`);
   const destAbs = join(vaultBase, destRel);
-  if (existsSync(destAbs)) return { ok: false, failing: [`destino já existe: ${destRel}`] };
-  ensureDir(join(vaultBase, chDir, ARCHIVE_DIR));
-  try { renameSync(src, destAbs); } catch (e) { return { ok: false, failing: [`falha ao mover: ${e.message}`] }; }
+  const checkedDestination = assertVaultPathSafe(vaultBase, destAbs, {
+    expectedType: 'directory', label: 'destino da change abandonada',
+  });
+  if (checkedDestination.exists) return { ok: false, failing: [`destino já existe: ${destRel}`] };
+  mkdirVaultPath(vaultBase, join(vaultBase, chDir, ARCHIVE_DIR), {
+    label: 'raiz de changes arquivadas',
+  });
+  try {
+    renameVaultPath(vaultBase, src, destAbs, {
+      sourceType: 'directory', label: 'abandono da change',
+    });
+  } catch (e) { return { ok: false, failing: [`falha ao mover: ${e.message}`] }; }
   try {
     const pp = join(destAbs, 'proposta.md');
-    writeFileSync(pp, readFileSync(pp, 'utf8').replace(/^status:\s*active\s*$/m, 'status: abandoned'), 'utf8');
+    writeVaultFileSync(
+      vaultBase,
+      pp,
+      readFileSync(pp, 'utf8').replace(/^status:\s*active\s*$/m, 'status: abandoned'),
+      'utf8',
+      { label: 'proposta abandonada' },
+    );
   } catch { /* proposta sem frontmatter — segue */ }
   let linksRewritten = 0;
   try { linksRewritten = rewriteChangeLinks(vaultBase, `${chDir}/${slug}`, destRel.replaceAll('\\', '/')); } catch { /* abandono já íntegro */ }

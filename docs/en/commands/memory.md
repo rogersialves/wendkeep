@@ -25,6 +25,7 @@ Pass the vault explicitly in automation. Preserve backups and evidence before re
 ```bash
 npx wendkeep memory status [--gate] --vault <vault>
 npx wendkeep memory repair --vault <vault>
+npx wendkeep memory reconcile <ambiguous-session> --by-session <successor-session> --reason <reason> [--apply] --vault <vault>
 npx wendkeep memory promote <candidate> --vault <vault>
 npx wendkeep memory reject <candidate> --vault <vault>
 npx wendkeep validate-memory [CORE-path]
@@ -44,7 +45,20 @@ npx wendkeep validate-memory --vault <v2-vault>
 - A valid legacy vault warns and exits `0`. For v2, status correlates `last_memory_attempt`,
   disposition, outbox, ledger, SHARED, and checkpoint: an ambiguous attempt, lost publication, or
   mismatched checkpoint blocks; `degraded` with an intact outbox is a warning.
-- `memory repair` locks, writes a `.bak`, retains valid events, and reprojects state.
+- `memory repair` is structural only: it uses PID/token-owned locks, writes a `.bak`, retains
+  valid events, and reprojects state. When it recognizes a valid pre-0.59 checkpoint whose cursor
+  is causal, it CAS-migrates it to the physical boundary with backup/audit; it never reclassifies
+  registry attempts or accepts a tuple that cannot be fully re-derived.
+- `memory reconcile` is a dry run by default. `--apply` requires two named sessions plus a reason,
+  CAS-checks the exact attempt, backs up the registry, and limits mutation to the ambiguous attempt
+  and its successor. Replay is CORE-aware, checkpoints use the physical ledger cursor, and the
+  command neither rewrites ledger/CORE/notes nor consumes the outbox. Retrying the same applied
+  decision is idempotent.
+- Every memory path validates the physical topology of `.brain`, ledger, outbox, CORE, SHARED,
+  candidates, registry, notes, backups, temporary files, and sidecars before reading or writing.
+  Junctions, symlinks, reparse points, or hardlinks fail closed without touching external bytes.
+  Locks publish owner and lease atomically, never reap a live PID by age alone, and release only
+  the lease they acquired.
 - `promote`/`reject` append auditable decisions and never rewrite the ledger in place.
 - `validate-memory <CORE.md>` checks the 25-line cap, required sections, and secrets.
 - `validate-memory --vault` requires a complete v2 bundle and is not the legacy-vault gate.
@@ -53,6 +67,8 @@ npx wendkeep validate-memory --vault <v2-vault>
 
 ```bash
 npx wendkeep memory status --gate --vault .MyApp-vault
+npx wendkeep memory reconcile old --by-session current --reason "delivery continued" --vault .MyApp-vault
+npx wendkeep memory reconcile old --by-session current --reason "delivery continued" --apply --vault .MyApp-vault
 npx wendkeep validate-memory .MyApp-vault/.brain/CORE.md
 npx wendkeep memory promote candidate-123 --vault .MyApp-vault
 ```
@@ -73,7 +89,9 @@ of a global projection that has already advanced with concurrent events.
   let idempotent replay finish. An event ID absent from both locations means lost publication.
 - An `ambiguous` attempt, an `applied` attempt without event IDs, a `projected` event found only in
   the outbox, or a mismatched checkpoint is blocking: preserve the artifacts and investigate
-  before repair.
+  before repair. If the ambiguity is demonstrably superseded by a successor session, inspect the
+  `memory reconcile` dry run before authorizing `--apply`; the command fails when the ambiguous
+  attempt already contains event IDs.
 - Ordinary pending candidate: recoverable warning, requiring human choice when appropriate.
 - Missing `event_cursor` or mismatched v2 hash: preserve the bundle and assess `memory repair`.
 - `validate-memory --vault` fails on legacy: validate CORE only or migrate first.

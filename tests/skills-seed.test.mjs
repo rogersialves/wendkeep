@@ -26,6 +26,43 @@ test('wk-verify present; wk-tdd/brainstorming carry TLC discipline; workflow cit
   assert.match(by['wk-workflow'], /verify --deep/);
 });
 
+test('[req:OP-4] [req:OP-5] wk-workflow routes by profile without a universal change mandate', () => {
+  const cases = [
+    {
+      locale: 'pt-BR',
+      keepCore: /Keep Core.*sempre ativo/i,
+      governDefault: /GOVERN.*padr[aã]o|padr[aã]o.*GOVERN/i,
+      nativeHarness: /harness nativo da LLM/i,
+      oldUniversalGate: /Toda tarefa n[aã]o-trivial passa pelo loop/i,
+      profileAware: /perfil efetivo/i,
+    },
+    {
+      locale: 'en',
+      keepCore: /Keep Core.*always active/i,
+      governDefault: /GOVERN.*default|default.*GOVERN/i,
+      nativeHarness: /native LLM harness|LLM's native harness/i,
+      oldUniversalGate: /Every non-trivial task goes through the loop/i,
+      profileAware: /effective profile/i,
+    },
+  ];
+
+  for (const expected of cases) {
+    const workflow = wkSkills(expected.locale).find((s) => s.name === 'wk-workflow');
+    assert.ok(workflow, `${expected.locale}: workflow seed exists`);
+    assert.match(workflow.body, expected.keepCore, `${expected.locale}: Keep Core remains active`);
+    assert.match(workflow.body, expected.governDefault, `${expected.locale}: GOVERN is the default`);
+    assert.match(workflow.body, expected.nativeHarness, `${expected.locale}: OFF delegates governance`);
+    assert.match(workflow.body, expected.profileAware, `${expected.locale}: gate resolves the effective profile`);
+    for (const profile of ['OFF', 'FLOW', 'GUIDE', 'GOVERN', 'ASSURE']) {
+      assert.match(workflow.body, new RegExp(`\\b${profile}\\b`), `${expected.locale}: ${profile} route`);
+    }
+    assert.doesNotMatch(workflow.body, expected.oldUniversalGate,
+      `${expected.locale}: no contradictory universal GOVERN mandate`);
+    const description = (workflow.body.match(/^description:\s*(.+)$/m) || [])[1] || '';
+    assert.match(description, expected.profileAware, `${expected.locale}: activation description is profile-aware`);
+  }
+});
+
 // REQ-4 — o template do workflow documenta o formato de heading de requisito e
 // o suporte a múltiplos [req:] por tarefa (pt e en).
 test('wk-workflow teaches the requirement heading format and multi-[req:] support', () => {

@@ -29,6 +29,15 @@ test('syncDefs: writes the managed AGENTS.md section, idempotent, user content p
     assert.match(md, /<!-- wendkeep:skills:start -->/);
     assert.match(md, /bar.*does bar things/, 'skill listed with description');
     assert.match(md, /wendkeep change new|wendkeep verify/, 'loop commands present');
+    assert.match(md, /Keep Core.*always active/i, '[req:OP-4] Keep Core is unconditional');
+    assert.match(md, /GOVERN.*default|default.*GOVERN/i, '[req:OP-5] GOVERN is the safe default');
+    assert.match(md, /OFF[\s\S]*native LLM harness|native LLM harness[\s\S]*OFF/i,
+      '[req:OP-5] OFF delegates governance to the native LLM harness');
+    for (const profile of ['FLOW', 'GUIDE', 'GOVERN', 'ASSURE']) {
+      assert.match(md, new RegExp(`\\b${profile}\\b`), `[req:OP-5] ${profile} route is declared`);
+    }
+    assert.doesNotMatch(md, /Work\s+through its change loop/i,
+      '[req:OP-5] the managed block must not impose GOVERN on every profile');
     // idempotente: re-run = 1 seção só
     syncDefs(vault, project);
     const md2 = readFileSync(join(project, 'AGENTS.md'), 'utf8');

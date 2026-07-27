@@ -129,6 +129,38 @@ test('[req:MEM-STOP-5] [sensor:session-memory-lifecycle] outbox is durable befor
   assert.deepEqual(registry.sessions[SESSION_ID].last_memory_attempt.event_ids, ['example-event-1']);
 });
 
+test('[req:OP-10] [sensor:session-memory-lifecycle] lifecycle persists the exact checkpoint returned by the projector', () => {
+  const { vault, registryPath } = fixture();
+  try {
+    const staged = stageStopMemoryAttempt(vault, context());
+    const checkpoint = {
+      revision: 7,
+      event_cursor: 'example-physical-cursor',
+      causal_event_cursor: 'example-causal-cursor',
+      state_hash: 'a'.repeat(64),
+    };
+    const projected = projectStopMemoryAttempt(vault, staged, {
+      projectMemoryOutbox: () => ({
+        status: 'projected',
+        revision: 99,
+        eventCursor: 'wrong-causal-fallback',
+        ledgerCursor: 'wrong-physical-fallback',
+        stateHash: 'b'.repeat(64),
+        checkpoint,
+      }),
+    });
+    const recorded = recordStopMemoryOutcome(vault, staged, projected);
+    const registry = readRegistry(registryPath);
+
+    assert.deepEqual(projected.checkpoint, checkpoint);
+    assert.equal(recorded.persisted, true);
+    assert.deepEqual(registry.sessions[SESSION_ID].memory_checkpoint, checkpoint);
+    assert.deepEqual(registry.sessions[SESSION_ID].last_memory_attempt.checkpoint, checkpoint);
+  } finally {
+    rmSync(vault, { recursive: true, force: true });
+  }
+});
+
 test('[req:MEM-STOP-3] [req:MEM-STOP-5] [sensor:session-memory-lifecycle] retry reuses the frozen attempt when clock and evidence change', () => {
   const { vault, brain, registryPath } = fixture();
   let builds = 0;

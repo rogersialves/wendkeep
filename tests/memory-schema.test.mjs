@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { linkSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -173,6 +173,36 @@ test('[req:MEM-HYB-3] [req:MEM-HYB-7] validateMemoryBundle composes CORE, ledger
     assert.deepEqual(readFileSync(corePath), before, 'validator is read-only for curated CORE');
   } finally {
     rmSync(vault, { recursive: true, force: true });
+  }
+});
+
+test('[req:OP-10] validateMemoryBundle rejeita CORE por hardlink antes de tratá-lo como autoridade válida', (t) => {
+  const vault = tempMemoryVault();
+  const outside = mkdtempSync(join(tmpdir(), 'wk-memory-validation-hardlink-outside-'));
+  try {
+    const core = join(vault, '.brain', 'CORE.md');
+    const source = join(outside, 'CORE.md');
+    writeFileSync(source, readFileSync(core));
+    rmSync(core);
+    try {
+      linkSync(source, core);
+    } catch (error) {
+      if (['EPERM', 'EACCES', 'ENOTSUP', 'EXDEV'].includes(error?.code)) {
+        t.skip(`hardlinks indisponíveis neste filesystem: ${error.code}`);
+        return;
+      }
+      throw error;
+    }
+    const before = readFileSync(source);
+
+    const result = validateMemoryBundle(vault);
+
+    assert.equal(result.ok, false);
+    assert.match(result.errors.join('\n'), /hardlink|nlink|Vault/i);
+    assert.deepEqual(readFileSync(source), before);
+  } finally {
+    rmSync(vault, { recursive: true, force: true });
+    rmSync(outside, { recursive: true, force: true });
   }
 });
 

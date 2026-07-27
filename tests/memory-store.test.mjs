@@ -2,8 +2,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import {
-  existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync,
-  statSync, utimesSync, writeFileSync,
+  existsSync, linkSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync,
+  statSync, symlinkSync, utimesSync, writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -15,6 +15,7 @@ import {
   projectMemoryOutbox,
   readMemoryLedger,
   reduceMemoryEvents,
+  reprojectMemoryLedger,
   repairMemoryLedger,
 } from '../hooks/memory-store.mjs';
 
@@ -48,6 +49,28 @@ function transientNames(vault) {
   return readdirSync(join(vault, '.brain'), { recursive: true })
     .map(String)
     .filter((name) => /\.tmp$|\.lock$/i.test(name));
+}
+
+function flatSnapshot(dir) {
+  return Object.fromEntries(readdirSync(dir, { withFileTypes: true })
+    .sort((left, right) => left.name.localeCompare(right.name))
+    .map((entry) => [entry.name, entry.isDirectory()
+      ? '<directory>'
+      : readFileSync(join(dir, entry.name)).toString('base64')]));
+}
+
+function makeAlias(t, source, target, type = 'hardlink') {
+  try {
+    if (type === 'hardlink') linkSync(source, target);
+    else symlinkSync(source, target, process.platform === 'win32' ? 'junction' : 'dir');
+    return true;
+  } catch (error) {
+    if (['EPERM', 'EACCES', 'ENOTSUP', 'EXDEV'].includes(error?.code)) {
+      t.skip(`${type}s indisponíveis neste filesystem: ${error.code}`);
+      return false;
+    }
+    throw error;
+  }
 }
 
 test('[req:MEM-HYB-4] reducer is idempotent and preserves independent patches', () => {
@@ -115,6 +138,109 @@ test('[req:MEM-HYB-4] stale same-activation event is superseded and tombstone ke
   });
 });
 
+test('[req:MEM-HYB-4] newer same-session activation turn supersedes an older handoff deterministically', () => {
+  const older = event('mem-handoff-1', 'handoff.latest', 'assert', 'primeiro resumo', {
+    activation_id: 'activation-handoff',
+    turn_sequence: 1,
+    observed_at: '2026-07-26T12:00:00.000Z',
+  });
+  const newer = event('mem-handoff-2', 'handoff.latest', 'assert', 'segundo resumo', {
+    activation_id: 'activation-handoff',
+    turn_sequence: 2,
+    observed_at: '2026-07-26T12:01:00.000Z',
+  });
+
+  const forward = reduceMemoryEvents([older, newer]);
+  const reverse = reduceMemoryEvents([newer, older]);
+
+  assert.deepEqual(reverse, forward, 'ledger replay order cannot change the causal winner');
+  assert.equal(forward.state['handoff.latest'], 'segundo resumo');
+  assert.equal(forward.records['handoff.latest'].source.event_id, 'mem-handoff-2');
+  assert.deepEqual(forward.superseded, [{ event_id: 'mem-handoff-1', by_event_id: 'mem-handoff-2' }]);
+  assert.equal(forward.candidates.length, 0);
+});
+
+test('[req:MEM-HYB-4] distinct activations asserting different handoffs remain in conflict', () => {
+  const left = event('mem-handoff-left', 'handoff.latest', 'assert', 'resumo esquerdo', {
+    activation_id: 'activation-left',
+  });
+  const right = event('mem-handoff-right', 'handoff.latest', 'assert', 'resumo direito', {
+    activation_id: 'activation-right',
+  });
+
+  const reduced = reduceMemoryEvents([left, right]);
+
+  assert.equal(reduced.candidates.length, 1);
+  assert.equal(reduced.candidates[0].reason, 'conflict');
+  assert.deepEqual(reduced.candidates[0].event_ids, ['mem-handoff-left', 'mem-handoff-right']);
+});
+
+test('[req:MEM-HYB-4] late older handoff from the same activation stays superseded', () => {
+  const olderLate = event('mem-handoff-late-old', 'handoff.latest', 'assert', 'resumo antigo', {
+    activation_id: 'activation-handoff',
+    turn_sequence: 1,
+    observed_at: '2026-07-26T12:02:00.000Z',
+  });
+  const newer = event('mem-handoff-new', 'handoff.latest', 'assert', 'resumo atual', {
+    activation_id: 'activation-handoff',
+    turn_sequence: 2,
+    observed_at: '2026-07-26T12:01:00.000Z',
+  });
+
+  const reduced = reduceMemoryEvents([olderLate, newer]);
+
+  assert.equal(reduced.state['handoff.latest'], 'resumo atual');
+  assert.deepEqual(reduced.superseded, [{
+    event_id: 'mem-handoff-late-old', by_event_id: 'mem-handoff-new',
+  }]);
+  assert.equal(reduced.candidates.length, 0);
+});
+
+test('[req:OP-10] ledger-only reprojection separates the physical checkpoint from causal order without consuming outbox', () => {
+  const vault = scratch();
+  try {
+    const older = event('mem-physical-last', 'handoff.latest', 'assert', 'resumo antigo', {
+      activation_id: 'activation-handoff',
+      turn_sequence: 1,
+      observed_at: '2026-07-26T12:00:00.000Z',
+    });
+    const newer = event('mem-causal-last', 'handoff.latest', 'assert', 'resumo atual', {
+      activation_id: 'activation-handoff',
+      turn_sequence: 2,
+      observed_at: '2026-07-26T12:01:00.000Z',
+    });
+    const ledgerPath = join(vault, '.brain', 'MEMORY_EVENTS.jsonl');
+    writeFileSync(ledgerPath, `${JSON.stringify(newer)}\n${JSON.stringify(older)}\n`);
+    const ledgerBefore = readFileSync(ledgerPath);
+
+    const pending = event('mem-pending', 'next.pending', 'assert', 'não consumir', {
+      turn_sequence: 3,
+      observed_at: '2026-07-26T12:02:00.000Z',
+    });
+    const enqueued = enqueueMemoryEvent(vault, pending);
+    const outboxBefore = readFileSync(enqueued.path);
+    const outboxNamesBefore = readdirSync(join(vault, '.brain', 'memory-outbox'));
+
+    const projected = reprojectMemoryLedger(vault);
+
+    assert.equal(projected.status, 'reprojected');
+    assert.equal(projected.eventCursor, newer.event_id, 'causal cursor follows deterministic reducer order');
+    assert.equal(projected.ledgerCursor, older.event_id, 'ledger cursor follows the physical prefix boundary');
+    assert.deepEqual(projected.checkpoint, {
+      revision: 2,
+      event_cursor: older.event_id,
+      causal_event_cursor: newer.event_id,
+      state_hash: projected.stateHash,
+    });
+    assert.match(readFileSync(join(vault, '.brain', 'SHARED_MEMORY.md'), 'utf8'), /event_cursor: mem-physical-last/);
+    assert.deepEqual(readFileSync(ledgerPath), ledgerBefore, 'ledger-only replay cannot rewrite the ledger');
+    assert.deepEqual(readdirSync(join(vault, '.brain', 'memory-outbox')), outboxNamesBefore);
+    assert.deepEqual(readFileSync(enqueued.path), outboxBefore, 'pending outbox bytes remain untouched');
+  } finally {
+    rmSync(vault, { recursive: true, force: true });
+  }
+});
+
 test('[req:MEM-HYB-4] late event from an older activation cannot regress newer effective state', () => {
   const newer = event('mem-new', 'handoff.state', 'assert', 'e2e-blocked', {
     activation_id: 'activation-2',
@@ -156,6 +282,150 @@ test('[req:MEM-HYB-5] exclusive outbox is immutable, canonical and collision-obs
     assert.equal(readFileSync(first.path, 'utf8'), bytes, 'collision never overwrites winner bytes');
   } finally {
     rmSync(vault, { recursive: true, force: true });
+  }
+});
+
+test('[req:OP-10] producer rejeita outbox preexistente por hardlink antes de ler ou alterar bytes externos', (t) => {
+  const vault = scratch();
+  const outside = mkdtempSync(join(tmpdir(), 'wk-memory-outbox-hardlink-outside-'));
+  try {
+    const payload = event('mem-hardlinked-outbox', 'next.ui', 'assert', 'review');
+    const outsideFile = join(outside, 'event.json');
+    const outbox = join(vault, '.brain', 'memory-outbox');
+    mkdirSync(outbox);
+    writeFileSync(outsideFile, `${JSON.stringify(payload)}\n`);
+    const before = readFileSync(outsideFile);
+    if (!makeAlias(t, outsideFile, join(outbox, `${payload.event_id}.json`))) return;
+
+    assert.throws(
+      () => enqueueMemoryEvent(vault, payload),
+      /hardlink|nlink|Vault/i,
+    );
+    assert.deepEqual(readFileSync(outsideFile), before);
+    assert.equal(existsSync(join(vault, '.brain', 'MEMORY_EVENTS.jsonl')), false);
+  } finally {
+    rmSync(vault, { recursive: true, force: true });
+    rmSync(outside, { recursive: true, force: true });
+  }
+});
+
+test('[req:OP-10] projector rejeita ledger por hardlink antes do append e preserva outbox e bytes externos', (t) => {
+  const vault = scratch();
+  const outside = mkdtempSync(join(tmpdir(), 'wk-memory-ledger-hardlink-outside-'));
+  try {
+    const source = join(outside, 'external-ledger.jsonl');
+    writeFileSync(source, '');
+    const before = readFileSync(source);
+    if (!makeAlias(t, source, join(vault, '.brain', 'MEMORY_EVENTS.jsonl'))) return;
+    enqueueMemoryEvent(vault, event('mem-hardlinked-ledger', 'next.ui', 'assert', 'review'));
+
+    assert.throws(
+      () => projectMemoryOutbox(vault),
+      /hardlink|nlink|Vault/i,
+    );
+    assert.deepEqual(readFileSync(source), before, 'append nunca alcança o inode externo');
+    assert.ok(existsSync(join(vault, '.brain', 'memory-outbox', 'mem-hardlinked-ledger.json')));
+    assert.equal(existsSync(join(vault, '.brain', 'SHARED_MEMORY.md')), false);
+    assert.equal(existsSync(join(vault, '.brain', 'MEMORY_CANDIDATES.jsonl')), false);
+  } finally {
+    rmSync(vault, { recursive: true, force: true });
+    rmSync(outside, { recursive: true, force: true });
+  }
+});
+
+test('[req:OP-10] projector preflighta ambos sidecars por hardlink antes de append ou publicação parcial', async (t) => {
+  for (const name of ['SHARED_MEMORY.md', 'MEMORY_CANDIDATES.jsonl']) {
+    await t.test(name, (subtest) => {
+      const vault = scratch();
+      const outside = mkdtempSync(join(tmpdir(), 'wk-memory-sidecar-hardlink-outside-'));
+      try {
+        const source = join(outside, name);
+        writeFileSync(source, `external sentinel for ${name}\n`);
+        const before = readFileSync(source);
+        if (!makeAlias(subtest, source, join(vault, '.brain', name))) return;
+        enqueueMemoryEvent(vault, event(`mem-hardlinked-${name}`, 'next.ui', 'assert', 'review'));
+
+        assert.throws(
+          () => projectMemoryOutbox(vault),
+          /hardlink|nlink|Vault/i,
+        );
+        assert.deepEqual(readFileSync(source), before);
+        assert.equal(existsSync(join(vault, '.brain', 'MEMORY_EVENTS.jsonl')), false);
+        assert.ok(existsSync(join(vault, '.brain', 'memory-outbox', `mem-hardlinked-${name}.json`)));
+        const other = name === 'SHARED_MEMORY.md' ? 'MEMORY_CANDIDATES.jsonl' : 'SHARED_MEMORY.md';
+        assert.equal(existsSync(join(vault, '.brain', other)), false, 'nenhum sidecar é publicado parcialmente');
+      } finally {
+        rmSync(vault, { recursive: true, force: true });
+        rmSync(outside, { recursive: true, force: true });
+      }
+    });
+  }
+});
+
+test('[req:OP-10] leituras de PROJECT e CORE rejeitam hardlinks sem criar ou consumir memória', async (t) => {
+  await t.test('PROJECT.json', (subtest) => {
+    const vault = scratch();
+    const outside = mkdtempSync(join(tmpdir(), 'wk-memory-project-hardlink-outside-'));
+    try {
+      const source = join(outside, 'PROJECT.json');
+      writeFileSync(source, '{"schemaVersion":1,"projectId":"project-a"}\n');
+      const before = readFileSync(source);
+      if (!makeAlias(subtest, source, join(vault, '.brain', 'PROJECT.json'))) return;
+      assert.throws(
+        () => enqueueMemoryEvent(vault, event('mem-hardlinked-project', 'next.ui', 'assert', 'review')),
+        /hardlink|nlink|Vault/i,
+      );
+      assert.deepEqual(readFileSync(source), before);
+      assert.equal(existsSync(join(vault, '.brain', 'memory-outbox')), false);
+    } finally {
+      rmSync(vault, { recursive: true, force: true });
+      rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  await t.test('CORE.md', (subtest) => {
+    const vault = scratch();
+    const outside = mkdtempSync(join(tmpdir(), 'wk-memory-core-hardlink-outside-'));
+    try {
+      const source = join(outside, 'CORE.md');
+      writeFileSync(source, '<!-- wk-memory: release.push="manual-only" -->\n');
+      const before = readFileSync(source);
+      if (!makeAlias(subtest, source, join(vault, '.brain', 'CORE.md'))) return;
+      enqueueMemoryEvent(vault, event('mem-hardlinked-core', 'next.ui', 'assert', 'review'));
+      assert.throws(
+        () => projectMemoryOutbox(vault),
+        /hardlink|nlink|Vault/i,
+      );
+      assert.deepEqual(readFileSync(source), before);
+      assert.equal(existsSync(join(vault, '.brain', 'MEMORY_EVENTS.jsonl')), false);
+      assert.ok(existsSync(join(vault, '.brain', 'memory-outbox', 'mem-hardlinked-core.json')));
+    } finally {
+      rmSync(vault, { recursive: true, force: true });
+      rmSync(outside, { recursive: true, force: true });
+    }
+  });
+});
+
+test('[req:OP-10] raiz .brain por junction é rejeitada antes de lock, leitura ou publicação externa', (t) => {
+  const vault = mkdtempSync(join(tmpdir(), 'wk-memory-brain-junction-'));
+  const outside = mkdtempSync(join(tmpdir(), 'wk-memory-brain-junction-outside-'));
+  try {
+    const ledgerEvent = event('mem-external-ledger', 'next.ui', 'assert', 'external sentinel');
+    writeFileSync(join(outside, 'MEMORY_EVENTS.jsonl'), `${JSON.stringify(ledgerEvent)}\n`);
+    writeFileSync(join(outside, 'PROJECT.json'), '{"schemaVersion":1,"projectId":"project-a"}\n');
+    const before = flatSnapshot(outside);
+    const brain = join(vault, '.brain');
+    if (!makeAlias(t, outside, brain, 'junction')) return;
+
+    assert.throws(
+      () => reprojectMemoryLedger(vault),
+      /link simbólico|junction|reparse|Vault/i,
+    );
+    assert.deepEqual(flatSnapshot(outside), before);
+    assert.equal(lstatSync(brain).isSymbolicLink(), true, 'a boundary não remove nem substitui o junction');
+  } finally {
+    rmSync(vault, { recursive: true, force: true });
+    rmSync(outside, { recursive: true, force: true });
   }
 });
 
@@ -255,6 +525,11 @@ test('[req:MEM-HYB-5] projector appends under lock and atomically publishes conv
     const ledger = readMemoryLedger(vault);
 
     assert.equal(first.status, 'projected');
+    assert.deepEqual(first.checkpoint, {
+      revision: first.revision,
+      event_cursor: first.ledgerCursor,
+      state_hash: first.stateHash,
+    });
     assert.equal(ledger.status, 'ok');
     assert.deepEqual(ledger.events.map((item) => item.event_id), ['mem-1', 'mem-2']);
     assert.match(shared, /schema_version:\s*2/);
@@ -287,7 +562,7 @@ test('[req:MEM-HYB-5] busy lock preserves pending outbox and stale lock is recov
 
     const old = new Date(Date.now() - 120_000);
     utimesSync(lock, old, old);
-    const recovered = projectMemoryOutbox(vault, { lock: { timeoutMs: 100, staleMs: 1000 } });
+    const recovered = projectMemoryOutbox(vault, { lock: { timeoutMs: 1000, staleMs: 1000 } });
     assert.equal(recovered.status, 'projected');
     assert.equal(existsSync(lock), false);
     assert.deepEqual(transientNames(vault), []);

@@ -1,10 +1,12 @@
 // hooks/spec-core.mjs — living spec (07-Specs) + change delta merge (OpenSpec native).
 // Pure parsing/merge + promoteSpecs (fs). No import from change-core (avoids a cycle).
 import { createHash } from 'node:crypto';
-import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { ensureDir } from './obsidian-common.mjs';
 import { getLocale } from './locale.mjs';
+import {
+  assertVaultPathSafe, assertVaultPathsSafe, mkdirVaultPath, writeVaultFileSync,
+} from './vault-path-safety.mjs';
 
 // Short stable fingerprint of tarefas.md — freshness check between package/verdict and gate.
 export function tasksHashOf(md) {
@@ -122,8 +124,14 @@ export function livingSpecCapabilities(vaultBase) {
 
 export function adoptSpecsState(vaultBase) {
   const state = { version: 1, generatedAt: new Date().toISOString(), specs: readLivingSpecs(vaultBase) };
-  ensureDir(join(vaultBase, '.brain'));
-  writeFileSync(join(vaultBase, SPECS_STATE_FILE), `${JSON.stringify(state, null, 2)}\n`, 'utf8');
+  mkdirVaultPath(vaultBase, join(vaultBase, '.brain'), { label: 'raiz do estado de specs' });
+  writeVaultFileSync(
+    vaultBase,
+    join(vaultBase, SPECS_STATE_FILE),
+    `${JSON.stringify(state, null, 2)}\n`,
+    'utf8',
+    { label: 'estado consolidado de specs' },
+  );
   return state;
 }
 
@@ -150,17 +158,32 @@ function recordPromotedSpecs(vaultBase, capabilities) {
     else delete specs[capability];
   }
   const state = { version: 1, generatedAt: new Date().toISOString(), specs };
-  writeFileSync(join(vaultBase, SPECS_STATE_FILE), `${JSON.stringify(state, null, 2)}\n`, 'utf8');
+  writeVaultFileSync(
+    vaultBase,
+    join(vaultBase, SPECS_STATE_FILE),
+    `${JSON.stringify(state, null, 2)}\n`,
+    'utf8',
+    { label: 'estado consolidado de specs' },
+  );
   return state;
 }
 
 export function captureSpecBaseline(vaultBase, changeDir, { refresh = false } = {}) {
   const path = join(changeDir, SPEC_BASELINE_FILE);
-  if (!refresh && existsSync(path)) {
+  const checked = assertVaultPathSafe(vaultBase, path, {
+    expectedType: 'file', label: 'baseline de specs da change',
+  });
+  if (!refresh && checked.exists) {
     try { return JSON.parse(readFileSync(path, 'utf8')); } catch { /* rebuild malformed baseline */ }
   }
   const baseline = { version: 1, capturedAt: new Date().toISOString(), specs: readLivingSpecs(vaultBase) };
-  writeFileSync(path, `${JSON.stringify(baseline, null, 2)}\n`, 'utf8');
+  writeVaultFileSync(
+    vaultBase,
+    path,
+    `${JSON.stringify(baseline, null, 2)}\n`,
+    'utf8',
+    { label: 'baseline de specs da change' },
+  );
   return baseline;
 }
 
@@ -325,7 +348,7 @@ export function ensureSpecsReadme(vaultBase) {
   const loc = getLocale(vaultBase);
   const en = loc.id === 'en';
   const dir = join(vaultBase, loc.folders.specs);
-  ensureDir(dir);
+  mkdirVaultPath(vaultBase, dir, { label: 'raiz de specs consolidadas' });
   const body = en
     ? `# Specs — generated living contract
 
@@ -355,7 +378,48 @@ Pense como código-fonte vs commits: esta pasta é o *código atual* de cada cap
   \`wendkeep change archive\` promove para esta pasta.
 - Histórico por mudança → \`${loc.folders.changes}/_arquivo/\`. Contrato atual → aqui.
 `;
-  writeFileSync(join(dir, 'README.md'), body, 'utf8');
+  writeVaultFileSync(vaultBase, join(dir, 'README.md'), body, 'utf8', { label: 'README de specs' });
+}
+
+export function assertSpecPromotionTargetsSafe(vaultBase, changeDir, specs) {
+  const loc = getLocale(vaultBase);
+  const specsRoot = join(vaultBase, loc.folders.specs);
+  const checkedRoot = assertVaultPathSafe(vaultBase, specsRoot, {
+    expectedType: 'directory', label: 'raiz de specs consolidadas',
+  });
+  const targets = [
+    { path: join(specsRoot, 'README.md'), expectedType: 'file', label: 'README de specs' },
+    { path: join(vaultBase, '.brain'), expectedType: 'directory', label: 'raiz do estado de specs' },
+    { path: join(vaultBase, SPECS_STATE_FILE), expectedType: 'file', label: 'estado consolidado de specs' },
+  ];
+  if (checkedRoot.exists) {
+    for (const name of readdirSync(checkedRoot.target)) {
+      if (!name.endsWith('.md')) continue;
+      targets.push({
+        path: join(checkedRoot.target, name),
+        allowMissing: false,
+        expectedType: 'file',
+        label: `spec consolidada existente ${name}`,
+      });
+    }
+  }
+  for (const capability of specs) {
+    targets.push(
+      {
+        path: join(changeDir, 'specs', capability, 'spec.md'),
+        allowMissing: false,
+        expectedType: 'file',
+        label: `delta da spec ${capability}`,
+      },
+      {
+        path: join(specsRoot, `${capability}.md`),
+        expectedType: 'file',
+        label: `spec consolidada ${capability}`,
+      },
+    );
+  }
+  assertVaultPathsSafe(vaultBase, targets);
+  return { specsRoot: checkedRoot.target };
 }
 
 // Merge each capability's delta (in the change) into the living spec in 07-Specs.
@@ -364,6 +428,7 @@ export function promoteSpecs(vaultBase, changeDir, specs, { changeWikilink, date
   const specsDir = loc.folders.specs;
   const promoted = [];
   const warnings = [];
+  const { specsRoot } = assertSpecPromotionTargetsSafe(vaultBase, changeDir, specs);
   const state = checkSpecsState(vaultBase);
   const unmanaged = state.missing ? [] : state.changed.filter((capability) => specs.includes(capability));
   if (unmanaged.length) {
@@ -371,6 +436,7 @@ export function promoteSpecs(vaultBase, changeDir, specs, { changeWikilink, date
   }
   const conflicts = specConflicts(vaultBase, changeDir, specs);
   if (conflicts.length) throw new Error(`conflito de spec: ${conflicts.join('; ')} — reconcilie o delta e rode \`wendkeep spec rebase --change <slug> --accept-current\``);
+  const materialized = [];
   for (const cap of specs) {
     let deltaMd;
     try { deltaMd = readFileSync(join(changeDir, 'specs', cap, 'spec.md'), 'utf8'); }
@@ -382,10 +448,23 @@ export function promoteSpecs(vaultBase, changeDir, specs, { changeWikilink, date
     try { current = parseRequirements(readFileSync(livePath, 'utf8')); } catch { /* nova capability */ }
     const applied = applyDelta(current, delta);
     warnings.push(...applied.warnings.map((w) => `${cap}: ${w}`));
-    ensureDir(join(vaultBase, specsDir));
     const footer = changeWikilink ? `Atualizado por ${changeWikilink} em ${dateStr}.` : '';
-    writeFileSync(livePath, renderSpec(cap, applied.reqs, { footer, reqHeading: loc.reqHeading }), 'utf8');
-    promoted.push(cap);
+    materialized.push({
+      capability: cap,
+      livePath,
+      content: renderSpec(cap, applied.reqs, { footer, reqHeading: loc.reqHeading }),
+    });
+  }
+  mkdirVaultPath(vaultBase, specsRoot, { label: 'raiz de specs consolidadas' });
+  for (const item of materialized) {
+    writeVaultFileSync(
+      vaultBase,
+      item.livePath,
+      item.content,
+      'utf8',
+      { label: `spec consolidada ${item.capability}` },
+    );
+    promoted.push(item.capability);
   }
   recordPromotedSpecs(vaultBase, promoted);
   ensureSpecsReadme(vaultBase); // self-heal the explainer so existing vaults get it on archive

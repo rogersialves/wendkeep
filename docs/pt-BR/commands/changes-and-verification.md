@@ -14,6 +14,9 @@ Use para qualquer implementação não trivial ou correção que precise deixar 
 ## Quando não usar
 
 Não crie uma change para consultar saúde, importar sessões ou executar manutenção read-only.
+Para manutenção local elegível ao perfil `FLOW`, use o microcontrato descrito em
+[Perfis de Operação](operating-profiles.md); em `OFF`, o lifecycle permanece disponível, mas não
+é imposto pelo Wend Runtime.
 
 ## Pré-requisitos
 
@@ -32,7 +35,8 @@ npx wendkeep change archive <slug>
 
 ## Opções e códigos de saída
 
-- `wendkeep change new <slug> [--simple]` cria proposta, design, tarefas e ponteiro ativo.
+- `wendkeep change new <slug> [--simple]` cria uma change; `--simple` só pula o design, não é nem
+  equivale a `FLOW` e preserva o lifecycle/ADR legado.
 - `change use`, `list`, `show`, `status`, `diff`, `done` e `undone` inspecionam ou atualizam o
   trabalho sem arquivar.
 - `change continue <arquivada> <nova>` abre continuação sem herdar evidência antiga.
@@ -70,11 +74,12 @@ gera um ADR. O archive só passa com tarefas fechadas, sensores exigidos verdes 
 
 - `no change`: selecione com `change use <slug>` ou informe `--change`.
 - `spec_impact: pending`: defina `required` com delta ou `none` com justificativa real.
-- Sensor não executado: mantenha `[sensor:id]` na mesma linha do checkbox da tarefa.
+- Sensor não executado: mantenha uma ou mais tags `[sensor:id]` na mesma linha do checkbox. Todos
+  os IDs distintos dessa linha são exigidos e executados uma vez, na ordem declarada.
 - Evidência stale: rode novamente `verify` e `verify --deep` depois de alterar tarefas/spec.
 - Rebase em conflito: resolva o delta ou use `--accept-current` apenas quando isso for a decisão.
 
 ## Próximos passos
 
-Leia o guia profundo de [verify](verify.md) e a referência de
-[manutenção e diagnóstico](maintenance-and-diagnostics.md).
+Leia [Perfis de Operação](operating-profiles.md), o guia profundo de [verify](verify.md) e a
+referência de [manutenção e diagnóstico](maintenance-and-diagnostics.md).

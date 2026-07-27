@@ -1,7 +1,7 @@
 {
   "name": "wendkeep",
-  "version": "0.58.3",
-  "description": "A persistent-memory harness for AI coding agents on your Obsidian vault: turn-by-turn session capture plus a native, zero-dependency spec→change→verify→archive loop (sensor-gated, independent verdict, mutation discrimination). Local-first, agent-agnostic (Claude Code, Codex, Cursor…).",
+  "version": "0.59.0",
+  "description": "Vault-first persistent memory for AI coding agents, with an optional profile-aware governance runtime: OFF, FLOW, GUIDE, GOVERN, or ASSURE. Local-first and agent-agnostic (Claude Code, Codex, Cursor…).",
   "type": "module",
   "bin": {
     "wendkeep": "bin/wendkeep.mjs",
@@ -22,7 +22,7 @@
     "node": ">=18"
   },
   "scripts": {
-    "check": "node --check bin/wendkeep.mjs && node --check src/init.mjs && node --check src/doctor.mjs && node --check src/project-vault.mjs",
+    "check": "node --check bin/wendkeep.mjs && node --check src/init.mjs && node --check src/doctor.mjs && node --check src/project-vault.mjs && node --check src/operating-profile.mjs && node --check src/profile.mjs && node --check src/flow.mjs && node --check hooks/operating-profile-runtime.mjs && node --check hooks/flow-core.mjs && node --check hooks/flow-protected-policy.mjs && node --check hooks/git-snapshot.mjs && node --check hooks/vault-path-safety.mjs && node --check hooks/vault-runtime-store.mjs",
     "test": "node --test",
     "release": "node scripts/release.mjs",
     "release:dry": "node scripts/release.mjs --dry-run",

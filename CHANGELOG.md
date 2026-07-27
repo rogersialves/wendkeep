@@ -4,6 +4,74 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.59.0] — 2026-07-27
+
+### Added
+
+- **Perfis de Operação separam memória persistente de governança:** `OFF`, `FLOW`, `GUIDE`,
+  `GOVERN` e `ASSURE`, com resolução explícita por sessão ou projeto e fallback conservador para
+  `GOVERN`. O novo `wendkeep profile status|use` torna a escolha e sua origem auditáveis.
+- **FLOW executa ajustes pequenos por um microcontrato E → V:** `flow start/status/show/finish`
+  exige allowlist e sensores, registra baseline Git e tentativas no Vault e produz um recibo
+  terminal imutável sem criar change, ADR ou veredicto independente. `flow promote` preserva a
+  evidência ao converter o trabalho em uma change normal, sem `--force`.
+
+### Changed
+
+- **Keep Core agora é explicitamente inegociável e sempre ativo.** Vault, identidade, sessões,
+  CORE, SHARED_MEMORY, lessons e persistência continuam funcionando em todos os perfis; apenas o
+  Wend Runtime de governança é desligado em `OFF`. Hooks, skills, `init` e `sync` respeitam a mesma
+  fronteira, e instalações novas começam em `GOVERN`.
+- **Artefatos de runtime FLOW vivem em `.brain/runtime/flows/`.** A fronteira arquitetural impede
+  dependências do Vault para o harness/perfil e mantém aberta uma modularização física posterior
+  em `cli`, `harness`, `vault`, `mcp`, `integration` e `pi`.
+
+### Fixed
+
+- **Handoffs sequenciais da mesma ativação respeitam causalidade.** Um turno mais novo da mesma
+  sessão/ativação substitui o anterior em vez de abrir conflito; ativações realmente distintas
+  continuam exigindo resolução humana.
+- **Todas as tags de sensor de uma tarefa entram no gate.** `verify` não descarta mais tags
+  `[sensor:]` adicionais na mesma linha: IDs distintos executam uma vez, na ordem declarada, e o
+  primeiro continua disponível como alias legado para consumidores antigos.
+- **Reconciliação de memória separa reparo estrutural de decisão semântica.** O novo `memory
+  reconcile` é dry-run por padrão, reprojeta o ledger sem consumir outbox, distingue cursor físico
+  de ordem causal e usa os mesmos invariantes do CORE no projector e no health check. `verify` e
+  `flow finish` agora executam sensores contra o Vault efetivamente selecionado. `memory repair`
+  reconhece e migra por CAS checkpoints causais válidos pré-0.59, com backup/auditoria, enquanto
+  locks owner-aware por PID/token impedem reap de processos vivos e remoção ABA.
+- **Iterações truncadas preservam Markdown válido.** Backticks inline ou fences cortados pelo
+  limite de tamanho são escapados antes da escrita e não engolem mais a linha seguinte.
+- **`sync` preserva seu estágio de reparo sem reabrir fallback global.** A CLI não tenta resolver
+  o Vault antes do `init`; binding inválido falha fechado nessa primeira etapa, e apenas o vínculo
+  validado é repassado a `sync-defs` e `doctor`.
+
+### Security
+
+- **FLOW falha fechado fora do contrato.** Escapes da allowlist, superfícies protegidas, mudança
+  de configuração de sensores, metadata/flags ocultas do Git, sensores críticos vermelhos ou
+  mutantes, symlink/junction/reparse/hardlink, submodules e superfícies ignoradas bloqueiam o
+  recibo. ProjectRoot/sensor cwd ficam congelados e um snapshot terminal fecha a janela após os
+  sensores. Raízes adicionais podem ser declaradas por `harness.flow.protectedRoots`; uma política
+  canônica gera classifier, discovery e topologia. Escritas/locks do Vault falham antes de escapar,
+  usando owner+lease sem reap de processo vivo ou liberação ABA. Uma descoberta no-follow limitada
+  inclui aliases protegidos vazios/ignorados sem entrar no Vault, `.git` ou caches. Promoção
+  cross-process elege um dono, vincula semanticamente contrato/reserva/recibo/origem, preflighta
+  destinos multi-spec e permite ao perdedor repetir com `--change-slug`. IDs não atravessam o
+  runtime root, artefatos corrompidos nunca reabrem o FLOW, não existe `--force`, e promoção nunca
+  toma outra change ou repositório. Ledger, outbox, CORE/SHARED, registry, notas, sidecars,
+  temporários e backups também falham fechados em aliases físicos ou hardlinks externos.
+- **Supersession ambígua exige autorização auditável e CAS exato.** A aplicação nomeia a sessão
+  sucessora e o motivo, prova que cada evento pertence à identidade causal nomeada, rejeita flags
+  ambíguas antes de I/O, limita a mutação às duas sessões, preserva o attempt original e cria backup
+  exato do registry antes da troca.
+- **Binding ilegível não desliga governança silenciosamente.** Hooks mutantes falham fechados;
+  quando um Vault explícito ou legado é inequívoco, Keep Core continua injetado sob fallback
+  `GOVERN` junto do diagnóstico de corrupção. Config legada mais próxima inválida, shape tipado
+  incorreto, marcador ausente ou identidade divergente não herdam Vault pai/global; `profile`
+  expõe `binding_error` e rejeita flags duplicadas/ambíguas antes de I/O. O guard cobre caixa,
+  shims locais, entrypoint Node e paths/call operator de Git nos gates force/no-verify.
+
 ## [0.58.3] — 2026-07-26
 
 ### Fixed

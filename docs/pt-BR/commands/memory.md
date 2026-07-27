@@ -25,6 +25,7 @@ Informe o vault explicitamente em automações. Preserve backups e evidências a
 ```bash
 npx wendkeep memory status [--gate] --vault <cofre>
 npx wendkeep memory repair --vault <cofre>
+npx wendkeep memory reconcile <sessão-ambígua> --by-session <sessão-sucessora> --reason <motivo> [--apply] --vault <cofre>
 npx wendkeep memory promote <candidate> --vault <cofre>
 npx wendkeep memory reject <candidate> --vault <cofre>
 npx wendkeep validate-memory [caminho-do-CORE]
@@ -44,7 +45,18 @@ npx wendkeep validate-memory --vault <cofre-v2>
 - Vault legado válido gera warning e exit `0`. Em v2, o status correlaciona
   `last_memory_attempt`, disposition, outbox, ledger, SHARED e checkpoint: attempt ambíguo,
   publicação perdida ou checkpoint divergente bloqueiam; `degraded` com outbox íntegra é warning.
-- `memory repair` trabalha sob lock, salva `.bak`, retém eventos válidos e reprojeta.
+- `memory repair` é exclusivamente estrutural: trabalha sob locks com owner PID/token, salva
+  `.bak`, retém eventos válidos e reprojeta. Quando reconhece um checkpoint pré-0.59 válido com
+  cursor causal, migra-o por CAS para a fronteira física e registra backup/auditoria; nunca
+  reclassifica attempts do registry nem aceita tuple que não seja rederivada integralmente.
+- `memory reconcile` é dry-run por padrão. `--apply` exige duas sessões nomeadas e motivo, faz CAS
+  do attempt exato, salva backup do registry e limita a mutação ao attempt ambíguo e à sucessora.
+  O replay é CORE-aware, usa cursor físico do ledger no checkpoint e não reescreve ledger, CORE ou
+  notas, nem consome a outbox. Repetir a mesma decisão aplicada é idempotente.
+- Toda rota de memória valida a topologia física de `.brain`, ledger, outbox, CORE, SHARED,
+  candidates, registry, notas, backups, temporários e sidecars antes de ler ou escrever. Junction,
+  symlink, reparse point ou hardlink falham fechados sem tocar bytes externos. Locks publicam owner
+  e lease atomicamente, não colhem PID vivo apenas por idade e só liberam a lease adquirida.
 - `promote`/`reject` acrescentam decisão auditável; nunca reescrevem o ledger no lugar.
 - `validate-memory <CORE.md>` valida cap de 25 linhas, seções e segredos.
 - `validate-memory --vault` exige bundle v2 completo; não é o gate correto para vault legado.
@@ -53,6 +65,8 @@ npx wendkeep validate-memory --vault <cofre-v2>
 
 ```bash
 npx wendkeep memory status --gate --vault .MeuApp-vault
+npx wendkeep memory reconcile antiga --by-session atual --reason "entrega continuada" --vault .MeuApp-vault
+npx wendkeep memory reconcile antiga --by-session atual --reason "entrega continuada" --apply --vault .MeuApp-vault
 npx wendkeep validate-memory .MeuApp-vault/.brain/CORE.md
 npx wendkeep memory promote candidate-123 --vault .MeuApp-vault
 ```
@@ -72,7 +86,9 @@ prefixo válido de uma projeção global que já avançou com eventos concorrent
 - `degraded` com todos os event IDs presentes no ledger ou na outbox íntegra é recuperável; deixe o
   replay idempotente concluir. Event ID ausente nos dois lugares indica publicação perdida.
 - Attempt `ambiguous`, attempt `applied` sem event IDs, evento `projected` apenas na outbox ou
-  checkpoint divergente são bloqueantes: preserve os artefatos e investigue antes de repair.
+  checkpoint divergente são bloqueantes: preserve os artefatos e investigue antes de repair. Se a
+  ambiguidade for comprovadamente substituída por uma sessão sucessora, revise o dry-run de
+  `memory reconcile` antes de autorizar `--apply`; o comando falha se o attempt ambíguo tiver IDs.
 - Candidate pendente comum: warning recuperável, exige decisão humana quando apropriado.
 - `event_cursor` ausente ou hash divergente em v2: preserve o bundle e avalie `memory repair`.
 - `validate-memory --vault` falha no legado: valide apenas CORE ou migre primeiro.

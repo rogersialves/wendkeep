@@ -52,7 +52,9 @@ export function logTask(vaultBase, input) {
 
   const heading = getLocale(vaultBase).id === 'en' ? 'Plan progress' : 'Progresso do plano';
   const line = `- [x] ${formatHourMinute(new Date()).replace('-', ':')} ${text}`;
-  return mutateSessionNote(sessionPath, (content) => appendProgress(content, line, heading)).written;
+  return mutateSessionNote(sessionPath, (content) => appendProgress(content, line, heading), {
+    vaultBase,
+  }).written;
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

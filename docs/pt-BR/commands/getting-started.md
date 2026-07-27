@@ -27,18 +27,22 @@ Não rode `init --force` para tentar reparar memória ou uma configuração ileg
 ```bash
 npm install --save-dev wendkeep
 npx wendkeep init [opções]
-npx wendkeep sync [--project <raiz>] [--vault <cofre>] [--yes]
+npx wendkeep sync [--project <raiz>] [--vault <cofre>] [--profile <perfil>] [--yes]
 ```
 
 ## Opções e códigos de saída
 
 - `--vault <path>` escolhe o cofre; sem ele, o vínculo local `.wendkeep.json` prevalece.
 - `--project <path>` aponta a raiz do projeto.
+- `--profile <OFF|FLOW|GUIDE|GOVERN|ASSURE>` seleciona o Perfil de Operação; instalação nova usa
+  `GOVERN`, re-init/sync sem a flag preserva a escolha existente e `OFF` nunca é inferido.
 - `--no-mcp`, `--no-colors` e `--no-companions` desativam integrações opcionais.
 - `--companions <csv>` habilita companions explicitamente.
 - `--yes` aceita defaults não interativos; `--force` atualiza apenas blocos gerenciados.
 - Exit `0` indica instalação/sincronização concluída; exit diferente de zero identifica a etapa
   que falhou. `sync` para em `init`, `sync-defs` ou `doctor`, sem esconder o erro.
+- `sync` não pré-resolve o Vault antes de `init`: um vínculo inválido falha fechado nessa primeira
+  etapa, e apenas um vínculo validado segue para `sync-defs` e `doctor`; nunca há fallback global.
 
 ## Exemplos
 
@@ -46,7 +50,7 @@ Primeira instalação no projeto atual:
 
 ```bash
 npm install --save-dev wendkeep
-npx wendkeep init --no-companions
+npx wendkeep init --profile GOVERN --no-companions
 ```
 
 Atualização posterior:
@@ -60,7 +64,7 @@ Com pnpm, informe uma versão concreta porque políticas de idade mínima podem 
 atrasado silenciosamente:
 
 ```bash
-pnpm add -D wendkeep@0.58.2
+pnpm add -D wendkeep@X.Y.Z --config.minimumReleaseAge=0
 pnpm exec wendkeep sync --yes
 ```
 

@@ -13,7 +13,7 @@
 
 **In the graph:** 🔵 session · 🟣 decision · 🔴 bug · 🟢 learning · 🟡 change — every note, backlinked.
 
-**A persistent‑memory harness for AI coding agents, built on your Obsidian vault.** Every Claude Code **and Codex** session is captured turn‑by‑turn into local Markdown — `init` wires both (Codex asks you to approve its hooks once; `import` backfills past sessions either way) — with token/cost tracking, auto‑extracted decisions, bugs and learnings, and a curated memory layer injected back at the start of the next session. On top of that memory core sits a native, zero‑dependency **change lifecycle** (spec → change → TDD → sensor‑gated archive) that keeps intent, work and proof wikilinked in one graph. 100% local, open‑core.
+**Persistent memory for AI coding agents, built on your Obsidian vault.** Every Claude Code **and Codex** session is captured turn by turn into local Markdown — `init` wires both (Codex asks you to approve its hooks once; `import` backfills past sessions either way) — with token/cost tracking and automatically extracted decisions, bugs, and learnings. That always-on plane is **Keep Core**. On top of it, **Wend Runtime** provides a native, zero-dependency lifecycle (spec → change → TDD → sensor-gated archive), selected through the `OFF`, `FLOW`, `GUIDE`, `GOVERN`, and `ASSURE` Operating Profiles. 100% local, open-core.
 
 ```bash
 npm i -D wendkeep && npx wendkeep init      # captures from the next session on
@@ -120,6 +120,9 @@ one command:
 npm install --save-dev wendkeep@latest && npx --no-install wendkeep sync --project . --yes
 ```
 
+`sync` lets its own `init` stage validate or rebuild the binding before resolving the Vault for
+later stages. An invalid `.wendkeep.json` stops at `init` without falling back to an inherited global Vault.
+
 The install stays outside `sync` on purpose: a running process cannot replace itself and
 keep going — the code in memory would still be the old one.
 
@@ -163,6 +166,7 @@ The README is the map; the guides provide syntax, options, exit codes, examples,
 | Group | Use it for | Detailed guide |
 |---|---|---|
 | **Installation and updates** | `init`, `sync`, companions, and the first project↔vault binding | [Installation and first use](https://github.com/rogersialves/wendkeep/blob/main/docs/en/commands/getting-started.md) |
+| **Operating profiles** | `profile`, `flow`, always-on Keep Core, and Wend Runtime governance | [Operating profiles](https://github.com/rogersialves/wendkeep/blob/main/docs/en/commands/operating-profiles.md) |
 | **Changes and verification** | `change`, specs, sensors, TDD, evidence, and archive | [Changes and verification](https://github.com/rogersialves/wendkeep/blob/main/docs/en/commands/changes-and-verification.md) |
 | **Shared memory** | CORE, SHARED, status, validation, repair, and curation | [Memory](https://github.com/rogersialves/wendkeep/blob/main/docs/en/commands/memory.md) |
 | **Sessions and import** | hooks, registry, session focus, and Claude/Codex backfill | [Sessions and import](https://github.com/rogersialves/wendkeep/blob/main/docs/en/commands/sessions-and-import.md) |
@@ -173,6 +177,34 @@ The README is the map; the guides provide syntax, options, exit codes, examples,
 Operations that deserve step-by-step guidance: [verify and exits 0/1/2](https://github.com/rogersialves/wendkeep/blob/main/docs/en/commands/verify.md),
 [legacy-memory migration](https://github.com/rogersialves/wendkeep/blob/main/docs/en/commands/memory-migration.md), and
 [safe retroactive import](https://github.com/rogersialves/wendkeep/blob/main/docs/en/commands/retroactive-import.md).
+
+## Operating Profiles — Keep Core is always active
+
+**Keep Core is always active**: the Vault, sessions, identity, CORE/SHARED, lessons, costs,
+and persistence do not turn off with the harness. **Wend Runtime** controls only the governance
+layer:
+
+| Profile | Route | Use |
+|---|---|---|
+| `OFF` | LLM-native harness | No Wend router, skill gate, or gates; explicit selection only. |
+| `FLOW` | E → V | Microcontract with Git baseline, allowlist, sensor, and receipt, without a change. |
+| `GUIDE` | P → E → V | Compact guided change. |
+| `GOVERN` | P → R → E → V | Current a2 loop and compatible fallback. |
+| `ASSURE` | P → R → E → V → C | Governance with confirmation and handoff. |
+
+A corrupt binding never selects `OFF`: with one unambiguous explicit or legacy Vault, Keep Core
+remains active under `GOVERN`, the error stays visible, and mutation guards fail closed. Additional
+roots that FLOW must protect can be declared as project-relative paths under
+`harness.flow.protectedRoots` in `.wendkeep.json`; any change below them requires promotion.
+Invalid local config, marker, or identity never silently falls back to a parent/global Vault.
+
+`wendkeep profile status/use` makes the choice observable; `wendkeep flow
+start/finish/promote` handles local adjustments without manufacturing an ADR and fails closed on
+physical escapes, Git metadata/hidden flags, mutating sensors, protected surfaces, or incomplete
+session projection. Bounded no-follow discovery sees empty/ignored protected aliases; Vault writes
+and owner+lease locks validate physical topology. Concurrent promotion elects one owner and supports
+retry through `--change-slug`. Read the complete
+[Operating profiles guide](https://github.com/rogersialves/wendkeep/blob/main/docs/en/commands/operating-profiles.md).
 
 ## Shared Project Memory v2
 
@@ -211,7 +243,13 @@ ledger, SHARED, and checkpoint: `degraded` with a durable outbox is a warning; a
 lost publication, or mismatched checkpoint blocks. See [migration](docs/en/commands/memory-migration.md)
 and [diagnostics](docs/en/commands/maintenance-and-diagnostics.md).
 
-If status blocks, preserve the evidence and run `wendkeep memory repair --vault <vault>` to save a backup of the corrupt ledger, retain valid lines, and re-project. Then run `status --gate` again. Conflicts require explicit curation with `memory promote <id>` or `memory reject <id>`; doctor only diagnoses.
+If status blocks, preserve the evidence and run `wendkeep memory repair --vault <vault>` to back up
+the corrupt ledger, retain valid lines, and re-project. Repair never reclassifies attempts. A
+valid pre-0.59 causal checkpoint is CAS-migrated to the physical boundary with backup/audit. A
+demonstrably superseded ambiguity uses `memory reconcile <session> --by-session <successor>
+--reason <reason>` as a dry run and requires `--apply`; the decision is backed up and audited
+without rewriting ledger, CORE, or notes. Run `status --gate` again afterwards. Conflicts require
+explicit curation with `memory promote <id>` or `memory reject <id>`; doctor only diagnoses.
 
 Session notes use one live `## Agentes, tokens e custos` snapshot. Main-agent and subagent hooks recompose it atomically, with costs, token dimensions, reasoning tokens and effort per model/source. Every hook that rewrites a session note takes a per-file lock and writes through a temp file + rename, so the `SubagentStop` fan-out (one hook run per subagent) can never leave a note half-written; a note whose frontmatter reads back damaged is left untouched rather than patched.
 
@@ -279,7 +317,7 @@ explore → propose → apply (TDD) → verify → archive
 ```
 
 - **Propose** — `wendkeep change new <slug>` scaffolds `08-Mudanças/<slug>/` (`proposta.md`, `design.md`, `tarefas.md`; `--simple` skips the design). It becomes the global *current* change. When the change declares `spec_impact: required`, you author the delta yourself at `specs/<capability>/spec.md` — there is no placeholder to delete. Multiple changes may remain open: `change list`/`status` and the hooks show every pending one, while commands without `--change` act on the current one alone. `change use <slug>` changes focus and `change continue <archived> <new>` creates an auditable continuation.
-- **Apply** — implement each `tarefas.md` task. Tag a task that needs machine proof with `[sensor:<id>]` — one sensor per task (a task carries a single sensor; split it in two if you need two) — and the requirement it satisfies with `[req:<ID>]`, of which a task may declare several.
+- **Apply** — implement each `tarefas.md` task. Mark machine proof with one or more `[sensor:<id>]` tags on the same task: every distinct ID enters the gate once, in declaration order. Also mark satisfied requirements with one or more `[req:<ID>]` tags.
 - **Verify** — `wendkeep verify` runs the sensors your tasks declared (from `wendkeep.sensors.json` at the project root) and writes `evidencia.json`. A red `critical` fails the gate; a red `warning` is advisory. `verify --deep` builds a self-contained package with complete effective requirements (living contract + this change's delta), so the independent verifier never needs to reconstruct unarchived requirements from `07-Specs`. Every change needs a `verdict.json` to archive; `verify --deep` writes a trivial one automatically when the change declares no `[req:]`.
 - **Archive** — `wendkeep change archive <slug>` **gates** on the evidence (blocks unless every declared critical sensor is green), promotes each capability's spec delta (`ADDED`/`MODIFIED`/`REMOVED`) into the living `07-Specs/<capability>.md`, moves the change to `_arquivo/`, and mints an ADR in `04-Decisões/`.
 

@@ -11,18 +11,29 @@ function skill(name, description, body, files = []) {
   return { name, description, body: `---\nname: ${name}\ndescription: ${description}\n---\n${body}`, files };
 }
 
-const WORKFLOW = `# Loop a2 — o ciclo de trabalho do wendkeep
+const WORKFLOW = `# Perfis de Operação — roteador de trabalho do wendkeep
 
-Use ao começar qualquer mudança não-trivial. O loop mantém memória (vault) e prova
-(sensores) juntas, tudo linkado no grafo do Obsidian.
+Use ao começar implementação, correção ou refatoração. **Keep Core permanece sempre ativo**
+em todos os perfis: Vault, sessão, identidade, memória, lessons e persistência. Na ausência de
+configuração válida, **GOVERN é o padrão** compatível.
 
 <HARD-GATE>
-NÃO edite arquivos de código antes do passo 2 (Propose / \`wendkeep change new\`).
-Toda tarefa não-trivial passa pelo loop — planejar no chat e sair editando deixa o
-vault cego. Exceção única: mudança trivial (typo, 1 linha).
+Antes de editar, leia o **perfil efetivo** injetado pelo WendKeep e siga somente sua rota:
+- \`OFF\`: não imponha processo Wend; a governança pertence ao **harness nativo da LLM**.
+- \`FLOW\`: inicie o microcontrato com \`wendkeep flow start\` antes de editar os paths permitidos.
+- \`GUIDE\`, \`GOVERN\` ou \`ASSURE\`: não edite código antes de Propose / \`wendkeep change new\`.
+Este gate nunca transforma \`OFF\` ou \`FLOW\` silenciosamente em \`GOVERN\`.
 </HARD-GATE>
 
-## Os passos
+## Rotas por perfil
+
+- **OFF — LLM nativa:** Wend Runtime desligado; esta skill devolve a execução ao harness nativo.
+- **FLOW — E → V:** \`flow start\` → implementar com wk-tdd → \`flow finish\`; sem change/ADR/verdict.
+- **GUIDE — P → E → V:** change compacta, sem revisão formal obrigatória.
+- **GOVERN — P → R → E → V:** loop a2 atual, com design/revisão; é o padrão conservador.
+- **ASSURE — P → R → E → V → C:** GOVERN acrescido de confirmação e handoff explícitos.
+
+## Passos para GUIDE, GOVERN e ASSURE
 
 1. **Explore** — entenda o problema antes de propor. Leia o código/contexto relevante.
 2. **Propose** — \`wendkeep change new <slug>\`. Isso cria \`08-Mudanças/<slug>/\` com:
@@ -251,18 +262,29 @@ nunca tivesse visto a implementação. Contexto fresco, read-only.
 - \`verdict-template.json\` — o formato exato do \`verdict.json\` a gravar.
 `;
 
-const WORKFLOW_EN = `# The a2 loop — wendkeep's work cycle
+const WORKFLOW_EN = `# Operating Profiles — wendkeep work router
 
-Use it when starting any non-trivial change. The loop keeps memory (vault) and proof
-(sensors) together, wikilinked in the Obsidian graph.
+Use this when starting an implementation, fix, or refactor. **Keep Core is always active**
+in every profile: Vault, session, identity, memory, lessons, and persistence. With no valid
+configuration, **GOVERN is the default** for compatibility.
 
 <HARD-GATE>
-Do NOT edit code files before step 2 (Propose / \`wendkeep change new\`).
-Every non-trivial task goes through the loop — planning in chat and editing right away
-leaves the vault blind. Single exception: a trivial change (typo, one line).
+Before editing, read the injected **effective profile** and follow only its route:
+- \`OFF\`: impose no Wend process; governance belongs to the **native LLM harness**.
+- \`FLOW\`: start the microcontract with \`wendkeep flow start\` before editing allowed paths.
+- \`GUIDE\`, \`GOVERN\`, or \`ASSURE\`: do not edit code before Propose / \`wendkeep change new\`.
+This gate never silently turns \`OFF\` or \`FLOW\` into \`GOVERN\`.
 </HARD-GATE>
 
-## Steps
+## Profile routes
+
+- **OFF — native LLM:** Wend Runtime is disabled; this skill returns execution to the native harness.
+- **FLOW — E → V:** \`flow start\` → implement with wk-tdd → \`flow finish\`; no change/ADR/verdict.
+- **GUIDE — P → E → V:** a compact change with no mandatory formal review.
+- **GOVERN — P → R → E → V:** the current a2 loop with design/review; the conservative default.
+- **ASSURE — P → R → E → V → C:** GOVERN plus explicit confirmation and handoff.
+
+## Steps for GUIDE, GOVERN, and ASSURE
 
 1. **Explore** — understand the problem before proposing.
 2. **Propose** — \`wendkeep change new <slug>\` scaffolds \`08-Changes/<slug>/\`
@@ -597,7 +619,7 @@ size of the problem>
 // usuário ("implementa X", "corrige Y"), não com abstrações ("mudança não-trivial"). Gatilhos
 // concretos + instrução imperativa = a skill dispara sozinha (paridade Superpowers).
 const WK_SKILLS_PT = [
-  skill('wk-workflow', 'Use SEMPRE que o usuário pedir para implementar, criar, corrigir, refatorar, adicionar ou alterar código — qualquer tarefa de código não-trivial. Invoque ANTES de editar qualquer arquivo: orquestra o loop a2 (wendkeep change new → tarefas → verify → archive) e registra tudo no vault.', WORKFLOW),
+  skill('wk-workflow', 'Use quando o usuário pedir para implementar, criar, corrigir, refatorar, adicionar ou alterar código: leia o perfil efetivo e roteie OFF/FLOW/GUIDE/GOVERN/ASSURE ANTES de editar. Keep Core permanece ativo; GOVERN é o padrão compatível.', WORKFLOW),
   skill('wk-tdd', 'Use ao implementar qualquer comportamento — Red/Green/Refactor com testes que discriminam (derivados do spec, litmus não-raso, adequação).', TDD),
   skill('wk-debugging', 'Use quando algo falha, quebra, dá erro ou regride — depuração sistemática por hipótese antes de corrigir.', DEBUGGING),
   skill('wk-brainstorming', 'Use quando a ideia ainda é vaga ou o usuário quer discutir/planejar uma feature (inclusive em plan mode) — vira design aprovado, com closure gate e tabela out-of-scope, antes de código.', BRAINSTORMING, [{ name: 'design-template.md', content: DESIGN_TEMPLATE_PT }]),
@@ -606,7 +628,7 @@ const WK_SKILLS_PT = [
 ];
 
 const WK_SKILLS_EN = [
-  skill('wk-workflow', 'Use WHENEVER the user asks to implement, create, fix, refactor, add or change code — any non-trivial coding task. Invoke BEFORE editing any file: it orchestrates the a2 loop (wendkeep change new → tasks → verify → archive) and records everything in the vault.', WORKFLOW_EN),
+  skill('wk-workflow', 'Use when the user asks to implement, create, fix, refactor, add, or change code: read the effective profile and route OFF/FLOW/GUIDE/GOVERN/ASSURE BEFORE editing. Keep Core stays active; GOVERN is the compatible default.', WORKFLOW_EN),
   skill('wk-tdd', 'Use when implementing any behaviour — Red/Green/Refactor with tests that discriminate (spec-derived, non-shallow litmus, adequacy).', TDD_EN),
   skill('wk-debugging', 'Use when something fails, breaks, errors or regresses — systematic hypothesis-driven debugging before fixing.', DEBUGGING_EN),
   skill('wk-brainstorming', 'Use when the idea is still vague or the user wants to discuss/plan a feature (plan mode included) — turns it into an approved design, with a closure gate and out-of-scope table, before code.', BRAINSTORMING_EN, [{ name: 'design-template.md', content: DESIGN_TEMPLATE_EN }]),

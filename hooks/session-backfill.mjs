@@ -12,6 +12,7 @@ import {
   readControl,
   readSessionRegistry,
 } from './obsidian-common.mjs';
+import { assertVaultPathSafe } from './vault-path-safety.mjs';
 
 function parseArgs(argv) {
   const args = { write: false, limit: 0, session: '' };
@@ -71,8 +72,11 @@ export function backfillSessions({ vaultBase, write = false, limit = 0, session 
     if (args.limit && report.scanned >= args.limit) break;
     report.scanned += 1;
 
-    const sessionPath = join(vaultBase, entry.session_file);
-    if (!existsSync(sessionPath) || !existsSync(entry.transcript_path)) {
+    const checkedSession = assertVaultPathSafe(vaultBase, join(vaultBase, entry.session_file), {
+      expectedType: 'file', label: 'nota de sessão do backfill',
+    });
+    const sessionPath = checkedSession.target;
+    if (!checkedSession.exists || !existsSync(entry.transcript_path)) {
       report.missing.push({
         session: entry.session_file,
         sessionExists: existsSync(sessionPath),
@@ -106,6 +110,7 @@ export function backfillSessions({ vaultBase, write = false, limit = 0, session 
           buildIterationBlock(tx, { turn_id: turn.turnId, now: turn.timestamp }),
           turn.turnId,
           tx,
+          vaultBase,
         );
         if (inserted) {
           report.inserted += 1;

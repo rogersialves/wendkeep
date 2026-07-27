@@ -137,6 +137,39 @@ test('plan-capture entrypoint via stdin persiste e emite contexto', () => {
   } finally { rmSync(vault, { recursive: true, force: true }); }
 });
 
+test('[req:OP-2] plan-capture falha fechado sem criar change quando o binding está corrompido', () => {
+  const root = mkdtempSync(join(tmpdir(), 'wk-pc-binding-'));
+  const vault = join(root, 'vault');
+  const project = join(root, 'project');
+  mkdirSync(vault, { recursive: true });
+  mkdirSync(project, { recursive: true });
+  try {
+    const hook = join(process.cwd(), 'hooks', 'plan-capture.mjs');
+    const base = sessionInput(vault, 'binding-bypass');
+    upsertSessionRegistry(vault, 'binding-bypass', { operating_profile: 'GOVERN' });
+    writeFileSync(join(project, '.wendkeep.json'), '{ invalid json');
+    const input = JSON.stringify({
+      ...base,
+      cwd: project,
+      obsidian_vault_path: vault,
+      tool_input: { plan: PLAN },
+      tool_response: { plan: PLAN, filePath: 'C:/tmp/plan.md', planWasEdited: true, isAgent: false },
+    });
+    const r = spawnSync(process.execPath, [hook], {
+      cwd: project,
+      input,
+      encoding: 'utf8',
+      env: { ...process.env, OBSIDIAN_VAULT_PATH: vault, CLAUDECODE: '1' },
+    });
+    assert.equal(r.status, 0, r.stderr);
+    const output = JSON.parse(r.stdout);
+    assert.match(output.hookSpecificOutput?.additionalContext || '', /plan_capture_error/);
+    assert.match(output.hookSpecificOutput?.additionalContext || '', /WENDKEEP_VAULT_CONFIG_INVALID/);
+    assert.equal(existsSync(join(vault, '08-Mudanças')), false, 'binding inválido não cria change');
+    assert.equal(existsSync(join(vault, '.brain', 'CURRENT_CHANGE.md')), false, 'binding inválido não ativa change');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 test('capturePlan sem checkboxes no plano: tarefas.md mantém o scaffold', () => {
   const vault = mkdtempSync(join(tmpdir(), 'wk-pc2-'));
   try {

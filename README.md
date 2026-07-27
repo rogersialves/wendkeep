@@ -13,7 +13,7 @@
 
 **No grafo:** 🔵 sessão · 🟣 decisão · 🔴 bug · 🟢 aprendizado · 🟡 mudança — cada nota, com backlink.
 
-**Um harness de memória persistente para agentes de código, construído sobre o seu cofre Obsidian.** Cada sessão do Claude Code e do Codex é capturada turno a turno em Markdown local — o `init` wira os hooks dos dois agentes (no Codex, valendo depois que você aprovar o prompt de confiança dele); o `import` importa as sessões passadas de qualquer um dos dois — com rastreio de tokens/custo, decisões, bugs e aprendizados extraídos automaticamente, e uma camada de memória curada injetada de volta no início da próxima sessão. Sobre esse núcleo de memória fica um **ciclo de mudança** nativo e sem dependências (spec → change → TDD → archive com gate por sensor) que mantém intenção, trabalho e prova wikilinkados num só grafo. 100% local, open‑core.
+**Memória persistente para agentes de código, construída sobre o seu cofre Obsidian.** Cada sessão do Claude Code e do Codex é capturada turno a turno em Markdown local — o `init` wira os hooks dos dois agentes (no Codex, valendo depois que você aprovar o prompt de confiança dele); o `import` recupera as sessões passadas — com rastreio de tokens/custo, decisões, bugs e aprendizados extraídos automaticamente. Esse plano sempre ativo é o **Keep Core**. Sobre ele, o **Wend Runtime** oferece um ciclo nativo e sem dependências (spec → change → TDD → archive com gate por sensor), selecionável pelos Perfis de Operação `OFF`, `FLOW`, `GUIDE`, `GOVERN` e `ASSURE`. 100% local, open‑core.
 
 ```bash
 npm i -D wendkeep && npx wendkeep init      # captura a partir da próxima sessão
@@ -117,6 +117,9 @@ reprocessar a fiação do projeto. O `sync` faz os três passos (`init` → `syn
 npm install --save-dev wendkeep@latest && npx --no-install wendkeep sync --project . --yes
 ```
 
+O `sync` deixa o próprio `init` validar ou reconstruir o vínculo antes de resolver o Vault para
+os passos seguintes. Um `.wendkeep.json` inválido para no `init`, sem cair no Vault global herdado.
+
 O `install` fica de fora do `sync` de propósito: um processo não se auto-substitui e segue
 rodando — o código em execução continuaria sendo o antigo.
 
@@ -159,6 +162,7 @@ O README mostra o mapa; os guias trazem sintaxe, opções, códigos de saída, e
 | Grupo | Use para | Guia detalhado |
 |---|---|---|
 | **Instalação e atualização** | `init`, `sync`, companions e primeiro vínculo projeto↔cofre | [Instalação e primeiro uso](https://github.com/rogersialves/wendkeep/blob/main/docs/pt-BR/commands/getting-started.md) |
+| **Perfis de operação** | `profile`, `flow`, Keep Core sempre ativo e governança do Wend Runtime | [Perfis de Operação](https://github.com/rogersialves/wendkeep/blob/main/docs/pt-BR/commands/operating-profiles.md) |
 | **Changes e verificação** | `change`, specs, sensores, TDD, evidência e archive | [Changes e verificação](https://github.com/rogersialves/wendkeep/blob/main/docs/pt-BR/commands/changes-and-verification.md) |
 | **Memória compartilhada** | CORE, SHARED, status, validação, repair e curadoria | [Memória](https://github.com/rogersialves/wendkeep/blob/main/docs/pt-BR/commands/memory.md) |
 | **Sessões e importação** | hooks, registry, foco de sessão e backfill Claude/Codex | [Sessões e importação](https://github.com/rogersialves/wendkeep/blob/main/docs/pt-BR/commands/sessions-and-import.md) |
@@ -169,6 +173,34 @@ O README mostra o mapa; os guias trazem sintaxe, opções, códigos de saída, e
 Operações que merecem instrução passo a passo: [verify e seus exits 0/1/2](https://github.com/rogersialves/wendkeep/blob/main/docs/pt-BR/commands/verify.md),
 [migração de memória legada](https://github.com/rogersialves/wendkeep/blob/main/docs/pt-BR/commands/memory-migration.md) e
 [importação retroativa segura](https://github.com/rogersialves/wendkeep/blob/main/docs/pt-BR/commands/retroactive-import.md).
+
+## Perfis de Operação — Keep Core sempre ativo
+
+O **Keep Core permanece sempre ativo**: Vault, sessões, identidade, CORE/SHARED, lessons, custos e
+persistência não são desligados junto com o harness. O **Wend Runtime** controla apenas a camada de
+governança:
+
+| Perfil | Rota | Uso |
+|---|---|---|
+| `OFF` | harness nativo da LLM | Sem router, skill gate ou gates Wend; seleção somente explícita. |
+| `FLOW` | E → V | Microcontrato com baseline Git, allowlist, sensor e recibo, sem change. |
+| `GUIDE` | P → E → V | Change compacta e guiada. |
+| `GOVERN` | P → R → E → V | Loop a2 atual e fallback compatível. |
+| `ASSURE` | P → R → E → V → C | Governança com confirmação e handoff. |
+
+Binding corrompido nunca seleciona `OFF`: com um Vault explícito ou legado inequívoco, o Keep Core
+continua ativo sob `GOVERN`, o erro fica visível e guards mutáveis falham fechados. Raízes
+adicionais que FLOW deve proteger podem ser declaradas como caminhos relativos ao projeto em
+`harness.flow.protectedRoots` no `.wendkeep.json`; qualquer alteração sob elas exige promoção.
+Config, marcador ou identidade local inválidos nunca caem silenciosamente no Vault pai/global.
+
+`wendkeep profile status/use` torna a escolha observável; `wendkeep flow
+start/finish/promote` resolve ajustes locais sem fabricar ADR e falha fechado em escapes físicos,
+metadata/flags ocultas do Git, sensores mutantes, superfícies protegidas ou projeção de sessão
+incompleta. Uma descoberta no-follow limitada enxerga aliases protegidos vazios/ignorados; escritas
+e locks owner+lease do Vault validam a topologia física. Promoção concorrente elege um único dono e
+permite retry com `--change-slug`. Veja o guia completo de
+[Perfis de Operação](https://github.com/rogersialves/wendkeep/blob/main/docs/pt-BR/commands/operating-profiles.md).
 
 ## Shared Project Memory v2
 
@@ -207,7 +239,14 @@ SHARED e checkpoint: `degraded` com outbox durável é warning; attempt ambíguo
 ou checkpoint divergente bloqueiam. Veja [migração](docs/pt-BR/commands/memory-migration.md) e
 [diagnóstico](docs/pt-BR/commands/maintenance-and-diagnostics.md).
 
-Se o status bloquear, preserve a evidência e rode `wendkeep memory repair --vault <cofre>` para salvar backup do ledger corrompido, reter linhas válidas e reprojetar. Depois rode `status --gate` novamente. Conflitos exigem curadoria explícita com `memory promote <id>` ou `memory reject <id>`; o doctor apenas diagnostica.
+Se o status bloquear, preserve a evidência e rode `wendkeep memory repair --vault <cofre>` para
+salvar backup do ledger corrompido, reter linhas válidas e reprojetar. Repair nunca reclassifica
+attempts; checkpoints causais válidos pré-0.59 são migrados por CAS, com backup/auditoria, para a
+fronteira física. Uma ambiguidade comprovadamente substituída usa `memory reconcile <sessão>
+--by-session <sucessora> --reason <motivo>` como dry-run e exige `--apply`; a decisão faz backup e
+auditoria sem reescrever ledger, CORE ou notas. Depois rode `status --gate` novamente. Conflitos
+exigem curadoria explícita com `memory promote <id>` ou `memory reject <id>`; o doctor apenas
+diagnostica.
 
 As notas de sessão usam um único snapshot vivo `## Agentes, tokens e custos`. Os hooks do agente principal e dos subagents recompõem o bloco atomicamente, incluindo custo, dimensões de tokens, reasoning e effort por modelo/origem.
 
@@ -273,7 +312,7 @@ explore → propose → apply (TDD) → verify → archive
 ```
 
 - **Propose** — `wendkeep change new <slug>` faz o scaffold de `08-Mudanças/<slug>/` (`proposta.md`, `design.md`, `tarefas.md`; o `--simple` pula o design). A change vira a *atual* global; `change use <slug>` troca o foco e `change continue <arquivada> <nova>` cria uma continuação auditável. Várias changes podem ficar abertas: hooks e `change list/status` mostram todas as pendências, enquanto comandos sem `--change` usam somente a atual. Quando a change declara `spec_impact: required`, você mesmo escreve o delta em `specs/<capability>/spec.md` — não há placeholder pra apagar.
-- **Apply** — implemente cada tarefa de `tarefas.md`. Taggeie a tarefa que precisa de prova de máquina com `[sensor:<id>]` — um sensor por tarefa (a tarefa carrega um só; quebre em duas se precisar de dois) — e o requisito que ela satisfaz com `[req:<ID>]`, dos quais a tarefa pode declarar vários.
+- **Apply** — implemente cada tarefa de `tarefas.md`. Marque a prova de máquina com uma ou mais tags `[sensor:<id>]` na mesma tarefa: todos os IDs distintos entram no gate uma vez, na ordem declarada. Marque também os requisitos satisfeitos com uma ou mais tags `[req:<ID>]`.
 - **Verify** — `wendkeep verify` roda os sensores que suas tarefas declararam (do `wendkeep.sensors.json` na raiz do projeto) e grava `evidencia.json`. Um vermelho crítico falha o gate; um vermelho `warning` é aviso. O `verify --deep` monta o pacote autocontido de verificação (contrato vivo + delta desta change). Toda change precisa de um `verdict.json` pra arquivar; quando ela não declara `[req:]`, o próprio `verify --deep` grava um verdict trivial.
 - **Archive** — `wendkeep change archive <slug>` faz **gate** na evidência (bloqueia a não ser que todo sensor crítico declarado esteja verde), promove o delta de cada capability (`ADDED`/`MODIFIED`/`REMOVED`) pro `07-Specs/<capability>.md` vivo, move a change pro `_arquivo/` e cunha um ADR em `04-Decisões/`.
 

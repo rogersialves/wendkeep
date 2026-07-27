@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
+import { linkSync, mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { adoptSpecsState, buildEffectiveRequirementPackage, captureSpecBaseline, checkSpecsState, parseRequirements, parseDelta, applyDelta, renderSpec, parseSpecsList, promoteSpecs, evaluateVerdict, tasksHashOf, isPlaceholderDelta, discoverSpecDeltas, parseSpecImpact, specConflicts, validateSpecImpact, formatOrphanReqs, ensureSpecsReadme } from '../hooks/spec-core.mjs';
@@ -290,4 +290,34 @@ test('baseline conflict is requirement-scoped', () => {
     assert.match(specConflicts(vault, change, ['auth'])[0], /AUTH-1 mudou/);
     assert.throws(() => promoteSpecs(vault, change, ['auth']), /conflito de spec/);
   } finally { rmSync(vault, { recursive: true, force: true }); }
+});
+
+test('[req:OP-7] captureSpecBaseline rejeita target preexistente por hardlink sem alterar a origem', (t) => {
+  const vault = mkdtempSync(join(tmpdir(), 'wk-spec-baseline-safe-'));
+  const outside = mkdtempSync(join(tmpdir(), 'wk-spec-baseline-outside-'));
+  const change = join(vault, '08-Mudanças', 'x');
+  try {
+    mkdirSync(change, { recursive: true });
+    const source = join(outside, 'baseline.json');
+    const original = '{"version":1,"specs":{}}\n';
+    writeFileSync(source, original);
+    try {
+      linkSync(source, join(change, '.spec-base.json'));
+    } catch (error) {
+      if (['EPERM', 'EACCES', 'ENOTSUP', 'EXDEV'].includes(error?.code)) {
+        t.skip(`hardlinks indisponíveis neste filesystem: ${error.code}`);
+        return;
+      }
+      throw error;
+    }
+
+    assert.throws(
+      () => captureSpecBaseline(vault, change, { refresh: true }),
+      /hardlink|nlink|Vault/i,
+    );
+    assert.equal(readFileSync(source, 'utf8'), original);
+  } finally {
+    rmSync(vault, { recursive: true, force: true });
+    rmSync(outside, { recursive: true, force: true });
+  }
 });
