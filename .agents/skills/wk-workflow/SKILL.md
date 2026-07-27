@@ -1,19 +1,30 @@
 ---
 name: wk-workflow
-description: Use SEMPRE que o usuário pedir para implementar, criar, corrigir, refatorar, adicionar ou alterar código — qualquer tarefa de código não-trivial. Invoque ANTES de editar qualquer arquivo: orquestra o loop a2 (wendkeep change new → tarefas → verify → archive) e registra tudo no vault.
+description: Use quando o usuário pedir para implementar, criar, corrigir, refatorar, adicionar ou alterar código: leia o perfil efetivo e roteie OFF/FLOW/GUIDE/GOVERN/ASSURE ANTES de editar. Keep Core permanece ativo; GOVERN é o padrão compatível.
 ---
-# Loop a2 — o ciclo de trabalho do wendkeep
+# Perfis de Operação — roteador de trabalho do wendkeep
 
-Use ao começar qualquer mudança não-trivial. O loop mantém memória (vault) e prova
-(sensores) juntas, tudo linkado no grafo do Obsidian.
+Use ao começar implementação, correção ou refatoração. **Keep Core permanece sempre ativo**
+em todos os perfis: Vault, sessão, identidade, memória, lessons e persistência. Na ausência de
+configuração válida, **GOVERN é o padrão** compatível.
 
 <HARD-GATE>
-NÃO edite arquivos de código antes do passo 2 (Propose / `wendkeep change new`).
-Toda tarefa não-trivial passa pelo loop — planejar no chat e sair editando deixa o
-vault cego. Exceção única: mudança trivial (typo, 1 linha).
+Antes de editar, leia o **perfil efetivo** injetado pelo WendKeep e siga somente sua rota:
+- `OFF`: não imponha processo Wend; a governança pertence ao **harness nativo da LLM**.
+- `FLOW`: inicie o microcontrato com `wendkeep flow start` antes de editar os paths permitidos.
+- `GUIDE`, `GOVERN` ou `ASSURE`: não edite código antes de Propose / `wendkeep change new`.
+Este gate nunca transforma `OFF` ou `FLOW` silenciosamente em `GOVERN`.
 </HARD-GATE>
 
-## Os passos
+## Rotas por perfil
+
+- **OFF — LLM nativa:** Wend Runtime desligado; esta skill devolve a execução ao harness nativo.
+- **FLOW — E → V:** `flow start` → implementar com wk-tdd → `flow finish`; sem change/ADR/verdict.
+- **GUIDE — P → E → V:** change compacta, sem revisão formal obrigatória.
+- **GOVERN — P → R → E → V:** loop a2 atual, com design/revisão; é o padrão conservador.
+- **ASSURE — P → R → E → V → C:** GOVERN acrescido de confirmação e handoff explícitos.
+
+## Passos para GUIDE, GOVERN e ASSURE
 
 1. **Explore** — entenda o problema antes de propor. Leia o código/contexto relevante.
 2. **Propose** — `wendkeep change new <slug>`. Isso cria `08-Mudanças/<slug>/` com:

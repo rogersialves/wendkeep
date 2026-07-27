@@ -212,7 +212,7 @@ export function captureDecision(vaultBase, input) {
           session = anchor === -1 ? `${session.trimEnd()}${section}` : `${session.slice(0, anchor).trimEnd()}${section}${session.slice(anchor)}`;
         }
         return session;
-      });
+      }, { vaultBase });
     } catch { /* backlink auxiliar nunca derruba a captura */ }
   }
   return { rel, skipped: false };

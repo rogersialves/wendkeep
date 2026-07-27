@@ -159,7 +159,9 @@ export function buildSessionObservability({ sessionContent, transcriptPath }) {
   return { snapshot, content: upsertObservabilitySection(content, renderSessionObservability(snapshot)) };
 }
 
-export function updateSessionObservability({ sessionPath, transcriptPath, caller = 'unknown', canonicalConversationId = '', lockTimeoutMs }) {
+export function updateSessionObservability({
+  vaultBase = '', sessionPath, transcriptPath, caller = 'unknown', canonicalConversationId = '', lockTimeoutMs,
+}) {
   if (!sessionPath || !existsSync(sessionPath)) return null;
   const identity = inspectTranscriptIdentity(transcriptPath);
   let snapshot = null;
@@ -184,7 +186,7 @@ export function updateSessionObservability({ sessionPath, transcriptPath, caller
     if (!result) return null;
     snapshot = result.snapshot;
     return result.content;
-  }, lockTimeoutMs ? { timeoutMs: lockTimeoutMs } : {});
+  }, { ...(lockTimeoutMs ? { timeoutMs: lockTimeoutMs } : {}), vaultBase });
 
   // 'unchanged' também é sucesso: a nota já estava em dia, o snapshot vale.
   return outcome.written || outcome.reason === 'unchanged' ? snapshot : null;

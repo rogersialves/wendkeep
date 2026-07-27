@@ -22,6 +22,9 @@ const step = (n, label) => process.stdout.write(`\n[${n}/3] ${label}\n`);
 export async function runSync(argv) {
   const projectRaw = opt(argv, '--project');
   const vaultRaw = opt(argv, '--vault');
+  const hasProfile = argv.includes('--profile') || argv.some((a) => a.startsWith('--profile='));
+  const profileRaw = opt(argv, '--profile');
+  const profileArgs = hasProfile ? ['--profile', profileRaw] : [];
   const projectPath = resolve(projectRaw && !projectRaw.startsWith('--') ? projectRaw : process.cwd());
   const passthrough = argv.filter((a) => a === '--yes' || a === '-y' || a === '--force');
 
@@ -29,7 +32,12 @@ export async function runSync(argv) {
   step(1, 'init');
   const { runInit } = await import('./init.mjs');
   try {
-    await runInit(['--project', projectPath, ...(vaultRaw ? ['--vault', vaultRaw] : []), ...passthrough]);
+    await runInit([
+      '--project', projectPath,
+      ...(vaultRaw ? ['--vault', vaultRaw] : []),
+      ...profileArgs,
+      ...passthrough,
+    ]);
   } catch (error) {
     process.stderr.write(`wendkeep sync: init falhou — ${error.message}\n`);
     return 1;

@@ -22,12 +22,13 @@ function version() {
   }
 }
 
-const HELP = `wendkeep ${version()} — capture AI coding agent sessions into your Obsidian vault.
+const HELP = `wendkeep ${version()} — keep durable AI sessions in an Obsidian vault, with optional governance.
 
 Usage:
   wendkeep init [options]      Set up wendkeep in a project (cross-platform).
     --vault <path>         Obsidian vault folder (default: <project>/.<project-name>-vault).
     --project <path>       Project root to wire (default: current directory).
+    --profile <name>       Operating profile: OFF, FLOW, GUIDE, GOVERN (default), or ASSURE.
     --no-mcp               Do not add the mcpvault MCP server to .mcp.json.
     --companions <csv>     Companion plugins/MCP to pin: context-mode,caveman,understand-anything
                            (default: none — opt in explicitly). dotcontext is legacy — the native a2 loop replaces it.
@@ -46,7 +47,7 @@ Usage:
                            command — the three steps that repeat identically after every
                            package update. Stops at the first failing step. Install the
                            package first (npm i -D wendkeep@latest); a running process
-                           cannot replace itself. · --vault P · --yes.
+                           cannot replace itself. · --vault P · --profile <name> · --yes.
 
   wendkeep doctor [--vault P]  Run a vault health check.
   wendkeep change <sub>        Change lifecycle: new [--simple] | use | bind <slug> --session <id> | continue | list | show |
@@ -56,6 +57,11 @@ Usage:
   wendkeep theme sync          Re-aplica o color system (snippet CSS + graph color groups) num vault
                            existente — recupera o grafo cinza sem re-init. --vault P.
   wendkeep session <sub>       Session registry: list | show <id> | use <id>.
+  wendkeep profile <sub>       Operating profile: status | use <OFF|FLOW|GUIDE|GOVERN|ASSURE>.
+                           --session <id> sets an audited session override; otherwise changes
+                           the project default. The Vault/session/memory core is always active.
+  wendkeep flow <sub>          Low-ceremony E -> V contract: start | status | show | finish | promote.
+                           FLOW records scope, sensors and a receipt without creating a change.
   wendkeep spec <sub>          Specs: list | show | effective [--change] [--json] | migrate | rebase.
   wendkeep sensors <sub>       list | add <id> "<command>" [--severity --type --report].
   wendkeep cost [opts]         Aggregate AI-coding spend across the vault's sessions.
@@ -95,7 +101,9 @@ Usage:
                            behind the closing block. Dry-run by default · --apply · --json.
   wendkeep lesson add "t" "l"   Record a project-local lesson (injected at SessionStart).
   wendkeep memory <sub>          Shared memory v2: status | migrate [--apply] | repair |
+                           reconcile <session> --by-session <session> --reason <text> [--apply] |
                            promote <candidate> | reject <candidate>. --vault P.
+                           Reconcile is dry-run by default; the original attempt remains audited.
   wendkeep validate-memory [path]  Validate .brain/CORE.md against the compaction
                            protocol (cap 25, 3 sections, no secrets/PII).
                            --vault <path> validates the complete v2 bundle.
@@ -142,11 +150,25 @@ async function preferProjectVault(argv) {
   if (optionValue(argv, '--vault')) return;
   try {
     const { resolveProjectVault } = await import('../src/project-vault.mjs');
+    // A sensor may itself invoke WendKeep. `verify`/`flow finish` already selected the
+    // authoritative Vault explicitly, so preserve that choice across the child process
+    // instead of letting the sensor cwd's project binding redirect it.
+    const sensorVault = process.env.WENDKEEP_SENSOR_VAULT;
+    if (sensorVault) {
+      const selected = resolveProjectVault({
+        startDir: optionValue(argv, '--project') || process.cwd(),
+        explicitVault: sensorVault,
+      });
+      process.env.OBSIDIAN_VAULT_PATH = selected.base;
+      return;
+    }
     const resolved = resolveProjectVault({ startDir: optionValue(argv, '--project') || process.cwd() });
     process.env.OBSIDIAN_VAULT_PATH = resolved.base;
-  } catch {
+  } catch (error) {
     // Backward-compatible manual CLI behavior: individual commands still explain
-    // --vault / legacy env when no project binding exists. Hooks do not use this path.
+    // --vault / legacy env only when no project binding exists. A configured but
+    // corrupt/missing/mismatched binding must abort before dispatch to another Vault.
+    if (error?.code !== 'WENDKEEP_VAULT_UNCONFIGURED') throw error;
   }
 }
 
@@ -156,10 +178,26 @@ async function main() {
   // Intercepted BEFORE vault resolution so it works anywhere — help must never depend
   // on project state, and no command may treat --help as a runnable default.
   if (cmd && (rest.includes('--help') || rest.includes('-h'))) {
-    process.stdout.write(HELP);
+    if (cmd === 'flow') {
+      const { FLOW_HELP } = await import('../src/flow.mjs');
+      process.stdout.write(FLOW_HELP);
+    } else if (cmd === 'profile') {
+      const { PROFILE_HELP } = await import('../src/profile.mjs');
+      process.stdout.write(PROFILE_HELP);
+    } else {
+      process.stdout.write(HELP);
+    }
     process.exit(0);
   }
-  if (cmd && !['init', 'hook', '--version', '-v', '--help', '-h', 'help'].includes(cmd)) {
+  const validatesStandaloneCore = cmd === 'validate-memory'
+    && !rest.includes('--vault')
+    && !rest.some((item) => item.startsWith('--vault='));
+  if (cmd
+    && !validatesStandaloneCore
+    // `sync` starts with `init` and resolves the freshly bound Vault itself. Pre-resolving
+    // here would prevent that repair step from reporting a corrupt binding as its own
+    // first-stage failure (and could never make it as far as the guarded init).
+    && !['init', 'sync', 'hook', '--version', '-v', '--help', '-h', 'help'].includes(cmd)) {
     await preferProjectVault(rest);
   }
   switch (cmd) {
@@ -209,6 +247,16 @@ async function main() {
     case 'session': {
       const { runSession } = await import('../src/session.mjs');
       runSession(rest);
+      break;
+    }
+    case 'profile': {
+      const { runProfile } = await import('../src/profile.mjs');
+      process.exit(runProfile(rest));
+      break;
+    }
+    case 'flow': {
+      const { runFlow } = await import('../src/flow.mjs');
+      process.exit(await runFlow(rest));
       break;
     }
     case 'theme': {

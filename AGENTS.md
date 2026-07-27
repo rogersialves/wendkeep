@@ -1,13 +1,22 @@
 <!-- wendkeep:skills:start -->
-<!-- wendkeep-version: 0.58.0; skills-sha256: c69f17a96cefc1f8a24a6bb6295bd4c0368c99f6d9f722f3ee6b95854729e8ad -->
-## wendkeep — process skills & loop
+<!-- wendkeep-version: 0.59.0; skills-sha256: 36ebe0728fe02c48230802722405c3179cb460f289429505e341db582542b82d -->
+## wendkeep — Keep Core & operating profiles
 
-This project uses the [wendkeep](https://github.com/rogersialves/wendkeep) harness. Work
-through its change loop: `wendkeep change new <slug>` → implement tasks test-first
-(tag proof `[sensor:id]` and requirement `[req:ID]`) → `wendkeep verify` →
-`wendkeep verify --deep` + an independent read-only verification pass writing
-`verdict.json` → `wendkeep change archive` (gated). Inspect with `wendkeep change
-status` / `spec effective --change <slug>` / `sensors list`. Author specs only in
+This project uses the [wendkeep](https://github.com/rogersialves/wendkeep) harness. **Keep Core is always active**
+in every profile: Vault, session, identity, memory, lessons, and persistence integrations.
+The effective profile is selected explicitly; missing or invalid configuration uses **GOVERN as the default**.
+
+Route work by the effective profile:
+- **OFF** — Wend Runtime is disabled and governance belongs to the native LLM harness; Keep Core stays active.
+- **FLOW** — Execute → Validate through `wendkeep flow start/finish`, without creating a change.
+- **GUIDE** — Plan → Execute → Validate through a compact change.
+- **GOVERN** — the default a2 loop: `wendkeep change new <slug>` → review → implement tasks test-first
+  (tag proof `[sensor:id]` and requirement `[req:ID]`) → `wendkeep verify` →
+  `wendkeep verify --deep` + independent read-only verdict → `wendkeep change archive`.
+- **ASSURE** — GOVERN plus explicit confirmation and handoff.
+
+Inspect with `wendkeep profile status` / `wendkeep change status` /
+`spec effective --change <slug>` / `sensors list`. Author specs only in
 `08-Mudanças/<slug>/specs/`; `07-Specs` is generated and must not be edited directly.
 
 Process skills (full text in `.claude/skills/`, `.agents/skills/`, and the vault's `.brain/skills/`):
@@ -17,7 +26,7 @@ Process skills (full text in `.claude/skills/`, `.agents/skills/`, and the vault
 - **wk-planning** — Use após um design aprovado ou um plano aceito (inclusive plan mode) — decompõe em plano de tarefas TDD bite-sized e registra na change ativa.
 - **wk-tdd** — Use ao implementar qualquer comportamento — Red/Green/Refactor com testes que discriminam (derivados do spec, litmus não-raso, adequação).
 - **wk-verify** — Use no verify deep — passe independente read-only (autor≠verificador) que re-deriva a cobertura do spec e grava verdict.json.
-- **wk-workflow** — Use SEMPRE que o usuário pedir para implementar, criar, corrigir, refatorar, adicionar ou alterar código — qualquer tarefa de código não-trivial. Invoque ANTES de editar qualquer arquivo: orquestra o loop a2 (wendkeep change new → tarefas → verify → archive) e registra tudo no vault.
+- **wk-workflow** — Use quando o usuário pedir para implementar, criar, corrigir, refatorar, adicionar ou alterar código: leia o perfil efetivo e roteie OFF/FLOW/GUIDE/GOVERN/ASSURE ANTES de editar. Keep Core permanece ativo; GOVERN é o padrão compatível.
 <!-- wendkeep:skills:end -->
 
 ## Contribuição — PR por implementação (regra do projeto)

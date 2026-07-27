@@ -4,7 +4,14 @@
 import { readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { isAbsolute, join, resolve } from 'node:path';
 import { parseTasks, activeChange, appendFixTasks, healSpecBacklinks } from '../hooks/change-core.mjs';
-import { loadSensorsDetailed, findProjectRoot, requiredSensors, runSensors, evaluateGate } from '../hooks/sensors-core.mjs';
+import {
+  loadSensorsDetailed,
+  findProjectRoot,
+  requiredSensors,
+  runSensors,
+  evaluateGate,
+  sensorProcessEnv,
+} from '../hooks/sensors-core.mjs';
 import {
   buildEffectiveRequirementPackage,
   captureSpecBaseline,
@@ -54,7 +61,10 @@ export function runVerify(argv) {
     process.stderr.write(`wendkeep verify: wendkeep.sensors.json não encontrado em ${loaded.path} — rode da raiz do projeto ou use --project <raiz>\n`);
   }
   const sensors = loaded.sensors;
-  const evidence = runSensors(sensors, ids, { cwd: projectRoot });
+  const evidence = runSensors(sensors, ids, {
+    cwd: projectRoot,
+    env: sensorProcessEnv(vaultBase),
+  });
   writeFileSync(join(changeDir, 'evidencia.json'), `${JSON.stringify(evidence, null, 2)}\n`, 'utf8');
   // Freshness seal: bind this evidence to the tarefas.md it was produced against, so the archive
   // gate can reject evidence gone stale (a sensor task added after this verify run).

@@ -111,3 +111,67 @@ test('buildIterationBlock: prompt que MENCIONA o termo atravessa o filtro inteir
   const block = buildIterationBlock(parseTranscript(p), { turn_id: 't1' });
   assert.ok(block.includes(MENTION), 'pedido legítimo não pode ser engolido por substring');
 });
+
+// [req:OP-10] Truncar uma entrada no meio de código inline/fence não pode deixar um
+// delimitador casar com a próxima linha e transformar a entrada seguinte em code span.
+test('buildIterationBlock: truncamento mantém backticks confinados à própria linha', async () => {
+  const { buildIterationBlock } = await import('../hooks/session-stop.mjs');
+  const short = 'use `codigo-curto` normalmente';
+  const inlineBySlashParity = Array.from({ length: 5 }, (_, slashCount) => (
+    `${'a'.repeat(490 - slashCount)} ${'\\'.repeat(slashCount)}\`codigo-depois-do-limite\``
+  ));
+  const fence = `${'b'.repeat(490)} \`\`\`javascript-depois-do-limite\`\`\``;
+  const conversation = [short, ...inlineBySlashParity, fence, fence]
+    .map((text) => ({ role: 'Assistente', text }));
+  const tx = {
+    turns: [{
+      turnId: 't-markdown',
+      timestamp: '2026-07-26T18:00:00.000Z',
+      userPrompts: ['registre a iteração'],
+      assistantMessages: ['feito'],
+      tools: [],
+      consultedFiles: [],
+      changedFiles: [],
+      conversation,
+      usage: {},
+    }],
+    latestTurnId: 't-markdown',
+  };
+
+  const block = buildIterationBlock(tx, { turn_id: 't-markdown' });
+  const entries = block.split('\n').filter((line) => line.startsWith('- **Assistente:**'));
+  assert.equal(entries.length, conversation.length, 'nenhuma entrada seguinte é engolida');
+  assert.match(entries[0], /`codigo-curto`/, 'código inline completo continua formatado');
+  const unescapedBacktickRuns = (line) => {
+    const lengths = [];
+    for (let index = 0; index < line.length;) {
+      if (line[index] !== '`') {
+        index += 1;
+        continue;
+      }
+      let precedingBackslashes = 0;
+      for (let cursor = index - 1; cursor >= 0 && line[cursor] === '\\'; cursor -= 1) {
+        precedingBackslashes += 1;
+      }
+      if (precedingBackslashes % 2 === 1) {
+        index += 1;
+        continue;
+      }
+      let end = index + 1;
+      while (end < line.length && line[end] === '`') end += 1;
+      lengths.push(end - index);
+      index = end;
+    }
+    return lengths;
+  };
+  for (const line of entries) {
+    const countsByRunLength = new Map();
+    for (const length of unescapedBacktickRuns(line)) {
+      countsByRunLength.set(length, (countsByRunLength.get(length) || 0) + 1);
+    }
+    for (const [length, count] of countsByRunLength) {
+      assert.equal(count % 2, 0, `linha deixou delimitador de ${length} backtick(s) aberto`);
+    }
+  }
+  assert.match(block, /\n\*\*Ferramentas usadas:\*\*/, 'a próxima seção continua fora de code span');
+});

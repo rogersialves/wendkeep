@@ -12,8 +12,17 @@ test('taxonomy: change/spec folders + change-core lib registered', () => {
 test('parseTasks: extracts [sensor:id] hint, strips it from text', () => {
   const t = parseTasks('- [ ] 1.1 wire toggle [sensor:tests]\n- [ ] 1.2 plain\n');
   assert.equal(t[0].sensor, 'tests');
+  assert.deepEqual(t[0].sensors, ['tests']);
   assert.equal(t[0].text, 'wire toggle');
   assert.equal(t[1].sensor, undefined);
+  assert.equal(t[1].sensors, undefined);
+});
+
+test('parseTasks: extracts every distinct [sensor:id] and keeps the first as legacy alias', () => {
+  const t = parseTasks('- [ ] 1.1 verify all [sensor:tests] [sensor:memory-health] [sensor:tests]\n');
+  assert.equal(t[0].sensor, 'tests');
+  assert.deepEqual(t[0].sensors, ['tests', 'memory-health']);
+  assert.equal(t[0].text, 'verify all');
 });
 
 test('parseTasks: extracts [req:ID] alongside [sensor:]', () => {
@@ -50,7 +59,10 @@ test('parseTasks: multi-segment req id (API-AUTH-2) is recognized', () => {
   assert.equal(t[0].text, 'protege rota');
 });
 
-import { mkdtempSync, existsSync, readFileSync, rmSync, mkdirSync, writeFileSync } from 'node:fs';
+import {
+  existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync,
+  symlinkSync, writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -148,6 +160,40 @@ test('archiveChange: artifact backlink survives the move to _arquivo', () => {
     assert.ok(tarefas.includes('[[08-Mudanças/_arquivo/2026-07-05-dm/proposta]]'), 'tarefas backlink rewritten');
     assert.doesNotMatch(design, /\[\[08-Mudanças\/dm\/proposta\]\]/, 'stale open-path link gone');
   } finally { rmSync(vault, { recursive: true, force: true }); }
+});
+
+test('[req:OP-7] archive preflight rejeita _arquivo redirecionado antes de rename ou ADR', (t) => {
+  const vault = mkdtempSync(join(tmpdir(), 'wk-archive-safe-root-'));
+  const outside = mkdtempSync(join(tmpdir(), 'wk-archive-safe-outside-'));
+  try {
+    mkdirSync(join(vault, '.brain'), { recursive: true });
+    newChange(vault, 'safe-archive', { dateStr: '2026-07-26' });
+    const archiveRoot = join(vault, '08-Mudanças', '_arquivo');
+    writeFileSync(join(outside, 'sentinel.txt'), 'preservado\n');
+    try {
+      symlinkSync(outside, archiveRoot, process.platform === 'win32' ? 'junction' : 'dir');
+    } catch (error) {
+      if (['EPERM', 'EACCES', 'ENOTSUP'].includes(error?.code)) {
+        t.skip(`links indisponíveis neste filesystem: ${error.code}`);
+        return;
+      }
+      throw error;
+    }
+
+    assert.throws(
+      () => archiveChange(vault, 'safe-archive', {
+        dateStr: '2026-07-26', adrNum: 9,
+      }),
+      /Vault|link simbólico|junction|reparse|redirecion/i,
+    );
+    assert.equal(existsSync(join(vault, '08-Mudanças', 'safe-archive', 'proposta.md')), true);
+    assert.equal(existsSync(join(vault, '04-Decisões')), false);
+    assert.deepEqual(readdirSync(outside), ['sentinel.txt']);
+    assert.equal(readFileSync(join(outside, 'sentinel.txt'), 'utf8'), 'preservado\n');
+  } finally {
+    rmSync(vault, { recursive: true, force: true });
+    rmSync(outside, { recursive: true, force: true });
+  }
 });
 
 // CGRAPH-2 — auto-heal do backlink em spec.md (escrito à mão), idempotente
@@ -268,6 +314,195 @@ test('newChange: creates the 3 files + active pointer, non-destructive', () => {
     assert.equal(again.created, false);
   } finally {
     rmSync(vault, { recursive: true, force: true });
+  }
+});
+
+test('[req:OP-7] newChange rejeita raiz de changes redirecionada sem escrever bytes externos', (t) => {
+  const vault = mkdtempSync(join(tmpdir(), 'wk-chg-safe-root-'));
+  const outside = mkdtempSync(join(tmpdir(), 'wk-chg-safe-outside-'));
+  try {
+    mkdirSync(join(vault, '.brain'));
+    writeFileSync(join(outside, 'sentinel.txt'), 'preservado\n');
+    try {
+      symlinkSync(outside, join(vault, '08-Mudanças'), process.platform === 'win32' ? 'junction' : 'dir');
+    } catch (error) {
+      if (['EPERM', 'EACCES', 'ENOTSUP'].includes(error?.code)) {
+        t.skip(`links indisponíveis neste filesystem: ${error.code}`);
+        return;
+      }
+      throw error;
+    }
+
+    assert.throws(
+      () => newChange(vault, 'nao-escapa', { dateStr: '2026-07-26' }),
+      /Vault|link simbólico|junction|reparse|redirecion/i,
+    );
+    assert.deepEqual(readdirSync(outside), ['sentinel.txt']);
+    assert.equal(readFileSync(join(outside, 'sentinel.txt'), 'utf8'), 'preservado\n');
+    assert.equal(existsSync(join(vault, '.brain', 'CURRENT_CHANGE.md')), false);
+  } finally {
+    rmSync(vault, { recursive: true, force: true });
+    rmSync(outside, { recursive: true, force: true });
+  }
+});
+
+test('[req:OP-7] newChange preflight rejeita .brain redirecionado antes de criar scaffold', (t) => {
+  const vault = mkdtempSync(join(tmpdir(), 'wk-chg-safe-pointer-'));
+  const outside = mkdtempSync(join(tmpdir(), 'wk-chg-pointer-outside-'));
+  try {
+    writeFileSync(join(outside, 'sentinel.txt'), 'preservado\n');
+    try {
+      symlinkSync(outside, join(vault, '.brain'), process.platform === 'win32' ? 'junction' : 'dir');
+    } catch (error) {
+      if (['EPERM', 'EACCES', 'ENOTSUP'].includes(error?.code)) {
+        t.skip(`links indisponíveis neste filesystem: ${error.code}`);
+        return;
+      }
+      throw error;
+    }
+
+    assert.throws(
+      () => newChange(vault, 'sem-parcial', { dateStr: '2026-07-26' }),
+      /Vault|link simbólico|junction|reparse|redirecion/i,
+    );
+    assert.equal(existsSync(join(vault, '08-Mudanças')), false);
+    assert.deepEqual(readdirSync(outside), ['sentinel.txt']);
+    assert.equal(readFileSync(join(outside, 'sentinel.txt'), 'utf8'), 'preservado\n');
+  } finally {
+    rmSync(vault, { recursive: true, force: true });
+    rmSync(outside, { recursive: true, force: true });
+  }
+});
+
+test('[req:OP-7] newChange rejeita proposta preexistente por hardlink sem criar artefatos parciais', (t) => {
+  const vault = mkdtempSync(join(tmpdir(), 'wk-chg-safe-hardlink-'));
+  const outside = mkdtempSync(join(tmpdir(), 'wk-chg-hardlink-outside-'));
+  try {
+    mkdirSync(join(vault, '.brain'));
+    const dir = join(vault, '08-Mudanças', 'hardlinked');
+    mkdirSync(dir, { recursive: true });
+    const source = join(outside, 'proposta.md');
+    writeFileSync(source, '# externo\n');
+    try {
+      linkSync(source, join(dir, 'proposta.md'));
+    } catch (error) {
+      if (['EPERM', 'EACCES', 'ENOTSUP', 'EXDEV'].includes(error?.code)) {
+        t.skip(`hardlinks indisponíveis neste filesystem: ${error.code}`);
+        return;
+      }
+      throw error;
+    }
+
+    assert.throws(
+      () => newChange(vault, 'hardlinked', { dateStr: '2026-07-26' }),
+      /hardlink|nlink|Vault/i,
+    );
+    assert.equal(readFileSync(source, 'utf8'), '# externo\n');
+    assert.deepEqual(readdirSync(dir), ['proposta.md']);
+    assert.equal(existsSync(join(vault, '.brain', 'CURRENT_CHANGE.md')), false);
+  } finally {
+    rmSync(vault, { recursive: true, force: true });
+    rmSync(outside, { recursive: true, force: true });
+  }
+});
+
+test('[req:OP-7] newChange preflight cobre CURRENT_CHANGE e todos os targets de scaffold por hardlink', async (t) => {
+  const targets = [
+    ['.brain', 'CURRENT_CHANGE.md'],
+    ['08-Mudanças', 'hardlinked', 'tarefas.md'],
+    ['08-Mudanças', 'hardlinked', 'design.md'],
+    ['08-Mudanças', 'hardlinked', '.spec-impact-v1'],
+    ['08-Mudanças', 'hardlinked', '.spec-impact-v1.json'],
+    ['08-Mudanças', 'hardlinked', '.spec-base.json'],
+    ['08-Mudanças', 'hardlinked', 'flow-origin.json'],
+  ];
+  for (const segments of targets) {
+    await t.test(segments.at(-1), (subtest) => {
+      const vault = mkdtempSync(join(tmpdir(), 'wk-chg-safe-all-targets-'));
+      const outside = mkdtempSync(join(tmpdir(), 'wk-chg-all-targets-outside-'));
+      try {
+        mkdirSync(join(vault, '.brain'), { recursive: true });
+        const target = join(vault, ...segments);
+        mkdirSync(join(target, '..'), { recursive: true });
+        const source = join(outside, 'source');
+        const original = `externo:${segments.at(-1)}\n`;
+        writeFileSync(source, original);
+        try {
+          linkSync(source, target);
+        } catch (error) {
+          if (['EPERM', 'EACCES', 'ENOTSUP', 'EXDEV'].includes(error?.code)) {
+            subtest.skip(`hardlinks indisponíveis neste filesystem: ${error.code}`);
+            return;
+          }
+          throw error;
+        }
+
+        assert.throws(
+          () => newChange(vault, 'hardlinked', { dateStr: '2026-07-26' }),
+          /hardlink|nlink|Vault/i,
+        );
+        assert.equal(readFileSync(source, 'utf8'), original);
+        const changeDir = join(vault, '08-Mudanças', 'hardlinked');
+        const expectedChangeEntries = segments[0] === '.brain' ? [] : [segments.at(-1)];
+        assert.deepEqual(existsSync(changeDir) ? readdirSync(changeDir) : [], expectedChangeEntries);
+      } finally {
+        rmSync(vault, { recursive: true, force: true });
+        rmSync(outside, { recursive: true, force: true });
+      }
+    });
+  }
+});
+
+test('[req:OP-7] archive multi-spec falha antes da primeira mutação quando target tardio é hardlink', (t) => {
+  const vault = mkdtempSync(join(tmpdir(), 'wk-archive-spec-preflight-'));
+  const outside = mkdtempSync(join(tmpdir(), 'wk-archive-spec-preflight-outside-'));
+  try {
+    const change = join(vault, '08-Mudanças', 'multi-spec');
+    mkdirSync(join(change, 'specs', 'alpha'), { recursive: true });
+    mkdirSync(join(change, 'specs', 'beta'), { recursive: true });
+    mkdirSync(join(vault, '07-Specs'), { recursive: true });
+    writeFileSync(join(change, 'proposta.md'), [
+      '---', 'type: change', 'status: active', 'specs:', '  - alpha', '  - beta', '---', '# multi', '',
+    ].join('\n'));
+    writeFileSync(join(change, 'tarefas.md'), '- [x] 1.1 pronto\n');
+    writeFileSync(join(change, 'specs', 'alpha', 'spec.md'), [
+      '## ADDED Requirements', '### Requisito: ALPHA-2 — novo', 'novo',
+      '## MODIFIED Requirements', '', '## REMOVED Requirements', '',
+    ].join('\n'));
+    writeFileSync(join(change, 'specs', 'beta', 'spec.md'), [
+      '## ADDED Requirements', '### Requisito: BETA-2 — novo', 'novo',
+      '## MODIFIED Requirements', '', '## REMOVED Requirements', '',
+    ].join('\n'));
+    const alphaPath = join(vault, '07-Specs', 'alpha.md');
+    const alphaOriginal = '### Requisito: ALPHA-1 — existente\nantigo\n';
+    writeFileSync(alphaPath, alphaOriginal);
+    const external = join(outside, 'beta.md');
+    const betaOriginal = '### Requisito: BETA-1 — externo\npreservado\n';
+    writeFileSync(external, betaOriginal);
+    try {
+      linkSync(external, join(vault, '07-Specs', 'beta.md'));
+    } catch (error) {
+      if (['EPERM', 'EACCES', 'ENOTSUP', 'EXDEV'].includes(error?.code)) {
+        t.skip(`hardlinks indisponíveis neste filesystem: ${error.code}`);
+        return;
+      }
+      throw error;
+    }
+
+    const result = archiveChange(vault, 'multi-spec', {
+      dateStr: '2026-07-26', adrNum: 99,
+    });
+    assert.equal(result.ok, false);
+    assert.match(result.failing.join('\n'), /hardlink|nlink|Vault/i);
+    assert.equal(readFileSync(alphaPath, 'utf8'), alphaOriginal, 'primeira capability fica byte-idêntica');
+    assert.equal(readFileSync(external, 'utf8'), betaOriginal, 'origem externa fica byte-idêntica');
+    assert.equal(existsSync(join(vault, '07-Specs', 'README.md')), false);
+    assert.equal(existsSync(join(vault, '.brain', 'SPECS_STATE.json')), false);
+    assert.equal(existsSync(change), true, 'change não é movida parcialmente');
+    assert.equal(existsSync(join(vault, '08-Mudanças', '_arquivo')), false);
+  } finally {
+    rmSync(vault, { recursive: true, force: true });
+    rmSync(outside, { recursive: true, force: true });
   }
 });
 

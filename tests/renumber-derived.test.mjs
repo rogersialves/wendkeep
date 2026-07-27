@@ -99,6 +99,7 @@ test('CLI renumber-bugs: preview default, --apply writes, --json, exit 2 without
     // Isola o env do harness: dentro do Claude Code, CLAUDE_PROJECT_DIR faria o
     // project-vault resolver o vault do repo e o exit 2 nunca aconteceria.
     const cleanEnv = { ...process.env, OBSIDIAN_VAULT_PATH: '' };
+    delete cleanEnv.WENDKEEP_SENSOR_VAULT;
     delete cleanEnv.CLAUDE_PROJECT_DIR;
     delete cleanEnv.CLAUDECODE;
     delete cleanEnv.CLAUDE_CODE_SESSION_ID;

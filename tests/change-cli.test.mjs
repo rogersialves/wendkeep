@@ -64,6 +64,38 @@ test('wendkeep change new: creates change under the vault', () => {
   }
 });
 
+test('[req:OP-8] CLI pública change new <slug> --simple preserva o scaffold legado compacto', () => {
+  const vault = mkdtempSync(join(tmpdir(), 'wk-simple-cli-'));
+  try {
+    const result = spawnSync(
+      process.execPath,
+      [BIN, 'change', 'new', 'legacy-simple', '--simple', '--vault', vault],
+      { encoding: 'utf8' },
+    );
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /change created/);
+
+    const changeDir = join(vault, '08-Mudanças', 'legacy-simple');
+    assert.deepEqual(
+      readdirSync(changeDir).sort(),
+      ['.spec-base.json', '.spec-impact-v1', 'proposta.md', 'tarefas.md'],
+      '--simple preserva os dois artefatos autorais e os metadados internos legados',
+    );
+
+    const proposta = readFileSync(join(changeDir, 'proposta.md'), 'utf8');
+    assert.match(proposta, /^spec_impact: none$/m);
+    assert.match(proposta, /^spec_impact_reason: ".+"$/m);
+    assert.match(
+      readFileSync(join(vault, '.brain', 'CURRENT_CHANGE.md'), 'utf8'),
+      /^change: legacy-simple$/m,
+      'a CLI ainda seleciona a change simples como atual',
+    );
+  } finally {
+    rmSync(vault, { recursive: true, force: true });
+  }
+});
+
 test('wendkeep change new then archive: moves + writes ADR', () => {
   const vault = mkdtempSync(join(tmpdir(), 'wk-archcli-'));
   try {
@@ -88,14 +120,98 @@ test('wendkeep verify: runs task sensors, writes evidencia.json', () => {
   try {
     mkdirSync(join(vault, '.brain'), { recursive: true });
     mkdirSync(join(vault, '08-Mudanças', 'x'), { recursive: true });
-    writeFileSync(join(vault, '08-Mudanças', 'x', 'tarefas.md'), '- [ ] 1.1 do it [sensor:ok]\n');
+    writeFileSync(join(vault, '08-Mudanças', 'x', 'tarefas.md'), '- [ ] 1.1 do it [sensor:ok] [sensor:also-ok] [sensor:ok]\n');
     writeFileSync(join(vault, '.brain', 'CURRENT_CHANGE.md'), 'change: x\n');
-    writeFileSync(join(proj, 'wendkeep.sensors.json'), JSON.stringify({ version: 1, sensors: [{ id: 'ok', severity: 'critical', command: 'node -e "process.exit(0)"' }] }));
+    writeFileSync(join(proj, 'wendkeep.sensors.json'), JSON.stringify({ version: 1, sensors: [
+      { id: 'ok', severity: 'critical', command: 'node -e "process.exit(0)"' },
+      { id: 'also-ok', severity: 'critical', command: 'node -e "process.exit(0)"' },
+    ] }));
     const r = spawnSync(process.execPath, [BIN, 'verify', '--vault', vault, '--project', proj], { encoding: 'utf8' });
     assert.equal(r.status, 0, r.stderr);
     const ev = JSON.parse(readFileSync(join(vault, '08-Mudanças', 'x', 'evidencia.json'), 'utf8'));
-    assert.equal(ev.find((e) => e.id === 'ok').status, 'green');
+    assert.deepEqual(ev.map((e) => [e.id, e.status]), [['ok', 'green'], ['also-ok', 'green']]);
   } finally { rmSync(vault, { recursive: true, force: true }); rmSync(proj, { recursive: true, force: true }); }
+});
+
+test('wendkeep verify: a second critical sensor on the same task is evidence and blocks the gate', () => {
+  const vault = mkdtempSync(join(tmpdir(), 'wk-multi-ver-'));
+  const proj = mkdtempSync(join(tmpdir(), 'wk-multi-verp-'));
+  try {
+    mkdirSync(join(vault, '.brain'), { recursive: true });
+    mkdirSync(join(vault, '08-Mudanças', 'x'), { recursive: true });
+    writeFileSync(join(vault, '08-Mudanças', 'x', 'tarefas.md'), '- [x] 1.1 do it [sensor:ok] [sensor:blocked]\n');
+    writeFileSync(join(vault, '.brain', 'CURRENT_CHANGE.md'), 'change: x\n');
+    writeFileSync(join(proj, 'wendkeep.sensors.json'), JSON.stringify({ version: 1, sensors: [
+      { id: 'ok', severity: 'critical', command: 'node -e "process.exit(0)"' },
+      { id: 'blocked', severity: 'critical', command: 'node -e "process.exit(1)"' },
+    ] }));
+    const r = spawnSync(process.execPath, [BIN, 'verify', '--vault', vault, '--project', proj], { encoding: 'utf8' });
+    assert.equal(r.status, 1, 'the second critical sensor must block verify');
+    const ev = JSON.parse(readFileSync(join(vault, '08-Mudanças', 'x', 'evidencia.json'), 'utf8'));
+    assert.deepEqual(ev.map((e) => [e.id, e.status]), [['ok', 'green'], ['blocked', 'red']]);
+  } finally { rmSync(vault, { recursive: true, force: true }); rmSync(proj, { recursive: true, force: true }); }
+});
+
+test('[req:OP-10] wendkeep verify exports its effective --vault to sensor processes', () => {
+  const vault = mkdtempSync(join(tmpdir(), 'wk-sensor-vault-'));
+  const proj = mkdtempSync(join(tmpdir(), 'wk-sensor-vaultp-'));
+  try {
+    mkdirSync(join(vault, '.brain'), { recursive: true });
+    mkdirSync(join(vault, '08-Mudanças', 'x'), { recursive: true });
+    writeFileSync(join(vault, '08-Mudanças', 'x', 'tarefas.md'), '- [x] 1.1 bind [sensor:vault-env]\n');
+    writeFileSync(join(vault, '.brain', 'CURRENT_CHANGE.md'), 'change: x\n');
+    writeFileSync(join(proj, 'wendkeep.sensors.json'), JSON.stringify({ version: 1, sensors: [{
+      id: 'vault-env',
+      severity: 'critical',
+      command: 'node -e "require(\'node:fs\').writeFileSync(\'seen-vault.txt\', process.env.OBSIDIAN_VAULT_PATH || \'\')"',
+    }] }));
+    const result = spawnSync(process.execPath, [BIN, 'verify', '--vault', vault, '--project', proj], { encoding: 'utf8' });
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(readFileSync(join(proj, 'seen-vault.txt'), 'utf8'), vault);
+  } finally { rmSync(vault, { recursive: true, force: true }); rmSync(proj, { recursive: true, force: true }); }
+});
+
+test('[req:OP-10] nested wendkeep sensor keeps verify effective Vault over the project binding', () => {
+  const root = mkdtempSync(join(tmpdir(), 'wk-sensor-nested-vault-'));
+  const vault = join(root, 'selected-vault');
+  const proj = join(root, 'project');
+  const decoy = join(proj, '.decoy-vault');
+  const slug = 'selected-vault-change';
+  try {
+    mkdirSync(join(vault, '.brain'), { recursive: true });
+    mkdirSync(join(vault, '08-Mudanças', slug), { recursive: true });
+    mkdirSync(join(decoy, '.brain'), { recursive: true });
+    writeFileSync(join(vault, '08-Mudanças', slug, 'tarefas.md'), '- [x] 1.1 bind [sensor:nested-vault]\n');
+    writeFileSync(join(vault, '.brain', 'CURRENT_CHANGE.md'), `change: ${slug}\n`);
+    writeFileSync(join(proj, '.wendkeep.json'), `${JSON.stringify({
+      schemaVersion: 1,
+      projectId: 'decoy-project',
+      vault: '.decoy-vault',
+    }, null, 2)}\n`);
+    writeFileSync(join(decoy, '.brain', 'PROJECT.json'), `${JSON.stringify({
+      schemaVersion: 1,
+      projectId: 'decoy-project',
+      projectName: 'project',
+    }, null, 2)}\n`);
+    const sensorScript = join(proj, 'nested-sensor.mjs');
+    writeFileSync(sensorScript, `
+import { spawnSync } from 'node:child_process';
+const result = spawnSync(process.execPath, [${JSON.stringify(BIN)}, 'change', 'status'], {
+  cwd: process.cwd(),
+  encoding: 'utf8',
+  env: process.env,
+});
+process.exit(result.status === 0 && result.stdout.includes(${JSON.stringify(slug)}) ? 0 : 1);
+`);
+    writeFileSync(join(proj, 'wendkeep.sensors.json'), JSON.stringify({ version: 1, sensors: [{
+      id: 'nested-vault',
+      severity: 'critical',
+      command: `node "${sensorScript}"`,
+    }] }));
+
+    const result = spawnSync(process.execPath, [BIN, 'verify', '--vault', vault, '--project', proj], { encoding: 'utf8' });
+    assert.equal(result.status, 0, result.stderr);
+  } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
 test('archive blocked until verify green when a task declares a sensor', () => {
@@ -235,13 +351,17 @@ test('change status <slug>: one screen with tasks, sensors, verdict state', () =
   try {
     assert.equal(spawn(['new', 'x']).status, 0);
     fillScaffold(vault, 'x');
-    writeFileSync(join(vault, '08-Mudanças', 'x', 'tarefas.md'), '- [x] 1.1 feita [req:X-1] [sensor:tests]\n- [ ] 1.2 aberta\n');
-    writeFileSync(join(vault, '08-Mudanças', 'x', 'evidencia.json'), JSON.stringify([{ id: 'tests', status: 'green', severity: 'critical' }]));
+    writeFileSync(join(vault, '08-Mudanças', 'x', 'tarefas.md'), '- [x] 1.1 feita [req:X-1] [sensor:tests] [sensor:memory-health]\n- [ ] 1.2 aberta\n');
+    writeFileSync(join(vault, '08-Mudanças', 'x', 'evidencia.json'), JSON.stringify([
+      { id: 'tests', status: 'green', severity: 'critical' },
+      { id: 'memory-health', status: 'green', severity: 'critical' },
+    ]));
     const r = spawn(['status', 'x']);
     assert.equal(r.status, 0, r.stderr);
     assert.match(r.stdout, /x/);
     assert.match(r.stdout, /1 done.*1 open|1 aberta/i);
     assert.match(r.stdout, /\[x\] 1\.1/);
+    assert.match(r.stdout, /\[sensor:tests\].*\[sensor:memory-health\]/);
     assert.match(r.stdout, /tests.*green|✓ tests/i);
     assert.match(r.stdout, /verdict: ausente/i);
   } finally { rmSync(vault, { recursive: true, force: true }); }

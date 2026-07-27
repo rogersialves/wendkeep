@@ -14,12 +14,15 @@ Run after implementing tasks and again whenever tasks, specs, or tests change.
 ## When not to use
 
 Do not use it as a post-install health check or when no change exists. Run `wendkeep doctor` and
-`wendkeep memory status --gate` instead.
+`wendkeep memory status --gate` instead. In `FLOW`, validation and the receipt belong to
+`flow finish`; under `OFF`, `verify` remains available only when the user chooses to run the
+lifecycle manually.
 
 ## Prerequisites
 
 - An open change selected through `CURRENT_CHANGE.md` or `--change <slug>`.
-- A placeholder-free `tarefas.md` with `[req:]` and `[sensor:]` tags on checkbox lines.
+- A placeholder-free `tarefas.md` with `[req:]` and one or more `[sensor:]` tags on checkbox lines;
+  every distinct sensor ID is required once, in declaration order.
 - Sensors declared in `wendkeep.sensors.json`.
 
 ## Syntax
@@ -34,7 +37,8 @@ npx wendkeep change use <slug>
 
 - `--change <slug>` targets a change without changing the active pointer.
 - `change use <slug>` persists focus for following commands.
-- `--project <root>` selects the sensor cwd; `--vault` selects where proof is stored.
+- `--project <root>` selects the sensor cwd; `--vault` selects where proof is stored and is passed
+  to sensors as `OBSIDIAN_VAULT_PATH`, including `memory-health`.
 - **Exit 0:** all required sensors passed and evidence was written.
 - **Exit 1:** the gate ran, but at least one critical sensor was red or a mutant survived.
 - **Exit 2:** invalid usage/context, including `no change (--change or active)`, missing vault,
@@ -75,12 +79,14 @@ Deep mode packages requirements, tasks, and evidence for read-only review; the v
 ## Common errors and diagnosis
 
 - `no change`: this is exit 2 and a valid idle state; create/use a change or skip verify.
-- Zero sensors: inspect same-line tags and `sensors list`.
+- Zero/missing sensors: inspect every same-line tag and `sensors list`; multiple tags on one task
+  are valid and all of them enter the gate.
 - Red gate: fix the cause and rerun; never choose `archive --force` on your own.
 - Missing/stale verdict: regenerate `--deep` and request a fresh independent pass.
 - Surviving mutants: strengthen the discriminating test; after three rounds, review manually.
 
 ## Next steps
 
-Return to the [change lifecycle](changes-and-verification.md) for archive, or use
-[maintenance](maintenance-and-diagnostics.md) when no change exists.
+Return to the [change lifecycle](changes-and-verification.md) for archive, review
+[Operating profiles](operating-profiles.md), or use [maintenance](maintenance-and-diagnostics.md)
+when no change exists.

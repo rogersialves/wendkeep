@@ -16,6 +16,7 @@ import { buildSessionMemoryEvents, collectLifecycleEvidence } from './memory-han
 import { enqueueMemoryEvent, projectMemoryOutbox } from './memory-store.mjs';
 import { detectMemoryMode } from './memory-mode.mjs';
 import { sanitizeMemoryText } from './memory-schema.mjs';
+import { assertVaultPathSafe } from './vault-path-safety.mjs';
 import {
   projectStopMemoryAttempt,
   recordStopMemoryOutcome,
@@ -552,12 +553,38 @@ export function resolveTurnIdentity(transcript, requestedTurnId = '') {
   };
 }
 
+function escapeMarkdownBackticks(text) {
+  let escaped = '';
+  let precedingBackslashes = 0;
+  for (const char of String(text || '')) {
+    if (char === '\\') {
+      escaped += char;
+      precedingBackslashes += 1;
+      continue;
+    }
+    if (char === '`') {
+      if (precedingBackslashes % 2 === 0) escaped += '\\';
+      escaped += char;
+      precedingBackslashes = 0;
+      continue;
+    }
+    escaped += char;
+    precedingBackslashes = 0;
+  }
+  return escaped;
+}
+
 function compactText(text, max = 600) {
   const clean = redactSecrets(String(text || ''))
     .replace(/\r/g, '\n')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
-  return truncate(clean || 'Não capturado automaticamente.', max);
+  const source = clean || 'Não capturado automaticamente.';
+  const compact = source.replace(/\s+/g, ' ').trim();
+  const clipped = truncate(source, max);
+  // Um corte no meio de código inline/fence pode casar com backticks da próxima
+  // entrada gerada. Só snippets realmente truncados perdem a formatação incompleta.
+  return compact.length > max ? escapeMarkdownBackticks(clipped) : clipped;
 }
 
 function selectTurn(tx, turnId) {
@@ -801,7 +828,7 @@ function relocateOrphanIterations(content) {
   return insertIntoIteracoes(head, `\n${demoted}`);
 }
 
-export function insertIteration(sessionPath, block, turnId, tx) {
+export function insertIteration(sessionPath, block, turnId, tx, vaultBase = '') {
   let inserted = false;
   // Sob lock: outro hook (subagent-stop) pode estar reescrevendo a mesma nota agora.
   mutateSessionNote(sessionPath, (original) => {
@@ -815,7 +842,7 @@ export function insertIteration(sessionPath, block, turnId, tx) {
     content = insertIntoIteracoes(content, block);
     inserted = true;
     return applyDedicatedSections(content, tx);
-  });
+  }, { vaultBase });
   return inserted;
 }
 
@@ -846,11 +873,13 @@ export function commitSessionMemory(vaultBase, handoff, { projectOptions = {} } 
       status: 'projected',
       eventCount: events.length,
       eventIds,
-      checkpoint: {
-        revision: projection.revision,
-        event_cursor: projection.eventCursor,
-        state_hash: projection.stateHash,
-      },
+      checkpoint: projection.checkpoint && typeof projection.checkpoint === 'object'
+        ? { ...projection.checkpoint }
+        : {
+          revision: projection.revision,
+          event_cursor: projection.eventCursor,
+          state_hash: projection.stateHash,
+        },
     };
   } catch (error) {
     return {
@@ -981,7 +1010,7 @@ function replaceClosingSection(content, closing) {
   return `${content.slice(0, index).trimEnd()}\n\n${closing}\n`;
 }
 
-export function finalizeSessionFile(sessionPath, tx, created, endedAt) {
+export function finalizeSessionFile(sessionPath, tx, created, endedAt, vaultBase = '') {
   const pending = extractPending(tx.rawTextForDetection);
   const links = (items) => items.length ? items.map((rel) => `  - ${wikilinkFromRel(rel)}`).join('\n') : '  - Nenhuma';
   const summary = sessionFinalSummary(tx);
@@ -1009,7 +1038,7 @@ ${formatPendingClosing(pending)}
       created,
     ),
     closing,
-  ));
+  ), { vaultBase });
 }
 
 export function sessionFinalSummary(tx) {
@@ -1098,7 +1127,7 @@ function applyLinearLinks(sessionPath, tx, vaultBase, sessionRel) {
 
   mutateSessionNote(sessionPath, (original) => (
     upsertListSection(ensureSection(original, 'Issues Linear', '\n## Encerramento'), 'Issues Linear', lines, null)
-  ));
+  ), { vaultBase });
 }
 
 // Triggers Obsidian Local REST API to re-index the vault after file writes.
@@ -1162,11 +1191,14 @@ export function main({ stageMemory = stageStopMemoryAttempt } = {}) {
     return;
   }
 
-  const sessionPath = join(vaultBase, sessionRel);
-  if (!existsSync(sessionPath)) {
+  const checkedSession = assertVaultPathSafe(vaultBase, join(vaultBase, sessionRel), {
+    expectedType: 'file', label: 'nota de sessão do Stop',
+  });
+  if (!checkedSession.exists) {
     writeHookOutput({});
     return;
   }
+  const sessionPath = checkedSession.target;
 
   const tx = parseTranscript(identity.transcriptPath || input.transcript_path || input.transcriptPath);
   const requestedTurnId = String(input.turn_id || input.turnId || '');
@@ -1237,8 +1269,20 @@ export function main({ stageMemory = stageStopMemoryAttempt } = {}) {
   if (finalizing) {
     let projectId = '';
     try {
-      projectId = JSON.parse(readFileSync(join(vaultBase, '.brain', 'PROJECT.json'), 'utf8')).projectId || '';
-    } catch { /* the staging validator exposes an observable failure below */ }
+      const projectPath = join(vaultBase, '.brain', 'PROJECT.json');
+      let checkedProject = assertVaultPathSafe(vaultBase, projectPath, {
+        expectedType: 'file', label: 'autoridade PROJECT.json do Stop',
+      });
+      if (checkedProject.exists) {
+        checkedProject = assertVaultPathSafe(vaultBase, checkedProject.target, {
+          allowMissing: false, expectedType: 'file', label: 'autoridade PROJECT.json do Stop',
+        });
+        projectId = JSON.parse(readFileSync(checkedProject.target, 'utf8')).projectId || '';
+      }
+    } catch (error) {
+      if (error?.code === 'VAULT_PATH_UNSAFE') throw error;
+      /* the staging validator exposes ordinary missing/invalid PROJECT below */
+    }
     const finalSummary = sessionFinalSummary(tx);
     const memoryEvidence = collectLifecycleEvidence(vaultBase, {
       changeSlug: entry.change_slug,
@@ -1274,7 +1318,7 @@ export function main({ stageMemory = stageStopMemoryAttempt } = {}) {
     writeHookOutput({ systemMessage: message });
     return;
   }
-  const logged = insertIteration(sessionPath, buildIterationBlock(tx, input), turnId, tx);
+  const logged = insertIteration(sessionPath, buildIterationBlock(tx, input), turnId, tx, vaultBase);
 
   try {
     applyLinearLinks(sessionPath, tx, vaultBase, sessionRel);
@@ -1283,7 +1327,9 @@ export function main({ stageMemory = stageStopMemoryAttempt } = {}) {
   }
 
   try {
-    updateSessionObservability({ sessionPath, transcriptPath, caller: 'stop', canonicalConversationId: sessionId });
+    updateSessionObservability({
+      vaultBase, sessionPath, transcriptPath, caller: 'stop', canonicalConversationId: sessionId,
+    });
   } catch (error) {
     process.stderr.write(`[wendkeep] Token usage falhou: ${error.message}\n`);
   }
@@ -1318,7 +1364,7 @@ export function main({ stageMemory = stageStopMemoryAttempt } = {}) {
     createLinkedNotes(vaultBase, formatDate(now), sessionRel, tx),
     findLinkedDerivedNotes(vaultBase, sessionRel),
   );
-  finalizeSessionFile(sessionPath, tx, created, endedAt);
+  finalizeSessionFile(sessionPath, tx, created, endedAt, vaultBase);
   // Link durável sessão↔change: uma seção "Mudanças" ANTES de `## Encerramento`. O append antigo
   // (após o Encerramento) era apagado a cada reopen por stripClosingSection, perdendo a aresta do
   // grafo quando a change fechava antes do turno seguinte. Aqui sobrevive ao reopen e acumula toda
@@ -1331,7 +1377,7 @@ export function main({ stageMemory = stageStopMemoryAttempt } = {}) {
     if (wl) {
       mutateSessionNote(sessionPath, (cur) => (
         upsertListSection(ensureSection(cur, 'Mudanças', '\n## Encerramento'), 'Mudanças', [`- ${wl}`], null)
-      ));
+      ), { vaultBase });
     }
   } catch { /* nunca derruba o Stop */ }
   writeControl(vaultBase, {

@@ -6,7 +6,8 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { renderSharedMemory } from '../hooks/memory-schema.mjs';
-import { reduceMemoryEvents } from '../hooks/memory-store.mjs';
+import { reduceMemoryEvents, reprojectMemoryLedger } from '../hooks/memory-store.mjs';
+import { checkMemoryBundle } from '../hooks/vault-health.mjs';
 import { renderCoreSkeleton } from '../src/validate-core.mjs';
 
 const BIN = join(dirname(fileURLToPath(import.meta.url)), '..', 'bin', 'wendkeep.mjs');
@@ -21,8 +22,11 @@ function event() {
     operation: 'assert',
     value: 'review',
     authority: 'verified',
+    canonical_session_id: 'session-gate',
     activation_id: 'activation-gate',
+    activation_epoch: 1,
     turn_sequence: 1,
+    source_turn_id: 'turn-gate-1',
     observed_at: '2026-07-26T05:00:00Z',
     evidence: ['tests/memory-gate.test.mjs'],
   };
@@ -53,6 +57,14 @@ function seedBundle(vault, { warning = false, corrupt = false } = {}) {
   }
 }
 
+test('[req:OP-10] internal memory health blocks a missing vault instead of downgrading to legacy', () => {
+  const missing = join(tmpdir(), `wk-memory-gate-missing-${process.pid}-${Date.now()}`);
+  const result = checkMemoryBundle(missing);
+  assert.equal(result.ok, false);
+  assert.equal(result.status, 'blocked');
+  assert.match(result.failures.join('\n'), /not found|não existe|ausente/i);
+});
+
 function cli(args, cwd = process.cwd()) {
   return spawnSync(process.execPath, [BIN, ...args], { cwd, encoding: 'utf8' });
 }
@@ -79,6 +91,135 @@ test('[req:DIAG-8] memory status --gate exits 1 only for blocking states', () =>
   } finally {
     rmSync(warningVault, { recursive: true, force: true });
     rmSync(corruptVault, { recursive: true, force: true });
+  }
+});
+
+test('[req:OP-10] memory health rederives physical checkpoints with the same CORE-aware contract', () => {
+  const vault = mkdtempSync(join(tmpdir(), 'wk-memory-gate-causal-'));
+  const brain = join(vault, '.brain');
+  try {
+    mkdirSync(brain, { recursive: true });
+    const older = {
+      ...event(),
+      event_id: 'mem-physical-last',
+      memory_key: 'handoff.previous',
+      value: 'resumo antigo',
+      canonical_session_id: 'session-gate',
+      turn_sequence: 3,
+      source_turn_id: 'turn-gate-3',
+      observed_at: '2026-07-26T05:00:00Z',
+    };
+    const newer = {
+      ...older,
+      event_id: 'mem-causal-last',
+      memory_key: 'handoff.latest',
+      value: 'resumo atual',
+      turn_sequence: 3,
+      observed_at: '2026-07-26T05:01:00Z',
+    };
+    const blockedByCore = {
+      ...event(),
+      event_id: 'mem-core-conflict',
+      memory_key: 'release.push',
+      value: 'automatic',
+      turn_sequence: 3,
+      source_turn_id: 'turn-gate-3',
+      observed_at: '2026-07-26T05:02:00Z',
+    };
+    writeFileSync(join(brain, 'PROJECT.json'), `${JSON.stringify({ schemaVersion: 1, projectId: PROJECT_ID })}\n`);
+    writeFileSync(join(brain, 'CORE.md'), `${renderCoreSkeleton().trimEnd()}\n<!-- wk-memory: release.push="manual-only" -->\n`);
+    writeFileSync(join(brain, 'MEMORY_EVENTS.jsonl'), [newer, blockedByCore, older]
+      .map((item) => JSON.stringify(item)).join('\n') + '\n');
+
+    const projection = reprojectMemoryLedger(vault);
+    const health = checkMemoryBundle(vault, { registry: {
+      version: 2,
+      sessions: {
+        'session-gate': {
+          last_memory_attempt: {
+            memory_mode: 'v2',
+            canonical_session_id: 'session-gate',
+            activation_id: 'activation-gate',
+            activation_epoch: 1,
+            turn_id: 'turn-gate-3',
+            turn_sequence: 3,
+            state: 'projected',
+            disposition: 'applied',
+            event_ids: [newer.event_id, blockedByCore.event_id, older.event_id],
+            checkpoint: projection.checkpoint,
+          },
+        },
+      },
+    } });
+
+    assert.equal(projection.eventCursor, blockedByCore.event_id, 'causal cursor remains independent of physical order');
+    assert.equal(projection.ledgerCursor, older.event_id);
+    assert.equal(projection.checkpoint.event_cursor, older.event_id);
+    assert.equal(projection.revision, 2, 'CORE-blocked event does not advance operational revision');
+    assert.equal(health.ok, true, health.failures.join('\n'));
+    assert.equal(health.failures.some((item) => /stale|checkpoint|prefixo/i.test(item)), false);
+  } finally {
+    rmSync(vault, { recursive: true, force: true });
+  }
+});
+
+test('[req:OP-10] memory health vincula registry key e identidade causal completa aos eventos', async (t) => {
+  const cases = [
+    {
+      name: 'registry session key divergente',
+      sessionId: 'borrowed-session',
+      attempt: { canonical_session_id: 'session-gate' },
+      error: /canonical_session_id|identidade causal/i,
+    },
+    {
+      name: 'activation do evento divergente',
+      sessionId: 'session-gate',
+      attempt: { canonical_session_id: 'session-gate', activation_id: 'activation-other' },
+      error: /activation_id|identidade causal/i,
+    },
+    {
+      name: 'epoch do evento divergente',
+      sessionId: 'session-gate',
+      attempt: { canonical_session_id: 'session-gate', activation_epoch: 2 },
+      error: /activation_epoch|identidade causal/i,
+    },
+    {
+      name: 'turn do evento divergente',
+      sessionId: 'session-gate',
+      attempt: { canonical_session_id: 'session-gate', turn_id: 'turn-other' },
+      error: /source_turn_id|identidade causal/i,
+    },
+  ];
+
+  for (const scenario of cases) {
+    await t.test(scenario.name, () => {
+      const vault = mkdtempSync(join(tmpdir(), 'wk-memory-gate-identity-'));
+      try {
+        seedBundle(vault);
+        const projection = reprojectMemoryLedger(vault);
+        const attempt = {
+          memory_mode: 'v2',
+          canonical_session_id: 'session-gate',
+          activation_id: 'activation-gate',
+          activation_epoch: 1,
+          turn_id: 'turn-gate-1',
+          turn_sequence: 1,
+          state: 'projected',
+          disposition: 'applied',
+          event_ids: ['mem-gate-1'],
+          checkpoint: projection.checkpoint,
+          ...scenario.attempt,
+        };
+        const health = checkMemoryBundle(vault, { registry: {
+          version: 2,
+          sessions: { [scenario.sessionId]: { last_memory_attempt: attempt } },
+        } });
+        assert.equal(health.status, 'blocked');
+        assert.match(health.failures.join('\n'), scenario.error);
+      } finally {
+        rmSync(vault, { recursive: true, force: true });
+      }
+    });
   }
 });
 

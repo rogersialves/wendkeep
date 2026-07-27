@@ -5,8 +5,8 @@
 // ledger, then atomically publishes SHARED_MEMORY.md and MEMORY_CANDIDATES.jsonl.
 import { createHash } from 'node:crypto';
 import {
-  closeSync, copyFileSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync,
-  readdirSync, unlinkSync, writeFileSync,
+  closeSync, constants as fsConstants, copyFileSync, fstatSync, fsyncSync, openSync,
+  readFileSync, readdirSync, statSync, writeFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
 import {
@@ -14,7 +14,10 @@ import {
   sanitizeMemoryText,
   validateMemoryEvent,
 } from './memory-schema.mjs';
-import { LOCK_BUSY, withPathLock, writeFileAtomic } from './session-note-io.mjs';
+import {
+  assertVaultPathSafe, assertVaultPathsSafe, mkdirVaultPath, unlinkVaultFile,
+  VAULT_LOCK_BUSY, withVaultPathLock, writeVaultFileAtomic,
+} from './vault-path-safety.mjs';
 
 const EVENT_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
@@ -74,6 +77,59 @@ function lockTarget(vaultBase) {
   return join(brainDir(vaultBase), 'MEMORY');
 }
 
+function unsafeMemoryPath(message) {
+  const error = new Error(message);
+  error.code = 'VAULT_PATH_UNSAFE';
+  return error;
+}
+
+function checkedMemoryFile(vaultBase, path, label, {
+  allowMissing = true,
+  mustNotExist = false,
+} = {}) {
+  return assertVaultPathSafe(vaultBase, path, {
+    allowMissing,
+    expectedType: 'file',
+    mustNotExist,
+    label,
+  });
+}
+
+function checkedMemoryDirectory(vaultBase, path, label, { allowMissing = true } = {}) {
+  return assertVaultPathSafe(vaultBase, path, {
+    allowMissing,
+    expectedType: 'directory',
+    label,
+  });
+}
+
+function readCheckedMemoryFile(vaultBase, path, encoding, label, { allowMissing = false } = {}) {
+  let checked = checkedMemoryFile(vaultBase, path, label, { allowMissing });
+  if (!checked.exists) return null;
+  // Deliberately adjacent to readFileSync: aliases created since the first policy check
+  // are rejected before Node opens the artifact.
+  checked = checkedMemoryFile(vaultBase, checked.target, label, { allowMissing: false });
+  return readFileSync(checked.target, encoding);
+}
+
+function assertOpenedMemoryFile(vaultBase, path, fd, label) {
+  const checked = checkedMemoryFile(vaultBase, path, label, { allowMissing: false });
+  const descriptor = fstatSync(fd);
+  const target = statSync(checked.target);
+  if (!descriptor.isFile() || descriptor.nlink > 1 || target.nlink > 1
+      || descriptor.dev !== target.dev || descriptor.ino !== target.ino) {
+    throw unsafeMemoryPath(`${label} mudou de inode ou possui hardlink antes da mutação: ${checked.target}`);
+  }
+  return checked.target;
+}
+
+function preflightProjectionTargets(vaultBase) {
+  return assertVaultPathsSafe(vaultBase, [
+    { path: sharedPath(vaultBase), expectedType: 'file', label: 'projeção SHARED_MEMORY.md' },
+    { path: candidatesPath(vaultBase), expectedType: 'file', label: 'projeção MEMORY_CANDIDATES.jsonl' },
+  ]);
+}
+
 function canonicalize(value) {
   if (Array.isArray(value)) return value.map(canonicalize);
   if (value && typeof value === 'object') {
@@ -112,8 +168,13 @@ function sanitizeEvent(event) {
 }
 
 function projectIdForVault(vaultBase) {
+  const path = join(brainDir(vaultBase), 'PROJECT.json');
+  const raw = readCheckedMemoryFile(vaultBase, path, 'utf8', 'autoridade PROJECT.json', {
+    allowMissing: true,
+  });
+  if (raw === null) return undefined;
   try {
-    const project = JSON.parse(readFileSync(join(brainDir(vaultBase), 'PROJECT.json'), 'utf8'));
+    const project = JSON.parse(raw);
     return typeof project.projectId === 'string' && project.projectId ? project.projectId : undefined;
   } catch {
     return undefined;
@@ -142,6 +203,34 @@ function eventHash(event) {
   return sha256(canonicalMemoryJson(event));
 }
 
+const OUTBOX_PUBLICATION_WAIT_MS = 500;
+const OUTBOX_PUBLICATION_POLL_MS = 5;
+const OUTBOX_PUBLICATION_SIGNAL = new Int32Array(new SharedArrayBuffer(4));
+
+function readConcurrentOutboxEvent(vaultBase, path, eventId) {
+  const deadline = Date.now() + OUTBOX_PUBLICATION_WAIT_MS;
+  while (true) {
+    let raw;
+    try {
+      raw = readCheckedMemoryFile(
+        vaultBase, path, 'utf8', 'evento imutável preexistente do outbox',
+      );
+    } catch (cause) {
+      if (cause?.code === 'VAULT_PATH_UNSAFE') throw cause;
+      throw new MemoryEventCollision(eventId, `Existing outbox event is unreadable: ${eventId}`);
+    }
+
+    try {
+      return JSON.parse(raw);
+    } catch (cause) {
+      if (!(cause instanceof SyntaxError) || Date.now() >= deadline) {
+        throw new MemoryEventCollision(eventId, `Existing outbox event is unreadable: ${eventId}`);
+      }
+      Atomics.wait(OUTBOX_PUBLICATION_SIGNAL, 0, 0, OUTBOX_PUBLICATION_POLL_MS);
+    }
+  }
+}
+
 /**
  * Persist one immutable producer event using exclusive creation. A retry with the same
  * canonical payload is a no-op; reusing the ID for different bytes is an observable error.
@@ -149,25 +238,26 @@ function eventHash(event) {
 export function enqueueMemoryEvent(vaultBase, event) {
   const checked = assertValidEvent(event, vaultBase);
   const dir = outboxDir(vaultBase);
-  mkdirSync(dir, { recursive: true });
+  mkdirVaultPath(vaultBase, dir, { label: 'outbox de memória' });
   const path = join(dir, `${checked.event_id}.json`);
   const payload = `${canonicalMemoryJson(checked)}\n`;
   const hash = eventHash(checked);
 
   let fd;
   try {
+    checkedMemoryFile(vaultBase, path, 'evento imutável do outbox');
+    // The final lstat is deliberately adjacent to the exclusive open. A pre-created
+    // symlink/hardlink loses the wx race and is revalidated in the EEXIST branch.
+    checkedMemoryFile(vaultBase, path, 'evento imutável do outbox');
     fd = openSync(path, 'wx');
+    assertOpenedMemoryFile(vaultBase, path, fd, 'evento imutável do outbox');
     writeFileSync(fd, payload, 'utf8');
     fsyncSync(fd);
+    assertOpenedMemoryFile(vaultBase, path, fd, 'evento imutável do outbox');
     return { status: 'enqueued', path, eventId: checked.event_id, hash };
   } catch (error) {
     if (error?.code !== 'EEXIST') throw error;
-    let existing;
-    try {
-      existing = JSON.parse(readFileSync(path, 'utf8'));
-    } catch (cause) {
-      throw new MemoryEventCollision(checked.event_id, `Existing outbox event is unreadable: ${checked.event_id}`);
-    }
+    const existing = readConcurrentOutboxEvent(vaultBase, path, checked.event_id);
     if (eventHash(existing) !== hash || canonicalMemoryJson(existing) !== canonicalMemoryJson(checked)) {
       throw new MemoryEventCollision(checked.event_id);
     }
@@ -184,10 +274,13 @@ function ledgerError(line, message, partial = false) {
 /** Read a ledger without hiding a valid prefix when its tail is corrupt or partial. */
 export function readMemoryLedger(vaultBase) {
   const path = ledgerPath(vaultBase);
-  if (!existsSync(path)) {
+  const checked = checkedMemoryFile(vaultBase, path, 'ledger MEMORY_EVENTS.jsonl');
+  if (!checked.exists) {
     return { status: 'ok', path, raw: '', events: [], eventIds: new Set(), errors: [] };
   }
-  const raw = readFileSync(path, 'utf8').replace(/\r\n/g, '\n');
+  const raw = readCheckedMemoryFile(
+    vaultBase, checked.target, 'utf8', 'ledger MEMORY_EVENTS.jsonl',
+  ).replace(/\r\n/g, '\n');
   const lines = raw.split('\n');
   const hasPartialTail = raw.length > 0 && !raw.endsWith('\n');
   if (!hasPartialTail) lines.pop();
@@ -245,8 +338,14 @@ function eventOrder(left, right) {
     || String(left.event_id).localeCompare(String(right.event_id));
 }
 
+function sameCausalActivation(left, right) {
+  return Boolean(left?.canonical_session_id)
+    && left.canonical_session_id === right?.canonical_session_id
+    && left.activation_id === right?.activation_id;
+}
+
 function comparable(left, right) {
-  if (left.activation_id === right.activation_id) return true;
+  if (sameCausalActivation(left, right)) return true;
   const leftSupersedes = left.supersedes_event_id || left.supersedes;
   const rightSupersedes = right.supersedes_event_id || right.supersedes;
   return leftSupersedes === right.event_id || rightSupersedes === left.event_id
@@ -268,12 +367,10 @@ function candidateId(reason, memoryKey, eventIds) {
 // participates in precedence so the projector never guesses meaning from human text:
 //   <!-- wk-memory: release.push="manual-only" -->
 function readCoreInvariants(vaultBase) {
-  let core;
-  try {
-    core = readFileSync(corePath(vaultBase), 'utf8').replace(/\r\n/g, '\n');
-  } catch {
-    return new Map();
-  }
+  const core = readCheckedMemoryFile(
+    vaultBase, corePath(vaultBase), 'utf8', 'autoridade CORE.md', { allowMissing: true },
+  );
+  if (core === null) return new Map();
   const invariants = new Map();
   const marker = /^<!--\s*wk-memory:\s*([A-Za-z0-9][A-Za-z0-9._-]*)=(.+)\s*-->$/;
   for (const line of core.split('\n')) {
@@ -333,7 +430,7 @@ function currentEventFromRecord(record) {
 
 function isCausallyOlder(event, current) {
   if (!current) return false;
-  if (event.activation_id === current.activation_id) {
+  if (sameCausalActivation(event, current)) {
     return Number(event.turn_sequence) < Number(current.turn_sequence);
   }
   if (Number.isInteger(event.activation_epoch) && Number.isInteger(current.activation_epoch)
@@ -419,6 +516,15 @@ export function reduceMemoryEvents(inputEvents = [], { coreInvariants = new Map(
 
     if (item.operation === 'assert') {
       if (current && hashMemoryValue(current.value) !== hashMemoryValue(item.value)) {
+        if (sameCausalActivation(item, currentSource)
+            && Number(item.turn_sequence) > Number(currentSource.turn_sequence)) {
+          records.set(item.memory_key, { value: item.value, revision: current.revision + 1, source: item });
+          tombstones.delete(item.memory_key);
+          superseded.push({ event_id: currentSource.event_id, by_event_id: item.event_id });
+          revision += 1;
+          appliedEventIds.push(item.event_id);
+          continue;
+        }
         candidates.push(conflictCandidate(item.memory_key, [currentEventFromRecord(current), item]));
         continue;
       }
@@ -524,47 +630,170 @@ export function reduceMemoryEvents(inputEvents = [], { coreInvariants = new Map(
   };
 }
 
+/**
+ * Re-derive one ledger projection using the explicit invariants declared by CORE.
+ * `eventCursor` is the reducer's deterministic causal cursor; `ledgerCursor` is the
+ * physical prefix boundary used by durable checkpoints.
+ */
+export function deriveMemoryProjection(vaultBase, inputEvents = []) {
+  const reduced = reduceMemoryEvents(inputEvents, { coreInvariants: readCoreInvariants(vaultBase) });
+  const ledgerCursor = inputEvents.at(-1)?.event_id || 'none';
+  const checkpoint = {
+    revision: reduced.revision,
+    event_cursor: ledgerCursor,
+    state_hash: reduced.stateHash,
+  };
+  if (reduced.eventCursor !== ledgerCursor) {
+    checkpoint.causal_event_cursor = reduced.eventCursor;
+  }
+  return {
+    ...reduced,
+    ledgerCursor,
+    checkpoint,
+  };
+}
+
 function readOutbox(vaultBase) {
   const dir = outboxDir(vaultBase);
-  if (!existsSync(dir)) return [];
-  return readdirSync(dir, { withFileTypes: true })
-    .filter((entry) => entry.isFile() && entry.name.endsWith('.json'))
+  let checkedDir = checkedMemoryDirectory(vaultBase, dir, 'outbox de memória');
+  if (!checkedDir.exists) return [];
+  checkedDir = checkedMemoryDirectory(vaultBase, checkedDir.target, 'outbox de memória', {
+    allowMissing: false,
+  });
+  const entries = readdirSync(checkedDir.target, { withFileTypes: true });
+  for (const entry of entries) {
+    assertVaultPathSafe(vaultBase, join(checkedDir.target, entry.name), {
+      allowMissing: false,
+      label: `entrada ${entry.name} do outbox de memória`,
+    });
+  }
+  return entries
+    .filter((entry) => entry.name.endsWith('.json'))
     .sort((left, right) => left.name.localeCompare(right.name))
     .map((entry) => {
-      const path = join(dir, entry.name);
+      const path = join(checkedDir.target, entry.name);
       try {
-        const event = assertValidEvent(JSON.parse(readFileSync(path, 'utf8')), vaultBase);
+        const event = assertValidEvent(JSON.parse(readCheckedMemoryFile(
+          vaultBase, path, 'utf8', `evento ${entry.name} do outbox de memória`,
+        )), vaultBase);
         if (`${event.event_id}.json` !== entry.name) throw new Error('filename does not match event_id');
         return { event, path };
       } catch (error) {
+        if (error?.code === 'VAULT_PATH_UNSAFE') throw error;
         throw new MemoryOutboxCorruption(path, error);
       }
     });
 }
 
-function appendLedgerDurably(path, events) {
+function countPendingOutbox(vaultBase) {
+  const dir = outboxDir(vaultBase);
+  let checked = checkedMemoryDirectory(vaultBase, dir, 'outbox de memória');
+  if (!checked.exists) return 0;
+  checked = checkedMemoryDirectory(vaultBase, checked.target, 'outbox de memória', {
+    allowMissing: false,
+  });
+  return readdirSync(checked.target, { withFileTypes: true })
+    .filter((entry) => entry.name.endsWith('.json'))
+    .map((entry) => {
+      assertVaultPathSafe(vaultBase, join(checked.target, entry.name), {
+        allowMissing: false,
+        label: `entrada ${entry.name} do outbox de memória`,
+      });
+      return entry;
+    }).length;
+}
+
+function appendLedgerDurably(vaultBase, path, events) {
   if (!events.length) return;
   let fd;
   try {
-    fd = openSync(path, 'a');
+    let checked = checkedMemoryFile(vaultBase, path, 'ledger MEMORY_EVENTS.jsonl');
+    checked = checkedMemoryFile(vaultBase, checked.target, 'ledger MEMORY_EVENTS.jsonl');
+    fd = openSync(checked.target, 'a');
+    assertOpenedMemoryFile(vaultBase, checked.target, fd, 'ledger MEMORY_EVENTS.jsonl');
     const payload = events.map((item) => canonicalMemoryJson(item)).join('\n') + '\n';
     writeFileSync(fd, payload, 'utf8');
     fsyncSync(fd);
+    assertOpenedMemoryFile(vaultBase, checked.target, fd, 'ledger MEMORY_EVENTS.jsonl');
   } finally {
     if (fd !== undefined) closeSync(fd);
   }
 }
 
-function writeAtomicIfChanged(path, content) {
-  try {
-    if (readFileSync(path, 'utf8') === content) return false;
-  } catch { /* missing/unreadable projections are replaced atomically */ }
-  writeFileAtomic(path, content);
+function writeAtomicIfChanged(vaultBase, path, content, label) {
+  const checked = checkedMemoryFile(vaultBase, path, label);
+  if (checked.exists) {
+    try {
+      if (readCheckedMemoryFile(vaultBase, checked.target, 'utf8', label) === content) return false;
+    } catch (error) {
+      if (error?.code === 'VAULT_PATH_UNSAFE') throw error;
+      // A contained but unreadable projection may be atomically replaced.
+    }
+  }
+  writeVaultFileAtomic(vaultBase, checked.target, content, 'utf8', { label });
   return true;
 }
 
 function injectFault(faultAt, boundary) {
   if (faultAt === boundary) throw new Error(`Injected memory-store fault: ${boundary}`);
+}
+
+/** Build every derived byte from an immutable authority snapshot without publishing it. */
+export function prepareMemoryProjection(vaultBase, allEvents) {
+  const reduced = deriveMemoryProjection(vaultBase, allEvents);
+  const updatedAt = allEvents
+    .map((item) => item.observed_at)
+    .filter(Boolean)
+    .sort()
+    .at(-1);
+  const shared = renderSharedMemory({
+    revision: reduced.revision,
+    eventCursor: reduced.ledgerCursor,
+    events: reduced.activeEvents,
+    stateHash: reduced.stateHash,
+    updatedAt,
+  });
+  const candidates = reduced.candidates.map((item) => canonicalMemoryJson(item)).join('\n')
+    + (reduced.candidates.length ? '\n' : '');
+  return {
+    sharedContent: shared,
+    candidatesContent: candidates,
+    revision: reduced.revision,
+    eventCursor: reduced.eventCursor,
+    ledgerCursor: reduced.ledgerCursor,
+    stateHash: reduced.stateHash,
+    checkpoint: reduced.checkpoint,
+    candidates: reduced.candidates.length,
+  };
+}
+
+/** Publish a projection prepared from the same locked authority snapshot. */
+export function publishMemoryProjection(vaultBase, prepared) {
+  const {
+    sharedContent, candidatesContent, ...projection
+  } = prepared;
+  // Validate the complete publication set before the first rename: a bad candidates
+  // alias cannot leave SHARED partially advanced (and vice versa).
+  preflightProjectionTargets(vaultBase);
+  const sharedWritten = writeAtomicIfChanged(
+    vaultBase, sharedPath(vaultBase), sharedContent, 'projeção SHARED_MEMORY.md',
+  );
+  const candidatesWritten = writeAtomicIfChanged(
+    vaultBase, candidatesPath(vaultBase), candidatesContent, 'projeção MEMORY_CANDIDATES.jsonl',
+  );
+  return { ...projection, projectionsWritten: sharedWritten || candidatesWritten };
+}
+
+function publishDerivedProjection(vaultBase, allEvents) {
+  return publishMemoryProjection(vaultBase, prepareMemoryProjection(vaultBase, allEvents));
+}
+
+// Reconciliation needs to validate proof, perform registry CAS, and publish the exact
+// prepared bytes inside one MEMORY critical section. This primitive deliberately does
+// not create `.brain`: callers must complete their read-only Vault preflight first.
+export const MEMORY_LOCK_BUSY = VAULT_LOCK_BUSY;
+export function withMemoryLock(vaultBase, fn, options = {}) {
+  return withVaultPathLock(vaultBase, lockTarget(vaultBase), fn, options);
 }
 
 function projectLocked(vaultBase, { faultAt } = {}) {
@@ -584,70 +813,81 @@ function projectLocked(vaultBase, { faultAt } = {}) {
     newEvents.push(item);
   }
 
-  appendLedgerDurably(ledger.path, newEvents);
+  const allEvents = [...ledger.events, ...newEvents];
+  const prepared = prepareMemoryProjection(vaultBase, allEvents);
+  // CORE and both sidecars are checked before the append, so an unsafe derived target
+  // cannot partially advance the authoritative ledger.
+  preflightProjectionTargets(vaultBase);
+  appendLedgerDurably(vaultBase, ledger.path, newEvents);
   injectFault(faultAt, 'after-ledger');
 
-  const allEvents = [...ledger.events, ...newEvents];
-  const reduced = reduceMemoryEvents(allEvents, { coreInvariants: readCoreInvariants(vaultBase) });
-  const updatedAt = allEvents
-    .map((item) => item.observed_at)
-    .filter(Boolean)
-    .sort()
-    .at(-1);
-  const shared = renderSharedMemory({
-    revision: reduced.revision,
-    eventCursor: reduced.eventCursor,
-    events: reduced.activeEvents,
-    stateHash: reduced.stateHash,
-    updatedAt,
-  });
-  const candidates = reduced.candidates.map((item) => canonicalMemoryJson(item)).join('\n')
-    + (reduced.candidates.length ? '\n' : '');
-  const sharedWritten = writeAtomicIfChanged(sharedPath(vaultBase), shared);
-  const candidatesWritten = writeAtomicIfChanged(candidatesPath(vaultBase), candidates);
+  const projection = publishMemoryProjection(vaultBase, prepared);
   injectFault(faultAt, 'after-projection');
 
-  for (const entry of outbox) unlinkSync(entry.path);
+  for (const entry of outbox) {
+    unlinkVaultFile(vaultBase, entry.path, {
+      missingOk: false, label: 'evento consumido do outbox de memória',
+    });
+  }
   return {
     status: 'projected',
     appended: newEvents.length,
     consumed: outbox.length,
     pending: 0,
-    revision: reduced.revision,
-    eventCursor: reduced.eventCursor,
-    stateHash: reduced.stateHash,
-    candidates: reduced.candidates.length,
-    projectionsWritten: sharedWritten || candidatesWritten,
+    ...projection,
   };
 }
 
 /** Serialize ledger append + full deterministic replay under .brain/MEMORY.lock. */
 export function projectMemoryOutbox(vaultBase, options = {}) {
-  mkdirSync(brainDir(vaultBase), { recursive: true });
-  const pending = existsSync(outboxDir(vaultBase))
-    ? readdirSync(outboxDir(vaultBase)).filter((name) => name.endsWith('.json')).length
-    : 0;
-  const result = withPathLock(
+  mkdirVaultPath(vaultBase, brainDir(vaultBase), { label: 'raiz .brain da memória' });
+  const pending = countPendingOutbox(vaultBase);
+  const result = withVaultPathLock(
+    vaultBase,
     lockTarget(vaultBase),
     () => projectLocked(vaultBase, options),
     options.lock || {},
   );
-  if (result === LOCK_BUSY) return { status: 'busy', pending };
+  if (result === VAULT_LOCK_BUSY) return { status: 'busy', pending };
+  return result;
+}
+
+/**
+ * Rebuild generated projections from the existing ledger only. This path never
+ * enumerates, reads, acknowledges, or consumes producer outbox files.
+ */
+export function reprojectMemoryLedger(vaultBase, options = {}) {
+  mkdirVaultPath(vaultBase, brainDir(vaultBase), { label: 'raiz .brain da memória' });
+  const result = withVaultPathLock(vaultBase, lockTarget(vaultBase), () => {
+    const ledger = readMemoryLedger(vaultBase);
+    if (ledger.status !== 'ok') throw new MemoryLedgerCorruption(ledger.errors);
+    return {
+      status: 'reprojected',
+      ...publishDerivedProjection(vaultBase, ledger.events),
+    };
+  }, options.lock || {});
+  if (result === VAULT_LOCK_BUSY) return { status: 'busy' };
   return result;
 }
 
 /** Explicit repair: preserve exact corrupt bytes, then retain every independently valid line. */
 export function repairMemoryLedger(vaultBase, options = {}) {
-  mkdirSync(brainDir(vaultBase), { recursive: true });
-  const result = withPathLock(lockTarget(vaultBase), () => {
+  mkdirVaultPath(vaultBase, brainDir(vaultBase), { label: 'raiz .brain da memória' });
+  const result = withVaultPathLock(vaultBase, lockTarget(vaultBase), () => {
     const ledger = readMemoryLedger(vaultBase);
     if (ledger.status === 'ok') return { status: 'unchanged', repairedLines: 0, backupPath: null };
     const backupPath = `${ledger.path}.corrupt-${Date.now()}.bak`;
     // copyFileSync preserves the exact evidence before any canonical rewrite.
-    copyFileSync(ledger.path, backupPath);
+    checkedMemoryFile(vaultBase, ledger.path, 'ledger corrompido', { allowMissing: false });
+    checkedMemoryFile(vaultBase, backupPath, 'backup do ledger corrompido', { mustNotExist: true });
+    // Revalidate immediately before the exclusive copy, then verify the created inode.
+    checkedMemoryFile(vaultBase, ledger.path, 'ledger corrompido', { allowMissing: false });
+    checkedMemoryFile(vaultBase, backupPath, 'backup do ledger corrompido', { mustNotExist: true });
+    copyFileSync(ledger.path, backupPath, fsConstants.COPYFILE_EXCL);
+    checkedMemoryFile(vaultBase, backupPath, 'backup do ledger corrompido', { allowMissing: false });
     const repaired = ledger.events.map((item) => canonicalMemoryJson(item)).join('\n')
       + (ledger.events.length ? '\n' : '');
-    writeFileAtomic(ledger.path, repaired);
+    writeVaultFileAtomic(vaultBase, ledger.path, repaired, 'utf8', { label: 'ledger reparado' });
     return {
       status: 'repaired',
       repairedLines: ledger.errors.length,
@@ -655,6 +895,6 @@ export function repairMemoryLedger(vaultBase, options = {}) {
       backupPath,
     };
   }, options.lock || {});
-  if (result === LOCK_BUSY) return { status: 'busy', repairedLines: 0, backupPath: null };
+  if (result === VAULT_LOCK_BUSY) return { status: 'busy', repairedLines: 0, backupPath: null };
   return result;
 }

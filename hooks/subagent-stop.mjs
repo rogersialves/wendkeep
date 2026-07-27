@@ -20,7 +20,10 @@ export function refreshSubagents(vaultBase, input) {
   if (!sessionRel) return false;
   const sessionPath = join(vaultBase, sessionRel);
   if (!existsSync(sessionPath)) return false;
-  updateSessionObservability({ sessionPath, transcriptPath, caller: 'subagent-stop', canonicalConversationId: identity.canonicalConversationId });
+  updateSessionObservability({
+    vaultBase, sessionPath, transcriptPath, caller: 'subagent-stop',
+    canonicalConversationId: identity.canonicalConversationId,
+  });
   return true;
 }
 

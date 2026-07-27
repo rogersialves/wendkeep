@@ -131,6 +131,36 @@ test('logTask writes plan progress into the active session note', () => {
   } finally { rmSync(vault, { recursive: true, force: true }); }
 });
 
+test('[req:OP-7] registry session_file traversal não permite task-log nem decision backlink fora do Vault', () => {
+  const { vault, transcript } = vaultWithSession();
+  const outside = join(vault, '..', `${vault.split(/[\\/]/).at(-1)}-outside.md`);
+  const original = '---\ntype: session\n---\n\n# externa\n\n## Iterações\n\n## Encerramento\n';
+  try {
+    writeFileSync(outside, original);
+    upsertSessionRegistry(vault, 's1', { session_file: `../${outside.split(/[\\/]/).at(-1)}` });
+
+    assert.throws(
+      () => logTask(vault, {
+        transcript_path: transcript, provider: 'codex', task: { content: 'não pode escapar' },
+      }),
+      /Vault|escapa logicamente|path/i,
+    );
+    assert.equal(readFileSync(outside, 'utf8'), original);
+
+    captureDecision(vault, {
+      tool_name: 'AskUserQuestion',
+      tool_input: { questions: [{ question: 'Backlink seguro?', options: [{ label: 'Sim', description: '' }] }] },
+      tool_output: '"Backlink seguro?"="Sim"',
+      transcript_path: transcript,
+      provider: 'codex',
+    });
+    assert.equal(readFileSync(outside, 'utf8'), original);
+  } finally {
+    rmSync(outside, { force: true });
+    rmSync(vault, { recursive: true, force: true });
+  }
+});
+
 // --- wiring -----------------------------------------------------------------
 test('the 3 hooks are wired by mergeSettings on their events', () => {
   const cmds = (settings, ev) => (settings.hooks[ev] || []).flatMap((g) => (g.hooks || []).map((h) => h.command));

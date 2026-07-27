@@ -2,11 +2,16 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync, linkSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync,
+  symlinkSync, writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { canonicalMemoryJson, deriveMemoryProjection, reduceMemoryEvents } from '../hooks/memory-store.mjs';
+import { renderSharedMemory } from '../hooks/memory-schema.mjs';
 import { renderCoreSkeleton } from '../src/validate-core.mjs';
 
 const BIN = join(dirname(fileURLToPath(import.meta.url)), '..', 'bin', 'wendkeep.mjs');
@@ -21,6 +26,77 @@ function fixture() {
   return vault;
 }
 
+function createAlias(t, source, target, type = 'hardlink') {
+  try {
+    if (type === 'hardlink') linkSync(source, target);
+    else symlinkSync(source, target, process.platform === 'win32' ? 'junction' : 'dir');
+    return true;
+  } catch (error) {
+    if (['EPERM', 'EACCES', 'ENOTSUP', 'EXDEV'].includes(error?.code)) {
+      t.skip(`${type}s indisponíveis neste filesystem: ${error.code}`);
+      return false;
+    }
+    throw error;
+  }
+}
+
+function memoryEvent(eventId, value, turnSequence) {
+  return {
+    v: 1,
+    project_id: 'project-a',
+    event_id: eventId,
+    memory_key: 'handoff.latest',
+    operation: 'assert',
+    value,
+    authority: 'reported',
+    canonical_session_id: 'current-session',
+    activation_id: 'current-activation',
+    activation_epoch: 1,
+    turn_sequence: turnSequence,
+    source_turn_id: `turn-${turnSequence}`,
+    observed_at: `2026-07-26T12:0${turnSequence}:00.000Z`,
+    evidence: [`turn:${turnSequence}`],
+  };
+}
+
+function checkpoint(reduced) {
+  return {
+    revision: reduced.revision,
+    event_cursor: reduced.eventCursor,
+    state_hash: reduced.stateHash,
+  };
+}
+
+function projectedAttempt(sessionId, event, checkpointValue = null, overrides = {}) {
+  return {
+    v: 1,
+    memory_mode: 'v2',
+    canonical_session_id: sessionId,
+    activation_id: event.activation_id,
+    activation_epoch: event.activation_epoch,
+    turn_id: event.source_turn_id,
+    turn_sequence: event.turn_sequence,
+    disposition: 'applied',
+    state: 'projected',
+    event_ids: [event.event_id],
+    checkpoint: checkpointValue,
+    ...overrides,
+  };
+}
+
+function reconciliationArtifacts(vault) {
+  const brain = join(vault, '.brain');
+  const backups = readdirSync(brain)
+    .filter((name) => name.includes('.reconcile-') && name.endsWith('.bak'))
+    .sort()
+    .map((name) => ({ name, content: readFileSync(join(brain, name), 'utf8') }));
+  return {
+    registry: readFileSync(join(brain, 'SESSION_REGISTRY.json'), 'utf8'),
+    shared: readFileSync(join(brain, 'SHARED_MEMORY.md'), 'utf8'),
+    backups,
+  };
+}
+
 test('memory migrate é dry-run por padrão e não toca nenhum byte', async () => {
   const vault = fixture();
   const before = readFileSync(join(vault, '.brain', 'SHARED_MEMORY.md'), 'utf8');
@@ -32,6 +108,57 @@ test('memory migrate é dry-run por padrão e não toca nenhum byte', async () =
     assert.equal(existsSync(join(vault, '.brain', 'MEMORY_EVENTS.jsonl')), false);
     assert.equal(existsSync(result.backupPath), false);
   } finally { rmSync(vault, { recursive: true, force: true }); }
+});
+
+test('[req:OP-10] seed rejeita raiz .brain por junction antes de criar artefatos externos', async (t) => {
+  const vault = mkdtempSync(join(tmpdir(), 'wk-memory-seed-junction-'));
+  const outside = mkdtempSync(join(tmpdir(), 'wk-memory-seed-junction-outside-'));
+  try {
+    writeFileSync(join(outside, 'sentinel.txt'), 'external seed sentinel\n');
+    const before = readdirSync(outside).sort();
+    const brain = join(vault, '.brain');
+    if (!createAlias(t, outside, brain, 'junction')) return;
+    const { seedMemoryV2 } = await import('../src/memory.mjs');
+
+    assert.throws(
+      () => seedMemoryV2(vault),
+      /link simbólico|junction|reparse|Vault/i,
+    );
+    assert.deepEqual(readdirSync(outside).sort(), before);
+    assert.equal(readFileSync(join(outside, 'sentinel.txt'), 'utf8'), 'external seed sentinel\n');
+    assert.equal(lstatSync(brain).isSymbolicLink(), true);
+  } finally {
+    rmSync(vault, { recursive: true, force: true });
+    rmSync(outside, { recursive: true, force: true });
+  }
+});
+
+test('[req:OP-10] migrate rejeita SHARED legado por hardlink antes de backup ou publicação', async (t) => {
+  const vault = fixture();
+  const outside = mkdtempSync(join(tmpdir(), 'wk-memory-migrate-hardlink-outside-'));
+  const brain = join(vault, '.brain');
+  try {
+    const shared = join(brain, 'SHARED_MEMORY.md');
+    const source = join(outside, 'legacy-shared.md');
+    writeFileSync(source, readFileSync(shared));
+    rmSync(shared);
+    if (!createAlias(t, source, shared)) return;
+    const outsideBefore = readFileSync(source);
+    const brainBefore = readdirSync(brain).sort();
+    const { migrateMemory } = await import('../src/memory.mjs');
+
+    assert.throws(
+      () => migrateMemory(vault, { apply: true }),
+      /hardlink|nlink|Vault/i,
+    );
+    assert.deepEqual(readFileSync(source), outsideBefore);
+    assert.deepEqual(readdirSync(brain).sort(), brainBefore, 'nenhum backup ou sidecar parcial é criado');
+    assert.equal(existsSync(join(brain, 'MEMORY_EVENTS.jsonl')), false);
+    assert.equal(existsSync(join(brain, 'MEMORY_CANDIDATES.jsonl')), false);
+  } finally {
+    rmSync(vault, { recursive: true, force: true });
+    rmSync(outside, { recursive: true, force: true });
+  }
 });
 
 test('memory migrate --apply em vault sem SHARED apenas cria bundle v2 vazio', async () => {
@@ -185,6 +312,408 @@ test('memory repair preserva bytes corrompidos em backup antes de reconstruir', 
   } finally { rmSync(vault, { recursive: true, force: true }); }
 });
 
+test('[req:OP-10] memory reconcile replays physical ledger, refreshes only the successor and audits explicit supersession', async () => {
+  const vault = fixture();
+  const brain = join(vault, '.brain');
+  const notePath = join(vault, '02-Sessões', 'old.md');
+  const events = [
+    memoryEvent('mem-reconcile-1', 'handoff one', 1),
+    memoryEvent('mem-reconcile-2', 'handoff two', 2),
+    memoryEvent('mem-reconcile-3', 'handoff three', 3),
+  ];
+  const physicalLedger = [events[2], events[0], events[1]];
+  const oldCheckpoint = checkpoint(reduceMemoryEvents([events[2]]));
+  const reduced = reduceMemoryEvents(events);
+  const expectedCheckpoint = {
+    revision: reduced.revision,
+    event_cursor: physicalLedger.at(-1).event_id,
+    state_hash: reduced.stateHash,
+    causal_event_cursor: reduced.eventCursor,
+  };
+  const ambiguousAttempt = {
+    v: 1,
+    memory_mode: 'v2',
+    activation_id: '',
+    activation_epoch: 0,
+    turn_id: 'old-turn',
+    turn_sequence: 23,
+    disposition: 'ambiguous',
+    state: 'skipped',
+    event_ids: [],
+    checkpoint: null,
+    observed_at: '2026-07-26T12:00:00.000Z',
+  };
+  mkdirSync(dirname(notePath), { recursive: true });
+  writeFileSync(notePath, '# old session\n\n## Iterações\n\nunchanged\n');
+  writeFileSync(join(brain, 'MEMORY_EVENTS.jsonl'), `${physicalLedger.map(canonicalMemoryJson).join('\n')}\n`);
+  writeFileSync(join(brain, 'MEMORY_CANDIDATES.jsonl'), `${JSON.stringify({ candidate_id: 'stale' })}\n`);
+  writeFileSync(join(brain, 'SHARED_MEMORY.md'), renderSharedMemory());
+  writeFileSync(join(brain, 'SESSION_REGISTRY.json'), `${JSON.stringify({
+    version: 2,
+    sessions: {
+      'old-session': {
+        status: 'active',
+        session_file: '02-Sessões/old.md',
+        last_memory_attempt: ambiguousAttempt,
+      },
+      'current-session': {
+        status: 'active',
+        memory_checkpoint: oldCheckpoint,
+        last_memory_attempt: projectedAttempt('current-session', events[2], oldCheckpoint),
+      },
+      'unrelated-session': {
+        status: 'active',
+        memory_checkpoint: oldCheckpoint,
+        last_memory_attempt: {
+          memory_mode: 'legacy',
+          checkpoint: oldCheckpoint,
+        },
+      },
+    },
+  }, null, 2)}\n`);
+  const ledgerBefore = readFileSync(join(brain, 'MEMORY_EVENTS.jsonl'), 'utf8');
+  const coreBefore = readFileSync(join(brain, 'CORE.md'), 'utf8');
+  const noteBefore = readFileSync(notePath, 'utf8');
+  try {
+    const { reconcileMemory } = await import('../src/memory.mjs');
+    const dryRunRegistry = readFileSync(join(brain, 'SESSION_REGISTRY.json'), 'utf8');
+    const dryRun = reconcileMemory(vault, {
+      sessionId: 'old-session',
+      bySessionId: 'current-session',
+      reason: 'Implementation delivered and continued by the current session.',
+      now: '2026-07-26T18:00:00.000Z',
+    });
+    assert.equal(dryRun.status, 'dry-run');
+    assert.equal(readFileSync(join(brain, 'SESSION_REGISTRY.json'), 'utf8'), dryRunRegistry);
+
+    const result = reconcileMemory(vault, {
+      sessionId: 'old-session',
+      bySessionId: 'current-session',
+      reason: 'Implementation delivered and continued by the current session.',
+      apply: true,
+      now: '2026-07-26T18:00:00.000Z',
+    });
+    assert.equal(result.projection.revision, 3);
+    assert.equal(result.projection.candidates, 0);
+    assert.ok(existsSync(result.registry.backupPath), 'exact registry backup exists');
+
+    const registry = JSON.parse(readFileSync(join(brain, 'SESSION_REGISTRY.json'), 'utf8'));
+    const old = registry.sessions['old-session'];
+    const current = registry.sessions['current-session'];
+    const unrelated = registry.sessions['unrelated-session'];
+    assert.equal(old.last_memory_attempt.state, 'skipped');
+    assert.equal(old.last_memory_attempt.disposition, 'superseded');
+    assert.equal(old.last_memory_attempt.reconciled_by_session_id, 'current-session');
+    assert.deepEqual(old.memory_reconciliations[0].original_attempt, ambiguousAttempt);
+    assert.deepEqual(old.memory_reconciliations[0].causal_proof.required_event_ids, ['mem-reconcile-3']);
+    assert.equal(old.memory_reconciliations[0].causal_proof.registry_session_id, 'current-session');
+    assert.equal(old.memory_reconciliations[0].causal_proof.activation_id, 'current-activation');
+    assert.equal(old.memory_reconciliations[0].causal_proof.activation_epoch, 1);
+    assert.equal(old.memory_reconciliations[0].causal_proof.turn_id, 'turn-3');
+    assert.equal(old.memory_reconciliations[0].causal_proof.turn_sequence, 3);
+    assert.match(old.memory_reconciliations[0].causal_proof.expected_ledger_sha256, /^[a-f0-9]{64}$/);
+    assert.match(old.memory_reconciliations[0].causal_proof.expected_core_sha256, /^[a-f0-9]{64}$/);
+    assert.deepEqual(current.last_memory_attempt.checkpoint, expectedCheckpoint);
+    assert.deepEqual(current.memory_checkpoint, expectedCheckpoint);
+    assert.equal(current.memory_reconciliations[0].type, 'checkpoint_refreshed');
+    assert.deepEqual(unrelated.last_memory_attempt.checkpoint, oldCheckpoint, 'sessão não autorizada não é reconciliada');
+    assert.deepEqual(unrelated.memory_checkpoint, oldCheckpoint);
+
+    const health = (await import('../hooks/vault-health.mjs')).checkMemoryBundle(vault);
+    assert.equal(health.ok, true, health.failures.join('\n'));
+    assert.notEqual(health.status, 'blocked');
+
+    const reconciledRegistry = readFileSync(join(brain, 'SESSION_REGISTRY.json'), 'utf8');
+    const retry = reconcileMemory(vault, {
+      sessionId: 'old-session',
+      bySessionId: 'current-session',
+      reason: 'Implementation delivered and continued by the current session.',
+      apply: true,
+      now: '2026-07-26T18:00:00.000Z',
+    });
+    assert.equal(retry.status, 'unchanged');
+    assert.equal(readFileSync(join(brain, 'SESSION_REGISTRY.json'), 'utf8'), reconciledRegistry);
+
+    assert.equal(readFileSync(join(brain, 'MEMORY_EVENTS.jsonl'), 'utf8'), ledgerBefore);
+    assert.equal(readFileSync(join(brain, 'CORE.md'), 'utf8'), coreBefore);
+    assert.equal(readFileSync(notePath, 'utf8'), noteBefore);
+  } finally { rmSync(vault, { recursive: true, force: true }); }
+});
+
+test('[req:OP-10] supersession fails closed for a non-ambiguous attempt and leaves registry untouched', async () => {
+  const vault = fixture();
+  const brain = join(vault, '.brain');
+  writeFileSync(join(brain, 'MEMORY_EVENTS.jsonl'), '');
+  writeFileSync(join(brain, 'MEMORY_CANDIDATES.jsonl'), '');
+  writeFileSync(join(brain, 'SHARED_MEMORY.md'), renderSharedMemory());
+  writeFileSync(join(brain, 'SESSION_REGISTRY.json'), `${JSON.stringify({
+    version: 2,
+    sessions: {
+      'old-session': { last_memory_attempt: { memory_mode: 'v2', state: 'projected', disposition: 'applied' } },
+      'current-session': { status: 'active' },
+    },
+  }, null, 2)}\n`);
+  const registryPath = join(brain, 'SESSION_REGISTRY.json');
+  const before = readFileSync(registryPath, 'utf8');
+  try {
+    const { reconcileMemory } = await import('../src/memory.mjs');
+    assert.throws(() => reconcileMemory(vault, {
+      sessionId: 'old-session',
+      bySessionId: 'current-session',
+      reason: 'Must not reinterpret a projected attempt.',
+      apply: true,
+    }), /não está ambiguous/i);
+    assert.equal(readFileSync(registryPath, 'utf8'), before);
+    assert.equal(readdirSync(brain).some((name) => name.includes('reconcile-') && name.endsWith('.bak')), false);
+  } finally { rmSync(vault, { recursive: true, force: true }); }
+});
+
+test('[req:OP-10] reconciliação incompleta falha antes da reprojeção e preserva registry, SHARED e backups', async (t) => {
+  const event = { ...memoryEvent('mem-negative-proof', 'causal proof', 1), canonical_session_id: 'current' };
+  const validTarget = {
+    last_memory_attempt: {
+      memory_mode: 'v2', state: 'skipped', disposition: 'ambiguous', event_ids: [],
+    },
+  };
+  const validSuccessor = {
+    last_memory_attempt: projectedAttempt('current', event),
+  };
+  const cases = [
+    {
+      name: 'target inexistente',
+      sessions: { current: validSuccessor },
+      reason: 'target must exist',
+      error: /sessão não encontrada/i,
+    },
+    {
+      name: 'sucessora inexistente',
+      sessions: { old: validTarget },
+      reason: 'successor must exist',
+      error: /sessão reconciliadora não encontrada/i,
+    },
+    {
+      name: 'reason ausente',
+      sessions: { old: validTarget, current: validSuccessor },
+      reason: undefined,
+      error: /reason é obrigatório/i,
+    },
+    {
+      name: 'sucessora sem event_ids',
+      sessions: {
+        old: validTarget,
+        current: {
+          last_memory_attempt: projectedAttempt('current', event, null, { event_ids: [] }),
+        },
+      },
+      reason: 'successor needs causal evidence',
+      error: /não possui event_ids/i,
+    },
+    {
+      name: 'sucessora referencia event_id ausente do ledger',
+      sessions: {
+        old: validTarget,
+        current: {
+          last_memory_attempt: projectedAttempt('current', event, null, { event_ids: ['mem-not-in-ledger'] }),
+        },
+      },
+      reason: 'successor evidence must exist in ledger',
+      error: /event_ids ausentes do ledger/i,
+    },
+  ];
+
+  const { reconcileMemory } = await import('../src/memory.mjs');
+  for (const scenario of cases) {
+    await t.test(scenario.name, () => {
+      const vault = fixture();
+      const brain = join(vault, '.brain');
+      try {
+        writeFileSync(join(brain, 'MEMORY_EVENTS.jsonl'), `${canonicalMemoryJson(event)}\n`);
+        writeFileSync(join(brain, 'MEMORY_CANDIDATES.jsonl'), 'stale projection sentinel\n');
+        writeFileSync(join(brain, 'SHARED_MEMORY.md'), '# SHARED byte sentinel\n');
+        writeFileSync(join(brain, 'SESSION_REGISTRY.json'), `${JSON.stringify({
+          version: 2,
+          sessions: scenario.sessions,
+        }, null, 2)}\n`);
+        writeFileSync(join(brain, 'SESSION_REGISTRY.json.reconcile-existing.bak'), 'existing backup sentinel\n');
+        const before = reconciliationArtifacts(vault);
+
+        assert.throws(() => reconcileMemory(vault, {
+          sessionId: 'old',
+          bySessionId: 'current',
+          reason: scenario.reason,
+          apply: true,
+        }), scenario.error);
+
+        assert.deepEqual(reconciliationArtifacts(vault), before);
+      } finally { rmSync(vault, { recursive: true, force: true }); }
+    });
+  }
+});
+
+test('[req:OP-10] memory repair estrutural não reescreve o registry', async () => {
+  const vault = fixture();
+  const brain = join(vault, '.brain');
+  writeFileSync(join(brain, 'MEMORY_EVENTS.jsonl'), '');
+  writeFileSync(join(brain, 'MEMORY_CANDIDATES.jsonl'), '');
+  writeFileSync(join(brain, 'SHARED_MEMORY.md'), renderSharedMemory());
+  const registryPath = join(brain, 'SESSION_REGISTRY.json');
+  writeFileSync(registryPath, '{\n  "version": 2,\n  "sessions": {}\n}\n');
+  const before = readFileSync(registryPath, 'utf8');
+  try {
+    const { repairMemory } = await import('../src/memory.mjs');
+    repairMemory(vault);
+    assert.equal(readFileSync(registryPath, 'utf8'), before);
+  } finally { rmSync(vault, { recursive: true, force: true }); }
+});
+
+test('[req:OP-10] memory repair migra checkpoint causal pré-upgrade para boundary físico com CAS', async () => {
+  const vault = fixture();
+  const brain = join(vault, '.brain');
+  const newer = {
+    ...memoryEvent('mem-pre-upgrade-newer', 'new epoch state', 1),
+    memory_key: 'handoff.newer',
+    activation_id: 'activation-epoch-2',
+    activation_epoch: 2,
+    source_turn_id: 'turn-epoch-2',
+    observed_at: '2026-07-26T12:02:00.000Z',
+  };
+  const olderLate = {
+    ...memoryEvent('mem-pre-upgrade-older-late', 'old epoch appended late', 1),
+    memory_key: 'handoff.older',
+    activation_id: 'activation-epoch-1',
+    activation_epoch: 1,
+    source_turn_id: 'turn-epoch-1',
+    observed_at: '2026-07-26T12:01:00.000Z',
+  };
+  const physicalLedger = [newer, olderLate];
+  const causal = reduceMemoryEvents(physicalLedger);
+  assert.equal(causal.eventCursor, newer.event_id);
+  const legacyCheckpoint = {
+    revision: causal.revision,
+    event_cursor: causal.eventCursor,
+    state_hash: causal.stateHash,
+  };
+  writeFileSync(join(brain, 'MEMORY_EVENTS.jsonl'), `${physicalLedger.map(canonicalMemoryJson).join('\n')}\n`);
+  writeFileSync(join(brain, 'MEMORY_CANDIDATES.jsonl'), '');
+  writeFileSync(join(brain, 'SHARED_MEMORY.md'), renderSharedMemory({
+    revision: causal.revision,
+    eventCursor: causal.eventCursor,
+    stateHash: causal.stateHash,
+    events: causal.activeEvents,
+    updatedAt: newer.observed_at,
+  }));
+  const legacyAttempt = projectedAttempt('current-session', newer, legacyCheckpoint);
+  const registryPath = join(brain, 'SESSION_REGISTRY.json');
+  writeFileSync(registryPath, `${JSON.stringify({ version: 2, sessions: {
+    'current-session': {
+      memory_checkpoint: legacyCheckpoint,
+      last_memory_attempt: legacyAttempt,
+    },
+  } }, null, 2)}\n`);
+  const ledgerBefore = readFileSync(join(brain, 'MEMORY_EVENTS.jsonl'));
+  const coreBefore = readFileSync(join(brain, 'CORE.md'));
+
+  try {
+    const beforeGate = spawnSync(process.execPath, [BIN, 'memory', 'status', '--gate', '--vault', vault], { encoding: 'utf8' });
+    assert.equal(beforeGate.status, 1, beforeGate.stderr || beforeGate.stdout);
+    assert.match(beforeGate.stdout, /stale|checkpoint|prefixo|cursor/i);
+
+    const { repairMemory } = await import('../src/memory.mjs');
+    const repaired = repairMemory(vault, { now: '2026-07-26T18:30:00.000Z' });
+    assert.equal(repaired.checkpointMigration.status, 'migrated');
+    assert.equal(repaired.checkpointMigration.migrated, 1);
+    assert.deepEqual(readFileSync(join(brain, 'MEMORY_EVENTS.jsonl')), ledgerBefore);
+    assert.deepEqual(readFileSync(join(brain, 'CORE.md')), coreBefore);
+
+    const expected = deriveMemoryProjection(vault, physicalLedger).checkpoint;
+    const migratedRegistry = JSON.parse(readFileSync(registryPath, 'utf8'));
+    const migrated = migratedRegistry.sessions['current-session'];
+    assert.deepEqual(migrated.last_memory_attempt.checkpoint, expected);
+    assert.deepEqual(migrated.memory_checkpoint, expected);
+    assert.equal(migrated.memory_reconciliations.at(-1).type, 'legacy_causal_checkpoint_migrated');
+    assert.deepEqual(migrated.memory_reconciliations.at(-1).original_checkpoint, legacyCheckpoint);
+    assert.match(migrated.memory_reconciliations.at(-1).causal_proof.expected_ledger_sha256, /^[a-f0-9]{64}$/);
+    assert.ok(existsSync(repaired.checkpointMigration.backupPath));
+
+    const afterGate = spawnSync(process.execPath, [BIN, 'memory', 'status', '--gate', '--vault', vault], { encoding: 'utf8' });
+    assert.equal(afterGate.status, 0, afterGate.stderr || afterGate.stdout);
+    assert.notEqual(JSON.parse(afterGate.stdout).status, 'blocked');
+
+    const registryAfterMigration = readFileSync(registryPath, 'utf8');
+    const retry = repairMemory(vault, { now: '2026-07-26T18:31:00.000Z' });
+    assert.equal(retry.checkpointMigration.status, 'unchanged');
+    assert.equal(readFileSync(registryPath, 'utf8'), registryAfterMigration);
+  } finally { rmSync(vault, { recursive: true, force: true }); }
+});
+
+test('[req:OP-10] ambiguous com event_ids falha antes de reprojetar ou criar backup', async () => {
+  const vault = fixture();
+  const brain = join(vault, '.brain');
+  const existingEvent = { ...memoryEvent('mem-existing', 'existing', 1), canonical_session_id: 'current' };
+  writeFileSync(join(brain, 'MEMORY_EVENTS.jsonl'), `${canonicalMemoryJson(existingEvent)}\n`);
+  writeFileSync(join(brain, 'MEMORY_CANDIDATES.jsonl'), 'stale\n');
+  writeFileSync(join(brain, 'SHARED_MEMORY.md'), renderSharedMemory());
+  const registryPath = join(brain, 'SESSION_REGISTRY.json');
+  writeFileSync(registryPath, `${JSON.stringify({ version: 2, sessions: {
+    old: { last_memory_attempt: { memory_mode: 'v2', state: 'skipped', disposition: 'ambiguous', event_ids: ['mem-existing'] } },
+    current: { last_memory_attempt: projectedAttempt('current', existingEvent, checkpoint(reduceMemoryEvents([existingEvent]))) },
+  } }, null, 2)}\n`);
+  const sharedBefore = readFileSync(join(brain, 'SHARED_MEMORY.md'), 'utf8');
+  try {
+    const { reconcileMemory } = await import('../src/memory.mjs');
+    assert.throws(() => reconcileMemory(vault, {
+      sessionId: 'old', bySessionId: 'current', reason: 'must fail', apply: true,
+    }), /event_ids/i);
+    assert.equal(readFileSync(join(brain, 'SHARED_MEMORY.md'), 'utf8'), sharedBefore);
+    assert.equal(readdirSync(brain).some((name) => name.includes('reconcile-') && name.endsWith('.bak')), false);
+  } finally { rmSync(vault, { recursive: true, force: true }); }
+});
+
+test('[req:OP-10] CAS impede superseder outro attempt ambíguo criado durante a reconciliação', async () => {
+  const vault = fixture();
+  const brain = join(vault, '.brain');
+  const event = { ...memoryEvent('mem-race', 'current', 1), canonical_session_id: 'current' };
+  const currentCheckpoint = checkpoint(reduceMemoryEvents([event]));
+  writeFileSync(join(brain, 'MEMORY_EVENTS.jsonl'), `${canonicalMemoryJson(event)}\n`);
+  writeFileSync(join(brain, 'MEMORY_CANDIDATES.jsonl'), '');
+  writeFileSync(join(brain, 'SHARED_MEMORY.md'), renderSharedMemory());
+  const registryPath = join(brain, 'SESSION_REGISTRY.json');
+  const firstAttempt = { memory_mode: 'v2', state: 'skipped', disposition: 'ambiguous', event_ids: [], turn_id: 'first' };
+  const successorAttempt = {
+    ...projectedAttempt('current', event, currentCheckpoint),
+  };
+  writeFileSync(registryPath, `${JSON.stringify({ version: 2, sessions: {
+    old: { last_memory_attempt: firstAttempt },
+    current: { memory_checkpoint: currentCheckpoint, last_memory_attempt: successorAttempt },
+  } }, null, 2)}\n`);
+  try {
+    const { reconcileMemory } = await import('../src/memory.mjs');
+    assert.throws(() => reconcileMemory(vault, {
+      sessionId: 'old',
+      bySessionId: 'current',
+      reason: 'race proof',
+      apply: true,
+      beforeRegistryMutation: () => {
+        const registry = JSON.parse(readFileSync(registryPath, 'utf8'));
+        registry.sessions.old.last_memory_attempt = { ...firstAttempt, turn_id: 'second' };
+        writeFileSync(registryPath, `${JSON.stringify(registry, null, 2)}\n`);
+      },
+    }), /mudou|CAS/i);
+    const after = JSON.parse(readFileSync(registryPath, 'utf8'));
+    assert.equal(after.sessions.old.last_memory_attempt.turn_id, 'second');
+    assert.equal(after.sessions.old.last_memory_attempt.disposition, 'ambiguous');
+    assert.equal(readdirSync(brain).some((name) => name.includes('reconcile-') && name.endsWith('.bak')), false);
+  } finally { rmSync(vault, { recursive: true, force: true }); }
+});
+
+test('[req:OP-10] memory status rejects an explicit missing vault instead of reporting healthy legacy mode', () => {
+  const missing = join(tmpdir(), `wk-missing-vault-${process.pid}-${Date.now()}`);
+  const result = spawnSync(process.execPath, [BIN, 'memory', 'status', '--gate', '--vault', missing], { encoding: 'utf8' });
+  assert.equal(result.status, 2);
+  assert.match(result.stderr, /not found/i);
+  assert.doesNotMatch(result.stdout, /legacy/);
+});
+
 test('wendkeep memory roteia migrate dry-run/apply e expõe o comando no help', () => {
   const vault = fixture();
   try {
@@ -197,5 +726,39 @@ test('wendkeep memory roteia migrate dry-run/apply e expõe o comando no help', 
     assert.match(apply.stdout, /migrated/);
     const help = spawnSync(process.execPath, [BIN, '--help'], { encoding: 'utf8' });
     assert.match(help.stdout, /wendkeep memory/);
+  } finally { rmSync(vault, { recursive: true, force: true }); }
+});
+
+test('[req:OP-10] CLI reconcile é dry-run por padrão e só aplica com autorização completa', () => {
+  const vault = fixture();
+  const brain = join(vault, '.brain');
+  const event = { ...memoryEvent('mem-cli-reconcile', 'continued', 1), canonical_session_id: 'current' };
+  const currentCheckpoint = checkpoint(reduceMemoryEvents([event]));
+  writeFileSync(join(brain, 'MEMORY_EVENTS.jsonl'), `${canonicalMemoryJson(event)}\n`);
+  writeFileSync(join(brain, 'MEMORY_CANDIDATES.jsonl'), '');
+  writeFileSync(join(brain, 'SHARED_MEMORY.md'), renderSharedMemory());
+  const registryPath = join(brain, 'SESSION_REGISTRY.json');
+  writeFileSync(registryPath, `${JSON.stringify({ version: 2, sessions: {
+    old: { last_memory_attempt: { memory_mode: 'v2', state: 'skipped', disposition: 'ambiguous', event_ids: [] } },
+    current: {
+      memory_checkpoint: currentCheckpoint,
+      last_memory_attempt: projectedAttempt('current', event, currentCheckpoint),
+    },
+  } }, null, 2)}\n`);
+  const before = readFileSync(registryPath, 'utf8');
+  const args = ['memory', 'reconcile', 'old', '--by-session', 'current', '--reason', 'continued delivery', '--vault', vault];
+  try {
+    const dry = spawnSync(process.execPath, [BIN, ...args], { encoding: 'utf8' });
+    assert.equal(dry.status, 0, dry.stderr);
+    assert.match(dry.stdout, /dry-run/);
+    assert.equal(readFileSync(registryPath, 'utf8'), before);
+
+    const apply = spawnSync(process.execPath, [BIN, ...args, '--apply'], { encoding: 'utf8' });
+    assert.equal(apply.status, 0, apply.stderr);
+    assert.match(apply.stdout, /reconciled/);
+    assert.equal(JSON.parse(readFileSync(registryPath, 'utf8')).sessions.old.last_memory_attempt.disposition, 'superseded');
+
+    const help = spawnSync(process.execPath, [BIN, '--help'], { encoding: 'utf8' });
+    assert.match(help.stdout, /reconcile <session>/);
   } finally { rmSync(vault, { recursive: true, force: true }); }
 });

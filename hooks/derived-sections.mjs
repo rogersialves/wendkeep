@@ -178,7 +178,7 @@ export function repairDerivedSections(vaultBase, { apply = false, lockTimeoutMs 
     const outcome = mutateSessionNote(
       abs,
       (original) => applyDerivedSections(original, mergedForNote(entry)),
-      lockTimeoutMs ? { timeoutMs: lockTimeoutMs } : {},
+      { ...(lockTimeoutMs ? { timeoutMs: lockTimeoutMs } : {}), vaultBase },
     );
     if (!outcome.written) { skipped.push({ file: rel, reason: `gravação não ocorreu (${outcome.reason})` }); continue; }
     repaired.push({ file: rel, missing });

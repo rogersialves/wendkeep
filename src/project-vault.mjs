@@ -13,6 +13,16 @@ export const PROJECT_CONFIG_FILE = '.wendkeep.json';
 export const PROJECT_MARKER_REL = '.brain/PROJECT.json';
 export const PROJECT_CONFIG_SCHEMA = 1;
 
+const PROJECT_VAULT_INTEGRITY_CODES = new Set([
+  'WENDKEEP_VAULT_CONFIG_INVALID',
+  'WENDKEEP_VAULT_MARKER_MISSING',
+  'WENDKEEP_VAULT_PROJECT_MISMATCH',
+]);
+
+export function isProjectVaultIntegrityError(error) {
+  return PROJECT_VAULT_INTEGRITY_CODES.has(error?.code);
+}
+
 function json(path) {
   try { return JSON.parse(readFileSync(path, 'utf8')); }
   catch (error) {
@@ -62,8 +72,23 @@ function inputStart(input = {}, fallback = '') {
     || process.cwd();
 }
 
+function bindingDiagnostic(error) {
+  return {
+    code: error?.code || 'WENDKEEP_VAULT_CONFIG_INVALID',
+    message: error?.message || 'Configuração WendKeep inválida.',
+  };
+}
+
 function vaultFromConfig(projectRoot, config) {
-  if (!config || config.schemaVersion !== PROJECT_CONFIG_SCHEMA || !config.projectId || !config.vault) {
+  const valid = config
+    && typeof config === 'object'
+    && !Array.isArray(config)
+    && config.schemaVersion === PROJECT_CONFIG_SCHEMA
+    && typeof config.projectId === 'string'
+    && config.projectId.trim()
+    && typeof config.vault === 'string'
+    && config.vault.trim();
+  if (!valid) {
     const error = new Error(
       `Configuração incompleta em "${join(projectRoot, PROJECT_CONFIG_FILE)}". `
       + 'Rode `wendkeep init --project <path> --vault <path>`.',
@@ -104,9 +129,14 @@ export function findLegacyProjectVault(start) {
           source: 'legacy-project-settings',
           configPath: settingsPath,
           projectId: '',
+          config: null,
         };
       }
-    } catch { /* init/doctor explicam JSON inválido; descoberta segue procurando */ }
+    } catch (error) {
+      const wrapped = new Error(`Configuração WendKeep legada inválida em "${settingsPath}": ${error.message}`);
+      wrapped.code = 'WENDKEEP_VAULT_CONFIG_INVALID';
+      throw wrapped;
+    }
   }
   return null;
 }
@@ -147,16 +177,30 @@ export function resolveProjectVault({
   const start = inputStart(input, startDir);
   const explicit = explicitVault || input?.obsidian_vault_path;
   if (explicit) {
+    let bindingError = null;
+    try { findProjectBinding(start); }
+    catch (error) {
+      if (error?.code !== 'WENDKEEP_VAULT_CONFIG_INVALID') throw error;
+      bindingError = bindingDiagnostic(error);
+    }
     return {
       base: isAbsolute(explicit) ? resolve(explicit) : resolve(startDirectory(start), explicit),
       source: explicitVault ? 'explicit' : 'payload',
       projectRoot: startDirectory(start),
       projectId: '',
       configPath: '',
+      config: null,
+      ...(bindingError ? { bindingError } : {}),
     };
   }
 
-  const binding = findProjectBinding(start);
+  let binding = null;
+  let bindingFailure = null;
+  try { binding = findProjectBinding(start); }
+  catch (error) {
+    if (error?.code !== 'WENDKEEP_VAULT_CONFIG_INVALID') throw error;
+    bindingFailure = error;
+  }
   if (binding) {
     const result = {
       base: binding.base,
@@ -164,6 +208,7 @@ export function resolveProjectVault({
       projectRoot: binding.projectRoot,
       projectId: binding.config.projectId,
       configPath: binding.configPath,
+      config: binding.config,
     };
     if (validateIdentity) validateMarker(result);
     return result;
@@ -171,8 +216,15 @@ export function resolveProjectVault({
 
   if (allowLegacySettings) {
     const legacy = findLegacyProjectVault(start);
-    if (legacy) return legacy;
+    if (legacy) {
+      return {
+        ...legacy,
+        ...(bindingFailure ? { bindingError: bindingDiagnostic(bindingFailure) } : {}),
+      };
+    }
   }
+
+  if (bindingFailure) throw bindingFailure;
 
   const error = new Error(
     `Nenhum vault WendKeep vinculado ao projeto em "${startDirectory(start)}". `
@@ -188,7 +240,11 @@ function portableVaultPath(projectRoot, vaultPath) {
   return vaultPath;
 }
 
-export function bindProjectVault({ projectRoot, vaultPath }) {
+function objectRecord(value) {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+}
+
+export function bindProjectVault({ projectRoot, vaultPath, configPatch = {} }) {
   const root = resolve(projectRoot);
   const base = isAbsolute(vaultPath) ? resolve(vaultPath) : resolve(root, vaultPath);
   const existing = readProjectBinding(root);
@@ -205,12 +261,23 @@ export function bindProjectVault({ projectRoot, vaultPath }) {
   }
 
   mkdirSync(join(base, '.brain'), { recursive: true });
+  const previousConfig = objectRecord(existing?.config);
+  const patch = objectRecord(configPatch);
   const config = {
+    ...previousConfig,
+    ...patch,
     schemaVersion: PROJECT_CONFIG_SCHEMA,
     projectId,
     vault: portableVaultPath(root, base),
   };
+  if (previousConfig.harness || patch.harness) {
+    config.harness = {
+      ...objectRecord(previousConfig.harness),
+      ...objectRecord(patch.harness),
+    };
+  }
   const marker = {
+    ...objectRecord(existingMarker?.marker),
     schemaVersion: PROJECT_CONFIG_SCHEMA,
     projectId,
     projectName: basename(root),
@@ -218,4 +285,42 @@ export function bindProjectVault({ projectRoot, vaultPath }) {
   atomicJson(join(base, ...PROJECT_MARKER_REL.split('/')), marker);
   atomicJson(join(root, PROJECT_CONFIG_FILE), config);
   return { base, projectRoot: root, projectId, config, marker };
+}
+
+export function updateProjectBinding(projectRoot, updater) {
+  const binding = readProjectBinding(projectRoot);
+  if (!binding) {
+    const error = new Error(
+      `Nenhum binding WendKeep em "${resolve(projectRoot)}". Rode \`wendkeep init\` primeiro.`,
+    );
+    error.code = 'WENDKEEP_VAULT_UNCONFIGURED';
+    throw error;
+  }
+  if (typeof updater !== 'function') {
+    throw new TypeError('updateProjectBinding exige uma função updater.');
+  }
+
+  const current = {
+    ...binding.config,
+    ...(binding.config.harness ? { harness: { ...objectRecord(binding.config.harness) } } : {}),
+  };
+  const candidate = updater(current);
+  if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) {
+    const error = new Error('Updater do binding WendKeep deve retornar um objeto de configuração.');
+    error.code = 'WENDKEEP_VAULT_CONFIG_INVALID';
+    throw error;
+  }
+
+  const config = {
+    ...candidate,
+    schemaVersion: PROJECT_CONFIG_SCHEMA,
+    projectId: binding.config.projectId,
+    vault: binding.config.vault,
+  };
+  atomicJson(binding.configPath, config);
+  return {
+    ...binding,
+    config,
+    base: vaultFromConfig(binding.projectRoot, config),
+  };
 }

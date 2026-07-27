@@ -5,7 +5,8 @@
 ## Objetivo
 
 Entender como os hooks capturam sessões ao vivo, como activation/turno preservam causalidade no
-registry e quando usar a importação retroativa.
+registry e quando usar a importação retroativa. No perfil `OFF`, o Vault continua ativo: hooks de
+sessão, identidade, memória, custos e persistência pertencem ao Keep Core, não ao Wend Runtime.
 
 ## Quando usar
 
@@ -45,6 +46,8 @@ npx wendkeep import [opções]
 - `Stop` aceita somente o turno comprovado pelo transcript e pela activation ativa compatível.
   Duplicatas são no-op; Stops stale/superseded não publicam memória nem sobrescrevem o checkpoint
   de um epoch mais novo.
+- Ao compactar conversas em `## Iterações`, o hook escapa delimitadores de código cortados pelo
+  limite de tamanho; backticks inline ou fences nunca ficam abertos para engolir a linha seguinte.
 - `session list` lê `SESSION_REGISTRY`; `show` exibe uma sessão e `use` muda apenas o foco humano
   em `CURRENT_SESSION.md`.
 - `import --source all|claude|codex`, `--since`, `--limit`, `--from` e `--codex-from` limitam escopo.
@@ -66,7 +69,8 @@ npx wendkeep import --source codex --since 2026-07-01 --dry-run --json
 Cada sessão canônica aponta para provider, transcript, arquivo de nota e custos correspondentes.
 O registry mantém um epoch de `SessionStart` por activation e o turno nativo mais recente; vários
 `Stop` podem confirmar turnos do mesmo epoch sem fechá-lo. Importações repetidas do mesmo
-`session_id` são deduplicadas; o foco humano não encerra nem altera a identidade dos hooks.
+`session_id` são deduplicadas; o foco humano não encerra nem altera a identidade dos hooks. Cada
+iteração automática permanece Markdown válido mesmo quando uma fala precisa ser truncada.
 
 ## Erros comuns e diagnóstico
 
@@ -81,5 +85,5 @@ O registry mantém um epoch de `SessionStart` por activation e o turno nativo ma
 
 ## Próximos passos
 
-Leia [importação retroativa](retroactive-import.md),
+Leia [Perfis de Operação](operating-profiles.md), [importação retroativa](retroactive-import.md),
 [custos e observabilidade](costs-and-observability.md) e [notas](notes-and-knowledge.md).

@@ -148,7 +148,8 @@ export function runChange(argv) {
     process.stdout.write(`specs: ${specs.join(', ') || '(nenhuma)'}\n`);
     process.stdout.write(`tarefas: ${done} done / ${tasks.length - done} open\n`);
     for (const t of tasks) {
-      process.stdout.write(`  [${t.done ? 'x' : ' '}] ${t.id} ${t.text}${(t.reqs ?? []).map((r) => ` [req:${r}]`).join('')}${t.sensor ? ` [sensor:${t.sensor}]` : ''}\n`);
+      const sensorIds = t.sensors ?? (t.sensor ? [t.sensor] : []);
+      process.stdout.write(`  [${t.done ? 'x' : ' '}] ${t.id} ${t.text}${(t.reqs ?? []).map((r) => ` [req:${r}]`).join('')}${sensorIds.map((id) => ` [sensor:${id}]`).join('')}\n`);
     }
     let evidence = null;
     try { evidence = JSON.parse(readFileSync(join(dir, 'evidencia.json'), 'utf8')); } catch { /* sem evidência */ }

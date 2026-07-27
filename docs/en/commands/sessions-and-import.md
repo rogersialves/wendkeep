@@ -5,7 +5,8 @@
 ## Purpose
 
 Understand how hooks capture live sessions, how activation/turn state preserves causality in the
-registry, and when to use retroactive import.
+registry, and when to use retroactive import. Under `OFF`, the Vault remains active: session,
+identity, memory, cost, and persistence hooks belong to Keep Core, not Wend Runtime.
 
 ## When to use
 
@@ -45,6 +46,8 @@ npx wendkeep import [options]
 - `Stop` accepts only a transcript-proven turn from the compatible active activation. Duplicates
   are no-ops; stale/superseded Stops neither publish memory nor overwrite a newer epoch's
   checkpoint.
+- When compacting conversations into `## Iterações`, the hook escapes code delimiters cut by the
+  size limit; inline backticks and fences never remain open and consume the following line.
 - `session list` reads `SESSION_REGISTRY`; `show` displays one session and `use` only changes human
   focus in `CURRENT_SESSION.md`.
 - `import --source all|claude|codex`, `--since`, `--limit`, `--from`, and `--codex-from` bound scope.
@@ -66,7 +69,8 @@ npx wendkeep import --source codex --since 2026-07-01 --dry-run --json
 Each canonical session points to the matching provider, transcript, note file, and costs. The
 registry keeps one `SessionStart` epoch per activation plus the latest native turn; multiple
 `Stop` events may acknowledge turns in that epoch without closing it. Repeated imports of the
-same `session_id` deduplicate; human focus does not close or re-identify live hooks.
+same `session_id` deduplicate; human focus does not close or re-identify live hooks. Every
+automatic iteration remains valid Markdown even when a message must be truncated.
 
 ## Common errors and diagnosis
 
@@ -81,5 +85,5 @@ same `session_id` deduplicate; human focus does not close or re-identify live ho
 
 ## Next steps
 
-Read [retroactive import](retroactive-import.md), [costs and observability](costs-and-observability.md),
-and [notes](notes-and-knowledge.md).
+Read [Operating profiles](operating-profiles.md), [retroactive import](retroactive-import.md),
+[costs and observability](costs-and-observability.md), and [notes](notes-and-knowledge.md).

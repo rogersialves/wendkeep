@@ -156,6 +156,9 @@ test('guardDecision R1: deny em archive --force; escape só via env do processo'
       'wk change archive --force',
       'npx wendkeep change archive x --force',
       'WENDKEEP_ALLOW_FORCE=1 wendkeep change archive --force', // env inline no TEXTO não libera
+      'WENDKEEP change archive x --force',
+      'node node_modules/wendkeep/bin/wendkeep.mjs change archive x --force',
+      'node_modules/.bin/wendkeep.cmd change archive x --force',
     ]) {
       const d = guardDecision(cmd, { vaultBase: vault, env: {} });
       assert.equal(d?.permissionDecision, 'deny', cmd);
@@ -177,6 +180,15 @@ test('guardDecision R2: ask em git commit com change ativa + redCritical ou --no
     const nv = guardDecision('git add . && git commit --no-verify -m x', { vaultBase: vault, env: {} });
     assert.equal(nv?.permissionDecision, 'ask');
     assert.match(nv.permissionDecisionReason, /no-verify/);
+    for (const command of [
+      'Git commit --no-verify -m x',
+      '"C:/Program Files/Git/bin/git.exe" commit --no-verify -m x',
+      '& git commit --no-verify -m x',
+    ]) {
+      const decision = guardDecision(command, { vaultBase: vault, env: {} });
+      assert.equal(decision?.permissionDecision, 'ask', command);
+      assert.match(decision.permissionDecisionReason, /no-verify/);
+    }
     // sensor crítico vermelho → ask
     writeFileSync(join(dir, 'evidencia.json'), JSON.stringify([{ id: 's', status: 'red', severity: 'critical' }]));
     const red = guardDecision('git commit -m "y"', { vaultBase: vault, env: {} });

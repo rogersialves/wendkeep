@@ -8,7 +8,9 @@ import {
   PROJECT_MARKER_REL,
   bindProjectVault,
   resolveProjectVault,
+  updateProjectBinding,
 } from '../src/project-vault.mjs';
+import { resolveOperatingProfile, setOperatingProfile } from '../src/operating-profile.mjs';
 
 function tempProject(name = 'project') {
   const parent = mkdtempSync(join(tmpdir(), 'wk-project-vault-'));
@@ -63,6 +65,45 @@ test('legacy Claude project setting is discovered by Codex without a global env'
     assert.equal(result.base, resolve(vault));
     assert.equal(result.source, 'legacy-project-settings');
     assert.equal(result.projectRoot, resolve(project));
+  } finally { rmSync(parent, { recursive: true, force: true }); }
+});
+
+test('[req:OP-2] legacy setting corrompido no projeto mais próximo não herda Vault do pai', () => {
+  const root = mkdtempSync(join(tmpdir(), 'wk-project-vault-nested-'));
+  const parentProject = join(root, 'parent');
+  const childProject = join(parentProject, 'packages', 'child');
+  const parentVault = join(parentProject, '.vault');
+  mkdirSync(join(parentProject, '.claude'), { recursive: true });
+  mkdirSync(join(childProject, '.claude'), { recursive: true });
+  writeFileSync(join(parentProject, '.claude', 'settings.json'), JSON.stringify({
+    env: { OBSIDIAN_VAULT_PATH: parentVault },
+  }));
+  const childSettings = join(childProject, '.claude', 'settings.json');
+  writeFileSync(childSettings, '{ invalid json');
+  try {
+    assert.throws(
+      () => resolveProjectVault({ input: { cwd: childProject } }),
+      (error) => error?.code === 'WENDKEEP_VAULT_CONFIG_INVALID'
+        && error.message.includes(childSettings),
+    );
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('[req:OP-2] binding JSON estruturalmente inválido vira diagnóstico canônico sob Vault explícito', () => {
+  const { parent, project, vault } = tempProject('typed-corruption');
+  writeFileSync(join(project, PROJECT_CONFIG_FILE), `${JSON.stringify({
+    schemaVersion: 1,
+    projectId: 'typed-corruption',
+    vault: { unexpected: true },
+  }, null, 2)}\n`);
+  try {
+    assert.throws(
+      () => resolveProjectVault({ input: { cwd: project } }),
+      (error) => error?.code === 'WENDKEEP_VAULT_CONFIG_INVALID',
+    );
+    const explicit = resolveProjectVault({ input: { cwd: project, obsidian_vault_path: vault } });
+    assert.equal(explicit.base, resolve(vault));
+    assert.equal(explicit.bindingError?.code, 'WENDKEEP_VAULT_CONFIG_INVALID');
   } finally { rmSync(parent, { recursive: true, force: true }); }
 });
 
@@ -123,4 +164,88 @@ test('binding stores an external vault as an absolute path', () => {
     rmSync(project.parent, { recursive: true, force: true });
     rmSync(external, { recursive: true, force: true });
   }
+});
+
+test('[req:OP-2] [req:OP-8] binding v1 sem harness.profile continua válido e resolve GOVERN', () => {
+  const { parent, project, vault } = tempProject('legacy-profile');
+  try {
+    bindProjectVault({ projectRoot: project, vaultPath: vault });
+    const result = resolveProjectVault({ input: { cwd: project } });
+    assert.equal(result.config.schemaVersion, 1);
+    assert.equal(resolveOperatingProfile(result.config).profile, 'GOVERN');
+    assert.equal(resolveOperatingProfile(result.config).source, 'default');
+  } finally { rmSync(parent, { recursive: true, force: true }); }
+});
+
+test('[req:OP-2] [req:OP-8] rebind preserva perfil e campos desconhecidos com merge de harness', () => {
+  const { parent, project, vault } = tempProject('profile-preserve');
+  try {
+    const first = bindProjectVault({
+      projectRoot: project,
+      vaultPath: vault,
+      configPatch: {
+        futureTopLevel: { enabled: true },
+        harness: { profile: 'FLOW', futureHarnessOption: 7 },
+      },
+    });
+    const second = bindProjectVault({
+      projectRoot: project,
+      vaultPath: vault,
+      configPatch: { harness: { anotherHarnessOption: 'kept' } },
+    });
+    const config = JSON.parse(readFileSync(join(project, PROJECT_CONFIG_FILE), 'utf8'));
+
+    assert.equal(second.projectId, first.projectId);
+    assert.equal(config.schemaVersion, 1);
+    assert.equal(config.harness.profile, 'FLOW');
+    assert.equal(config.harness.futureHarnessOption, 7);
+    assert.equal(config.harness.anotherHarnessOption, 'kept');
+    assert.deepEqual(config.futureTopLevel, { enabled: true });
+    assert.equal(resolveOperatingProfile(second.config).profile, 'FLOW');
+  } finally { rmSync(parent, { recursive: true, force: true }); }
+});
+
+test('[req:OP-2] configuração inválida preserva o Vault e converge para GOVERN em leitura', () => {
+  const { parent, project, vault } = tempProject('invalid-profile');
+  try {
+    bindProjectVault({
+      projectRoot: project,
+      vaultPath: vault,
+      configPatch: { harness: { profile: 'TURBO' } },
+    });
+    const result = resolveProjectVault({ input: { cwd: project } });
+    assert.equal(result.base, resolve(vault));
+    assert.deepEqual(resolveOperatingProfile(result.config), {
+      profile: 'GOVERN',
+      source: 'default-invalid',
+      valid: false,
+      configured: true,
+      raw: 'TURBO',
+    });
+  } finally { rmSync(parent, { recursive: true, force: true }); }
+});
+
+test('[req:OP-2] updateProjectBinding persiste setter estrito sem alterar identidade ou campos alheios', () => {
+  const { parent, project, vault } = tempProject('profile-update');
+  try {
+    const first = bindProjectVault({
+      projectRoot: project,
+      vaultPath: vault,
+      configPatch: { futureTopLevel: 42, harness: { futureHarnessOption: true } },
+    });
+    const beforeInvalid = readFileSync(join(project, PROJECT_CONFIG_FILE), 'utf8');
+    assert.throws(
+      () => updateProjectBinding(project, (config) => setOperatingProfile(config, 'invalid')),
+      (error) => error?.code === 'WENDKEEP_OPERATING_PROFILE_INVALID',
+    );
+    assert.equal(readFileSync(join(project, PROJECT_CONFIG_FILE), 'utf8'), beforeInvalid, 'falha estrita não muta parcialmente');
+
+    const updated = updateProjectBinding(project, (config) => setOperatingProfile(config, 'assure'));
+    assert.equal(updated.config.harness.profile, 'ASSURE');
+    assert.equal(updated.config.futureTopLevel, 42);
+    assert.equal(updated.config.harness.futureHarnessOption, true);
+    assert.equal(updated.config.projectId, first.projectId);
+    assert.equal(updated.config.vault, '.vault');
+    assert.equal(resolveProjectVault({ input: { cwd: project } }).projectId, first.projectId);
+  } finally { rmSync(parent, { recursive: true, force: true }); }
 });

@@ -95,8 +95,13 @@ test('runSensors: type mutation attaches survivors from the report', () => {
 
 test('requiredSensors: distinct sensor ids from tasks', () => {
   assert.deepEqual(
-    requiredSensors([{ sensor: 'tests' }, { sensor: 'tests' }, { sensor: 'lint' }, {}]),
-    ['tests', 'lint'],
+    requiredSensors([
+      { sensor: 'tests', sensors: ['tests', 'memory-health'] },
+      { sensor: 'tests' },
+      { sensor: 'lint', sensors: ['lint', 'memory-health'] },
+      {},
+    ]),
+    ['tests', 'memory-health', 'lint'],
   );
 });
 
@@ -122,6 +127,16 @@ test('runSensors: green/red by exit code; carries severity (undefined sensor = c
   assert.equal(sev.bad, 'warning');
   assert.equal(sev.ghost, 'critical'); // undefined sensor defaults to critical
   assert.equal(ev[0].ts, '2026-07-05T00:00:00Z');
+});
+
+test('[req:OP-10] runSensors forwards the selected Vault environment to the sensor process', () => {
+  let options;
+  const env = { PATH: 'synthetic', OBSIDIAN_VAULT_PATH: 'C:\\synthetic-vault' };
+  const spawn = (_command, _args, received) => { options = received; return { status: 0 }; };
+  const evidence = runSensors([{ id: 'memory', command: 'memory-check' }], ['memory'], { spawn, env });
+  assert.equal(evidence[0].status, 'green');
+  assert.equal(options.env, env);
+  assert.equal(options.env.OBSIDIAN_VAULT_PATH, 'C:\\synthetic-vault');
 });
 
 test('evaluateGate: ok when all required green; failing lists missing/red', () => {

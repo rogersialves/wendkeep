@@ -1,9 +1,12 @@
 #!/usr/bin/env node
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'fs';
-import { releaseLockDir } from './session-note-io.mjs';
+import { LOCK_BUSY, mutateSessionNote, withPathLock } from './session-note-io.mjs';
 import { basename, dirname, join, relative } from 'path';
 import { getLocale } from './locale.mjs';
 import { resolveProjectVault } from '../src/project-vault.mjs';
+import {
+  assertVaultPathSafe, mkdirVaultPath, writeVaultFileAtomic,
+} from './vault-path-safety.mjs';
 
 // Deprecated export kept for consumers that imported it before 0.39.0. Automatic
 // hooks never use this fallback: an unbound project fails closed.
@@ -212,9 +215,12 @@ export function yamlQuote(value = '') {
 
 export function readControl(vaultBase) {
   const path = controlPath(vaultBase);
-  if (!existsSync(path)) return {};
+  const checked = assertVaultPathSafe(vaultBase, path, {
+    expectedType: 'file', label: 'CURRENT_SESSION.md',
+  });
+  if (!checked.exists) return {};
 
-  const content = readFileSync(path, 'utf-8');
+  const content = readFileSync(checked.target, 'utf-8');
   const match = content.match(/^---\n([\s\S]*?)\n---/);
   if (!match) return {};
 
@@ -228,7 +234,10 @@ export function readControl(vaultBase) {
 
 export function writeControl(vaultBase, data) {
   const path = controlPath(vaultBase);
-  ensureDir(dirname(path));
+  mkdirVaultPath(vaultBase, dirname(path), { label: 'diretório do CURRENT_SESSION' });
+  assertVaultPathSafe(vaultBase, path, {
+    expectedType: 'file', label: 'CURRENT_SESSION.md',
+  });
 
   const status = data.status || 'inactive';
   const sessionFile = data.session_file || '';
@@ -275,15 +284,20 @@ ${activeRows}
 Regra crítica: sempre anexar conteúdo à sessão ativa. Nunca sobrescrever o histórico de iterações.
 `;
 
-  writeFileSync(path, content, 'utf-8');
+  writeVaultFileAtomic(vaultBase, path, content, 'utf-8', {
+    label: 'CURRENT_SESSION.md',
+  });
 }
 
 export function readSessionRegistry(vaultBase) {
   const path = registryPath(vaultBase);
-  if (!existsSync(path)) return { version: 2, sessions: {} };
+  const checked = assertVaultPathSafe(vaultBase, path, {
+    expectedType: 'file', label: 'SESSION_REGISTRY.json',
+  });
+  if (!checked.exists) return { version: 2, sessions: {} };
 
   try {
-    const parsed = JSON.parse(readFileSync(path, 'utf-8'));
+    const parsed = JSON.parse(readFileSync(checked.target, 'utf-8'));
     return {
       version: Math.max(2, parsed.version || 1),
       sessions: parsed.sessions && typeof parsed.sessions === 'object' ? parsed.sessions : {},
@@ -295,48 +309,18 @@ export function readSessionRegistry(vaultBase) {
 
 export function writeSessionRegistry(vaultBase, registry) {
   const path = registryPath(vaultBase);
-  ensureDir(dirname(path));
+  mkdirVaultPath(vaultBase, dirname(path), { label: 'diretório do SESSION_REGISTRY' });
   // Escrita atômica: grava em tmp e renomeia (rename é atômico no mesmo volume),
   // evitando registry truncado/corrompido quando dois hooks gravam ao mesmo tempo.
-  const tmp = `${path}.${process.pid}.${Date.now()}.tmp`;
-  writeFileSync(tmp, `${JSON.stringify(registry, null, 2)}\n`, 'utf-8');
-  renameSync(tmp, path);
-}
-
-function registryLockPath(vaultBase) {
-  return `${registryPath(vaultBase)}.lock`;
-}
-
-function waitBriefly(ms) {
-  const signal = new Int32Array(new SharedArrayBuffer(4));
-  Atomics.wait(signal, 0, 0, ms);
+  writeVaultFileAtomic(vaultBase, path, `${JSON.stringify(registry, null, 2)}\n`, 'utf-8', {
+    label: 'SESSION_REGISTRY.json',
+  });
 }
 
 export function mutateSessionRegistry(vaultBase, mutator, { timeoutMs = 2000 } = {}) {
-  const lock = registryLockPath(vaultBase);
-  ensureDir(dirname(lock));
-  const deadline = Date.now() + timeoutMs;
-  while (true) {
-    try {
-      mkdirSync(lock);
-      break;
-    } catch (error) {
-      if (error?.code === 'EEXIST') {
-        try {
-          if (Date.now() - statSync(lock).mtimeMs > 10_000) {
-            releaseLockDir(lock);
-            continue;
-          }
-        } catch { /* outro processo pode ter liberado o lock */ }
-      }
-      if (error?.code !== 'EEXIST' || Date.now() >= deadline) {
-        throw new Error(`SESSION_REGISTRY lock indisponível: ${error.message}`);
-      }
-      waitBriefly(10);
-    }
-  }
-
-  try {
+  const path = registryPath(vaultBase);
+  mkdirVaultPath(vaultBase, dirname(path), { label: 'diretório do SESSION_REGISTRY' });
+  const outcome = withPathLock(path, () => {
     const registry = readSessionRegistry(vaultBase);
     const before = JSON.stringify(registry);
     registry.version = 2;
@@ -345,11 +329,11 @@ export function mutateSessionRegistry(vaultBase, mutator, { timeoutMs = 2000 } =
       writeSessionRegistry(vaultBase, registry);
     }
     return result;
-  } finally {
-    // rmSync recursivo não remove diretório em caminho não-ASCII no Windows — ver
-    // releaseLockDir. Vault sob pasta acentuada travaria o registry após a 1ª mutação.
-    releaseLockDir(lock);
+  }, { timeoutMs, vaultBase });
+  if (outcome === LOCK_BUSY) {
+    throw new Error('SESSION_REGISTRY lock indisponível: lock ocupado até o timeout.');
   }
+  return outcome;
 }
 
 function meaningfulPatch(patch = {}) {
@@ -756,13 +740,13 @@ export function sweepStaleSessionsFile(vaultBase, now = new Date(), maxIdleMs = 
 // já fechada com o mesmo `endedAt`). Devolve true se gravou.
 export function closeSessionNoteFile(vaultBase, sessionFileRel, endedAt) {
   if (!sessionFileRel) return false;
-  const path = join(vaultBase, sessionFileRel);
-  if (!existsSync(path)) return false;
-  const content = readFileSync(path, 'utf-8');
-  const next = closeSessionNote(content, endedAt);
-  if (next === content) return false;
-  writeFileSync(path, next, 'utf-8');
-  return true;
+  const checked = assertVaultPathSafe(vaultBase, join(vaultBase, sessionFileRel), {
+    expectedType: 'file', label: 'nota de sessão encerrada',
+  });
+  if (!checked.exists) return false;
+  return mutateSessionNote(checked.target, (content) => closeSessionNote(content, endedAt), {
+    vaultBase,
+  }).written;
 }
 
 // Marca de sessão ainda aberta no corpo da nota (template do hook de início).

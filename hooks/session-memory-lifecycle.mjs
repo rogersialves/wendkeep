@@ -246,11 +246,16 @@ export function projectStopMemoryAttempt(vaultBase, attempt, overrides = {}) {
       });
     }
     return outcome(attempt, 'projected', {
-      checkpoint: {
-        revision: projection.revision,
-        event_cursor: projection.eventCursor,
-        state_hash: projection.stateHash,
-      },
+      checkpoint: projection.checkpoint && typeof projection.checkpoint === 'object'
+        ? { ...projection.checkpoint }
+        : {
+          revision: projection.revision,
+          event_cursor: projection.ledgerCursor || projection.eventCursor,
+          state_hash: projection.stateHash,
+          ...(projection.ledgerCursor && projection.eventCursor !== projection.ledgerCursor
+            ? { causal_event_cursor: projection.eventCursor }
+            : {}),
+        },
     });
   } catch (error) {
     return outcome(attempt, 'degraded', {

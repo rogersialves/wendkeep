@@ -214,7 +214,7 @@ function maybeRetitleSession({ vaultBase, relPath, startedAt, input }) {
   const sessionPath = join(vaultBase, nextRelPath);
   const outcome = mutateSessionNote(sessionPath, (content) => (
     updateSessionDescription(content, { relPath: nextRelPath, summary, startedAt })
-  ));
+  ), { vaultBase });
 
   return { relPath: nextRelPath, summary, changed: nextRelPath !== relPath || outcome.written };
 }
@@ -226,8 +226,10 @@ function stripClosingSection(content) {
   return `${content.slice(0, index).trimEnd()}\n`;
 }
 
-function reopenSessionFile(sessionPath) {
-  mutateSessionNote(sessionPath, (content) => stripClosingSection(updateSessionFrontmatter(content)));
+function reopenSessionFile(vaultBase, sessionPath) {
+  mutateSessionNote(sessionPath, (content) => stripClosingSection(updateSessionFrontmatter(content)), {
+    vaultBase,
+  });
 }
 
 function findSessionForInput(vaultBase, input, control) {
@@ -260,7 +262,7 @@ function activateExistingSession({ vaultBase, relPath, startedAt, sessionId, inp
   const sessionPath = join(vaultBase, relPath);
   if (!existsSync(sessionPath)) return false;
 
-  reopenSessionFile(sessionPath);
+  reopenSessionFile(vaultBase, sessionPath);
   const nextStartedAt = startedAt || formatLocalIso(now);
   writeControl(vaultBase, {
     status: 'active',

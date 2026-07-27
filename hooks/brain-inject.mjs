@@ -2,10 +2,10 @@
 // Injeção da camada quente no SessionStart (Claude/Codex/Copilot): CORE curado +
 // SHARED operacional no v2; DIGEST fica só no fallback legado/recall. Nunca derruba o hook.
 // Uso (hook): node .agent/hooks/brain-inject.mjs   (input JSON via stdin)
-import { existsSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { getVaultBase, readHookInput, writeHookOutput } from './obsidian-common.mjs';
+import { readHookInput, writeHookOutput } from './obsidian-common.mjs';
 import { brainDir } from './brain-core.mjs';
 import { buildActiveChangeInjection, changeCtxState, writeSentinel } from './change-core.mjs';
 import { buildLessonsInjection } from './lessons-core.mjs';
@@ -13,6 +13,12 @@ import { getLocale } from './locale.mjs';
 import { resolveSessionEntry } from './session-identity.mjs';
 import { sanitizeMemoryText, validateSharedMemory } from './memory-schema.mjs';
 import { detectMemoryMode } from './memory-mode.mjs';
+import {
+  hookProfilePolicy,
+  profileSentinelId,
+  resolveHookOperatingProfile,
+} from './operating-profile-runtime.mjs';
+import { assertVaultPathSafe } from './vault-path-safety.mjs';
 import { validateCore } from '../src/validate-core.mjs';
 
 // The process ROUTER — the enforcement layer. The wk-* skills are passive files; without a
@@ -53,9 +59,27 @@ const INJECTION_LIMITS = Object.freeze({
   recallBytes: 512,
 });
 
-function readMemoryFile(dir, name) {
-  try { return readFileSync(join(dir, name), 'utf8').replace(/\r\n/g, '\n').trim(); }
-  catch { return ''; }
+function aliasBoundaryError(error) {
+  return error?.code === 'VAULT_PATH_UNSAFE'
+    && /link simbólico|junction|reparse|hardlink|nlink|redirecion|escapa logicamente/i
+      .test(String(error?.message || error));
+}
+
+function readMemoryFile(vaultBase, name) {
+  const path = join(brainDir(vaultBase), name);
+  const label = `camada de memória ${name}`;
+  try {
+    let checked = assertVaultPathSafe(vaultBase, path, { expectedType: 'file', label });
+    if (!checked.exists) return '';
+    checked = assertVaultPathSafe(vaultBase, checked.target, {
+      allowMissing: false, expectedType: 'file', label,
+    });
+    return readFileSync(checked.target, 'utf8').replace(/\r\n/g, '\n').trim();
+  }
+  catch (error) {
+    if (aliasBoundaryError(error)) throw error;
+    return '';
+  }
 }
 
 function byteLength(value) {
@@ -76,6 +100,17 @@ function safeError(layer, reasons) {
   const max = 260;
   const visible = detail.length <= max ? detail : `${detail.slice(0, max - 20)} … [erro resumido]`;
   return `<wk_memory_error layer="${layer}" repair="wendkeep memory status --gate">${visible}</wk_memory_error>`;
+}
+
+export function profileRuntimeError(diagnostic) {
+  if (!diagnostic) return '';
+  const code = diagnostic.code || 'WENDKEEP_PROFILE_RESOLUTION_ERROR';
+  const detail = sanitizeMemoryText(diagnostic.message || String(diagnostic))
+    .replace(/\s+/g, ' ')
+    .trim();
+  const max = 320;
+  const visible = detail.length <= max ? detail : `${detail.slice(0, max - 20)} … [erro resumido]`;
+  return `<wk_profile_error code="${xmlAttr(code)}" fallback="GOVERN" repair="wendkeep doctor">${visible}</wk_profile_error>`;
 }
 
 function validateCoreLayer(raw) {
@@ -105,9 +140,9 @@ function validateSharedLayer(raw) {
     : { ok: false, rendered: safeError('shared', validation.errors), metadata: validation.metadata };
 }
 
-function buildV2Memory(dir) {
-  const core = validateCoreLayer(readMemoryFile(dir, 'CORE.md'));
-  const shared = validateSharedLayer(readMemoryFile(dir, 'SHARED_MEMORY.md'));
+function buildV2Memory(vaultBase) {
+  const core = validateCoreLayer(readMemoryFile(vaultBase, 'CORE.md'));
+  const shared = validateSharedLayer(readMemoryFile(vaultBase, 'SHARED_MEMORY.md'));
   const revision = shared.metadata?.revision ?? 'unknown';
   const stateHash = shared.metadata?.state_hash ?? 'unknown';
   const attention = [core, shared].every((layer) => layer.ok)
@@ -156,10 +191,10 @@ function validateLegacyLayer(raw, layer, { maxLines, maxBytes }) {
   return errors.length ? safeError(layer.toLowerCase(), errors) : sanitized;
 }
 
-function buildLegacyMemory(dir) {
-  const coreRaw = readMemoryFile(dir, 'CORE.md');
+function buildLegacyMemory(vaultBase) {
+  const coreRaw = readMemoryFile(vaultBase, 'CORE.md');
   const coreValidation = coreRaw ? validateCoreLayer(coreRaw) : { ok: true, rendered: '' };
-  const digest = validateLegacyLayer(readMemoryFile(dir, 'DIGEST.md'), 'DIGEST', { maxLines: 15, maxBytes: 4096 });
+  const digest = validateLegacyLayer(readMemoryFile(vaultBase, 'DIGEST.md'), 'DIGEST', { maxLines: 15, maxBytes: 4096 });
   const pointer = 'Memória profunda sob demanda: /brain-recall <tópico> (índice .brain/index.jsonl).';
   return [
     '<brain_memory>',
@@ -185,24 +220,34 @@ function budgetNotice(priority, layer, message) {
   return `<wk_budget_notice priority="${priority}" layer="${layer}">${message}</wk_budget_notice>`;
 }
 
-export function buildInjection(vaultBase, input = {}) {
-  const dir = brainDir(vaultBase);
-  const brain = detectMemoryMode(vaultBase).mode === 'v2' ? buildV2Memory(dir) : buildLegacyMemory(dir);
-  const router = processRouter(getLocale(vaultBase).id);
+export function buildInjection(vaultBase, input = {}, { profile = 'GOVERN', bindingError = null } = {}) {
+  const brain = detectMemoryMode(vaultBase).mode === 'v2'
+    ? buildV2Memory(vaultBase)
+    : buildLegacyMemory(vaultBase);
+  const policy = hookProfilePolicy(profile);
+  const lessons = buildLessonsInjection(vaultBase, { maxLineChars: INJECTION_LIMITS.lineChars });
+  const profileNotice = profileRuntimeError(bindingError);
+
+  // OFF keeps only the persistent project memory layers. No process/change/gate state crosses
+  // the vault -> harness boundary in this profile.
+  if (!policy.harness) return joinInjection([brain, profileNotice, lessons]);
+
+  // FLOW executes and validates without demanding a change. Explicitly opened changes remain
+  // visible below, but the standing change router would contradict that contract.
+  const router = policy.requiresChange ? processRouter(getLocale(vaultBase).id) : '';
   const { identity, entry } = resolveSessionEntry(vaultBase, input);
   const focus = identity.state === 'resolved' && entry?.change_slug
     ? `<session_change>${boundAncillaryText(`Change vinculada a esta sessão: ${entry.change_slug}. Este vínculo prevalece para writes automáticos; todas as pendências continuam visíveis acima.`, '<session_change></session_change>'.length)}</session_change>`
     : '';
   const allChanges = buildActiveChangeInjection(vaultBase, { maxLineChars: INJECTION_LIMITS.lineChars });
-  const lessons = buildLessonsInjection(vaultBase, { maxLineChars: INJECTION_LIMITS.lineChars });
 
   // Global priority is deterministic: memory/router/focus, then changes, then lessons.
-  let output = joinInjection([brain, router, focus, allChanges, lessons]);
+  let output = joinInjection([brain, profileNotice, router, focus, allChanges, lessons]);
   if (byteLength(output) <= INJECTION_LIMITS.totalBytes) return output;
 
   // First pressure step: lessons are fully removable and remain available in the vault.
   const lessonsEvicted = budgetNotice(1, 'lessons', 'Lessons omitidas primeiro pelo budget global.');
-  output = joinInjection([brain, router, focus, allChanges, lessonsEvicted]);
+  output = joinInjection([brain, profileNotice, router, focus, allChanges, lessonsEvicted]);
   if (byteLength(output) <= INJECTION_LIMITS.totalBytes) return output;
 
   // Second pressure step: non-current changes leave the hot context before the current one.
@@ -211,12 +256,12 @@ export function buildInjection(vaultBase, input = {}) {
     currentOnly: true,
     maxLineChars: INJECTION_LIMITS.lineChars,
   });
-  output = joinInjection([brain, router, focus, currentChange, lessonsEvicted, nonCurrentEvicted]);
+  output = joinInjection([brain, profileNotice, router, focus, currentChange, lessonsEvicted, nonCurrentEvicted]);
   if (byteLength(output) <= INJECTION_LIMITS.totalBytes) return output;
 
   // Last step caps only the current change block, with an explicit marker and closed wrapper.
   const currentSummarized = budgetNotice(3, 'current-change', 'Change atual resumida por último; blocker e início da fila foram preservados.');
-  const fixed = joinInjection([brain, router, focus, lessonsEvicted, nonCurrentEvicted, currentSummarized]);
+  const fixed = joinInjection([brain, profileNotice, router, focus, lessonsEvicted, nonCurrentEvicted, currentSummarized]);
   const remaining = Math.max(512, INJECTION_LIMITS.totalBytes - byteLength(fixed) - 1);
   const boundedCurrent = buildActiveChangeInjection(vaultBase, {
     currentOnly: true,
@@ -225,6 +270,7 @@ export function buildInjection(vaultBase, input = {}) {
   });
   return joinInjection([
     brain,
+    profileNotice,
     router,
     focus,
     lessonsEvicted,
@@ -237,23 +283,34 @@ export function buildInjection(vaultBase, input = {}) {
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   try {
     const input = readHookInput();
-    const vaultBase = getVaultBase(input);
+    const runtime = resolveHookOperatingProfile({ input });
+    const vaultBase = runtime.vaultBase;
     writeHookOutput({
       hookSpecificOutput: {
         hookEventName: 'SessionStart',
-        additionalContext: buildInjection(vaultBase, input),
+        additionalContext: buildInjection(vaultBase, input, {
+          profile: runtime.profile,
+          bindingError: runtime.bindingError,
+        }),
       },
     });
     // Sentinela do change-context: o backlog completo acabou de ser injetado aqui, então o hook
     // UserPromptSubmit não precisa re-pingar no 1º prompt. Bônus — nunca derruba a injeção.
-    try {
+    if (runtime.policy.harness && !runtime.bindingError) try {
       const st = changeCtxState(vaultBase);
-      const { identity } = resolveSessionEntry(vaultBase, input);
+      const { identity } = runtime;
       const sid = identity.state === 'resolved' ? identity.canonicalConversationId : (input.session_id || input.sessionId || '');
-      if (st) writeSentinel(vaultBase, 'ctx', sid, st.hash);
+      if (st) {
+        writeSentinel(vaultBase, 'ctx', profileSentinelId(sid, runtime.profile), st.hash);
+      }
     } catch { /* sentinela é bônus */ }
   } catch (error) {
     process.stderr.write(`[brain] inject falhou: ${error.message}\n`);
-    writeHookOutput({});
+    writeHookOutput({
+      hookSpecificOutput: {
+        hookEventName: 'SessionStart',
+        additionalContext: profileRuntimeError(error),
+      },
+    });
   }
 }

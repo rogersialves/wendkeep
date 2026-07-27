@@ -13,7 +13,8 @@ import {
 import { getLocale } from './locale.mjs';
 import { parseSharedMemory, validateMemoryEvent } from './memory-schema.mjs';
 import { detectMemoryMode, LEGACY_MEMORY_WARNING } from './memory-mode.mjs';
-import { reduceMemoryEvents } from './memory-store.mjs';
+import { deriveMemoryProjection } from './memory-store.mjs';
+import { assertVaultPathSafe, assertVaultPathsSafe } from './vault-path-safety.mjs';
 import { validateMemoryBundle } from '../src/validate-memory.mjs';
 
 const DEFAULT_PENDING_PATTERNS = [
@@ -100,10 +101,21 @@ function linkedNotesFromSession(content) {
 const MEMORY_STATUS_COMMAND = 'wendkeep memory status --gate --vault <vault>';
 const MEMORY_REPAIR_COMMAND = 'wendkeep memory repair --vault <vault>';
 
-function readJsonLines(path, label) {
-  if (!existsSync(path)) return { items: [], errors: [] };
+function readJsonLines(vaultBase, path, label) {
+  let checked;
+  try {
+    checked = assertVaultPathSafe(vaultBase, path, { expectedType: 'file', label });
+  } catch (error) {
+    return { items: [], errors: [`${label} inseguro: ${error?.message || error}`] };
+  }
+  if (!checked.exists) return { items: [], errors: [] };
   let raw;
-  try { raw = readFileSync(path, 'utf8').replace(/\r\n/g, '\n'); }
+  try {
+    checked = assertVaultPathSafe(vaultBase, checked.target, {
+      allowMissing: false, expectedType: 'file', label,
+    });
+    raw = readFileSync(checked.target, 'utf8').replace(/\r\n/g, '\n');
+  }
   catch (error) { return { items: [], errors: [`${label} ilegível: ${error?.message || error}`] }; }
   const lines = raw.endsWith('\n') ? raw.split('\n').slice(0, -1) : raw.split('\n');
   const items = [];
@@ -121,25 +133,107 @@ function readJsonLines(path, label) {
 
 function inspectOutbox(vaultBase, projectId) {
   const dir = join(vaultBase, '.brain', 'memory-outbox');
-  if (!existsSync(dir)) return { count: 0, errors: [], eventIds: new Set() };
-  const files = readdirSync(dir).filter((name) => name.endsWith('.json')).sort();
+  let checked;
+  try {
+    checked = assertVaultPathSafe(vaultBase, dir, {
+      expectedType: 'directory', label: 'outbox de memória',
+    });
+  } catch (error) {
+    return {
+      count: 0,
+      errors: [`outbox insegura: ${error?.message || error}`],
+      eventIds: new Set(),
+      eventsById: new Map(),
+    };
+  }
+  if (!checked.exists) return {
+    count: 0, errors: [], eventIds: new Set(), eventsById: new Map(),
+  };
+  try {
+    checked = assertVaultPathSafe(vaultBase, checked.target, {
+      allowMissing: false, expectedType: 'directory', label: 'outbox de memória',
+    });
+  } catch (error) {
+    return {
+      count: 0,
+      errors: [`outbox insegura: ${error?.message || error}`],
+      eventIds: new Set(),
+      eventsById: new Map(),
+    };
+  }
+  const files = readdirSync(checked.target).filter((name) => name.endsWith('.json')).sort();
   const errors = [];
   const eventIds = new Set();
+  const eventsById = new Map();
   for (const name of files) {
-    const path = join(dir, name);
+    const path = join(checked.target, name);
     try {
-      const event = JSON.parse(readFileSync(path, 'utf8'));
+      const file = assertVaultPathSafe(vaultBase, path, {
+        allowMissing: false, expectedType: 'file', label: `evento ${name} da outbox`,
+      });
+      const event = JSON.parse(readFileSync(file.target, 'utf8'));
       const validation = validateMemoryEvent(event, projectId ? { projectId } : {});
       if (!validation.ok) errors.push(`${name}: ${validation.errors.join(' ')}`);
-      else eventIds.add(event.event_id);
+      else {
+        eventIds.add(event.event_id);
+        eventsById.set(event.event_id, event);
+      }
     } catch (error) {
       errors.push(`${name}: JSON inválido: ${error.message}`);
     }
   }
-  return { count: files.length, errors, eventIds };
+  return {
+    count: files.length, errors, eventIds, eventsById,
+  };
 }
 
-function checkpointMatchesLedgerPrefix(checkpoint, eventIds, ledgerEvents) {
+function memoryMetrics() {
+  return {
+    schemaVersion: null,
+    revision: null,
+    eventCursor: null,
+    stateHash: null,
+    ledgerEvents: 0,
+    pendingOutbox: 0,
+    candidates: 0,
+    activeConflicts: 0,
+  };
+}
+
+function blockedMemoryBoundary(error) {
+  return {
+    ok: false,
+    status: 'blocked',
+    failures: [`Boundary física da memória insegura: ${error?.message || error}`],
+    warnings: [],
+    metrics: memoryMetrics(),
+  };
+}
+
+function preflightMemoryBundle(vaultBase) {
+  const brain = join(vaultBase, '.brain');
+  assertVaultPathSafe(vaultBase, brain, {
+    expectedType: 'directory', label: 'raiz .brain da memória',
+  });
+  assertVaultPathsSafe(vaultBase, [
+    'PROJECT.json', 'CORE.md', 'MEMORY_EVENTS.jsonl', 'SHARED_MEMORY.md',
+    'MEMORY_CANDIDATES.jsonl',
+  ].map((name) => ({
+    path: join(brain, name), expectedType: 'file', label: `${name} ilegível ou inseguro`,
+  })));
+  const outbox = assertVaultPathSafe(vaultBase, join(brain, 'memory-outbox'), {
+    expectedType: 'directory', label: 'outbox de memória',
+  });
+  if (!outbox.exists) return;
+  const entries = readdirSync(outbox.target);
+  for (const name of entries) {
+    assertVaultPathSafe(vaultBase, join(outbox.target, name), {
+      allowMissing: false, label: `entrada ${name} da outbox de memória`,
+    });
+  }
+}
+
+function checkpointMatchesLedgerPrefix(checkpoint, eventIds, ledgerEvents, vaultBase) {
   if (!checkpoint || typeof checkpoint !== 'object') return false;
   if (!Number.isInteger(checkpoint.revision) || checkpoint.revision < 0) return false;
   if (typeof checkpoint.event_cursor !== 'string' || !checkpoint.event_cursor) return false;
@@ -152,24 +246,32 @@ function checkpointMatchesLedgerPrefix(checkpoint, eventIds, ledgerEvents) {
   if (eventIds.some((eventId) => !prefixIds.has(eventId))) return false;
 
   try {
-    const replay = reduceMemoryEvents(prefix);
-    return checkpoint.revision === replay.revision
-      && checkpoint.event_cursor === replay.eventCursor
-      && checkpoint.state_hash === replay.stateHash;
+    const replay = deriveMemoryProjection(vaultBase, prefix);
+    const causalMatches = checkpoint.causal_event_cursor === undefined
+      || checkpoint.causal_event_cursor === replay.eventCursor;
+    return checkpoint.revision === replay.checkpoint.revision
+      && checkpoint.event_cursor === replay.checkpoint.event_cursor
+      && checkpoint.state_hash === replay.checkpoint.state_hash
+      && causalMatches;
   } catch {
     return false;
   }
 }
 
-function checkMemoryAttempts(registry, { ledgerEvents = [], outboxEventIds = new Set() } = {}) {
+function checkMemoryAttempts(registry, {
+  vaultBase, ledgerEvents = [], outboxEventIds = new Set(), outboxEventsById = new Map(),
+} = {}) {
   const failures = [];
   const warnings = [];
   const ledgerEventIds = new Set(ledgerEvents.map((event) => event?.event_id).filter(Boolean));
-  const attempts = Object.values(registry?.sessions || {})
-    .map((entry) => entry?.last_memory_attempt)
-    .filter((attempt) => attempt && typeof attempt === 'object' && attempt.memory_mode === 'v2');
+  const ledgerById = new Map(ledgerEvents
+    .filter((event) => event?.event_id)
+    .map((event) => [event.event_id, event]));
+  const attempts = Object.entries(registry?.sessions || {})
+    .map(([sessionId, entry]) => [sessionId, entry?.last_memory_attempt])
+    .filter(([, attempt]) => attempt && typeof attempt === 'object' && attempt.memory_mode === 'v2');
 
-  for (const attempt of attempts) {
+  for (const [sessionId, attempt] of attempts) {
     const state = String(attempt.state || '');
     const disposition = String(attempt.disposition || '');
     const eventIds = Array.isArray(attempt.event_ids)
@@ -201,6 +303,37 @@ function checkMemoryAttempts(registry, { ledgerEvents = [], outboxEventIds = new
       continue;
     }
 
+    const identity = {
+      canonical_session_id: sessionId,
+      activation_id: attempt.activation_id,
+      activation_epoch: attempt.activation_epoch,
+      source_turn_id: attempt.turn_id,
+      turn_sequence: attempt.turn_sequence,
+    };
+    const invalidAttemptFields = [];
+    if (attempt.canonical_session_id !== sessionId) invalidAttemptFields.push('canonical_session_id');
+    if (typeof attempt.activation_id !== 'string' || !attempt.activation_id) invalidAttemptFields.push('activation_id');
+    if (!Number.isInteger(attempt.activation_epoch) || attempt.activation_epoch < 0) invalidAttemptFields.push('activation_epoch');
+    if (typeof attempt.turn_id !== 'string' || !attempt.turn_id) invalidAttemptFields.push('turn_id');
+    if (!Number.isInteger(attempt.turn_sequence) || attempt.turn_sequence < 0) invalidAttemptFields.push('turn_sequence');
+    if (invalidAttemptFields.length) {
+      failures.push(`Attempt v2 da sessão ${sessionId} possui identidade causal inválida (${invalidAttemptFields.join(', ')}). Inspecione com: ${MEMORY_STATUS_COMMAND}.`);
+      continue;
+    }
+    const causalMismatches = [];
+    for (const eventId of eventIds) {
+      const event = ledgerById.get(eventId) || outboxEventsById.get(eventId);
+      if (!event) continue;
+      const fields = Object.entries(identity)
+        .filter(([field, expected]) => event[field] !== expected)
+        .map(([field]) => field);
+      if (fields.length) causalMismatches.push(`${eventId}: ${fields.join(', ')}`);
+    }
+    if (causalMismatches.length) {
+      failures.push(`Attempt v2 da sessão ${sessionId} referencia evento(s) com identidade causal divergente (${causalMismatches.join('; ')}). Inspecione com: ${MEMORY_STATUS_COMMAND}.`);
+      continue;
+    }
+
     if (state === 'enqueued' || state === 'degraded') {
       const missing = eventIds.filter((eventId) => !ledgerEventIds.has(eventId) && !outboxEventIds.has(eventId));
       if (missing.length) {
@@ -215,7 +348,7 @@ function checkMemoryAttempts(registry, { ledgerEvents = [], outboxEventIds = new
       const outsideLedger = eventIds.filter((eventId) => !ledgerEventIds.has(eventId));
       if (outsideLedger.length) {
         failures.push(`Attempt projetado perdeu ${outsideLedger.length} evento(s) no ledger. Inspecione com: ${MEMORY_STATUS_COMMAND}.`);
-      } else if (!checkpointMatchesLedgerPrefix(attempt.checkpoint, eventIds, ledgerEvents)) {
+      } else if (!checkpointMatchesLedgerPrefix(attempt.checkpoint, eventIds, ledgerEvents, vaultBase)) {
         failures.push(`Checkpoint do attempt projetado diverge do prefixo rederivado do ledger. Inspecione com: ${MEMORY_STATUS_COMMAND}.`);
       }
       continue;
@@ -232,24 +365,28 @@ function checkMemoryAttempts(registry, { ledgerEvents = [], outboxEventIds = new
  * does not acquire MEMORY.lock or invoke the projector/repair paths.
  */
 export function checkMemoryBundle(vaultBase, { registry } = {}) {
+  if (!existsSync(vaultBase)) {
+    return {
+      ok: false,
+      status: 'blocked',
+      failures: [`Vault not found: ${vaultBase}`],
+      warnings: [],
+      metrics: memoryMetrics(),
+    };
+  }
+  try { preflightMemoryBundle(vaultBase); }
+  catch (error) { return blockedMemoryBoundary(error); }
   const brain = join(vaultBase, '.brain');
-  const mode = detectMemoryMode(vaultBase);
+  let mode;
+  try { mode = detectMemoryMode(vaultBase); }
+  catch (error) { return blockedMemoryBoundary(error); }
   if (mode.mode === 'legacy') {
     return {
       ok: true,
       status: 'legacy',
       failures: [],
       warnings: [LEGACY_MEMORY_WARNING],
-      metrics: {
-        schemaVersion: null,
-        revision: null,
-        eventCursor: null,
-        stateHash: null,
-        ledgerEvents: 0,
-        pendingOutbox: 0,
-        candidates: 0,
-        activeConflicts: 0,
-      },
+      metrics: memoryMetrics(),
     };
   }
   const bundle = validateMemoryBundle(vaultBase);
@@ -260,7 +397,9 @@ export function checkMemoryBundle(vaultBase, { registry } = {}) {
     : { metadata: {} };
   const metadata = parsedShared.metadata || {};
   const outbox = inspectOutbox(vaultBase, bundle.project?.projectId);
-  const candidates = readJsonLines(join(brain, 'MEMORY_CANDIDATES.jsonl'), 'MEMORY_CANDIDATES.jsonl');
+  const candidates = readJsonLines(
+    vaultBase, join(brain, 'MEMORY_CANDIDATES.jsonl'), 'MEMORY_CANDIDATES.jsonl',
+  );
 
   const ledgerCorrupt = (bundle.ledger?.errors || []).length > 0;
   if (ledgerCorrupt) {
@@ -282,7 +421,7 @@ export function checkMemoryBundle(vaultBase, { registry } = {}) {
 
   let replay = null;
   if (bundle.ledger?.ok) {
-    try { replay = reduceMemoryEvents(bundle.ledger.events); }
+    try { replay = deriveMemoryProjection(vaultBase, bundle.ledger.events); }
     catch (error) {
       failures.push(`Ledger não pode ser reduzido: ${error.message}. Execute com segurança: ${MEMORY_REPAIR_COMMAND}.`);
     }
@@ -290,16 +429,23 @@ export function checkMemoryBundle(vaultBase, { registry } = {}) {
   if (replay && bundle.shared?.ok) {
     const divergences = [];
     if (metadata.revision !== replay.revision) divergences.push(`revision ${metadata.revision} != ${replay.revision}`);
-    if (metadata.event_cursor !== replay.eventCursor) divergences.push(`event_cursor ${metadata.event_cursor} != ${replay.eventCursor}`);
+    if (metadata.event_cursor !== replay.ledgerCursor) divergences.push(`event_cursor ${metadata.event_cursor} != ${replay.ledgerCursor}`);
     if (metadata.state_hash !== replay.stateHash) divergences.push(`state_hash ${metadata.state_hash} != ${replay.stateHash}`);
     if (divergences.length) {
       failures.push(`Projeção SHARED stale/lag (${divergences.join('; ')}). Inspecione com: ${MEMORY_STATUS_COMMAND}.`);
     }
   }
 
-  const lifecycle = checkMemoryAttempts(registry || readSessionRegistry(vaultBase), {
+  let effectiveRegistry = registry;
+  if (!effectiveRegistry) {
+    try { effectiveRegistry = readSessionRegistry(vaultBase); }
+    catch (error) { failures.push(`SESSION_REGISTRY.json inseguro ou ilegível: ${error?.message || error}.`); }
+  }
+  const lifecycle = checkMemoryAttempts(effectiveRegistry || { version: 2, sessions: {} }, {
+    vaultBase,
     ledgerEvents: bundle.ledger?.events || [],
     outboxEventIds: outbox.eventIds,
+    outboxEventsById: outbox.eventsById,
   });
   failures.push(...lifecycle.failures);
   warnings.push(...lifecycle.warnings);

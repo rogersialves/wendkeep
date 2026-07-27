@@ -986,7 +986,7 @@ export function updateSessionUsage({ vaultBase, sessionRel, sessionPath, transcr
     result = collectSessionUsage({ sessionContent, transcriptPath });
     if (!result) return null; // sem usage OU conteúdo corrompido: não grava
     return upsertUsageSection(result.content, buildUsageSection(result.aggregate, result.entries, result.summary));
-  }, lockTimeoutMs ? { timeoutMs: lockTimeoutMs } : {});
+  }, { ...(lockTimeoutMs ? { timeoutMs: lockTimeoutMs } : {}), vaultBase });
   return outcome.written || outcome.reason === 'unchanged' ? result : null;
 }
 

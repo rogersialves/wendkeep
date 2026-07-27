@@ -14,6 +14,9 @@ Use for any non-trivial implementation or fix that must leave auditable proof.
 ## When not to use
 
 Do not create a change merely to inspect health, import sessions, or run read-only maintenance.
+For local maintenance eligible for the `FLOW` profile, use the microcontract in
+[Operating profiles](operating-profiles.md); under `OFF`, the lifecycle remains available but is
+not imposed by Wend Runtime.
 
 ## Prerequisites
 
@@ -32,7 +35,8 @@ npx wendkeep change archive <slug>
 
 ## Options and exit codes
 
-- `wendkeep change new <slug> [--simple]` creates proposal, design, tasks, and active pointer.
+- `wendkeep change new <slug> [--simple]` creates a change; `--simple` only skips design, is not
+  `FLOW`, and preserves the legacy lifecycle/ADR contract.
 - `change use`, `list`, `show`, `status`, `diff`, `done`, and `undone` inspect or update work
   without archiving it.
 - `change continue <archived> <new>` starts follow-up work without inheriting stale proof.
@@ -70,10 +74,12 @@ and mints an ADR. Archive passes only with closed tasks, green required sensors,
 
 - `no change`: select one with `change use <slug>` or pass `--change`.
 - `spec_impact: pending`: choose `required` with a delta or `none` with a real reason.
-- Sensor not executed: keep `[sensor:id]` on the same checkbox line as the task.
+- Sensor not executed: keep one or more `[sensor:id]` tags on the same checkbox line. Every
+  distinct ID on that line is required and runs once, in declaration order.
 - Stale evidence: rerun `verify` and `verify --deep` after task/spec edits.
 - Rebase conflict: resolve the delta or use `--accept-current` only when that is the decision.
 
 ## Next steps
 
-Read the deep [verify guide](verify.md) and [maintenance and diagnostics](maintenance-and-diagnostics.md).
+Read [Operating profiles](operating-profiles.md), the deep [verify guide](verify.md), and
+[maintenance and diagnostics](maintenance-and-diagnostics.md).

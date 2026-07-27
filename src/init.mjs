@@ -40,15 +40,28 @@ import { seedDotcontext, globalHasDotcontext, resolveDotcontextSkipMcp, renderSe
 import { adoptSpecsState, ensureSpecsReadme, SPECS_STATE_FILE } from '../hooks/spec-core.mjs';
 import { bindProjectVault, readProjectBinding } from './project-vault.mjs';
 import { seedMemoryV2 } from './memory.mjs';
+import {
+  DEFAULT_OPERATING_PROFILE,
+  normalizeOperatingProfile,
+  setOperatingProfile,
+} from './operating-profile.mjs';
 
 function parseArgs(argv) {
-  const args = { mcp: true, yes: false, force: false };
+  const args = { mcp: true, yes: false, force: false, profileProvided: false };
   for (let i = 0; i < argv.length; i += 1) {
     const a = argv[i];
     if (a === '--vault') args.vault = argv[++i];
     else if (a === '--locale') args.locale = argv[++i];
     else if (a.startsWith('--locale=')) args.locale = a.slice(9);
     else if (a === '--project') args.project = argv[++i];
+    else if (a === '--profile') {
+      args.profileProvided = true;
+      args.profile = argv[++i];
+    }
+    else if (a.startsWith('--profile=')) {
+      args.profileProvided = true;
+      args.profile = a.slice(10);
+    }
     else if (a === '--no-mcp') args.mcp = false;
     else if (a === '--yes' || a === '-y') args.yes = true;
     else if (a === '--force') args.force = true;
@@ -308,6 +321,7 @@ const MESSAGES = {
     mcpSkipped: '  [4/5] .mcp.json ignorado (--no-mcp, sem companions MCP)',
     colorsSkipped: '  [5/5] cores ignoradas (--no-colors)',
     colors: (r) => `  [5/5] cores: ${r}`,
+    runtimeIgnore: '  [!] ignore runtimes locais do wendkeep no Git quando o vault for versionado: .brain/.change-* .brain/runtime/flows/',
     merged: 'mesclado', created: 'criado', bakSaved: ', .bak salvo',
     nextSteps: '\nPróximos passos:',
     step1: (v) => `  1. Abra o vault no Obsidian: "Abrir pasta como cofre" -> ${v}`,
@@ -336,6 +350,7 @@ const MESSAGES = {
     mcpSkipped: '  [4/5] .mcp.json skipped (--no-mcp, no MCP companions)',
     colorsSkipped: '  [5/5] colors skipped (--no-colors)',
     colors: (r) => `  [5/5] colors: ${r}`,
+    runtimeIgnore: '  [!] keep local wendkeep runtimes out of Git when the vault is versioned: .brain/.change-* .brain/runtime/flows/',
     merged: 'merged', created: 'created', bakSaved: ', .bak saved',
     nextSteps: '\nNext steps:',
     step1: (v) => `  1. Open the vault in Obsidian: "Open folder as vault" -> ${v}`,
@@ -385,6 +400,11 @@ export async function runInit(argv) {
   const args = parseArgs(argv);
   const projectPath = resolve(args.project || process.cwd());
   const log = (s) => process.stdout.write(`${s}\n`);
+  const requestedProfile = args.profileProvided
+    ? normalizeOperatingProfile(args.profile, { strict: true })
+    : undefined;
+  let existingBinding = null;
+  try { existingBinding = readProjectBinding(projectPath); } catch { /* bind surfaces invalid config */ }
 
   // Recognize an already-configured project through `.wendkeep.json`, or through the
   // project-local Claude setting during migration. Locale remains locked in vault config.
@@ -424,7 +444,10 @@ export async function runInit(argv) {
 
   // Persist the provider-neutral binding before any hook/config delivery. This also
   // claims the vault identity and rejects accidental cross-project graph contamination.
-  bindProjectVault({ projectRoot: projectPath, vaultPath });
+  const profile = requestedProfile
+    ?? (existingBinding ? undefined : DEFAULT_OPERATING_PROFILE);
+  const configPatch = profile === undefined ? {} : setOperatingProfile({}, profile);
+  bindProjectVault({ projectRoot: projectPath, vaultPath, configPatch });
 
   // Companion plugins/MCP selection. --no-companions wins; --companions <csv> is
   // explicit; an interactive TTY gets a multi-choice prompt (context-mode pre-checked);
@@ -599,7 +622,7 @@ export async function runInit(argv) {
     log(M.mcpSkipped);
   }
 
-  log('  [!] ignore runtime do wendkeep no Git quando o vault for versionado: .brain/.change-*');
+  log(M.runtimeIgnore);
 
   // 4. Vault color system (.obsidian) -----------------------------------------
   if (args.noColors) {

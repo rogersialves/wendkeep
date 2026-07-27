@@ -9,7 +9,6 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import {
   formatDate,
-  getVaultBase,
   readHookInput,
   slugify,
   upsertSessionRegistry,
@@ -18,6 +17,7 @@ import {
 } from './obsidian-common.mjs';
 import { activeChange, newChange } from './change-core.mjs';
 import { getLocale } from './locale.mjs';
+import { hookProfilePolicy, resolveHookOperatingProfile } from './operating-profile-runtime.mjs';
 import { resolveSessionEntry } from './session-identity.mjs';
 
 // O plano aprovado chega por um de três canais, conforme a versão do Claude Code:
@@ -87,7 +87,9 @@ export function planTasks(plan) {
   return boxes.map((m, i) => `- [${m[1]}] 1.${i + 1} ${m[2].trim()}`);
 }
 
-export function capturePlan(vaultBase, input) {
+export function capturePlan(vaultBase, input, { profile = 'GOVERN' } = {}) {
+  const policy = hookProfilePolicy(profile);
+  if (!policy.harness) return null;
   const plan = extractPlan(input);
   if (!plan) return null;
   const loc = getLocale(vaultBase);
@@ -110,6 +112,10 @@ export function capturePlan(vaultBase, input) {
         : `Plano aprovado anexado à change ativa "${active}" (plano-aprovado.md). Sincronize tarefas.md com as tarefas do plano.`}\n</plan_captured>`,
     };
   }
+
+  // FLOW deliberately has no implicit change lifecycle. It may enrich a change the user
+  // explicitly opened, but an approved plan alone must not create one.
+  if (!policy.requiresChange) return null;
 
   const slug = planSlug(plan);
   newChange(vaultBase, slug, { dateStr, sessionRel });
@@ -156,7 +162,12 @@ ${en ? 'See design.md and plano-aprovado.md (captured from the approved plan-mod
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   try {
     const input = readHookInput();
-    const r = capturePlan(getVaultBase(input), input);
+    const runtime = resolveHookOperatingProfile({ input });
+    if (runtime.bindingError) {
+      const code = runtime.bindingError.code || 'WENDKEEP_VAULT_CONFIG_INVALID';
+      throw new Error(`${code}: ${runtime.bindingError.message || 'binding WendKeep inválido'}`);
+    }
+    const r = capturePlan(runtime.vaultBase, input, { profile: runtime.profile });
     if (!r) { writeHookOutput({}); }
     else writeHookOutput({ hookSpecificOutput: { hookEventName: 'PostToolUse', additionalContext: r.context } });
   } catch (error) {

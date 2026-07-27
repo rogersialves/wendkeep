@@ -58,14 +58,23 @@ function renderAgentsSection(skills, sourceHash = '') {
   const list = skills.map((s) => `- **${s.name}** — ${s.description}`).join('\n');
   return `${AG_START}
 <!-- wendkeep-version: ${WENDKEEP_VERSION}; skills-sha256: ${sourceHash} -->
-## wendkeep — process skills & loop
+## wendkeep — Keep Core & operating profiles
 
-This project uses the [wendkeep](https://github.com/rogersialves/wendkeep) harness. Work
-through its change loop: \`wendkeep change new <slug>\` → implement tasks test-first
-(tag proof \`[sensor:id]\` and requirement \`[req:ID]\`) → \`wendkeep verify\` →
-\`wendkeep verify --deep\` + an independent read-only verification pass writing
-\`verdict.json\` → \`wendkeep change archive\` (gated). Inspect with \`wendkeep change
-status\` / \`spec effective --change <slug>\` / \`sensors list\`. Author specs only in
+This project uses the [wendkeep](https://github.com/rogersialves/wendkeep) harness. **Keep Core is always active**
+in every profile: Vault, session, identity, memory, lessons, and persistence integrations.
+The effective profile is selected explicitly; missing or invalid configuration uses **GOVERN as the default**.
+
+Route work by the effective profile:
+- **OFF** — Wend Runtime is disabled and governance belongs to the native LLM harness; Keep Core stays active.
+- **FLOW** — Execute → Validate through \`wendkeep flow start/finish\`, without creating a change.
+- **GUIDE** — Plan → Execute → Validate through a compact change.
+- **GOVERN** — the default a2 loop: \`wendkeep change new <slug>\` → review → implement tasks test-first
+  (tag proof \`[sensor:id]\` and requirement \`[req:ID]\`) → \`wendkeep verify\` →
+  \`wendkeep verify --deep\` + independent read-only verdict → \`wendkeep change archive\`.
+- **ASSURE** — GOVERN plus explicit confirmation and handoff.
+
+Inspect with \`wendkeep profile status\` / \`wendkeep change status\` /
+\`spec effective --change <slug>\` / \`sensors list\`. Author specs only in
 \`08-Mudanças/<slug>/specs/\`; \`07-Specs\` is generated and must not be edited directly.
 
 Process skills (full text in \`.claude/skills/\`, \`.agents/skills/\`, and the vault's \`.brain/skills/\`):

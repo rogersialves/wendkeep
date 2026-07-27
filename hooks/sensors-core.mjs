@@ -5,6 +5,16 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 
+export const SENSOR_VAULT_ENV = 'WENDKEEP_SENSOR_VAULT';
+
+export function sensorProcessEnv(vaultBase, inherited = process.env) {
+  return {
+    ...inherited,
+    OBSIDIAN_VAULT_PATH: vaultBase,
+    [SENSOR_VAULT_ENV]: vaultBase,
+  };
+}
+
 export function loadSensors(projectRoot, file = 'wendkeep.sensors.json') {
   return loadSensorsDetailed(projectRoot, file).sensors;
 }
@@ -37,17 +47,19 @@ export function findProjectRoot(startDir) {
 }
 
 export function requiredSensors(tasks) {
-  return [...new Set((tasks || []).map((t) => t.sensor).filter(Boolean))];
+  return [...new Set((tasks || []).flatMap((task) => (
+    Array.isArray(task.sensors) && task.sensors.length ? task.sensors : [task.sensor]
+  )).filter(Boolean))];
 }
 
-export function runSensors(sensors, ids, { spawn = spawnSync, cwd, now } = {}) {
+export function runSensors(sensors, ids, { spawn = spawnSync, cwd, env, now } = {}) {
   const byId = Object.fromEntries((sensors || []).map((s) => [s.id, s]));
   const ts = now || new Date().toISOString();
   const evidence = [];
   for (const id of ids) {
     const s = byId[id];
     if (!s) { evidence.push({ id, status: 'red', ts, severity: 'critical', note: 'sensor não definido' }); continue; }
-    const r = spawn(s.command, [], { cwd, shell: true, stdio: 'ignore' });
+    const r = spawn(s.command, [], { cwd, shell: true, stdio: 'ignore', ...(env ? { env } : {}) });
     const entry = { id, status: (r.status ?? 1) === 0 ? 'green' : 'red', ts, severity: s.severity || 'critical' };
     if (s.type === 'mutation' && s.report) {
       // Delegated mutation (Wave B): read the tool's mutation-testing-elements report and

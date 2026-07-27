@@ -27,18 +27,22 @@ Do not run `init --force` as a generic repair for memory or unreadable configura
 ```bash
 npm install --save-dev wendkeep
 npx wendkeep init [options]
-npx wendkeep sync [--project <root>] [--vault <vault>] [--yes]
+npx wendkeep sync [--project <root>] [--vault <vault>] [--profile <profile>] [--yes]
 ```
 
 ## Options and exit codes
 
 - `--vault <path>` selects the vault; otherwise the local `.wendkeep.json` binding wins.
 - `--project <path>` selects the project root.
+- `--profile <OFF|FLOW|GUIDE|GOVERN|ASSURE>` selects the Operating Profile; new installs use
+  `GOVERN`, re-init/sync without the flag preserves the existing choice, and `OFF` is never inferred.
 - `--no-mcp`, `--no-colors`, and `--no-companions` disable optional integrations.
 - `--companions <csv>` explicitly enables companion integrations.
 - `--yes` accepts non-interactive defaults; `--force` refreshes managed blocks only.
 - Exit `0` means setup/sync completed. Any other exit identifies the failed stage. `sync` stops at
   `init`, `sync-defs`, or `doctor` instead of hiding the error.
+- `sync` does not pre-resolve the Vault before `init`: an invalid binding fails closed at that first
+  stage, and only a validated binding reaches `sync-defs` and `doctor`; no global fallback is used.
 
 ## Examples
 
@@ -46,7 +50,7 @@ First installation in the current project:
 
 ```bash
 npm install --save-dev wendkeep
-npx wendkeep init --no-companions
+npx wendkeep init --profile GOVERN --no-companions
 ```
 
 Later update:
@@ -60,7 +64,7 @@ With pnpm, pin a concrete version because minimum-release-age policies may keep 
 behind:
 
 ```bash
-pnpm add -D wendkeep@0.58.2
+pnpm add -D wendkeep@X.Y.Z --config.minimumReleaseAge=0
 pnpm exec wendkeep sync --yes
 ```
 
