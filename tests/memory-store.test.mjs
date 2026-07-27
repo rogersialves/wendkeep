@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import {
-  existsSync, linkSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync,
+  existsSync, linkSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync,
   statSync, symlinkSync, utimesSync, writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -10,6 +10,7 @@ import { join } from 'node:path';
 import {
   MemoryEventCollision,
   MemoryLedgerCorruption,
+  canonicalMemoryJson,
   enqueueMemoryEvent,
   hashMemoryValue,
   projectMemoryOutbox,
@@ -275,11 +276,43 @@ test('[req:MEM-HYB-5] exclusive outbox is immutable, canonical and collision-obs
     assert.equal(duplicate.status, 'duplicate');
     assert.equal(readFileSync(first.path, 'utf8'), bytes, 'same canonical payload is a no-op');
 
-    assert.throws(
-      () => enqueueMemoryEvent(vault, { ...original, value: 'discard' }),
-      (error) => error instanceof MemoryEventCollision && error.eventId === 'mem-exclusive',
-    );
+    const originalWait = Atomics.wait;
+    let waits = 0;
+    Atomics.wait = () => { waits += 1; return 'timed-out'; };
+    try {
+      assert.throws(
+        () => enqueueMemoryEvent(vault, { ...original, value: 'discard' }),
+        (error) => error instanceof MemoryEventCollision && error.eventId === 'mem-exclusive',
+      );
+    } finally {
+      Atomics.wait = originalWait;
+    }
+    assert.equal(waits, 0, 'a valid different payload collides without entering publication polling');
     assert.equal(readFileSync(first.path, 'utf8'), bytes, 'collision never overwrites winner bytes');
+  } finally {
+    rmSync(vault, { recursive: true, force: true });
+  }
+});
+
+test('[req:MEM-HYB-5] permanently unreadable outbox event stays fail-closed after bounded reconciliation', () => {
+  const vault = scratch();
+  try {
+    const payload = event('mem-unreadable-outbox', 'next.ui', 'assert', 'review');
+    const outbox = join(vault, '.brain', 'memory-outbox');
+    mkdirSync(outbox);
+    const target = join(outbox, `${payload.event_id}.json`);
+    writeFileSync(target, '{');
+    const startedAt = Date.now();
+
+    assert.throws(
+      () => enqueueMemoryEvent(vault, payload),
+      (error) => error instanceof MemoryEventCollision
+        && error.eventId === payload.event_id
+        && /unreadable/i.test(error.message),
+    );
+
+    assert.equal(readFileSync(target, 'utf8'), '{', 'reconciliation never rewrites corrupt winner bytes');
+    assert.ok(Date.now() - startedAt < 2_000, 'an unreadable event fails within the bounded window');
   } finally {
     rmSync(vault, { recursive: true, force: true });
   }
@@ -461,6 +494,109 @@ function runProducer({ vault, barrier, payload }) {
     child.on('close', (codeValue) => resolve({ code: codeValue, stdout, stderr }));
   });
 }
+
+function startDelayedOutboxPublication({ vault, payload, delayMs = 150 }) {
+  const outbox = join(vault, '.brain', 'memory-outbox');
+  mkdirSync(outbox, { recursive: true });
+  const target = join(outbox, `${payload.event_id}.json`);
+  const code = [
+    "import { closeSync, fsyncSync, openSync, writeFileSync } from 'node:fs';",
+    'const signal = new Int32Array(new SharedArrayBuffer(4));',
+    "const fd = openSync(process.env.WK_STORE_TARGET, 'wx');",
+    "process.stdout.write('ready\\n');",
+    'Atomics.wait(signal, 0, 0, Number(process.env.WK_STORE_DELAY_MS));',
+    "writeFileSync(fd, process.env.WK_STORE_PAYLOAD, 'utf8');",
+    'fsyncSync(fd);',
+    'closeSync(fd);',
+    "process.stdout.write('published\\n');",
+  ].join('\n');
+  const child = spawn(process.execPath, ['--input-type=module', '-e', code], {
+    env: {
+      ...process.env,
+      WK_STORE_DELAY_MS: String(delayMs),
+      WK_STORE_PAYLOAD: `${canonicalMemoryJson(payload)}\n`,
+      WK_STORE_TARGET: target,
+    },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  let stdout = '';
+  let stderr = '';
+  let readyResolve;
+  let readyReject;
+  const ready = new Promise((resolve, reject) => {
+    readyResolve = resolve;
+    readyReject = reject;
+  });
+  child.stdout.on('data', (chunk) => {
+    stdout += chunk;
+    if (stdout.includes('ready\n')) readyResolve();
+  });
+  child.stderr.on('data', (chunk) => { stderr += chunk; });
+  child.on('error', readyReject);
+  const closed = new Promise((resolve, reject) => {
+    child.on('error', reject);
+    child.on('close', (codeValue) => {
+      if (!stdout.includes('ready\n')) readyReject(new Error(stderr || `delayed writer exited ${codeValue}`));
+      resolve({ code: codeValue, stdout, stderr });
+    });
+  });
+  return { ready, closed, target };
+}
+
+test('[req:MEM-HYB-5] equal-ID retry waits for an exclusively created event still being published', async () => {
+  const vault = scratch();
+  const payload = event('mem-delayed-publication', 'decision.adr', 'assert', 'ADR-0107');
+  let writer;
+  try {
+    writer = startDelayedOutboxPublication({ vault, payload });
+    await writer.ready;
+
+    const duplicate = enqueueMemoryEvent(vault, payload);
+
+    assert.equal(duplicate.status, 'duplicate');
+    const outcome = await writer.closed;
+    assert.equal(outcome.code, 0, outcome.stderr);
+    assert.equal(readFileSync(writer.target, 'utf8'), `${canonicalMemoryJson(payload)}\n`);
+  } finally {
+    if (writer) await writer.closed;
+    rmSync(vault, { recursive: true, force: true });
+  }
+});
+
+test('[req:MEM-HYB-5] every publication poll rejects an outbox file swapped to a hardlink', (t) => {
+  const vault = scratch();
+  const outside = mkdtempSync(join(tmpdir(), 'wk-memory-outbox-poll-swap-'));
+  const payload = event('mem-poll-alias-swap', 'decision.adr', 'assert', 'ADR-0107');
+  const externalPath = join(outside, 'external-event.json');
+  writeFileSync(externalPath, `${canonicalMemoryJson(payload)}\n`);
+  const externalBefore = readFileSync(externalPath);
+  const originalWait = Atomics.wait;
+  try {
+    const outbox = join(vault, '.brain', 'memory-outbox');
+    mkdirSync(outbox, { recursive: true });
+    const target = join(outbox, `${payload.event_id}.json`);
+    const swap = `${target}.swap`;
+    writeFileSync(target, '');
+    if (!makeAlias(t, externalPath, swap)) return;
+    let waits = 0;
+    Atomics.wait = () => {
+      waits += 1;
+      if (waits === 1) renameSync(swap, target);
+      return 'timed-out';
+    };
+
+    assert.throws(
+      () => enqueueMemoryEvent(vault, payload),
+      (error) => error?.code === 'VAULT_PATH_UNSAFE' && /hardlink|nlink|Vault/i.test(error.message),
+    );
+    assert.equal(waits, 1, 'the alias swap happens exactly between the first and second read');
+    assert.deepEqual(readFileSync(externalPath), externalBefore, 'polling never mutates external bytes');
+  } finally {
+    Atomics.wait = originalWait;
+    rmSync(vault, { recursive: true, force: true });
+    rmSync(outside, { recursive: true, force: true });
+  }
+});
 
 test('[req:MEM-HYB-5] real producers converge for equal IDs and lose no independent event', async () => {
   const vault = scratch();

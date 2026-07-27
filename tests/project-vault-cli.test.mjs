@@ -9,6 +9,12 @@ import { spawnSync } from 'node:child_process';
 
 const BIN = join(dirname(fileURLToPath(import.meta.url)), '..', 'bin', 'wendkeep.mjs');
 
+function withoutSensorVault(overrides = {}) {
+  const env = { ...process.env, ...overrides };
+  delete env.WENDKEEP_SENSOR_VAULT;
+  return env;
+}
+
 function seedChange(vault, slug) {
   const dir = join(vault, '08-Mudanças', slug);
   mkdirSync(dir, { recursive: true });
@@ -28,7 +34,7 @@ test('CLI discovers project vault and overrides an inherited global vault', () =
     const result = spawnSync(process.execPath, [BIN, 'change', 'list'], {
       cwd: project,
       encoding: 'utf8',
-      env: { ...process.env, OBSIDIAN_VAULT_PATH: wrongVault },
+      env: withoutSensorVault({ OBSIDIAN_VAULT_PATH: wrongVault }),
     });
     assert.equal(result.status, 0, result.stderr);
     assert.match(result.stdout, /right-change/);
@@ -72,7 +78,7 @@ test('[req:OP-2] CLI não usa Vault global quando o binding local falha na ident
     const result = spawnSync(process.execPath, [BIN, 'change', 'new', 'wrong-route', '--simple'], {
       cwd: project,
       encoding: 'utf8',
-      env: { ...process.env, OBSIDIAN_VAULT_PATH: wrongVault },
+      env: withoutSensorVault({ OBSIDIAN_VAULT_PATH: wrongVault }),
     });
     assert.notEqual(result.status, 0, 'binding inválido deve abortar antes do dispatch');
     assert.match(result.stderr, /WENDKEEP_VAULT_PROJECT_MISMATCH|Vault de outro projeto/);
@@ -87,11 +93,12 @@ test('doctor reports the project-local source without a Windows global env', () 
   try {
     const init = spawnSync(process.execPath, [BIN, 'init', '--project', project, '--vault', vault, '--no-mcp', '--no-companions', '--no-colors', '--yes'], {
       encoding: 'utf8',
-      env: { ...process.env, OBSIDIAN_VAULT_PATH: join(project, 'wrong-global') },
+      env: withoutSensorVault({ OBSIDIAN_VAULT_PATH: join(project, 'wrong-global') }),
     });
     assert.equal(init.status, 0, init.stderr);
     const env = { ...process.env };
     delete env.OBSIDIAN_VAULT_PATH;
+    delete env.WENDKEEP_SENSOR_VAULT;
     const result = spawnSync(process.execPath, [BIN, 'doctor', '--project', project], { cwd: project, encoding: 'utf8', env });
     assert.notEqual(result.status, 2, `vault resolution must succeed; stdout=${result.stdout}\nstderr=${result.stderr}`);
     assert.match(result.stdout, /\[vault\].*project-config/);

@@ -203,6 +203,34 @@ function eventHash(event) {
   return sha256(canonicalMemoryJson(event));
 }
 
+const OUTBOX_PUBLICATION_WAIT_MS = 500;
+const OUTBOX_PUBLICATION_POLL_MS = 5;
+const OUTBOX_PUBLICATION_SIGNAL = new Int32Array(new SharedArrayBuffer(4));
+
+function readConcurrentOutboxEvent(vaultBase, path, eventId) {
+  const deadline = Date.now() + OUTBOX_PUBLICATION_WAIT_MS;
+  while (true) {
+    let raw;
+    try {
+      raw = readCheckedMemoryFile(
+        vaultBase, path, 'utf8', 'evento imutável preexistente do outbox',
+      );
+    } catch (cause) {
+      if (cause?.code === 'VAULT_PATH_UNSAFE') throw cause;
+      throw new MemoryEventCollision(eventId, `Existing outbox event is unreadable: ${eventId}`);
+    }
+
+    try {
+      return JSON.parse(raw);
+    } catch (cause) {
+      if (!(cause instanceof SyntaxError) || Date.now() >= deadline) {
+        throw new MemoryEventCollision(eventId, `Existing outbox event is unreadable: ${eventId}`);
+      }
+      Atomics.wait(OUTBOX_PUBLICATION_SIGNAL, 0, 0, OUTBOX_PUBLICATION_POLL_MS);
+    }
+  }
+}
+
 /**
  * Persist one immutable producer event using exclusive creation. A retry with the same
  * canonical payload is a no-op; reusing the ID for different bytes is an observable error.
@@ -229,15 +257,7 @@ export function enqueueMemoryEvent(vaultBase, event) {
     return { status: 'enqueued', path, eventId: checked.event_id, hash };
   } catch (error) {
     if (error?.code !== 'EEXIST') throw error;
-    let existing;
-    try {
-      existing = JSON.parse(readCheckedMemoryFile(
-        vaultBase, path, 'utf8', 'evento imutável preexistente do outbox',
-      ));
-    } catch (cause) {
-      if (cause?.code === 'VAULT_PATH_UNSAFE') throw cause;
-      throw new MemoryEventCollision(checked.event_id, `Existing outbox event is unreadable: ${checked.event_id}`);
-    }
+    const existing = readConcurrentOutboxEvent(vaultBase, path, checked.event_id);
     if (eventHash(existing) !== hash || canonicalMemoryJson(existing) !== canonicalMemoryJson(checked)) {
       throw new MemoryEventCollision(checked.event_id);
     }

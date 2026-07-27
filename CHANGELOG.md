@@ -28,6 +28,11 @@ All notable changes to **wendkeep** are documented here. Format based on
 
 ### Fixed
 
+- **Retries concorrentes do mesmo evento de memória convergem durante a publicação.** O perdedor
+  do `open(..., 'wx')` tolera por uma janela limitada apenas o JSON ainda parcial do produtor
+  vencedor, revalidando a fronteira física do Vault a cada leitura; payload diferente, arquivo
+  permanentemente ilegível e aliases inseguros continuam falhando fechado. Fixtures de CLI também
+  isolam `WENDKEEP_SENSOR_VAULT`, permitindo que a suíte rode dentro do próprio `verify --vault`.
 - **Handoffs sequenciais da mesma ativação respeitam causalidade.** Um turno mais novo da mesma
   sessão/ativação substitui o anterior em vez de abrir conflito; ativações realmente distintas
   continuam exigindo resolução humana.
