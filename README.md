@@ -16,11 +16,11 @@
 **Memória persistente para agentes de código, construída sobre o seu cofre Obsidian.** Cada sessão do Claude Code e do Codex é capturada turno a turno em Markdown local — o `init` wira os hooks dos dois agentes (no Codex, valendo depois que você aprovar o prompt de confiança dele); o `import` recupera as sessões passadas — com rastreio de tokens/custo, decisões, bugs e aprendizados extraídos automaticamente. Esse plano sempre ativo é o **Keep Core**. Sobre ele, o **Wend Runtime** oferece um ciclo nativo e sem dependências (spec → change → TDD → archive com gate por sensor), selecionável pelos Perfis de Operação `OFF`, `FLOW`, `GUIDE`, `GOVERN` e `ASSURE`. 100% local, open‑core.
 
 O runtime está sendo separado em seis fronteiras físicas — `cli`, `harness`, `vault`, `mcp`,
-`integrations` e `pi` — sem fragmentar a instalação. O workspace privado `vault` agora é o dono
-canônico do binding seguro e do kernel da Shared Project Memory v2 (schema, modo, handoff, ledger,
-projeção e validação), exposto pelo pacote raiz em `wendkeep/vault`. Os imports históricos,
-inclusive bare subpaths instalados como `wendkeep/hooks/...`, continuam funcionando por fachadas
-de compatibilidade e nenhum dado de sessão precisa ser migrado;
+`integrations` e `pi` — sem fragmentar a instalação. Os workspaces privados `harness` e `vault`
+agora são donos canônicos, respectivamente, dos Perfis de Operação/engine de sensores e do binding
+seguro/kernel da Shared Project Memory v2. O pacote raiz expõe essas superfícies em
+`wendkeep/harness` e `wendkeep/vault`; os imports históricos continuam funcionando por fachadas de
+compatibilidade e nenhum dado de sessão precisa ser migrado;
 veja a [arquitetura modular](docs/pt-BR/architecture.md).
 
 ```bash
@@ -186,7 +186,8 @@ Operações que merecem instrução passo a passo: [verify e seus exits 0/1/2](h
 
 O **Keep Core permanece sempre ativo**: Vault, sessões, identidade, CORE/SHARED, lessons, custos e
 persistência não são desligados junto com o harness. O **Wend Runtime** controla apenas a camada de
-governança:
+governança automática. Mesmo em `OFF`, os comandos explícitos do WendKeep continuam disponíveis;
+invocá-los é uma escolha deliberada e executa as validações próprias do comando:
 
 | Perfil | Rota | Uso |
 |---|---|---|

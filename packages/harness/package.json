@@ -1,5 +1,6 @@
 {
   "name": "@wendkeep/harness",
   "private": true,
-  "type": "module"
+  "type": "module",
+  "exports": "./src/index.mjs"
 }

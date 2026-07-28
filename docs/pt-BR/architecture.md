@@ -14,18 +14,35 @@ em workspaces privados para permitir migração incremental e testes explícitos
 
 ## Direção de dependências
 
-`vault` é a base independente e nunca depende de `harness`. Perfis como `OFF` desligam apenas a
-governança do Wend Runtime; Vault, sessões e memória continuam ativos. Binding/resolução,
-segurança física de paths e o kernel de memória agora vivem canonicamente em
-`packages/vault/src/`.
+Os adapters de host (`cli`, `mcp`, `integrations` e `pi`) compõem o runtime pelo `harness`; o
+`harness`, por sua vez, usa o `vault`. A direção permitida é:
+
+```text
+adapters (cli/mcp/integrations/pi) -> Harness -> Vault
+```
+
+`vault` é a base independente e nunca depende de `harness`. O workspace `harness` é o dono
+canônico da resolução/política dos Perfis de Operação e da engine de sensores em
+`packages/harness/src/`; o `vault` continua dono do binding/resolução, da segurança física de paths
+e do kernel de memória em `packages/vault/src/`.
+
+O perfil `OFF` desativa somente a ativação automática da governança do Wend Runtime — router,
+skill gate, FLOW e gates automáticos. Keep Core, Vault, sessões e memória continuam ativos, e os
+comandos explícitos do WendKeep permanecem disponíveis como opt-in deliberado.
 
 O kernel reúne `memory-schema`, `memory-mode`, `memory-handoff`, `memory-store`, `validate-core` e
 `validate-memory`. Essa fronteira é dona do schema v2, do ledger append-only, da projeção, do
 handoff e das validações; captura de sessão e orquestração do harness continuam fora dela.
 
-Consumidores programáticos importam a superfície suportada pelo subpath do pacote raiz:
+Consumidores programáticos importam as superfícies suportadas pelos subpaths do pacote raiz:
 
 ```js
+import {
+  resolveOperatingProfile,
+  runSensors,
+  evaluateGate,
+} from 'wendkeep/harness';
+
 import {
   resolveProjectVault,
   validateSharedMemory,
@@ -33,12 +50,13 @@ import {
 } from 'wendkeep/vault';
 ```
 
-Os paths históricos em `hooks/` e `src/` permanecem como fachadas finas de reexportação para
-compatibilidade; o mapa de exports também preserva bare specifiers instalados como
-`wendkeep/hooks/memory-store.mjs`. Por isso, a extração não altera o schema v2 nem reescreve ledger, projeção ou
-dados de sessão: não há migração de dados.
+Os paths históricos `src/operating-profile.mjs` e `hooks/sensors-core.mjs` permanecem como fachadas
+finas para o `harness`; os demais paths históricos em `hooks/` e `src/` preservam a compatibilidade
+do `vault`. O mapa de exports também mantém bare specifiers instalados. Por isso, a extração não
+altera perfis, contratos de sensores, schema v2, ledger, projeção ou dados de sessão: não há
+migração de dados.
 
 Todos os seis workspaces permanecem privados e internos ao monorepo; eles não são pacotes npm
-independentes. A instalação continua sendo `wendkeep`, e `wendkeep/vault` é a única entrada pública
-nova desta fase. Os demais workspaces são fronteiras reservadas e ganharão superfícies públicas
-somente quando suas implementações forem migradas.
+independentes. A instalação continua sendo `wendkeep`; `wendkeep/harness` e `wendkeep/vault` são
+subpaths públicos do pacote raiz, não publicações separadas. Os demais workspaces são fronteiras
+reservadas e ganharão superfícies públicas somente quando suas implementações forem migradas.

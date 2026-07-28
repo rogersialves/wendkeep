@@ -2,12 +2,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import {
-  existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync,
+  existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { writeSessionRegistry } from '../hooks/obsidian-common.mjs';
+import { bindProjectVault } from '../src/project-vault.mjs';
 import { runFlow } from '../src/flow.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -17,7 +18,7 @@ function git(cwd, ...args) {
   assert.equal(result.status, 0, `${args.join(' ')}\n${result.stderr}`);
 }
 
-function fixture() {
+function fixture({ profile = '' } = {}) {
   const root = mkdtempSync(join(tmpdir(), 'wk-flow-cli-'));
   const vault = join(root, '.vault');
   const sessionRel = '02-Sessões/flow-cli.md';
@@ -53,6 +54,13 @@ status: active
   git(root, 'init', '-q');
   git(root, 'config', 'user.email', 'flow@example.invalid');
   git(root, 'config', 'user.name', 'FLOW CLI Test');
+  if (profile) {
+    bindProjectVault({
+      projectRoot: root,
+      vaultPath: vault,
+      configPatch: { harness: { profile } },
+    });
+  }
   git(root, 'add', '.');
   git(root, 'commit', '-qm', 'base');
   return { root, vault };
@@ -75,6 +83,47 @@ function io() {
 function common(fx) {
   return ['--project', fx.root, '--vault', fx.vault, '--session', 'flow-cli-session', '--json'];
 }
+
+function runCli(fx, ...args) {
+  const env = { ...process.env, OBSIDIAN_VAULT_PATH: '' };
+  delete env.WENDKEEP_SENSOR_VAULT;
+  return spawnSync(process.execPath, [
+    join(ROOT, 'bin', 'wendkeep.mjs'),
+    ...args,
+    '--project', fx.root,
+  ], { cwd: fx.root, encoding: 'utf8', env });
+}
+
+test('[req:MOD-9] OFF mantém comandos explícitos change, FLOW e sensores disponíveis', () => {
+  const fx = fixture({ profile: 'OFF' });
+  try {
+    const bindingPath = join(fx.root, '.wendkeep.json');
+    assert.equal(JSON.parse(readFileSync(bindingPath, 'utf8')).harness.profile, 'OFF');
+
+    const sensors = runCli(fx, 'sensors', 'list');
+    assert.equal(sensors.status, 0, sensors.stderr);
+    assert.match(sensors.stdout, /^focused:/m);
+
+    const flow = runCli(
+      fx,
+      'flow', 'start', 'off-explicit',
+      '--allow', 'src/app.mjs',
+      '--sensor', 'focused',
+      '--reason', 'operador solicitou FLOW explícito em OFF',
+      '--session', 'flow-cli-session',
+      '--json',
+    );
+    assert.equal(flow.status, 0, flow.stderr);
+    assert.equal(JSON.parse(flow.stdout).state, 'active');
+
+    const change = runCli(fx, 'change', 'new', 'off-explicit-change');
+    assert.equal(change.status, 0, change.stderr);
+    assert.equal(existsSync(join(fx.vault, '08-Mudanças', 'off-explicit-change', 'proposta.md')), true);
+    assert.equal(JSON.parse(readFileSync(bindingPath, 'utf8')).harness.profile, 'OFF');
+  } finally {
+    rmSync(fx.root, { recursive: true, force: true });
+  }
+});
 
 test('[req:OP-6] CLI canônica start/status/show/finish mantém FLOW consultável sem change', async () => {
   const fx = fixture();

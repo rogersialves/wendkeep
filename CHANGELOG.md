@@ -4,6 +4,25 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.62.0] — 2026-07-28
+
+### Added
+
+- **`wendkeep/harness` passa a expor o policy kernel reutilizável.** Os contratos dos cinco
+  Perfis de Operação e a engine de sensores podem ser importados pela superfície pública do pacote
+  raiz, com identidade validada a partir de um tarball realmente instalado.
+
+### Changed
+
+- **As implementações canônicas de perfis e sensores agora pertencem a
+  `packages/harness/src`.** `src/operating-profile.mjs` e `hooks/sensors-core.mjs` permanecem como
+  fachadas de reexport, preservando funções, constantes, objetos congelados e consumidores atuais.
+- **A direção modular do Harness virou contrato estrutural.** O workspace aceita somente built-ins,
+  módulos internos e a superfície pública do Vault; Vault continua proibido de depender do
+  Harness, e CLI, MCP, Integrations e Pi permanecem adaptadores superiores.
+- **OFF preserva a semântica publicada:** Keep Core/Vault continua ativo e a governança automática
+  fica desligada; comandos explícitos do operador não ganham bloqueios novos nesta extração.
+
 ## [0.61.0] — 2026-07-28
 
 ### Added

@@ -14,17 +14,35 @@ into private workspaces so migration can be incremental and dependency direction
 
 ## Dependency direction
 
-`vault` is the independent base and never depends on `harness`. Profiles such as `OFF` disable
-only Wend Runtime governance; Vault, sessions, and memory remain active. Binding/resolution,
-physical path safety, and the memory kernel now canonically live in `packages/vault/src/`.
+Host adapters (`cli`, `mcp`, `integrations`, and `pi`) compose the runtime through `harness`, which
+in turn uses `vault`. The allowed direction is:
+
+```text
+adapters (cli/mcp/integrations/pi) -> Harness -> Vault
+```
+
+`vault` is the independent base and never depends on `harness`. The `harness` workspace
+canonically owns Operating Profile resolution/policy and the sensor engine under
+`packages/harness/src/`; `vault` continues to own binding/resolution, physical path safety, and the
+memory kernel under `packages/vault/src/`.
+
+The `OFF` profile disables only automatic Wend Runtime governance activation — router, skill gate,
+FLOW, and automatic gates. Keep Core, Vault, sessions, and memory remain active, and explicit
+WendKeep commands remain available as a deliberate opt-in.
 
 The kernel brings together `memory-schema`, `memory-mode`, `memory-handoff`, `memory-store`,
 `validate-core`, and `validate-memory`. This boundary owns schema v2, the append-only ledger,
 projection, handoff, and validation; session capture and harness orchestration remain outside it.
 
-Programmatic consumers import the supported surface through the root package subpath:
+Programmatic consumers import the supported surfaces through root package subpaths:
 
 ```js
+import {
+  resolveOperatingProfile,
+  runSensors,
+  evaluateGate,
+} from 'wendkeep/harness';
+
 import {
   resolveProjectVault,
   validateSharedMemory,
@@ -32,12 +50,13 @@ import {
 } from 'wendkeep/vault';
 ```
 
-Historical paths under `hooks/` and `src/` remain thin re-export facades for compatibility; the
-exports map also preserves installed bare specifiers such as `wendkeep/hooks/memory-store.mjs`.
-Therefore, the extraction neither changes schema v2 nor rewrites the ledger, projection, or
-session data: there is no data migration.
+The historical `src/operating-profile.mjs` and `hooks/sensors-core.mjs` paths remain thin facades
+for `harness`; the other historical paths under `hooks/` and `src/` preserve `vault`
+compatibility. The exports map also keeps installed bare specifiers. Therefore, the extraction
+changes neither profiles, sensor contracts, schema v2, ledger, projection, nor session data: there
+is no data migration.
 
 All six workspaces remain private and internal to the monorepo; they are not independent npm
-packages. Installation remains `wendkeep`, and `wendkeep/vault` is the only new public entry point
-in this phase. The other workspaces are reserved boundaries and will gain public surfaces only
-after their implementations are migrated.
+packages. Installation remains `wendkeep`; `wendkeep/harness` and `wendkeep/vault` are public
+subpaths of the root package, not separate publications. The other workspaces are reserved
+boundaries and will gain public surfaces only after their implementations are migrated.

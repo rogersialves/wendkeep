@@ -73,11 +73,14 @@ test('every published hook passes node --check (no broken syntax shipped)', () =
   }
 });
 
-test('[req:MOD-4] published tarball contains the modular Vault surface', () => {
+test('[req:MOD-4] [req:MOD-8] [req:MOD-10] published tarball contains the modular Vault and Harness surfaces', () => {
   const published = publishedFiles();
   for (const path of [
     'packages/cli/package.json',
     'packages/harness/package.json',
+    'packages/harness/src/index.mjs',
+    'packages/harness/src/operating-profile.mjs',
+    'packages/harness/src/sensors-core.mjs',
     'packages/mcp/package.json',
     'packages/integrations/package.json',
     'packages/pi/package.json',
@@ -92,11 +95,11 @@ test('[req:MOD-4] published tarball contains the modular Vault surface', () => {
     'packages/vault/src/validate-memory.mjs',
     'packages/vault/src/vault-path-safety.mjs',
   ]) {
-    assert.ok(published.has(path), `missing modular Vault file from package: ${path}`);
+    assert.ok(published.has(path), `missing modular file from package: ${path}`);
   }
 });
 
-test('[req:MOD-4] [req:MOD-6] installed tarball executes CLI, legacy hook and Vault memory kernel', () => {
+test('[req:MOD-4] [req:MOD-6] [req:MOD-9] [req:MOD-10] installed tarball exposes Harness identities with OFF and Vault intact', () => {
   const temp = mkdtempSync(join(tmpdir(), 'wendkeep-installed-tarball-'));
   try {
     const packed = spawnSync(`npm pack --json --pack-destination "${temp}"`, {
@@ -122,8 +125,11 @@ test('[req:MOD-4] [req:MOD-6] installed tarball executes CLI, legacy hook and Va
 
     const imported = spawnSync(process.execPath, ['--input-type=module', '--eval', [
       "const vault = await import('wendkeep/vault');",
+      "const harness = await import('wendkeep/harness');",
       "const legacy = await import('wendkeep/hooks/vault-path-safety.mjs');",
       "const legacyStore = await import('wendkeep/hooks/memory-store.mjs');",
+      "const legacyProfile = await import('wendkeep/src/operating-profile.mjs');",
+      "const legacySensors = await import('wendkeep/hooks/sensors-core.mjs');",
       "if (typeof vault.resolveProjectVault !== 'function') process.exit(11);",
       "if (typeof legacy.assertVaultPathSafe !== 'function') process.exit(12);",
       "const shared = vault.renderSharedMemory({ updatedAt: '2026-07-28T00:00:00.000Z', reviewAfter: '2026-08-04T00:00:00.000Z' });",
@@ -131,7 +137,13 @@ test('[req:MOD-4] [req:MOD-6] installed tarball executes CLI, legacy hook and Va
       "if (!vault.validateCore(vault.renderCoreSkeleton()).ok) process.exit(14);",
       "if (legacyStore.MemoryEventCollision !== vault.MemoryEventCollision) process.exit(15);",
       "if (legacyStore.MEMORY_LOCK_BUSY !== vault.MEMORY_LOCK_BUSY) process.exit(16);",
-      "if (vault.canonicalMemoryJson({ z: 1, a: 2 }) !== '{\"a\":2,\"z\":1}') process.exit(15);",
+      "if (harness.normalizeOperatingProfile !== legacyProfile.normalizeOperatingProfile) process.exit(17);",
+      "if (harness.OPERATING_PROFILE_POLICIES !== legacyProfile.OPERATING_PROFILE_POLICIES) process.exit(18);",
+      "if (harness.runSensors !== legacySensors.runSensors) process.exit(19);",
+      "if (harness.sensorProcessEnv !== legacySensors.sensorProcessEnv) process.exit(20);",
+      "const off = harness.operatingProfilePolicy('OFF');",
+      "if (off.keepCore !== true || off.harness !== false || off.contract !== 'native') process.exit(21);",
+      "if (vault.canonicalMemoryJson({ z: 1, a: 2 }) !== '{\"a\":2,\"z\":1}') process.exit(22);",
     ].join('\n')], { cwd: consumer, encoding: 'utf8' });
     assert.equal(imported.status, 0, `installed imports failed:\n${imported.stderr}`);
 
