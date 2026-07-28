@@ -8,6 +8,10 @@ Escolher quanta governança do Wend Runtime uma execução precisa sem desligar 
 O Keep Core permanece sempre ativo: Vault, sessão, identidade, CORE/SHARED, lessons, custos e
 integrações de persistência continuam funcionando em todos os perfis.
 
+O perfil `OFF` desativa a ativação automática da governança, não a CLI: comandos explícitos como
+`profile`, `flow`, `change`, `verify` e `sensors` continuam disponíveis. Invocá-los é um opt-in
+deliberado e executa as validações e gates próprios daquele comando.
+
 ## Quando usar
 
 Use `profile` para consultar ou selecionar explicitamente um Perfil de Operação. Use `FLOW` para
@@ -44,11 +48,29 @@ Todos os subcomandos FLOW também aceitam `--project <path>`, `--vault <path>` e
 Quando informado, `--session` restringe inclusive consultas e mutações por ID à sessão dona do
 FLOW; um ID de outra sessão falha sem mutação.
 
+## Ownership e superfície programática
+
+O workspace privado `packages/harness` é o dono canônico da resolução/política dos Perfis de
+Operação e da engine de sensores. Consumidores programáticos usam o subpath público do pacote raiz:
+
+```js
+import {
+  resolveOperatingProfile,
+  runSensors,
+  evaluateGate,
+} from 'wendkeep/harness';
+```
+
+`src/operating-profile.mjs` e `hooks/sensors-core.mjs` são somente fachadas de compatibilidade. A
+direção de dependências é `adapters (cli/mcp/integrations/pi) -> Harness -> Vault`; o Vault nunca
+depende do Harness. Os workspaces continuam privados e não são publicados como pacotes npm
+independentes.
+
 ## Opções e códigos de saída
 
 | Perfil | Rota | Contrato |
 |---|---|---|
-| `OFF` | harness nativo da LLM | Wend Runtime desligado; Keep Core integral. |
+| `OFF` | harness nativo da LLM | Governança automática desligada; Keep Core e comandos explícitos disponíveis. |
 | `FLOW` | E → V | Microcontrato com baseline Git, allowlist, sensores e recibo, sem change. |
 | `GUIDE` | P → E → V | Change compacta; política reconhecida para evolução compatível. |
 | `GOVERN` | P → R → E → V | Loop a2 atual e fallback conservador. |
@@ -144,8 +166,9 @@ npx wendkeep flow promote $flowId --change-slug outro-slug
 
 Trocar o perfil não cria outra sessão nem interrompe o Vault. Em `OFF`, a memória e as lessons
 continuam injetadas e o Stop continua persistindo sessão/memória, mas router, skill gate,
-change context/warn/nag/guard e captura de plano ficam inativos. Um FLOW concluído deixa recibo
-durável e consultável; um FLOW promovido passa a seguir o lifecycle normal de change.
+change context/warn/nag/guard e captura de plano automáticos ficam inativos. Os comandos explícitos
+continuam disponíveis e executam seus próprios contratos. Um FLOW concluído deixa recibo durável e
+consultável; um FLOW promovido passa a seguir o lifecycle normal de change.
 
 ## Erros comuns e diagnóstico
 

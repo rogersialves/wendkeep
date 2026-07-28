@@ -8,6 +8,10 @@ Choose how much Wend Runtime governance an execution needs without disabling **K
 Keep Core is always active: the Vault, session, identity, CORE/SHARED, lessons, costs, and
 persistence integrations continue working under every profile.
 
+The `OFF` profile disables automatic governance activation, not the CLI: explicit commands such as
+`profile`, `flow`, `change`, `verify`, and `sensors` remain available. Invoking one is a deliberate
+opt-in and runs that command's own validations and gates.
+
 ## When to use
 
 Use `profile` to inspect or explicitly select an Operating Profile. Use `FLOW` for local,
@@ -44,11 +48,28 @@ Every FLOW subcommand also accepts `--project <path>`, `--vault <path>`, and `--
 provided, `--session` scopes ID-based reads and mutations to the session that owns the FLOW; an
 ID from another session fails without mutation.
 
+## Ownership and programmatic surface
+
+The private `packages/harness` workspace canonically owns Operating Profile resolution/policy and
+the sensor engine. Programmatic consumers use the public root-package subpath:
+
+```js
+import {
+  resolveOperatingProfile,
+  runSensors,
+  evaluateGate,
+} from 'wendkeep/harness';
+```
+
+`src/operating-profile.mjs` and `hooks/sensors-core.mjs` are compatibility facades only. Dependency
+direction is `adapters (cli/mcp/integrations/pi) -> Harness -> Vault`; Vault never depends on
+Harness. The workspaces remain private and are not published as independent npm packages.
+
 ## Options and exit codes
 
 | Profile | Route | Contract |
 |---|---|---|
-| `OFF` | LLM-native harness | Wend Runtime off; Keep Core intact. |
+| `OFF` | LLM-native harness | Automatic governance off; Keep Core and explicit commands available. |
 | `FLOW` | E → V | Microcontract with Git baseline, allowlist, sensors, and receipt, without a change. |
 | `GUIDE` | P → E → V | Compact change; policy recognized for compatible evolution. |
 | `GOVERN` | P → R → E → V | Current a2 loop and conservative fallback. |
@@ -145,9 +166,10 @@ npx wendkeep flow promote $flowId --change-slug another-slug
 ## Expected result
 
 Changing profile neither creates a new session nor interrupts the Vault. In `OFF`, memory and
-lessons are still injected and Stop still persists the session/memory lifecycle, while the
-router, skill gate, change context/warn/nag/guard, and plan capture are inactive. A completed FLOW
-leaves a durable, inspectable receipt; a promoted FLOW enters the normal change lifecycle.
+lessons are still injected and Stop still persists the session/memory lifecycle, while automatic
+router, skill gate, change context/warn/nag/guard, and plan capture are inactive. Explicit commands
+remain available and run their own contracts. A completed FLOW leaves a durable, inspectable
+receipt; a promoted FLOW enters the normal change lifecycle.
 
 ## Common errors and diagnosis
 

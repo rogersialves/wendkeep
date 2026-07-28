@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { importSpecifiers } from './helpers/import-specifiers.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const SURFACES = ['cli', 'harness', 'vault', 'mcp', 'integrations', 'pi'];
@@ -12,6 +13,10 @@ const INITIAL_MEMORY_KERNEL = [
   { module: 'memory-handoff.mjs', legacy: '../hooks/memory-handoff.mjs' },
   { module: 'validate-core.mjs', legacy: '../src/validate-core.mjs' },
   { module: 'validate-memory.mjs', legacy: '../src/validate-memory.mjs' },
+];
+const HARNESS_POLICY_KERNEL = [
+  { module: 'operating-profile.mjs', legacy: '../src/operating-profile.mjs' },
+  { module: 'sensors-core.mjs', legacy: '../hooks/sensors-core.mjs' },
 ];
 
 function json(path) {
@@ -85,6 +90,21 @@ test('[req:MOD-5] [req:MOD-6] Vault owns the memory store without changing its p
   assert.equal(surface.MEMORY_LOCK_BUSY, surface.VAULT_LOCK_BUSY);
 });
 
+test('[req:MOD-8] Harness owns the policy kernel and preserves legacy identities', async () => {
+  for (const entry of HARNESS_POLICY_KERNEL) {
+    const implementation = join(ROOT, 'packages', 'harness', 'src', entry.module);
+    assert.ok(existsSync(implementation), `missing Harness implementation: ${entry.module}`);
+
+    const [kernel, legacy] = await Promise.all([
+      import(`../packages/harness/src/${entry.module}`),
+      import(entry.legacy),
+    ]);
+    for (const [name, value] of Object.entries(legacy)) {
+      assert.equal(kernel[name], value, `${entry.module} must preserve legacy identity for ${name}`);
+    }
+  }
+});
+
 test('[req:MOD-3] Vault imports only Node built-ins or modules inside its workspace', () => {
   const vaultRoot = join(ROOT, 'packages', 'vault');
   const files = (function modulesUnder(dir) {
@@ -99,26 +119,16 @@ test('[req:MOD-3] Vault imports only Node built-ins or modules inside its worksp
 
   const violations = [];
   for (const file of files) {
-    const source = readFileSync(file, 'utf8');
-    for (const pattern of [
-      /\bfrom\s+['"]([^'"]+)['"]/g,
-      /\bimport\s*\(\s*['"]([^'"]+)['"]\s*\)/g,
-      /\bimport\s+['"]([^'"]+)['"]/g,
-      /\brequire\s*\(\s*['"]([^'"]+)['"]\s*\)/g,
-    ]) {
-      let match;
-      while ((match = pattern.exec(source))) {
-        const specifier = match[1];
-        if (specifier.startsWith('node:')) continue;
-        if (!specifier.startsWith('.')) {
-          violations.push(`${relative(vaultRoot, file)} -> ${specifier}`);
-          continue;
-        }
-        const target = resolve(dirname(file), specifier);
-        const escaped = relative(vaultRoot, target).replaceAll('\\', '/');
-        if (escaped === '..' || escaped.startsWith('../')) {
-          violations.push(`${relative(vaultRoot, file)} -> ${specifier}`);
-        }
+    for (const specifier of importSpecifiers(file)) {
+      if (specifier.startsWith('node:')) continue;
+      if (!specifier.startsWith('.')) {
+        violations.push(`${relative(vaultRoot, file)} -> ${specifier}`);
+        continue;
+      }
+      const target = resolve(dirname(file), specifier);
+      const escaped = relative(vaultRoot, target).replaceAll('\\', '/');
+      if (escaped === '..' || escaped.startsWith('../')) {
+        violations.push(`${relative(vaultRoot, file)} -> ${specifier}`);
       }
     }
   }

@@ -16,11 +16,11 @@
 **Persistent memory for AI coding agents, built on your Obsidian vault.** Every Claude Code **and Codex** session is captured turn by turn into local Markdown — `init` wires both (Codex asks you to approve its hooks once; `import` backfills past sessions either way) — with token/cost tracking and automatically extracted decisions, bugs, and learnings. That always-on plane is **Keep Core**. On top of it, **Wend Runtime** provides a native, zero-dependency lifecycle (spec → change → TDD → sensor-gated archive), selected through the `OFF`, `FLOW`, `GUIDE`, `GOVERN`, and `ASSURE` Operating Profiles. 100% local, open-core.
 
 The runtime is being separated into six physical boundaries — `cli`, `harness`, `vault`, `mcp`,
-`integrations`, and `pi` — without fragmenting installation. The private `vault` workspace now
-canonically owns safe binding and the Shared Project Memory v2 kernel (schema, mode, handoff,
-ledger, projection, and validation), exposed by the root package through `wendkeep/vault`.
-Historical imports, including installed bare subpaths such as `wendkeep/hooks/...`, keep working
-through compatibility facades and no session data needs migration;
+`integrations`, and `pi` — without fragmenting installation. The private `harness` and `vault`
+workspaces now canonically own Operating Profiles/the sensor engine and safe binding/the Shared
+Project Memory v2 kernel, respectively. The root package exposes those surfaces through
+`wendkeep/harness` and `wendkeep/vault`; historical imports keep working through compatibility
+facades and no session data needs migration;
 see the [modular architecture](docs/en/architecture.md).
 
 ```bash
@@ -189,8 +189,9 @@ Operations that deserve step-by-step guidance: [verify and exits 0/1/2](https://
 ## Operating Profiles — Keep Core is always active
 
 **Keep Core is always active**: the Vault, sessions, identity, CORE/SHARED, lessons, costs,
-and persistence do not turn off with the harness. **Wend Runtime** controls only the governance
-layer:
+and persistence do not turn off with the harness. **Wend Runtime** controls only the automatic
+governance layer. Even under `OFF`, explicit WendKeep commands remain available; invoking one is a
+deliberate opt-in and runs that command's own validations:
 
 | Profile | Route | Use |
 |---|---|---|
