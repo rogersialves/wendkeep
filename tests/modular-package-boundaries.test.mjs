@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { parse } from 'acorn';
 import { importSpecifiers } from './helpers/import-specifiers.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -21,6 +22,25 @@ const HARNESS_POLICY_KERNEL = [
 
 function json(path) {
   return JSON.parse(readFileSync(path, 'utf8'));
+}
+
+function assertPureFacade(path, expectedSpecifier) {
+  const source = readFileSync(path, 'utf8');
+  const ast = parse(source, { ecmaVersion: 'latest', sourceType: 'module' });
+  assert.ok(ast.body.length > 0, `${relative(ROOT, path)} must re-export its canonical module`);
+  assert.ok(ast.body.every((node) => (
+    (node.type === 'ExportAllDeclaration' || node.type === 'ExportNamedDeclaration')
+      && node.source?.value === expectedSpecifier
+  )), `${relative(ROOT, path)} must contain only re-exports from ${expectedSpecifier}`);
+}
+
+function assertSameBindings(canonical, publicSurface, legacy, label) {
+  assert.ok(Object.keys(canonical).length > 0, `${label} must export at least one binding`);
+  for (const [name, value] of Object.entries(canonical)) {
+    assert.equal(publicSurface[name], value, `${label}: public identity differs for ${name}`);
+    assert.equal(legacy[name], value, `${label}: legacy identity differs for ${name}`);
+  }
+  assert.deepEqual(Object.keys(legacy).sort(), Object.keys(canonical).sort());
 }
 
 test('[req:MOD-1] root declares all six internal workspaces exactly once', () => {
@@ -103,6 +123,34 @@ test('[req:MOD-8] Harness owns the policy kernel and preserves legacy identities
       assert.equal(kernel[name], value, `${entry.module} must preserve legacy identity for ${name}`);
     }
   }
+});
+
+test('[req:MOD-11] Vault owns locale through one public and legacy-compatible implementation', async () => {
+  const implementation = join(ROOT, 'packages', 'vault', 'src', 'locale.mjs');
+  const facade = join(ROOT, 'hooks', 'locale.mjs');
+  assert.ok(existsSync(implementation), 'missing Vault implementation: locale.mjs');
+  assertPureFacade(facade, '../packages/vault/src/locale.mjs');
+
+  const [canonical, publicSurface, legacy] = await Promise.all([
+    import('../packages/vault/src/locale.mjs'),
+    import('wendkeep/vault'),
+    import('../hooks/locale.mjs'),
+  ]);
+  assertSameBindings(canonical, publicSurface, legacy, 'locale.mjs');
+});
+
+test('[req:MOD-12] Harness owns the FLOW store through one public and legacy-compatible implementation', async () => {
+  const implementation = join(ROOT, 'packages', 'harness', 'src', 'flow-store.mjs');
+  const facade = join(ROOT, 'hooks', 'vault-runtime-store.mjs');
+  assert.ok(existsSync(implementation), 'missing Harness implementation: flow-store.mjs');
+  assertPureFacade(facade, '../packages/harness/src/flow-store.mjs');
+
+  const [canonical, publicSurface, legacy] = await Promise.all([
+    import('../packages/harness/src/flow-store.mjs'),
+    import('wendkeep/harness'),
+    import('../hooks/vault-runtime-store.mjs'),
+  ]);
+  assertSameBindings(canonical, publicSurface, legacy, 'flow-store.mjs');
 });
 
 test('[req:MOD-3] Vault imports only Node built-ins or modules inside its workspace', () => {

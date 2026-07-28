@@ -13,6 +13,12 @@ import { importSpecifiers } from './helpers/import-specifiers.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
+test('[req:MOD-12] sensor configuration keeps every id unique', () => {
+  const config = JSON.parse(readFileSync(join(ROOT, 'wendkeep.sensors.json'), 'utf8'));
+  const ids = config.sensors.map((sensor) => sensor.id);
+  assert.equal(new Set(ids).size, ids.length, 'wendkeep.sensors.json contains duplicate sensor ids');
+});
+
 const VAULT_MODULES = [
   'packages/vault/src/project-vault.mjs',
   'packages/vault/src/vault-path-safety.mjs',
@@ -34,12 +40,12 @@ const VAULT_MODULES = [
   'hooks/session-identity.mjs',
   'hooks/session-note-io.mjs',
   'hooks/vault-path-safety.mjs',
-  'hooks/vault-runtime-store.mjs',
   'hooks/vault-health.mjs',
 ];
 
 const HARNESS_MODULES = new Set([
   'packages/harness/src/index.mjs',
+  'packages/harness/src/flow-store.mjs',
   'packages/harness/src/operating-profile.mjs',
   'packages/harness/src/sensors-core.mjs',
   'src/operating-profile.mjs',
@@ -60,6 +66,7 @@ const HARNESS_MODULES = new Set([
   'hooks/flow-protected-policy.mjs',
   'hooks/session-iteration.mjs',
   'hooks/flow-core.mjs',
+  'hooks/vault-runtime-store.mjs',
 ]);
 
 function modulesUnder(dir) {
@@ -179,12 +186,13 @@ test('[req:MOD-9] boundary scanner recognizes ESM and CommonJS edges without com
   }
 });
 
-test('[req:MOD-9] Vault boundary inventory covers every canonical workspace module', () => {
+test('[req:MOD-9] [req:MOD-11] Vault boundary inventory covers every canonical workspace module', () => {
   const canonical = modulesUnder(join(ROOT, 'packages', 'vault'))
     .map((file) => relative(ROOT, file).replaceAll('\\', '/'));
   const inventory = vaultBoundaryModules();
   const missing = canonical.filter((modulePath) => !inventory.includes(modulePath));
   assert.deepEqual(missing, []);
+  assert.ok(inventory.includes('packages/vault/src/locale.mjs'), 'missing canonical Vault locale boundary');
 });
 
 test('[req:MOD-9] Vault boundary rejects public and deep bare Harness specifiers', () => {
@@ -208,17 +216,21 @@ test('[req:MOD-9] Vault boundary rejects public and deep bare Harness specifiers
   }
 });
 
-test('[req:OP-4] boundary inventory covers the durable FLOW vault store', () => {
-  assert.ok(VAULT_MODULES.includes('hooks/vault-runtime-store.mjs'));
+test('[req:MOD-12] boundary inventory assigns the durable FLOW store to Harness', () => {
+  assert.ok(HARNESS_MODULES.has('packages/harness/src/flow-store.mjs'));
+  assert.ok(HARNESS_MODULES.has('hooks/vault-runtime-store.mjs'));
+  assert.equal(VAULT_MODULES.includes('hooks/vault-runtime-store.mjs'), false);
   assert.ok(VAULT_MODULES.includes('hooks/vault-path-safety.mjs'));
 });
 
-test('[req:MOD-9] Harness policy kernel is self-contained above the public Vault surface', () => {
+test('[req:MOD-9] [req:MOD-12] Harness policy kernel is self-contained above the public Vault surface', () => {
   const harnessRoot = join(ROOT, 'packages', 'harness');
+  const publicVaultIndex = join(ROOT, 'packages', 'vault', 'src', 'index.mjs');
   const modules = modulesUnder(harnessRoot);
   const inventory = modules.map((file) => relative(ROOT, file).replaceAll('\\', '/'));
   for (const required of [
     'packages/harness/src/index.mjs',
+    'packages/harness/src/flow-store.mjs',
     'packages/harness/src/operating-profile.mjs',
     'packages/harness/src/sensors-core.mjs',
   ]) {
@@ -229,12 +241,13 @@ test('[req:MOD-9] Harness policy kernel is self-contained above the public Vault
   for (const absolute of modules) {
     const modulePath = relative(ROOT, absolute).replaceAll('\\', '/');
     for (const specifier of importSpecifiers(absolute)) {
-      if (specifier.startsWith('node:') || specifier === 'wendkeep/vault') continue;
+      if (specifier.startsWith('node:')) continue;
       if (!specifier.startsWith('.')) {
         violations.push(`${modulePath} -> ${specifier}`);
         continue;
       }
       const target = resolve(dirname(absolute), specifier);
+      if (target === publicVaultIndex) continue;
       const targetRelative = relative(harnessRoot, target);
       if (targetRelative.startsWith('..') || isAbsolute(targetRelative)) {
         violations.push(`${modulePath} -> ${specifier}`);
@@ -242,6 +255,15 @@ test('[req:MOD-9] Harness policy kernel is self-contained above the public Vault
     }
   }
   assert.deepEqual(violations, [], `forbidden Harness dependencies:\n${violations.join('\n')}`);
+});
+
+test('[req:MOD-12] canonical FLOW store depends on the public Vault surface', () => {
+  const modulePath = join(ROOT, 'packages', 'harness', 'src', 'flow-store.mjs');
+  assert.ok(existsSync(modulePath), 'missing canonical Harness FLOW store boundary');
+  assert.ok(
+    importSpecifiers(modulePath).includes('../../vault/src/index.mjs'),
+    'FLOW store must depend on the canonical index exported as wendkeep/vault',
+  );
 });
 
 test('[req:OP-4] Vault modules do not import harness or operating-profile modules', () => {
