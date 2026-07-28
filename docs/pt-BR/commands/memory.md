@@ -47,8 +47,12 @@ npx wendkeep validate-memory --vault <cofre-v2>
   publicação perdida ou checkpoint divergente bloqueiam; `degraded` com outbox íntegra é warning.
 - `memory repair` é exclusivamente estrutural: trabalha sob locks com owner PID/token, salva
   `.bak`, retém eventos válidos e reprojeta. Quando reconhece um checkpoint pré-0.59 válido com
-  cursor causal, migra-o por CAS para a fronteira física e registra backup/auditoria; nunca
-  reclassifica attempts do registry nem aceita tuple que não seja rederivada integralmente.
+  cursor causal, migra-o por CAS para a fronteira física. Também reconhece um prefixo histórico
+  assert-only somente quando revision, cursor, hash, identidade, turns e o espelho
+  `memory_checkpoint` reproduzem exatamente a semântica antiga; o alvo é o replay atual daquele
+  prefixo, sem absorver eventos posteriores. Ambos os casos fazem CAS do attempt e do espelho e
+  registram backup/auditoria. O repair nunca reclassifica attempts do registry nem aceita tuple,
+  operação ou espelho que não seja rederivado integralmente.
 - `memory reconcile` é dry-run por padrão. `--apply` exige duas sessões nomeadas e motivo, faz CAS
   do attempt exato, salva backup do registry e limita a mutação ao attempt ambíguo e à sucessora.
   O replay é CORE-aware, usa cursor físico do ledger no checkpoint e não reescreve ledger, CORE ou

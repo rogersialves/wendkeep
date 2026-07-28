@@ -4,6 +4,31 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.61.0] — 2026-07-28
+
+### Added
+
+- **`wendkeep/vault` passa a expor o kernel de memória operacional.** Schema v2, detecção de
+  modo, handoff, ledger/projeção e validadores CORE/SHARED ficam disponíveis pela superfície
+  pública e são exercitados a partir de um tarball realmente instalado.
+
+### Changed
+
+- **A implementação canônica do kernel agora pertence a `packages/vault/src`.** Os paths
+  históricos em `hooks/` e `src/` permanecem como fachadas de reexport, inclusive por bare
+  specifiers no pacote instalado, preservando identidade de funções, classes, constantes e
+  compatibilidade com consumidores existentes.
+- **A extração é estrutural e não migra dados.** Schema 2, ledger, locks, projeção,
+  SessionStop e o conteúdo de cada Vault mantêm o mesmo contrato persistente.
+
+### Fixed
+
+- **`memory repair` converge checkpoints assert-only históricos pré-0.59 sem editar o ledger.**
+  O repair só migra quando prefixo, revision, cursor, hash, identidade e turns reproduzem
+  exatamente a semântica antiga e o espelho `memory_checkpoint` é compatível; o caminho preserva
+  CORE/ledger, usa CAS do attempt e do espelho, backup e auditoria e continua falhando fechado para
+  tuples, operações ou espelhos divergentes.
+
 ## [0.60.0] — 2026-07-27
 
 ### Added

@@ -47,8 +47,12 @@ npx wendkeep validate-memory --vault <v2-vault>
   mismatched checkpoint blocks; `degraded` with an intact outbox is a warning.
 - `memory repair` is structural only: it uses PID/token-owned locks, writes a `.bak`, retains
   valid events, and reprojects state. When it recognizes a valid pre-0.59 checkpoint whose cursor
-  is causal, it CAS-migrates it to the physical boundary with backup/audit; it never reclassifies
-  registry attempts or accepts a tuple that cannot be fully re-derived.
+  is causal, it CAS-migrates it to the physical boundary. It also recognizes an assert-only
+  historical prefix only when revision, cursor, hash, identity, turns, and the
+  `memory_checkpoint` mirror exactly reproduce the old semantics; the target is the current replay
+  of that prefix, without absorbing later events. Both paths CAS-check the attempt and mirror and
+  record backup/audit. Repair never reclassifies registry attempts or accepts a tuple, operation,
+  or mirror that cannot be fully re-derived.
 - `memory reconcile` is a dry run by default. `--apply` requires two named sessions plus a reason,
   CAS-checks the exact attempt, backs up the registry, and limits mutation to the ambiguous attempt
   and its successor. Replay is CORE-aware, checkpoints use the physical ledger cursor, and the
