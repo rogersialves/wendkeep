@@ -4,6 +4,26 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.60.0] — 2026-07-27
+
+### Added
+
+- **O runtime ganha seis fronteiras físicas internas:** `cli`, `harness`, `vault`, `mcp`,
+  `integrations` e `pi` passam a existir como workspaces privados `@wendkeep/*`, mantendo
+  `wendkeep` como uma única unidade de instalação e publicação.
+- **O Keep Core inaugura a API programática `wendkeep/vault`.** Binding/resolução do Vault e a
+  fronteira segura de paths podem ser importados pelo novo subpath público, incluído e validado no
+  tarball.
+
+### Changed
+
+- **Binding e segurança física agora pertencem a `packages/vault`.** Os paths históricos em
+  `src/project-vault.mjs` e `hooks/vault-path-safety.mjs` permanecem como fachadas compatíveis, sem
+  alterar CLI, hooks ou dados existentes.
+- **A direção de dependências virou gate estrutural.** O workspace Vault aceita somente built-ins
+  Node e módulos internos, impedindo que Keep Core passe a depender de Harness, perfis, changes,
+  FLOW, sensores ou CLI.
+
 ## [0.59.0] — 2026-07-27
 
 ### Added

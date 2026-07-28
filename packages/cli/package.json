@@ -1,0 +1,5 @@
+{
+  "name": "@wendkeep/cli",
+  "private": true,
+  "type": "module"
+}
