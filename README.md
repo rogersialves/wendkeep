@@ -16,8 +16,12 @@
 **Memória persistente para agentes de código, construída sobre o seu cofre Obsidian.** Cada sessão do Claude Code e do Codex é capturada turno a turno em Markdown local — o `init` wira os hooks dos dois agentes (no Codex, valendo depois que você aprovar o prompt de confiança dele); o `import` recupera as sessões passadas — com rastreio de tokens/custo, decisões, bugs e aprendizados extraídos automaticamente. Esse plano sempre ativo é o **Keep Core**. Sobre ele, o **Wend Runtime** oferece um ciclo nativo e sem dependências (spec → change → TDD → archive com gate por sensor), selecionável pelos Perfis de Operação `OFF`, `FLOW`, `GUIDE`, `GOVERN` e `ASSURE`. 100% local, open‑core.
 
 O runtime está sendo separado em seis fronteiras físicas — `cli`, `harness`, `vault`, `mcp`,
-`integrations` e `pi` — sem fragmentar a instalação. O Vault é a primeira superfície extraída e
-pode ser importado por `wendkeep/vault`; veja a [arquitetura modular](docs/pt-BR/architecture.md).
+`integrations` e `pi` — sem fragmentar a instalação. O workspace privado `vault` agora é o dono
+canônico do binding seguro e do kernel da Shared Project Memory v2 (schema, modo, handoff, ledger,
+projeção e validação), exposto pelo pacote raiz em `wendkeep/vault`. Os imports históricos,
+inclusive bare subpaths instalados como `wendkeep/hooks/...`, continuam funcionando por fachadas
+de compatibilidade e nenhum dado de sessão precisa ser migrado;
+veja a [arquitetura modular](docs/pt-BR/architecture.md).
 
 ```bash
 npm i -D wendkeep && npx wendkeep init      # captura a partir da próxima sessão
@@ -245,8 +249,10 @@ ou checkpoint divergente bloqueiam. Veja [migração](docs/pt-BR/commands/memory
 
 Se o status bloquear, preserve a evidência e rode `wendkeep memory repair --vault <cofre>` para
 salvar backup do ledger corrompido, reter linhas válidas e reprojetar. Repair nunca reclassifica
-attempts; checkpoints causais válidos pré-0.59 são migrados por CAS, com backup/auditoria, para a
-fronteira física. Uma ambiguidade comprovadamente substituída usa `memory reconcile <sessão>
+attempts; checkpoints causais válidos pré-0.59 e prefixos históricos assert-only exatamente
+rederiváveis são migrados por CAS do attempt e de `memory_checkpoint`, com backup/auditoria, para
+a fronteira física correta; espelhos divergentes falham fechados. Uma
+ambiguidade comprovadamente substituída usa `memory reconcile <sessão>
 --by-session <sucessora> --reason <motivo>` como dry-run e exige `--apply`; a decisão faz backup e
 auditoria sem reescrever ledger, CORE ou notas. Depois rode `status --gate` novamente. Conflitos
 exigem curadoria explícita com `memory promote <id>` ou `memory reject <id>`; o doctor apenas

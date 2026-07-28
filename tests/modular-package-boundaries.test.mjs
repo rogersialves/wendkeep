@@ -1,11 +1,18 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, readdirSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const SURFACES = ['cli', 'harness', 'vault', 'mcp', 'integrations', 'pi'];
+const INITIAL_MEMORY_KERNEL = [
+  { module: 'memory-schema.mjs', legacy: '../hooks/memory-schema.mjs' },
+  { module: 'memory-mode.mjs', legacy: '../hooks/memory-mode.mjs' },
+  { module: 'memory-handoff.mjs', legacy: '../hooks/memory-handoff.mjs' },
+  { module: 'validate-core.mjs', legacy: '../src/validate-core.mjs' },
+  { module: 'validate-memory.mjs', legacy: '../src/validate-memory.mjs' },
+];
 
 function json(path) {
   return JSON.parse(readFileSync(path, 'utf8'));
@@ -41,6 +48,41 @@ test('[req:MOD-2] wendkeep/vault and legacy paths expose identical bindings', as
   ]);
   for (const [name, value] of Object.entries(legacyBinding)) assert.equal(surface[name], value);
   for (const [name, value] of Object.entries(legacySafety)) assert.equal(surface[name], value);
+});
+
+test('[req:MOD-5] [req:MOD-6] Vault owns the initial memory kernel and preserves legacy identities', async () => {
+  const surface = await import('wendkeep/vault');
+
+  for (const entry of INITIAL_MEMORY_KERNEL) {
+    const implementation = join(ROOT, 'packages', 'vault', 'src', entry.module);
+    assert.ok(existsSync(implementation), `missing Vault implementation: ${entry.module}`);
+
+    const [kernel, legacy] = await Promise.all([
+      import(`../packages/vault/src/${entry.module}`),
+      import(entry.legacy),
+    ]);
+    for (const [name, value] of Object.entries(legacy)) {
+      assert.equal(kernel[name], value, `${entry.module} must preserve legacy identity for ${name}`);
+      assert.equal(surface[name], value, `wendkeep/vault must expose ${name}`);
+    }
+  }
+});
+
+test('[req:MOD-5] [req:MOD-6] Vault owns the memory store without changing its public identity', async () => {
+  const implementation = join(ROOT, 'packages', 'vault', 'src', 'memory-store.mjs');
+  assert.ok(existsSync(implementation), 'missing Vault implementation: memory-store.mjs');
+
+  const [surface, kernel, legacy] = await Promise.all([
+    import('wendkeep/vault'),
+    import('../packages/vault/src/memory-store.mjs'),
+    import('../hooks/memory-store.mjs'),
+  ]);
+  for (const [name, value] of Object.entries(legacy)) {
+    assert.equal(kernel[name], value, `memory-store.mjs must preserve legacy identity for ${name}`);
+    assert.equal(surface[name], value, `wendkeep/vault must expose ${name}`);
+  }
+  assert.equal(kernel.canonicalMemoryJson({ z: 1, a: 2 }), '{"a":2,"z":1}');
+  assert.equal(surface.MEMORY_LOCK_BUSY, surface.VAULT_LOCK_BUSY);
 });
 
 test('[req:MOD-3] Vault imports only Node built-ins or modules inside its workspace', () => {

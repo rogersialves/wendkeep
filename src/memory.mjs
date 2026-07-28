@@ -295,6 +295,14 @@ function attemptFingerprint(attempt) {
   return hash(canonicalMemoryJson(attempt || null));
 }
 
+function memoryCheckpointFingerprint(entry) {
+  const present = Object.prototype.hasOwnProperty.call(entry || {}, 'memory_checkpoint');
+  return hash(canonicalMemoryJson({
+    present,
+    checkpoint: present ? (entry.memory_checkpoint ?? null) : null,
+  }));
+}
+
 function matchingAppliedReconciliation(entry, request) {
   const attempt = entry?.last_memory_attempt;
   if (attempt?.memory_mode !== 'v2' || attempt?.state !== 'skipped' || attempt?.disposition !== 'superseded') return null;
@@ -723,27 +731,81 @@ function checkpointShape(checkpoint) {
     && typeof checkpoint.state_hash === 'string' && checkpoint.state_hash;
 }
 
-function legacyCheckpointMigration(sessionId, attempt, authority, fullReplay) {
+function legacyEventOrder(left, right) {
+  return (Number(left.base_revision ?? 0) - Number(right.base_revision ?? 0))
+    || String(left.effective_at || left.observed_at).localeCompare(String(right.effective_at || right.observed_at))
+    || Number(left.turn_sequence ?? 0) - Number(right.turn_sequence ?? 0)
+    || String(left.event_id).localeCompare(String(right.event_id));
+}
+
+function historicalAssertOnlyCheckpoint(vault, attempt, authority, checkpoint) {
+  const requiredEventIds = Array.isArray(attempt?.event_ids) ? [...attempt.event_ids] : [];
+  if (!requiredEventIds.includes(checkpoint.event_cursor)) return null;
+
+  const cursorIndex = authority.ledgerEvents
+    .findIndex((event) => event.event_id === checkpoint.event_cursor);
+  if (cursorIndex < 0) return null;
+  const prefix = authority.ledgerEvents.slice(0, cursorIndex + 1);
+  const prefixIds = new Set(prefix.map((event) => event.event_id));
+  if (requiredEventIds.some((eventId) => !prefixIds.has(eventId))) return null;
+  if (prefix.some((event) => event.operation !== 'assert')) return null;
+
+  const firstByKey = [];
+  const priorByKey = new Map();
+  for (const event of [...prefix].sort(legacyEventOrder)) {
+    const prior = priorByKey.get(event.memory_key);
+    if (prior) {
+      const sameActivation = Boolean(event.canonical_session_id)
+        && event.canonical_session_id === prior.canonical_session_id
+        && event.activation_id === prior.activation_id;
+      if (!sameActivation || !Number.isInteger(event.turn_sequence)
+          || event.turn_sequence <= prior.turn_sequence) return null;
+    } else {
+      firstByKey.push(event);
+    }
+    priorByKey.set(event.memory_key, event);
+  }
+
+  const legacyState = deriveMemoryProjection(vault, firstByKey);
+  const currentPrefix = deriveMemoryProjection(vault, prefix);
+  if (legacyState.candidates.length || currentPrefix.candidates.length) return null;
+  const legacyCheckpoint = {
+    revision: legacyState.revision,
+    event_cursor: currentPrefix.eventCursor,
+    state_hash: legacyState.stateHash,
+  };
+  if (!sameCheckpoint(checkpoint, legacyCheckpoint)) return null;
+  return currentPrefix.checkpoint;
+}
+
+function legacyCheckpointMigration(vault, sessionId, entry, authority, fullReplay) {
+  const attempt = entry?.last_memory_attempt;
   const checkpoint = attempt?.checkpoint;
   const requiredEventIds = Array.isArray(attempt?.event_ids) ? [...attempt.event_ids] : [];
   if (!checkpointShape(checkpoint) || !requiredEventIds.length) return null;
+  if (entry?.memory_checkpoint !== undefined
+      && !sameCheckpoint(entry.memory_checkpoint, checkpoint)) return null;
   // The pre-physical format had no explicit causal_event_cursor: event_cursor itself
   // named the reducer's causal tail while revision/hash described the full authority
-  // snapshot. Restricting automatic migration to that exact snapshot is both O(n) and
-  // fail-closed: historical/ambiguous prefixes require explicit human reconciliation.
+  // snapshot. Historical prefixes are accepted only by the narrower assert-only proof below;
+  // every other ambiguous tuple remains fail-closed for explicit human reconciliation.
   if (checkpoint.causal_event_cursor !== undefined) return null;
   if (requiredEventIds.some((eventId) => !authority.ledgerById.has(eventId))) return null;
-  if (checkpoint.revision !== fullReplay.revision
-      || checkpoint.state_hash !== fullReplay.stateHash
-      || checkpoint.event_cursor !== fullReplay.eventCursor) return null;
-  if (sameCheckpoint(checkpoint, fullReplay.checkpoint)) return null;
+  const matchesFullReplay = checkpoint.revision === fullReplay.revision
+    && checkpoint.state_hash === fullReplay.stateHash
+    && checkpoint.event_cursor === fullReplay.eventCursor;
+  const nextCheckpoint = matchesFullReplay
+    ? fullReplay.checkpoint
+    : historicalAssertOnlyCheckpoint(vault, attempt, authority, checkpoint);
+  if (!nextCheckpoint || sameCheckpoint(checkpoint, nextCheckpoint)) return null;
 
   const proof = validateSuccessorProof({ bySessionId: sessionId }, attempt, authority);
   return {
     sessionId,
     expectedFingerprint: attemptFingerprint(attempt),
+    expectedMemoryCheckpointFingerprint: memoryCheckpointFingerprint(entry),
     originalCheckpoint: cloneJson(checkpoint),
-    checkpoint: cloneJson(fullReplay.checkpoint),
+    checkpoint: cloneJson(nextCheckpoint),
     proof,
   };
 }
@@ -759,7 +821,7 @@ export function migrateLegacyMemoryCheckpoints(vault, {
     const fullReplay = deriveMemoryProjection(vault, authority.ledgerEvents);
     const plans = Object.entries(inspected.sessions || {})
       .map(([sessionId, entry]) => legacyCheckpointMigration(
-        sessionId, entry?.last_memory_attempt, authority, fullReplay,
+        vault, sessionId, entry, authority, fullReplay,
       ))
       .filter(Boolean);
     assertAuthorityMatches(expectedAuthority, readMemoryAuthority(vault));
@@ -773,9 +835,13 @@ export function migrateLegacyMemoryCheckpoints(vault, {
       return mutateSessionRegistry(vault, (registry) => {
         // Validate every CAS before changing the first entry, making the batch atomic.
         for (const plan of plans) {
-          const attempt = registry.sessions?.[plan.sessionId]?.last_memory_attempt;
+          const entry = registry.sessions?.[plan.sessionId];
+          const attempt = entry?.last_memory_attempt;
           if (attemptFingerprint(attempt) !== plan.expectedFingerprint) {
             throw new Error(`CAS perdido: checkpoint da sessão ${plan.sessionId} mudou durante a migração estrutural.`);
+          }
+          if (memoryCheckpointFingerprint(entry) !== plan.expectedMemoryCheckpointFingerprint) {
+            throw new Error(`CAS perdido: memory_checkpoint da sessão ${plan.sessionId} mudou durante a migração estrutural.`);
           }
         }
 
@@ -795,7 +861,7 @@ export function migrateLegacyMemoryCheckpoints(vault, {
 
         for (const plan of plans) {
           const entry = registry.sessions[plan.sessionId];
-          const reconciliationId = `memcp-${hash(`${plan.sessionId}\0${plan.expectedFingerprint}\0${canonicalMemoryJson(plan.checkpoint)}`).slice(0, 20)}`;
+          const reconciliationId = `memcp-${hash(`${plan.sessionId}\0${plan.expectedFingerprint}\0${plan.expectedMemoryCheckpointFingerprint}\0${canonicalMemoryJson(plan.checkpoint)}`).slice(0, 20)}`;
           entry.memory_reconciliations = [
             ...(Array.isArray(entry.memory_reconciliations) ? entry.memory_reconciliations : []),
             {

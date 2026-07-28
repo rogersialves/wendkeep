@@ -83,14 +83,20 @@ test('[req:MOD-4] published tarball contains the modular Vault surface', () => {
     'packages/pi/package.json',
     'packages/vault/package.json',
     'packages/vault/src/index.mjs',
+    'packages/vault/src/memory-handoff.mjs',
+    'packages/vault/src/memory-mode.mjs',
+    'packages/vault/src/memory-schema.mjs',
+    'packages/vault/src/memory-store.mjs',
     'packages/vault/src/project-vault.mjs',
+    'packages/vault/src/validate-core.mjs',
+    'packages/vault/src/validate-memory.mjs',
     'packages/vault/src/vault-path-safety.mjs',
   ]) {
     assert.ok(published.has(path), `missing modular Vault file from package: ${path}`);
   }
 });
 
-test('[req:MOD-4] installed tarball executes CLI, legacy hook and wendkeep/vault', () => {
+test('[req:MOD-4] [req:MOD-6] installed tarball executes CLI, legacy hook and Vault memory kernel', () => {
   const temp = mkdtempSync(join(tmpdir(), 'wendkeep-installed-tarball-'));
   try {
     const packed = spawnSync(`npm pack --json --pack-destination "${temp}"`, {
@@ -116,9 +122,16 @@ test('[req:MOD-4] installed tarball executes CLI, legacy hook and wendkeep/vault
 
     const imported = spawnSync(process.execPath, ['--input-type=module', '--eval', [
       "const vault = await import('wendkeep/vault');",
-      "const legacy = await import(new URL('./node_modules/wendkeep/hooks/vault-path-safety.mjs', import.meta.url));",
+      "const legacy = await import('wendkeep/hooks/vault-path-safety.mjs');",
+      "const legacyStore = await import('wendkeep/hooks/memory-store.mjs');",
       "if (typeof vault.resolveProjectVault !== 'function') process.exit(11);",
       "if (typeof legacy.assertVaultPathSafe !== 'function') process.exit(12);",
+      "const shared = vault.renderSharedMemory({ updatedAt: '2026-07-28T00:00:00.000Z', reviewAfter: '2026-08-04T00:00:00.000Z' });",
+      "if (!vault.validateSharedMemory(shared).ok) process.exit(13);",
+      "if (!vault.validateCore(vault.renderCoreSkeleton()).ok) process.exit(14);",
+      "if (legacyStore.MemoryEventCollision !== vault.MemoryEventCollision) process.exit(15);",
+      "if (legacyStore.MEMORY_LOCK_BUSY !== vault.MEMORY_LOCK_BUSY) process.exit(16);",
+      "if (vault.canonicalMemoryJson({ z: 1, a: 2 }) !== '{\"a\":2,\"z\":1}') process.exit(15);",
     ].join('\n')], { cwd: consumer, encoding: 'utf8' });
     assert.equal(imported.status, 0, `installed imports failed:\n${imported.stderr}`);
 

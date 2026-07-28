@@ -16,8 +16,12 @@
 **Persistent memory for AI coding agents, built on your Obsidian vault.** Every Claude Code **and Codex** session is captured turn by turn into local Markdown — `init` wires both (Codex asks you to approve its hooks once; `import` backfills past sessions either way) — with token/cost tracking and automatically extracted decisions, bugs, and learnings. That always-on plane is **Keep Core**. On top of it, **Wend Runtime** provides a native, zero-dependency lifecycle (spec → change → TDD → sensor-gated archive), selected through the `OFF`, `FLOW`, `GUIDE`, `GOVERN`, and `ASSURE` Operating Profiles. 100% local, open-core.
 
 The runtime is being separated into six physical boundaries — `cli`, `harness`, `vault`, `mcp`,
-`integrations`, and `pi` — without fragmenting installation. Vault is the first extracted surface
-and is importable through `wendkeep/vault`; see the [modular architecture](docs/en/architecture.md).
+`integrations`, and `pi` — without fragmenting installation. The private `vault` workspace now
+canonically owns safe binding and the Shared Project Memory v2 kernel (schema, mode, handoff,
+ledger, projection, and validation), exposed by the root package through `wendkeep/vault`.
+Historical imports, including installed bare subpaths such as `wendkeep/hooks/...`, keep working
+through compatibility facades and no session data needs migration;
+see the [modular architecture](docs/en/architecture.md).
 
 ```bash
 npm i -D wendkeep && npx wendkeep init      # captures from the next session on
@@ -248,9 +252,11 @@ lost publication, or mismatched checkpoint blocks. See [migration](docs/en/comma
 and [diagnostics](docs/en/commands/maintenance-and-diagnostics.md).
 
 If status blocks, preserve the evidence and run `wendkeep memory repair --vault <vault>` to back up
-the corrupt ledger, retain valid lines, and re-project. Repair never reclassifies attempts. A
-valid pre-0.59 causal checkpoint is CAS-migrated to the physical boundary with backup/audit. A
-demonstrably superseded ambiguity uses `memory reconcile <session> --by-session <successor>
+the corrupt ledger, retain valid lines, and re-project. Repair never reclassifies attempts. Valid
+pre-0.59 causal checkpoints and exactly re-derived assert-only historical prefixes are
+CAS-migrated on both the attempt and `memory_checkpoint` to the correct physical boundary with
+backup/audit; divergent mirrors fail closed. A demonstrably superseded
+ambiguity uses `memory reconcile <session> --by-session <successor>
 --reason <reason>` as a dry run and requires `--apply`; the decision is backed up and audited
 without rewriting ledger, CORE, or notes. Run `status --gate` again afterwards. Conflicts require
 explicit curation with `memory promote <id>` or `memory reject <id>`; doctor only diagnoses.

@@ -1,7 +1,7 @@
 // [req:MEM-HYB-3] [req:MEM-HYB-7] [req:MEM-HYB-9]
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import {
   existsSync, linkSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync,
   symlinkSync, writeFileSync,
@@ -82,6 +82,131 @@ function projectedAttempt(sessionId, event, checkpointValue = null, overrides = 
     checkpoint: checkpointValue,
     ...overrides,
   };
+}
+
+function legacyAssertCheckpoint(events) {
+  const seenAssertKeys = new Set();
+  const legacyApplied = events.filter((event) => {
+    if (event.operation !== 'assert') return true;
+    if (seenAssertKeys.has(event.memory_key)) return false;
+    seenAssertKeys.add(event.memory_key);
+    return true;
+  });
+  const legacy = reduceMemoryEvents(legacyApplied);
+  const causal = reduceMemoryEvents(events);
+  return {
+    revision: legacy.revision,
+    event_cursor: causal.eventCursor,
+    state_hash: legacy.stateHash,
+  };
+}
+
+function historicalLegacyCheckpointFixture({
+  tamperHash = false,
+  nonAssert = false,
+  divergentIdentity = false,
+  nonIncreasingTurn = false,
+  divergentMirror = false,
+} = {}) {
+  const vault = fixture();
+  const brain = join(vault, '.brain');
+  const first = memoryEvent('mem-historical-t1', 'handoff t1', 1);
+  const second = memoryEvent('mem-historical-t2', 'handoff t2', 2);
+  if (nonAssert) second.operation = 'add';
+  if (divergentIdentity) second.activation_id = 'other-activation';
+  if (nonIncreasingTurn) second.turn_sequence = first.turn_sequence;
+  const git = {
+    ...memoryEvent('mem-historical-git', { commit: 'abc123' }, 3),
+    memory_key: 'git.local-head',
+  };
+  const fourth = memoryEvent('mem-historical-t4', 'handoff t4', 4);
+  const attempted = memoryEvent('mem-historical-t6', 'handoff t6', 6);
+  const appendedLate = memoryEvent('mem-historical-t5-late', 'handoff t5', 5);
+  const physicalLedger = [first, second, git, fourth, attempted, appendedLate];
+  const attemptPrefix = physicalLedger.slice(0, 5);
+  const legacyCheckpoint = legacyAssertCheckpoint(attemptPrefix);
+  if (tamperHash) {
+    legacyCheckpoint.state_hash = `${legacyCheckpoint.state_hash.slice(0, -1)}${legacyCheckpoint.state_hash.endsWith('0') ? '1' : '0'}`;
+  }
+
+  writeFileSync(join(brain, 'MEMORY_EVENTS.jsonl'), `${physicalLedger.map(canonicalMemoryJson).join('\n')}\n`);
+  writeFileSync(join(brain, 'MEMORY_CANDIDATES.jsonl'), '');
+  const current = deriveMemoryProjection(vault, physicalLedger);
+  const memoryCheckpoint = divergentMirror ? current.checkpoint : legacyCheckpoint;
+  writeFileSync(join(brain, 'SHARED_MEMORY.md'), renderSharedMemory({
+    revision: current.revision,
+    eventCursor: current.ledgerCursor,
+    stateHash: current.stateHash,
+    events: current.activeEvents,
+    updatedAt: attempted.observed_at,
+  }));
+  const registryPath = join(brain, 'SESSION_REGISTRY.json');
+  writeFileSync(registryPath, `${JSON.stringify({ version: 2, sessions: {
+    'current-session': {
+      memory_checkpoint: memoryCheckpoint,
+      last_memory_attempt: projectedAttempt('current-session', attempted, legacyCheckpoint),
+    },
+  } }, null, 2)}\n`);
+  return {
+    vault, brain, physicalLedger, attemptPrefix, legacyCheckpoint, registryPath,
+    currentCheckpoint: current.checkpoint,
+  };
+}
+
+function startCheckpointMirrorRace({ vault, registryPath: registryFile, checkpointValue }) {
+  const safetyUrl = new URL('../packages/vault/src/vault-path-safety.mjs', import.meta.url).href;
+  const registryUrl = new URL('../hooks/obsidian-common.mjs', import.meta.url).href;
+  const code = [
+    "import { existsSync } from 'node:fs';",
+    `import { withVaultPathLock } from ${JSON.stringify(safetyUrl)};`,
+    `import { readSessionRegistry, writeSessionRegistry } from ${JSON.stringify(registryUrl)};`,
+    'const signal = new Int32Array(new SharedArrayBuffer(4));',
+    'withVaultPathLock(process.env.WK_RACE_VAULT, process.env.WK_RACE_REGISTRY, () => {',
+    "  process.stdout.write('ready\\n');",
+    '  const deadline = Date.now() + 5000;',
+    '  while (!existsSync(process.env.WK_RACE_MEMORY_LOCK)) {',
+    "    if (Date.now() >= deadline) throw new Error('memory lock was not observed');",
+    '    Atomics.wait(signal, 0, 0, 10);',
+    '  }',
+    '  Atomics.wait(signal, 0, 0, 250);',
+    '  const registry = readSessionRegistry(process.env.WK_RACE_VAULT);',
+    "  registry.sessions['current-session'].memory_checkpoint = JSON.parse(process.env.WK_RACE_CHECKPOINT);",
+    '  writeSessionRegistry(process.env.WK_RACE_VAULT, registry);',
+    "  process.stdout.write('mutated\\n');",
+    '}, { timeoutMs: 2000 });',
+  ].join('\n');
+  const child = spawn(process.execPath, ['--input-type=module', '-e', code], {
+    env: {
+      ...process.env,
+      WK_RACE_VAULT: vault,
+      WK_RACE_REGISTRY: registryFile,
+      WK_RACE_MEMORY_LOCK: join(vault, '.brain', 'MEMORY.lock'),
+      WK_RACE_CHECKPOINT: JSON.stringify(checkpointValue),
+    },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  let stdout = '';
+  let stderr = '';
+  let readyResolve;
+  let readyReject;
+  const ready = new Promise((resolve, reject) => {
+    readyResolve = resolve;
+    readyReject = reject;
+  });
+  child.stdout.on('data', (chunk) => {
+    stdout += chunk;
+    if (stdout.includes('ready\n')) readyResolve();
+  });
+  child.stderr.on('data', (chunk) => { stderr += chunk; });
+  child.on('error', readyReject);
+  const closed = new Promise((resolve, reject) => {
+    child.on('error', reject);
+    child.on('close', (codeValue) => {
+      if (!stdout.includes('ready\n')) readyReject(new Error(stderr || `race writer exited ${codeValue}`));
+      resolve({ code: codeValue, stdout, stderr });
+    });
+  });
+  return { ready, closed };
 }
 
 function reconciliationArtifacts(vault) {
@@ -644,6 +769,105 @@ test('[req:OP-10] memory repair migra checkpoint causal pré-upgrade para bounda
     assert.equal(retry.checkpointMigration.status, 'unchanged');
     assert.equal(readFileSync(registryPath, 'utf8'), registryAfterMigration);
   } finally { rmSync(vault, { recursive: true, force: true }); }
+});
+
+test('[req:MOD-7] memory repair migra checkpoint assert-only pré-0.59 no prefixo histórico exato', async () => {
+  const {
+    vault, brain, physicalLedger, attemptPrefix, legacyCheckpoint, registryPath,
+  } = historicalLegacyCheckpointFixture();
+  const ledgerBefore = readFileSync(join(brain, 'MEMORY_EVENTS.jsonl'));
+  const coreBefore = readFileSync(join(brain, 'CORE.md'));
+  try {
+    const beforeGate = spawnSync(process.execPath, [BIN, 'memory', 'status', '--gate', '--vault', vault], { encoding: 'utf8' });
+    assert.equal(beforeGate.status, 1, beforeGate.stderr || beforeGate.stdout);
+    assert.match(beforeGate.stdout, /checkpoint|prefixo/i);
+
+    const { repairMemory } = await import('../src/memory.mjs');
+    const repaired = repairMemory(vault, { now: '2026-07-28T12:30:00.000Z' });
+    assert.equal(repaired.checkpointMigration.status, 'migrated');
+    assert.equal(repaired.checkpointMigration.migrated, 1);
+    assert.deepEqual(readFileSync(join(brain, 'MEMORY_EVENTS.jsonl')), ledgerBefore);
+    assert.deepEqual(readFileSync(join(brain, 'CORE.md')), coreBefore);
+
+    const expectedPrefix = deriveMemoryProjection(vault, attemptPrefix).checkpoint;
+    const fullCheckpoint = deriveMemoryProjection(vault, physicalLedger).checkpoint;
+    const migratedRegistry = JSON.parse(readFileSync(registryPath, 'utf8'));
+    const migrated = migratedRegistry.sessions['current-session'];
+    assert.deepEqual(migrated.last_memory_attempt.checkpoint, expectedPrefix);
+    assert.deepEqual(migrated.memory_checkpoint, expectedPrefix);
+    assert.notDeepEqual(expectedPrefix, fullCheckpoint, 'historical attempt must not absorb later ledger events');
+    assert.deepEqual(migrated.memory_reconciliations.at(-1).original_checkpoint, legacyCheckpoint);
+    assert.ok(existsSync(repaired.checkpointMigration.backupPath));
+
+    const afterGate = spawnSync(process.execPath, [BIN, 'memory', 'status', '--gate', '--vault', vault], { encoding: 'utf8' });
+    assert.equal(afterGate.status, 0, afterGate.stderr || afterGate.stdout);
+    const registryAfterMigration = readFileSync(registryPath, 'utf8');
+    const retry = repairMemory(vault, { now: '2026-07-28T12:31:00.000Z' });
+    assert.equal(retry.checkpointMigration.status, 'unchanged');
+    assert.equal(readFileSync(registryPath, 'utf8'), registryAfterMigration);
+  } finally { rmSync(vault, { recursive: true, force: true }); }
+});
+
+for (const scenario of [
+  { name: 'hash legado adulterado', options: { tamperHash: true } },
+  { name: 'operação não-assert no prefixo', options: { nonAssert: true } },
+  { name: 'identidade de ativação divergente', options: { divergentIdentity: true } },
+  { name: 'turn_sequence não crescente', options: { nonIncreasingTurn: true } },
+  { name: 'espelho memory_checkpoint divergente', options: { divergentMirror: true } },
+]) {
+  test(`[req:MOD-7] memory repair falha fechado para ${scenario.name}`, async () => {
+    const {
+      vault, brain, registryPath,
+    } = historicalLegacyCheckpointFixture(scenario.options);
+    const registryBefore = readFileSync(registryPath, 'utf8');
+    const ledgerBefore = readFileSync(join(brain, 'MEMORY_EVENTS.jsonl'));
+    const coreBefore = readFileSync(join(brain, 'CORE.md'));
+    try {
+      const { repairMemory } = await import('../src/memory.mjs');
+      const repaired = repairMemory(vault, { now: '2026-07-28T12:32:00.000Z' });
+      assert.equal(repaired.checkpointMigration.status, 'unchanged');
+      assert.equal(repaired.checkpointMigration.backupPath, null);
+      assert.equal(readFileSync(registryPath, 'utf8'), registryBefore);
+      assert.deepEqual(readFileSync(join(brain, 'MEMORY_EVENTS.jsonl')), ledgerBefore);
+      assert.deepEqual(readFileSync(join(brain, 'CORE.md')), coreBefore);
+      const gate = spawnSync(process.execPath, [BIN, 'memory', 'status', '--gate', '--vault', vault], { encoding: 'utf8' });
+      assert.equal(gate.status, 1, gate.stderr || gate.stdout);
+    } finally { rmSync(vault, { recursive: true, force: true }); }
+  });
+}
+
+test('[req:MOD-7] migração faz CAS do espelho memory_checkpoint antes de criar backup', async () => {
+  const {
+    vault, brain, registryPath, currentCheckpoint,
+  } = historicalLegacyCheckpointFixture();
+  const registryBefore = JSON.parse(readFileSync(registryPath, 'utf8'));
+  const ledgerBefore = readFileSync(join(brain, 'MEMORY_EVENTS.jsonl'));
+  const coreBefore = readFileSync(join(brain, 'CORE.md'));
+  const race = startCheckpointMirrorRace({
+    vault, registryPath, checkpointValue: currentCheckpoint,
+  });
+  try {
+    await race.ready;
+    const { migrateLegacyMemoryCheckpoints } = await import('../src/memory.mjs');
+    assert.throws(
+      () => migrateLegacyMemoryCheckpoints(vault, { now: '2026-07-28T12:33:00.000Z' }),
+      /CAS perdido: memory_checkpoint/i,
+    );
+    const outcome = await race.closed;
+    assert.equal(outcome.code, 0, outcome.stderr || outcome.stdout);
+
+    registryBefore.sessions['current-session'].memory_checkpoint = currentCheckpoint;
+    assert.deepEqual(JSON.parse(readFileSync(registryPath, 'utf8')), registryBefore);
+    assert.deepEqual(readFileSync(join(brain, 'MEMORY_EVENTS.jsonl')), ledgerBefore);
+    assert.deepEqual(readFileSync(join(brain, 'CORE.md')), coreBefore);
+    assert.equal(
+      readdirSync(brain).some((name) => name.includes('.checkpoint-migrate-') && name.endsWith('.bak')),
+      false,
+    );
+  } finally {
+    await race.closed.catch(() => {});
+    rmSync(vault, { recursive: true, force: true });
+  }
 });
 
 test('[req:OP-10] ambiguous com event_ids falha antes de reprojetar ou criar backup', async () => {
