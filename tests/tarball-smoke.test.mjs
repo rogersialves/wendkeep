@@ -4,7 +4,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { readFileSync, readdirSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join, posix } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { HOOK_FILES } from '../src/taxonomy.mjs';
@@ -69,5 +70,65 @@ test('every published hook passes node --check (no broken syntax shipped)', () =
       encoding: 'utf8',
     });
     assert.equal(r.status, 0, `node --check failed for ${file}:\n${r.stderr}`);
+  }
+});
+
+test('[req:MOD-4] published tarball contains the modular Vault surface', () => {
+  const published = publishedFiles();
+  for (const path of [
+    'packages/cli/package.json',
+    'packages/harness/package.json',
+    'packages/mcp/package.json',
+    'packages/integrations/package.json',
+    'packages/pi/package.json',
+    'packages/vault/package.json',
+    'packages/vault/src/index.mjs',
+    'packages/vault/src/project-vault.mjs',
+    'packages/vault/src/vault-path-safety.mjs',
+  ]) {
+    assert.ok(published.has(path), `missing modular Vault file from package: ${path}`);
+  }
+});
+
+test('[req:MOD-4] installed tarball executes CLI, legacy hook and wendkeep/vault', () => {
+  const temp = mkdtempSync(join(tmpdir(), 'wendkeep-installed-tarball-'));
+  try {
+    const packed = spawnSync(`npm pack --json --pack-destination "${temp}"`, {
+      cwd: pkgRoot,
+      encoding: 'utf8',
+      shell: true,
+    });
+    assert.equal(packed.status, 0, `npm pack failed:\n${packed.stderr}`);
+    const meta = JSON.parse(packed.stdout.slice(
+      packed.stdout.indexOf('['),
+      packed.stdout.lastIndexOf(']') + 1,
+    ));
+    const tarball = join(temp, meta[0].filename);
+    const consumer = join(temp, 'consumer');
+    mkdirSync(consumer);
+    writeFileSync(join(consumer, 'package.json'), '{"private":true,"type":"module"}\n');
+    const installed = spawnSync(`npm install --ignore-scripts --no-audit --no-fund "${tarball}"`, [], {
+      cwd: consumer,
+      encoding: 'utf8',
+      shell: true,
+    });
+    assert.equal(installed.status, 0, `npm install failed:\n${installed.stderr}`);
+
+    const imported = spawnSync(process.execPath, ['--input-type=module', '--eval', [
+      "const vault = await import('wendkeep/vault');",
+      "const legacy = await import(new URL('./node_modules/wendkeep/hooks/vault-path-safety.mjs', import.meta.url));",
+      "if (typeof vault.resolveProjectVault !== 'function') process.exit(11);",
+      "if (typeof legacy.assertVaultPathSafe !== 'function') process.exit(12);",
+    ].join('\n')], { cwd: consumer, encoding: 'utf8' });
+    assert.equal(imported.status, 0, `installed imports failed:\n${imported.stderr}`);
+
+    const cli = spawnSync(process.execPath, [
+      join(consumer, 'node_modules', 'wendkeep', 'bin', 'wendkeep.mjs'),
+      '--help',
+    ], { cwd: consumer, encoding: 'utf8' });
+    assert.equal(cli.status, 0, `installed CLI failed:\n${cli.stderr}`);
+    assert.match(cli.stdout, /wendkeep/);
+  } finally {
+    rmSync(temp, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
   }
 });

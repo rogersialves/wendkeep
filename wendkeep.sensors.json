@@ -26,6 +26,38 @@
       "command": "node --test tests/operating-profile.test.mjs tests/project-vault.test.mjs tests/profile-cli.test.mjs tests/init-sync-operating-profile.test.mjs tests/operating-profile-hooks.test.mjs tests/operating-profile-boundaries.test.mjs tests/flow-cli.test.mjs tests/flow-core.test.mjs tests/flow-promotion.test.mjs tests/git-snapshot.test.mjs tests/session-iteration.test.mjs tests/vault-runtime-store.test.mjs"
     },
     {
+      "id": "modular-boundaries",
+      "name": "Modular package boundaries",
+      "description": "Validates workspace inventory, public Vault compatibility and dependency direction",
+      "severity": "critical",
+      "type": "command",
+      "command": "node --test tests/modular-package-boundaries.test.mjs tests/operating-profile-boundaries.test.mjs"
+    },
+    {
+      "id": "project-vault",
+      "name": "Project Vault binding",
+      "description": "Exercises project-local Vault resolution and binding compatibility",
+      "severity": "critical",
+      "type": "command",
+      "command": "node --test tests/project-vault.test.mjs"
+    },
+    {
+      "id": "vault-path-safety",
+      "name": "Vault path safety",
+      "description": "Exercises the extracted physical Vault write boundary",
+      "severity": "critical",
+      "type": "command",
+      "command": "node --test tests/vault-path-safety.test.mjs"
+    },
+    {
+      "id": "tarball-smoke",
+      "name": "Tarball smoke",
+      "description": "Validates files and imports shipped in the npm package",
+      "severity": "critical",
+      "type": "command",
+      "command": "node --test tests/tarball-smoke.test.mjs"
+    },
+    {
       "id": "release-tests",
       "name": "release-tests",
       "description": "node --test tests/release-changelog.test.mjs",

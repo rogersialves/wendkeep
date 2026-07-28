@@ -47,13 +47,12 @@ test('os dois idiomas viajam no pacote', () => {
   for (const f of ['README.md', 'README.en.md']) assert.ok(files.includes(f), `${f} em files`);
 });
 
-test('[req:OP-9] package, lockfile raiz e primeira release do CHANGELOG convergem em 0.59.0', () => {
+test('[req:OP-9] package, lockfile raiz e primeira release do CHANGELOG convergem', () => {
   const manifest = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8'));
   const lockfile = JSON.parse(readFileSync(join(ROOT, 'package-lock.json'), 'utf8'));
   const changelog = readFileSync(join(ROOT, 'CHANGELOG.md'), 'utf8');
   const firstRelease = changelog.match(/^## \[([^\]]+)\]/m)?.[1];
 
-  assert.equal(manifest.version, '0.59.0', 'esta branch prepara exatamente a release minor 0.59.0');
   assert.equal(lockfile.version, manifest.version, 'package-lock.json.version acompanha package.json');
   assert.equal(lockfile.packages[''].version, manifest.version,
     'packages[""].version acompanha package.json');

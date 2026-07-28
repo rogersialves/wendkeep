@@ -149,6 +149,21 @@ function waitFor(predicate, timeoutMs = 5000) {
   });
 }
 
+async function removeTreeAfterWindowsHandlesClose(root, timeoutMs = 60_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (true) {
+    try {
+      rmSync(root, { recursive: true, force: true });
+      return;
+    } catch (error) {
+      const transientWindowsLock = process.platform === 'win32'
+        && ['EBUSY', 'ENOTEMPTY', 'EPERM'].includes(error?.code);
+      if (!transientWindowsLock || Date.now() >= deadline) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+  }
+}
+
 function spawnPromotion({ vaultBase, projectRoot, sessionId, flowId, readyPath }) {
   const script = `
     import { writeFileSync } from 'node:fs';
@@ -359,7 +374,7 @@ test('[req:OP-7] promoções multiprocesso para o mesmo slug elegem um único ow
     for (const lock of sessionLocks) {
       try { rmdirSync(lock); } catch { /* worker ou teste já liberou */ }
     }
-    rmSync(fx.root, { recursive: true, force: true });
+    await removeTreeAfterWindowsHandlesClose(fx.root);
   }
 });
 

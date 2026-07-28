@@ -10,6 +10,8 @@ import { fileURLToPath } from 'node:url';
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
 const VAULT_MODULES = [
+  'packages/vault/src/project-vault.mjs',
+  'packages/vault/src/vault-path-safety.mjs',
   'src/project-vault.mjs',
   'src/validate-core.mjs',
   'src/validate-memory.mjs',

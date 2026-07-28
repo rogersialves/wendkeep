@@ -15,6 +15,10 @@
 
 **Memória persistente para agentes de código, construída sobre o seu cofre Obsidian.** Cada sessão do Claude Code e do Codex é capturada turno a turno em Markdown local — o `init` wira os hooks dos dois agentes (no Codex, valendo depois que você aprovar o prompt de confiança dele); o `import` recupera as sessões passadas — com rastreio de tokens/custo, decisões, bugs e aprendizados extraídos automaticamente. Esse plano sempre ativo é o **Keep Core**. Sobre ele, o **Wend Runtime** oferece um ciclo nativo e sem dependências (spec → change → TDD → archive com gate por sensor), selecionável pelos Perfis de Operação `OFF`, `FLOW`, `GUIDE`, `GOVERN` e `ASSURE`. 100% local, open‑core.
 
+O runtime está sendo separado em seis fronteiras físicas — `cli`, `harness`, `vault`, `mcp`,
+`integrations` e `pi` — sem fragmentar a instalação. O Vault é a primeira superfície extraída e
+pode ser importado por `wendkeep/vault`; veja a [arquitetura modular](docs/pt-BR/architecture.md).
+
 ```bash
 npm i -D wendkeep && npx wendkeep init      # captura a partir da próxima sessão
 npx wendkeep import                          # importa sessões passadas do Claude + Codex
