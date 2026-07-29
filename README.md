@@ -23,6 +23,16 @@ seguro/kernel da Shared Project Memory v2. O pacote raiz expõe essas superfíci
 compatibilidade e nenhum dado de sessão precisa ser migrado;
 veja a [arquitetura modular](docs/pt-BR/architecture.md).
 
+Na fase **0.63 Harness FLOW Store**, `packages/vault/src/locale.mjs` passa a ser a fonte canônica
+do locale e da taxonomia do cofre, enquanto `packages/harness/src/flow-store.mjs` passa a ser o
+store durável canônico do FLOW. As fachadas históricas `hooks/locale.mjs` e
+`hooks/vault-runtime-store.mjs` preservam a identidade dos exports. O Harness depende somente do
+índice público do Vault — nunca o inverso —, sem migração de paths, schemas ou locks; o tarball
+continua único, publicado pelo pacote raiz `wendkeep`.
+Na contenção multiprocesso, a liberação transitória do lock público e de seus metadados owner/lease
+é revalidada com budget/deadline limitados, inclusive na limpeza final; junctions, reparse points,
+locks dangling e erros não transitórios continuam recusados antes de qualquer escrita.
+
 ```bash
 npm i -D wendkeep && npx wendkeep init      # captura a partir da próxima sessão
 npx wendkeep import                          # importa sessões passadas do Claude + Codex

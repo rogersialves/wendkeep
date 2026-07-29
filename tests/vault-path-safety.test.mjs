@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { once } from 'node:events';
 import {
   existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync,
@@ -20,6 +20,15 @@ async function waitFor(predicate, timeoutMs = 3000) {
     if (Date.now() >= deadline) throw new Error('timeout aguardando processo de lock');
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
+}
+
+function runVaultLockRaceProbe(scenario, timeout = 5000) {
+  const child = spawnSync(process.execPath, [
+    join(process.cwd(), 'tests', 'fixtures', 'vault-lock-race-probe.mjs'),
+    scenario,
+  ], { cwd: process.cwd(), encoding: 'utf8', timeout });
+  assert.equal(child.status, 0, child.stderr || child.stdout || child.error?.message);
+  return JSON.parse(child.stdout);
 }
 
 test('[req:OP-7] boundary aceita sufixo ausente contido e cria/escreve somente dentro do Vault', () => {
@@ -109,6 +118,244 @@ test('[req:OP-7] escrita atômica rejeita target por hardlink e preserva os byte
   }
 });
 
+test('[req:OP-7] desaparecimento transitório do lock público aguarda e repete a inspeção', () => {
+  const vault = mkdtempSync(join(tmpdir(), 'wk-vault-lock-transient-'));
+  const target = join(vault, '.brain', 'runtime', 'session-state');
+  const lock = `${target}.lock`;
+  mkdirSync(lock, { recursive: true });
+  const moduleUrl = pathToFileURL(join(
+    process.cwd(), 'packages', 'vault', 'src', 'vault-path-safety.mjs',
+  )).href;
+  const script = `
+    import fs from 'node:fs';
+    import { syncBuiltinESMExports } from 'node:module';
+    import { resolve } from 'node:path';
+
+    const lock = ${JSON.stringify(lock)};
+    const originalRealpath = fs.realpathSync.native;
+    const originalWait = Atomics.wait;
+    let injected = 0;
+    let waits = 0;
+
+    fs.realpathSync.native = function transientRealpath(path, ...args) {
+      if (resolve(path) === resolve(lock) && waits === 0) {
+        injected += 1;
+        const error = new Error('delete-pending transitório simulado');
+        error.code = 'ENOENT';
+        throw error;
+      }
+      return originalRealpath.call(this, path, ...args);
+    };
+    Atomics.wait = (...args) => {
+      waits += 1;
+      fs.rmSync(lock, { recursive: true, force: true });
+      return 'timed-out';
+    };
+    syncBuiltinESMExports();
+
+    try {
+      const { withVaultPathLock } = await import(
+        ${JSON.stringify(moduleUrl)} + '?transient-lock=' + Date.now()
+      );
+      const value = withVaultPathLock(
+        ${JSON.stringify(vault)},
+        ${JSON.stringify(target)},
+        () => 'acquired',
+        { timeoutMs: 250, staleMs: 50 },
+      );
+      process.stdout.write(JSON.stringify({ value, injected, waits }));
+    } catch (error) {
+      process.stderr.write(JSON.stringify({
+        code: error?.code,
+        cause: error?.cause?.code,
+        message: error?.message,
+        injected,
+        waits,
+      }));
+      process.exitCode = 1;
+    } finally {
+      fs.realpathSync.native = originalRealpath;
+      Atomics.wait = originalWait;
+      syncBuiltinESMExports();
+    }
+  `;
+
+  try {
+    const child = spawnSync(process.execPath, ['--input-type=module', '-e', script], {
+      cwd: process.cwd(), encoding: 'utf8', timeout: 5000,
+    });
+    assert.equal(child.status, 0, child.stderr || child.stdout);
+    assert.deepEqual(JSON.parse(child.stdout), {
+      value: 'acquired', injected: 1, waits: 1,
+    });
+  } finally {
+    rmSync(vault, { recursive: true, force: true });
+  }
+});
+
+test('[req:OP-7] owner público repete ENOENT transitório mas falha EACCES sem retry', () => {
+  assert.deepEqual(runVaultLockRaceProbe('owner-enoent'), {
+    value: 'acquired',
+    errorCode: null,
+    entered: true,
+    injected: 1,
+    waits: 1,
+    lockExists: false,
+  });
+  assert.deepEqual(runVaultLockRaceProbe('owner-eacces'), {
+    value: null,
+    errorCode: 'EACCES',
+    entered: false,
+    injected: 1,
+    waits: 0,
+    lockExists: true,
+  });
+});
+
+test('[req:OP-7] retries de topologia compartilham orçamento global e terminam', () => {
+  const result = runVaultLockRaceProbe('retry-budget', 2000);
+  assert.deepEqual({
+    injected: result.injected,
+    waits: result.waits,
+    errorCode: result.errorCode,
+    causeCode: result.causeCode,
+  }, {
+    injected: 4,
+    waits: 3,
+    errorCode: 'VAULT_PATH_UNSAFE',
+    causeCode: 'ENOENT',
+  });
+  assert.ok(result.elapsedMs < 500, `retry excedeu o limite: ${result.elapsedMs} ms`);
+});
+
+test('[req:OP-7] release repete ENOENT transitório e não deixa lock público residual', () => {
+  assert.deepEqual(runVaultLockRaceProbe('release-enoent'), {
+    value: 'done', injected: 1, waits: 1, lockExists: false,
+  });
+});
+
+test('[req:OP-7] rename aceita colisão nativa, mas nunca converte EACCES em contenção', () => {
+  const collision = runVaultLockRaceProbe('rename-collision');
+  const collisionCodes = process.platform === 'win32'
+    ? ['EEXIST', 'ENOTEMPTY', 'EPERM']
+    : ['EEXIST', 'ENOTEMPTY'];
+  assert.ok(
+    collisionCodes.includes(collision.collisionCode),
+    `colisão nativa inesperada: ${collision.collisionCode}`,
+  );
+  assert.deepEqual({ ...collision, collisionCode: undefined }, {
+    value: 'acquired',
+    errorCode: null,
+    entered: true,
+    injected: 1,
+    waits: 1,
+    collisionCode: undefined,
+    lockExists: false,
+    pending: [],
+  });
+
+  assert.deepEqual(runVaultLockRaceProbe('rename-eacces'), {
+    value: null,
+    errorCode: 'EACCES',
+    entered: false,
+    injected: 1,
+    waits: 0,
+    collisionCode: null,
+    lockExists: true,
+    pending: [],
+  });
+
+  for (const scenario of [
+    'rename-eperm-bad-dest',
+    'rename-eexist-bad-path',
+    'rename-eexist-bad-syscall',
+  ]) {
+    const malformed = runVaultLockRaceProbe(scenario);
+    assert.deepEqual({
+      errorCode: malformed.errorCode,
+      entered: malformed.entered,
+      injected: malformed.injected,
+      waits: malformed.waits,
+      collisionCode: malformed.collisionCode,
+      lockExists: malformed.lockExists,
+      pending: malformed.pending,
+    }, {
+      errorCode: scenario.includes('eperm') ? 'EPERM' : 'EEXIST',
+      entered: false,
+      injected: 1,
+      waits: 0,
+      collisionCode: null,
+      lockExists: true,
+      pending: [],
+    });
+  }
+});
+
+test('[req:OP-7] falha pós-mkdir de pending permanece fail-closed e limpa o resíduo privado', () => {
+  assert.deepEqual(runVaultLockRaceProbe('pending-post-mkdir'), {
+    errorCode: 'VAULT_PATH_UNSAFE',
+    causeCode: 'ENOENT',
+    entered: false,
+    injected: 1,
+    waits: 0,
+    pending: [],
+  });
+});
+
+test('[req:OP-7] mkdir EEXIST nunca autoriza cleanup de pending preexistente', () => {
+  assert.deepEqual(runVaultLockRaceProbe('pending-preexisting'), {
+    errorCode: 'EEXIST',
+    entered: false,
+    injected: 1,
+    waits: 0,
+    pendingCount: 1,
+    pendingSuffixValid: true,
+    lockExists: false,
+  });
+});
+
+test('[req:OP-7] lock publicado entre os dois preflights de rename converge como contenção', () => {
+  const result = runVaultLockRaceProbe('rename-preflight');
+  assert.deepEqual({
+    busy: result.busy,
+    errorCode: result.errorCode,
+    entered: result.entered,
+    injected: result.injected,
+    renameCalls: result.renameCalls,
+    lockExists: result.lockExists,
+    pending: result.pending,
+  }, {
+    busy: true,
+    errorCode: null,
+    entered: false,
+    injected: 1,
+    renameCalls: 0,
+    lockExists: true,
+    pending: [],
+  });
+  assert.ok(result.lockChecksAfterPending >= 3);
+});
+
+test('[req:OP-7] orçamento de retry é compartilhado entre checkpoints públicos', () => {
+  assert.deepEqual(runVaultLockRaceProbe('shared-retry-budget'), {
+    publicInjected: 2,
+    ownerInjected: 2,
+    waits: 3,
+    entered: false,
+    errorCode: 'VAULT_PATH_UNSAFE',
+    causeCode: 'ENOENT',
+  });
+});
+
+test('[req:OP-7] backoff que cruza o deadline não executa outro checkpoint', () => {
+  assert.deepEqual(runVaultLockRaceProbe('retry-deadline'), {
+    busy: true,
+    entered: false,
+    publicRealpaths: 1,
+    waits: 1,
+  });
+});
+
 test('[req:OP-7] retry de lock transitório nunca aceita junction ou reparse no lock', (t) => {
   const vault = mkdtempSync(join(tmpdir(), 'wk-vault-lock-reparse-'));
   const outside = mkdtempSync(join(tmpdir(), 'wk-vault-lock-reparse-outside-'));
@@ -129,6 +376,46 @@ test('[req:OP-7] retry de lock transitório nunca aceita junction ou reparse no 
       /link simbólico|junction|reparse/i,
     );
     assert.deepEqual(readdirSync(outside), []);
+  } finally {
+    rmSync(vault, { recursive: true, force: true });
+    rmSync(outside, { recursive: true, force: true });
+  }
+});
+
+test('[req:OP-7] lock público dangling persistente falha fechado sem executar callback', (t) => {
+  const vault = mkdtempSync(join(tmpdir(), 'wk-vault-lock-dangling-'));
+  const outside = mkdtempSync(join(tmpdir(), 'wk-vault-lock-dangling-outside-'));
+  const target = join(vault, '.brain', 'runtime', 'session-state');
+  const sentinel = join(outside, 'sentinel.txt');
+  let entered = false;
+  try {
+    mkdirSync(join(vault, '.brain', 'runtime'), { recursive: true });
+    writeFileSync(sentinel, 'preservado\n');
+    try {
+      symlinkSync(
+        join(outside, 'ausente'),
+        `${target}.lock`,
+        process.platform === 'win32' ? 'junction' : 'dir',
+      );
+    } catch (error) {
+      if (['EPERM', 'EACCES', 'ENOTSUP'].includes(error?.code)) {
+        t.skip(`links indisponíveis neste filesystem: ${error.code}`);
+        return;
+      }
+      throw error;
+    }
+    assert.throws(
+      () => withVaultPathLock(vault, target, () => {
+        entered = true;
+        return 'não deve entrar';
+      }),
+      {
+        code: 'VAULT_PATH_UNSAFE',
+        message: /link simbólico|junction|reparse|dangling/i,
+      },
+    );
+    assert.equal(entered, false);
+    assert.equal(readFileSync(sentinel, 'utf8'), 'preservado\n');
   } finally {
     rmSync(vault, { recursive: true, force: true });
     rmSync(outside, { recursive: true, force: true });

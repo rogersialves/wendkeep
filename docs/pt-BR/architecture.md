@@ -26,6 +26,24 @@ canônico da resolução/política dos Perfis de Operação e da engine de senso
 `packages/harness/src/`; o `vault` continua dono do binding/resolução, da segurança física de paths
 e do kernel de memória em `packages/vault/src/`.
 
+## 0.63 Harness FLOW Store
+
+Nesta fase, o locale e a taxonomia canônicos ficam em `packages/vault/src/locale.mjs`; o store
+durável canônico do FLOW fica em `packages/harness/src/flow-store.mjs`. O Harness consome apenas o
+índice público do Vault (`packages/vault/src/index.mjs`), e o Vault nunca depende do Harness.
+
+`hooks/locale.mjs` e `hooks/vault-runtime-store.mjs` permanecem fachadas finas e reexportam os
+mesmos bindings por identidade. A extração não muda paths persistidos, schemas nem a disciplina de
+locks, portanto não exige migração. A publicação também não se fragmenta: há um único tarball do
+pacote raiz `wendkeep`, que contém as superfícies modulares.
+
+O lock público ou um metadado owner/lease pode desaparecer legitimamente durante a liberação. O
+Vault repete apenas operações explicitamente escopadas ao lock público e apenas para `ENOENT`, com
+backoff curto, um budget global e o deadline original da aquisição. A limpeza final usa um budget
+curto independente para não deixar owner/lease residual. O retry nunca se aplica a `.pending`,
+junction, symlink, reparse point, `EACCES`, tipo inesperado ou estado irresolvível persistente, que
+continuam falhando fechado.
+
 O perfil `OFF` desativa somente a ativação automática da governança do Wend Runtime — router,
 skill gate, FLOW e gates automáticos. Keep Core, Vault, sessões e memória continuam ativos, e os
 comandos explícitos do WendKeep permanecem disponíveis como opt-in deliberado.

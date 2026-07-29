@@ -26,6 +26,24 @@ canonically owns Operating Profile resolution/policy and the sensor engine under
 `packages/harness/src/`; `vault` continues to own binding/resolution, physical path safety, and the
 memory kernel under `packages/vault/src/`.
 
+## 0.63 Harness FLOW Store
+
+In this phase, canonical locale and taxonomy live in `packages/vault/src/locale.mjs`; the canonical
+durable FLOW store lives in `packages/harness/src/flow-store.mjs`. Harness consumes only Vault's
+public index (`packages/vault/src/index.mjs`), and Vault never depends on Harness.
+
+`hooks/locale.mjs` and `hooks/vault-runtime-store.mjs` remain thin facades and re-export the same
+bindings by identity. The extraction changes neither persisted paths, schemas, nor lock discipline,
+so it requires no migration. Publication also remains unfragmented: a single tarball from the root
+`wendkeep` package contains the modular surfaces.
+
+A public lock or owner/lease metadata may legitimately disappear during release. Vault retries
+only operations explicitly scoped to the public lock and only for `ENOENT`, with short backoff, a
+global budget, and the acquisition's original deadline. Final cleanup uses an independent short
+budget so owner/lease state is not left behind. Retry never applies to `.pending`, junctions,
+symlinks, reparse points, `EACCES`, unexpected types, or persistently unresolvable state, which
+continue to fail closed.
+
 The `OFF` profile disables only automatic Wend Runtime governance activation — router, skill gate,
 FLOW, and automatic gates. Keep Core, Vault, sessions, and memory remain active, and explicit
 WendKeep commands remain available as a deliberate opt-in.

@@ -66,6 +66,14 @@
       "command": "node --test tests/release-changelog.test.mjs"
     },
     {
+      "id": "flow-store",
+      "name": "Harness FLOW store",
+      "description": "Exercises locale, durable FLOW persistence, corruption, immutability, path safety and multiprocess promotion",
+      "severity": "critical",
+      "type": "command",
+      "command": "node --test tests/locale.test.mjs tests/locale-e2e.test.mjs tests/vault-runtime-store.test.mjs tests/flow-core.test.mjs tests/flow-promotion.test.mjs"
+    },
+    {
       "id": "memory-health",
       "name": "Shared memory health",
       "description": "Blocks delivery only on memory corruption, projection lag or active conflict",

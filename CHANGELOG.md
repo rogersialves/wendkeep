@@ -4,6 +4,35 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.63.0] — 2026-07-28
+
+### Added
+
+- **O Vault público passa a expor locale e taxonomia de pastas, e o Harness passa a expor o
+  store durável de FLOW.** As novas superfícies canônicas estão disponíveis por
+  wendkeep/vault e wendkeep/harness e são validadas a partir de um tarball instalado em consumidor
+  isolado, inclusive com um ciclo persistido completo.
+
+### Changed
+
+- **Locale agora pertence a packages/vault/src e o store de FLOW a packages/harness/src.**
+  hooks/locale.mjs e hooks/vault-runtime-store.mjs permanecem como fachadas puras, preservando por
+  identidade todas as constantes e funções usadas por consumidores existentes.
+- **A extração stateful não exige migração.** Paths em .brain/runtime, schemas, ids, locks,
+  tentativas, recibos, reservas, promoções, atomicidade, contenção multiprocesso e validação física
+  de paths mantêm o contrato anterior.
+- **A direção Harness → Vault é verificada pelo índice público canônico.** Vault continua proibido
+  de depender do Harness, enquanto CLI, MCP, Integrations, Pi e flow-core permanecem fora deste
+  corte modular.
+
+### Fixed
+
+- **Promoções concorrentes no Windows/Node 22 não confundem a liberação transitória do lock com
+  um path inseguro.** O Vault agora revalida, com backoff curto e limitado, o lock público que
+  desaparece entre `lstat` e `realpath` e leituras `ENOENT` de owner/lease. A aquisição compartilha
+  um único budget/deadline e a liberação limpa o lock sem resíduo; junctions, reparse points, links
+  dangling, erros não transitórios e locks privados `.pending` continuam falhando fechado.
+
 ## [0.62.0] — 2026-07-28
 
 ### Added

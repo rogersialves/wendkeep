@@ -13,6 +13,9 @@ import {
   appendFlowAttempt, readFlow, reserveFlowPromotion, writeFlowReceipt,
 } from '../hooks/vault-runtime-store.mjs';
 
+// This bounded deadlock watchdog includes worker startup/import and Windows filesystem I/O.
+const PROMOTION_WORKER_TIMEOUT_MS = 30_000;
+
 function git(cwd, ...args) {
   const result = spawnSync('git', args, { cwd, encoding: 'utf8' });
   assert.equal(result.status, 0, `${args.join(' ')}\n${result.stderr}`);
@@ -217,7 +220,7 @@ function spawnPromotion({ vaultBase, projectRoot, sessionId, flowId, readyPath }
     const timer = setTimeout(() => {
       child.kill();
       reject(new Error(`worker de promoção travou: ${sessionId}`));
-    }, 10_000);
+    }, PROMOTION_WORKER_TIMEOUT_MS);
     child.once('error', (error) => {
       clearTimeout(timer);
       reject(error);
