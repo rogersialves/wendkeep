@@ -9,7 +9,7 @@ into private workspaces so migration can be incremental and dependency direction
 | `harness` | Profiles, policies, changes, sensors, and verification. |
 | `vault` | Keep Core, project binding, memory kernel, and safe local I/O. |
 | `mcp` | MCP transport and configuration. |
-| `integrations` | Agent-host event adapters. |
+| `integrations` | Pure host-integration rules for hooks, envelopes, transcripts, and identity. |
 | `pi` | Pi-specific extension and hooks. |
 
 ## Dependency direction
@@ -25,6 +25,25 @@ adapters (cli/mcp/integrations/pi) -> Harness -> Vault
 canonically owns Operating Profile resolution/policy and the sensor engine under
 `packages/harness/src/`; `vault` continues to own binding/resolution, physical path safety, and the
 memory kernel under `packages/vault/src/`.
+
+## 0.66 Integrations Kernel
+
+The private `@wendkeep/integrations` workspace under `packages/integrations/src/` is the canonical
+authority for pure rules shared by Claude Code and Codex: the hook catalog and projection;
+envelope parsing, provider detection, and metadata; content filters and extraction; usage
+normalization; transcript parsing and matching; and session/turn identity resolution.
+
+This boundary performs no stdin/stdout, ambient environment, filesystem, Vault, or registry
+effects. Those effects remain in the historical facades under
+`hooks/` and `src/`, which re-export the same bindings and inject host data into the pure kernel.
+Claude/Codex hooks and sessions therefore remain semantically equivalent, with no Vault,
+configuration, path, or schema migration.
+
+MCP and Integrations are sibling adapters with no dependency between them. Both follow
+`cli/mcp/integrations/pi → Harness → Vault`, and boundary tests reject cycles or ambient access
+inside the kernel. Integrations remains internal to the root tarball: there is no separate
+`@wendkeep/integrations` npm publication or public `wendkeep/integrations` subpath. Pi is the next
+phase of the modular migration.
 
 ## 0.65 MCP Configuration Kernel
 
@@ -110,7 +129,7 @@ is no data migration.
 
 All six workspaces remain private and internal to the monorepo; they are not independent npm
 packages. Installation remains `wendkeep`; `wendkeep/harness` and `wendkeep/vault` are public
-subpaths of the root package, not separate publications. CLI and MCP now have private canonical
-implementations: the former remains exposed through the binaries and the latter through `init`
-configuration effects. `integrations` and `pi` remain reserved boundaries; the planned migration
-sequence is MCP → Integrations → Pi.
+subpaths of the root package, not separate publications. CLI, MCP, and Integrations now have
+private canonical implementations: the first remains exposed through the binaries, the second
+through `init` configuration effects, and the third through the historical host facades. `pi`
+remains the reserved boundary and is the next planned migration phase.

@@ -4,7 +4,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, posix } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -73,7 +76,7 @@ test('every published hook passes node --check (no broken syntax shipped)', () =
   }
 });
 
-test('[req:MOD-4] [req:MOD-8] [req:MOD-10] [req:MOD-11] [req:MOD-12] [req:MOD-13] [req:MOD-16] [req:MOD-19] published tarball contains the modular surfaces', () => {
+test('[req:MOD-4] [req:MOD-8] [req:MOD-10] [req:MOD-11] [req:MOD-12] [req:MOD-13] [req:MOD-16] [req:MOD-19] [req:MOD-20] [req:MOD-22] published tarball contains the modular surfaces', () => {
   const published = publishedFiles();
   for (const path of [
     'packages/cli/package.json',
@@ -87,6 +90,13 @@ test('[req:MOD-4] [req:MOD-8] [req:MOD-10] [req:MOD-11] [req:MOD-12] [req:MOD-13
     'packages/mcp/src/config.mjs',
     'packages/mcp/src/index.mjs',
     'packages/integrations/package.json',
+    'packages/integrations/src/hook-envelope.mjs',
+    'packages/integrations/src/host-hooks.mjs',
+    'packages/integrations/src/index.mjs',
+    'packages/integrations/src/prompt-content.mjs',
+    'packages/integrations/src/session-identity.mjs',
+    'packages/integrations/src/transcript-usage.mjs',
+    'packages/integrations/src/transcripts.mjs',
     'packages/pi/package.json',
     'packages/vault/package.json',
     'packages/vault/src/index.mjs',
@@ -124,7 +134,32 @@ test('[req:MOD-17] [req:MOD-19] MCP workspace declares its private kernel withou
   assert.match(root.scripts.check, /node --check packages\/mcp\/src\/index\.mjs/);
 });
 
-test('[req:MOD-4] [req:MOD-6] [req:MOD-9] [req:MOD-10] [req:MOD-11] [req:MOD-12] [req:MOD-13] [req:MOD-16] [req:MOD-18] [req:MOD-19] installed tarball exposes strict canonical, public, and legacy identities', () => {
+test('[req:MOD-20] [req:MOD-22] Integrations workspace is packaged privately without a public subpath', () => {
+  const root = JSON.parse(readFileSync(join(pkgRoot, 'package.json'), 'utf8'));
+  const integrations = JSON.parse(readFileSync(
+    join(pkgRoot, 'packages', 'integrations', 'package.json'),
+    'utf8',
+  ));
+
+  assert.equal(integrations.name, '@wendkeep/integrations');
+  assert.equal(integrations.private, true);
+  assert.equal(integrations.exports, './src/index.mjs');
+  assert.equal(Object.hasOwn(root.exports, './integrations'), false);
+  assert.equal(Object.hasOwn(root.exports, './*'), false);
+  const publicPackageTargets = new Set([
+    './packages/harness/src/index.mjs',
+    './packages/vault/src/index.mjs',
+  ]);
+  assert.equal(
+    Object.entries(root.exports).some(([key, target]) => (
+      key.startsWith('./packages')
+      || (String(target).startsWith('./packages') && !publicPackageTargets.has(target))
+    )),
+    false,
+  );
+});
+
+test('[req:MOD-4] [req:MOD-6] [req:MOD-9] [req:MOD-10] [req:MOD-11] [req:MOD-12] [req:MOD-13] [req:MOD-16] [req:MOD-18] [req:MOD-19] [req:MOD-20] [req:MOD-21] [req:MOD-22] installed tarball exposes strict canonical, public, and legacy identities', () => {
   const temp = mkdtempSync(join(tmpdir(), 'wendkeep-installed-tarball-'));
   try {
     const packed = spawnSync(`npm pack --json --pack-destination "${temp}"`, {
@@ -151,9 +186,14 @@ test('[req:MOD-4] [req:MOD-6] [req:MOD-9] [req:MOD-10] [req:MOD-11] [req:MOD-12]
     const imported = spawnSync(process.execPath, ['--input-type=module', '--eval', [
       "const vault = await import('wendkeep/vault');",
       "const harness = await import('wendkeep/harness');",
-      "const canonicalMcp = await import('wendkeep/packages/mcp/src/index.mjs');",
-      "const canonicalLocale = await import('wendkeep/packages/vault/src/locale.mjs');",
-      "const canonicalFlowStore = await import('wendkeep/packages/harness/src/flow-store.mjs');",
+      "const path = await import('node:path');",
+      "const { pathToFileURL } = await import('node:url');",
+      "const installedRoot = path.join(process.cwd(), 'node_modules', 'wendkeep');",
+      "const internal = (...parts) => import(pathToFileURL(path.join(installedRoot, ...parts)).href);",
+      "const canonicalMcp = await internal('packages', 'mcp', 'src', 'index.mjs');",
+      "const canonicalIntegrations = await internal('packages', 'integrations', 'src', 'index.mjs');",
+      "const canonicalLocale = await internal('packages', 'vault', 'src', 'locale.mjs');",
+      "const canonicalFlowStore = await internal('packages', 'harness', 'src', 'flow-store.mjs');",
       "const legacyLocale = await import('wendkeep/hooks/locale.mjs');",
       "const legacy = await import('wendkeep/hooks/vault-path-safety.mjs');",
       "const legacyStore = await import('wendkeep/hooks/memory-store.mjs');",
@@ -161,6 +201,9 @@ test('[req:MOD-4] [req:MOD-6] [req:MOD-9] [req:MOD-10] [req:MOD-11] [req:MOD-12]
       "const legacyProfile = await import('wendkeep/src/operating-profile.mjs');",
       "const legacySensors = await import('wendkeep/hooks/sensors-core.mjs');",
       "const legacyTaxonomy = await import('wendkeep/src/taxonomy.mjs');",
+      "const legacyCommon = await import('wendkeep/hooks/obsidian-common.mjs');",
+      "const legacyUsage = await import('wendkeep/hooks/token-usage.mjs');",
+      "const legacySessionStop = await import('wendkeep/hooks/session-stop.mjs');",
       "if (typeof vault.resolveProjectVault !== 'function') process.exit(11);",
       "if (typeof legacy.assertVaultPathSafe !== 'function') process.exit(12);",
       "const shared = vault.renderSharedMemory({ updatedAt: '2026-07-28T00:00:00.000Z', reviewAfter: '2026-08-04T00:00:00.000Z' });",
@@ -237,9 +280,30 @@ test('[req:MOD-4] [req:MOD-6] [req:MOD-9] [req:MOD-10] [req:MOD-11] [req:MOD-12]
       "const mcpMerged = canonicalMcp.mergeMcpConfig({ mcpServers: { user: { command: 'user' } } }, { vaultPath: 'C:/vault' });",
       "if (mcpMerged.mcpServers.user.command !== 'user') process.exit(29);",
       "if (mcpMerged.mcpServers['wendkeep-vault'].args.at(-1) !== 'C:/vault') process.exit(30);",
-      "for (const specifier of ['wendkeep/mcp', '@wendkeep/mcp']) {",
-      "  try { await import(specifier); process.exit(31); } catch (error) {",
-      "    if (!['ERR_MODULE_NOT_FOUND', 'ERR_PACKAGE_PATH_NOT_EXPORTED'].includes(error.code)) process.exit(32);",
+      "const integrationsFacades = [",
+      "  [legacyTaxonomy, ['SESSION_HOOKS', 'CHANGE_NUDGE_HOOKS', 'CHANGE_GATE_HOOKS',",
+      "    'CODEX_MATCHER_EVENTS', 'hookCommand', 'hookCommandLocal',",
+      "    'hookCommandLocalLegacy', 'codexHookSpecs', 'codexHookEntry']],",
+      "  [legacyCommon, ['salvageTruncatedJson', 'extractHookPrompt', 'isBootstrapPrompt',",
+      "    'redactSecrets', 'transcriptsMatch']],",
+      "  [legacyUsage, ['emptyTokenUsage', 'normalizeCodexUsage', 'normalizeClaudeUsage', 'addUsage']],",
+      "  [legacySessionStop, ['resolveTurnIdentity']],",
+      "];",
+      "for (const [facade, names] of integrationsFacades) {",
+      "  for (const name of names) {",
+      "    if (!(name in canonicalIntegrations) || canonicalIntegrations[name] !== facade[name]) {",
+      "      throw new Error(`missing or non-identical installed Integrations facade: ${name}`);",
+      "    }",
+      "  }",
+      "}",
+      "for (const specifier of [",
+      "  'wendkeep/mcp', '@wendkeep/mcp', 'wendkeep/integrations', '@wendkeep/integrations',",
+      "  'wendkeep/packages/mcp/src/index.mjs', 'wendkeep/packages/harness/src/index.mjs',",
+      "  'wendkeep/packages/vault/src/index.mjs', 'wendkeep/packages/integrations',",
+      "  'wendkeep/packages/integrations/src/index.mjs', 'wendkeep/%70ackages/integrations/src/index.mjs',",
+      "]) {",
+      "  try { await import(specifier); process.exit(32); } catch (error) {",
+      "    if (!['ERR_MODULE_NOT_FOUND', 'ERR_PACKAGE_PATH_NOT_EXPORTED'].includes(error.code)) process.exit(33);",
       "  }",
       "}",
     ].join('\n')], { cwd: consumer, encoding: 'utf8' });
@@ -293,6 +357,156 @@ test('[req:MOD-4] [req:MOD-6] [req:MOD-9] [req:MOD-10] [req:MOD-11] [req:MOD-12]
       installedMcp.mcpServers['wendkeep-vault'].args,
       ['-y', '@bitbonsai/mcpvault@latest', installedVault],
     );
+
+    const installedHookProjection = spawnSync(process.execPath, ['--input-type=module', '--eval', [
+      "import assert from 'node:assert/strict';",
+      "import { readFileSync } from 'node:fs';",
+      "import { join } from 'node:path';",
+      "import { pathToFileURL } from 'node:url';",
+      `const project = ${JSON.stringify(installedProject)};`,
+      "const installedRoot = join(process.cwd(), 'node_modules', 'wendkeep');",
+      "const kernel = await import(pathToFileURL(join(installedRoot, 'packages', 'integrations', 'src', 'index.mjs')).href);",
+      "const specs = [...kernel.SESSION_HOOKS, ...kernel.CHANGE_NUDGE_HOOKS, ...kernel.CHANGE_GATE_HOOKS]",
+      "  .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));",
+      "const claude = JSON.parse(readFileSync(join(project, '.claude', 'settings.json'), 'utf8'));",
+      "const claudeManaged = Object.values(claude.hooks).flatMap((groups) => groups)",
+      "  .flatMap((group) => group.hooks || []).filter((entry) => entry.command?.startsWith('npx wendkeep hook '));",
+      "assert.equal(claudeManaged.length, specs.length);",
+      "for (const spec of specs) {",
+      "  const group = (claude.hooks[spec.event] || []).find((candidate) =>",
+      "    (candidate.hooks || []).some((entry) => entry.command === kernel.hookCommand(spec.name)));",
+      "  assert.ok(group, `missing installed Claude projection: ${spec.name}`);",
+      "  const entry = group.hooks.find((candidate) => candidate.command === kernel.hookCommand(spec.name));",
+      "  assert.equal(entry.timeout, spec.timeout);",
+      "  assert.equal(entry.statusMessage, spec.statusMessage);",
+      "  if (spec.matcher) assert.equal(group.matcher, spec.matcher);",
+      "}",
+      "const codex = JSON.parse(readFileSync(join(project, '.codex', 'hooks.json'), 'utf8'));",
+      "const codexSpecs = kernel.codexHookSpecs(specs).sort((a, b) => (a.order ?? 0) - (b.order ?? 0));",
+      "const codexManaged = Object.values(codex.hooks).flatMap((groups) => groups)",
+      "  .flatMap((group) => group.hooks || []).filter((entry) => entry.command?.startsWith('npx wendkeep hook '));",
+      "assert.equal(codexManaged.length, codexSpecs.length);",
+      "for (const spec of codexSpecs) {",
+      "  const expected = kernel.codexHookEntry(spec);",
+      "  const group = (codex.hooks[spec.event] || []).find((candidate) =>",
+      "    (candidate.hooks || []).some((entry) => entry.command === expected.command));",
+      "  assert.ok(group, `missing installed Codex projection: ${spec.name}`);",
+      "  assert.deepEqual(group.hooks.find((entry) => entry.command === expected.command), expected);",
+      "  if (kernel.CODEX_MATCHER_EVENTS.has(spec.event) && spec.matcher) assert.equal(group.matcher, spec.matcher);",
+      "  else assert.equal(Object.hasOwn(group, 'matcher'), false);",
+      "}",
+    ].join('\n')], { cwd: consumer, encoding: 'utf8' });
+    assert.equal(
+      installedHookProjection.status,
+      0,
+      `installed Claude/Codex hook projection failed:\n${installedHookProjection.stderr}`,
+    );
+
+    const installedBin = join(
+      consumer,
+      'node_modules',
+      'wendkeep',
+      'bin',
+      'wendkeep.mjs',
+    );
+    const installedSessionId = '019d0000-0000-7000-8000-000000000022';
+    const installedTranscript = join(installedProject, 'installed-hook.jsonl');
+    writeFileSync(installedTranscript, `${JSON.stringify({
+      type: 'session_meta',
+      payload: {
+        id: 'installed-hook-transcript',
+        session_id: installedSessionId,
+        model_provider: 'openai',
+      },
+    })}\n`);
+    const wrongGlobalVault = join(consumer, 'wrong-global-vault');
+    const installedHookEnv = {
+      ...process.env,
+      HOME: consumer,
+      USERPROFILE: consumer,
+      OBSIDIAN_VAULT_PATH: wrongGlobalVault,
+    };
+    for (const key of [
+      'CLAUDECODE',
+      'CLAUDE_CODE_SESSION_ID',
+      'CLAUDE_PROJECT_DIR',
+      'CODEX_THREAD_ID',
+      'NODE_PATH',
+      'WENDKEEP_DEBUG',
+    ]) delete installedHookEnv[key];
+    const installedHookInput = JSON.stringify({
+      hook_event_name: 'UserPromptSubmit',
+      session_id: installedSessionId,
+      transcript_path: installedTranscript,
+      prompt: 'installed hook runtime',
+    });
+    const installedHook = spawnSync(process.execPath, [
+      installedBin,
+      'hook',
+      'session-ensure',
+    ], {
+      cwd: installedProject,
+      env: installedHookEnv,
+      input: installedHookInput,
+      encoding: 'utf8',
+    });
+    assert.equal(
+      installedHook.status,
+      0,
+      `installed session-ensure hook failed:\n${installedHook.stderr}`,
+    );
+    const installedHookOutput = JSON.parse(installedHook.stdout);
+    assert.equal(installedHookOutput.hookSpecificOutput.hookEventName, 'UserPromptSubmit');
+    assert.match(installedHookOutput.hookSpecificOutput.additionalContext, /<obsidian_session>/);
+    assert.match(installedHookOutput.systemMessage, /Sessão Obsidian criada/);
+    const installedRegistry = JSON.parse(readFileSync(
+      join(installedVault, '.brain', 'SESSION_REGISTRY.json'),
+      'utf8',
+    ));
+    const installedEntry = installedRegistry.sessions[installedSessionId];
+    assert.equal(installedEntry.provider, 'codex');
+    assert.equal(installedEntry.transcript_path, installedTranscript);
+    assert.equal(installedEntry.transcript_id, 'installed-hook-transcript');
+    assert.equal(installedEntry.status, 'active');
+    assert.ok(installedEntry.session_file);
+    assert.ok(existsSync(join(installedVault, installedEntry.session_file)));
+    assert.match(
+      readFileSync(join(installedVault, installedEntry.session_file), 'utf8'),
+      /installed hook runtime/i,
+    );
+    assert.equal(existsSync(wrongGlobalVault), false);
+
+    const installedEnvelope = join(
+      consumer,
+      'node_modules',
+      'wendkeep',
+      'packages',
+      'integrations',
+      'src',
+      'hook-envelope.mjs',
+    );
+    const disabledEnvelope = `${installedEnvelope}.disabled`;
+    renameSync(installedEnvelope, disabledEnvelope);
+    try {
+      const brokenInstalledHook = spawnSync(process.execPath, [
+        installedBin,
+        'hook',
+        'session-ensure',
+      ], {
+        cwd: installedProject,
+        env: installedHookEnv,
+        input: installedHookInput,
+        encoding: 'utf8',
+      });
+      assert.notEqual(
+        brokenInstalledHook.status,
+        0,
+        'installed hook must not fall back to the source checkout when its kernel is absent',
+      );
+      assert.match(brokenInstalledHook.stderr, /hook-envelope\.mjs|ERR_MODULE_NOT_FOUND/);
+    } finally {
+      renameSync(disabledEnvelope, installedEnvelope);
+    }
   } finally {
     rmSync(temp, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
   }

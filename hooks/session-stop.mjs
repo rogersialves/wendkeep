@@ -23,6 +23,13 @@ import {
   stageStopMemoryAttempt,
 } from './session-memory-lifecycle.mjs';
 import {
+  parseClaudeTranscriptContent,
+  parseCodexTranscriptContent,
+  parseTranscriptContent,
+  resolveTurnIdentity,
+} from '../packages/integrations/src/transcripts.mjs';
+export { resolveTurnIdentity };
+import {
   ensureDir,
   findActiveSessionByTranscript,
   formatDate,
@@ -51,16 +58,6 @@ import {
   resolveStopActivation,
   applyStopActivation,
 } from './obsidian-common.mjs';
-
-function extractContentText(content) {
-  if (typeof content === 'string') return content;
-  if (!Array.isArray(content)) return '';
-  return content
-    .map((item) => item?.text || item?.input_text || item?.output_text || '')
-    .filter(Boolean)
-    .join('\n')
-    .trim();
-}
 
 // Tags injetadas pelo harness (não são fala humana): notificações de task,
 // reminders do sistema, stdout de comando local, wrappers de slash-command e
@@ -99,36 +96,6 @@ function createTurn(turnId = '', timestamp = '') {
     usage: emptyTokenUsage(),
     model: '',
   };
-}
-
-function addConversation(turn, role, value) {
-  if (!turn) return;
-  const text = redactSecrets(String(value || '').trim());
-  if (!text) return;
-  const exists = turn.conversation.some((item) => item.role === role && item.text === text);
-  if (!exists) turn.conversation.push({ role, text });
-}
-
-function extractPaths(text) {
-  const paths = [];
-  const addPath = (value) => {
-    const path = normalizeExtractedPath(value);
-    if (!shouldIgnoreExtractedPath(path) && !paths.includes(path)) paths.push(path);
-  };
-
-  const windowsRegex = /[A-Za-z]:[\\/]+[^"'`\r\n{}()[\],]+\.[A-Za-z0-9]+(?::\d+)?/g;
-  let match;
-  const source = String(text || '');
-  while ((match = windowsRegex.exec(source)) !== null) {
-    addPath(match[0]);
-  }
-
-  const masked = source.replace(windowsRegex, ' ');
-  const regex = /(?:^|[\s"'`(])((?:\/(?:home|mnt)\/|\.{1,2}\/|[A-Za-z0-9_.-]+\/)[A-Za-z0-9_./@+:-]+\.[A-Za-z0-9]+(?::\d+)?)/g;
-  while ((match = regex.exec(masked)) !== null) {
-    addPath(match[1]);
-  }
-  return paths.slice(0, 20);
 }
 
 const REPO_ROOT = String(process.cwd() || '')
@@ -196,361 +163,28 @@ function normalizeFileListLine(line) {
   return `- \`${normalizeExtractedPath(match[1])}\``;
 }
 
-function extractPatchFiles(text) {
-  const files = [];
-  const regex = /^\*\*\* (?:Add|Update|Delete) File:\s+(.+)$/gm;
-  let match;
-  while ((match = regex.exec(text || '')) !== null) addUnique(files, match[1]);
-  return files;
+function transcriptContent(transcriptPath) {
+  return transcriptPath && existsSync(transcriptPath)
+    ? readFileSync(transcriptPath, 'utf-8')
+    : '';
 }
 
-function parseToolArguments(args) {
-  if (!args) return {};
-  if (typeof args === 'object') return args;
-  try {
-    return JSON.parse(args);
-  } catch {
-    return { raw: String(args) };
-  }
-}
-
-function toolArgumentText(value) {
-  if (value == null) return '';
-  if (typeof value === 'string') return value;
-  if (Array.isArray(value)) return value.map(toolArgumentText).filter(Boolean).join('\n');
-  if (typeof value === 'object') return Object.values(value).map(toolArgumentText).filter(Boolean).join('\n');
-  return String(value);
+function transcriptOptions() {
+  let vaultRoot = '';
+  try { vaultRoot = getVaultBase(); } catch { /* projeto sem binding */ }
+  return { repoRoot: process.cwd(), vaultRoot };
 }
 
 export function parseCodexTranscript(transcriptPath) {
-  const result = {
-    provider: 'codex',
-    sessionId: '',
-    model: '',
-    latestTurnId: '',
-    latestUserPrompt: '',
-    latestAssistantMessage: '',
-    userPrompts: [],
-    assistantMessages: [],
-    tools: [],
-    consultedFiles: [],
-    changedFiles: [],
-    turns: [],
-    rawTextForDetection: '',
-  };
-
-  if (!transcriptPath || !existsSync(transcriptPath)) return result;
-
-  const eventUserPrompts = [];
-  let currentTurn = null;
-  const ensureTurn = (turnId = '', timestamp = '') => {
-    const normalized = turnId || currentTurn?.turnId || `turn-${result.turns.length + 1}`;
-    const existing = result.turns.find((turn) => turn.turnId === normalized);
-    if (existing) {
-      currentTurn = existing;
-      return existing;
-    }
-    currentTurn = createTurn(normalized, timestamp);
-    result.turns.push(currentTurn);
-    return currentTurn;
-  };
-
-  const lines = readFileSync(transcriptPath, 'utf-8').split('\n').filter(Boolean);
-  for (const line of lines) {
-    let event;
-    try { event = JSON.parse(line); } catch { continue; }
-
-    if (event.type === 'session_meta') {
-      result.sessionId = event.payload?.id || result.sessionId;
-      result.model = event.payload?.model || event.payload?.model_provider || result.model;
-      continue;
-    }
-
-    if (event.type === 'event_msg' && event.payload?.type === 'task_started') {
-      result.latestTurnId = event.payload.turn_id || result.latestTurnId;
-      ensureTurn(result.latestTurnId, event.timestamp);
-      continue;
-    }
-
-    if (event.type === 'turn_context') {
-      result.latestTurnId = event.payload?.turn_id || result.latestTurnId;
-      result.model = event.payload?.model || result.model;
-      ensureTurn(result.latestTurnId, event.timestamp);
-      continue;
-    }
-
-    if (event.type === 'event_msg' && event.payload?.type === 'user_message') {
-      const text = event.payload.message || '';
-      if (text && !shouldIgnoreUserText(text)) {
-        const turn = ensureTurn(event.payload.turn_id || result.latestTurnId, event.timestamp);
-        addUnique(eventUserPrompts, text);
-        addUnique(result.userPrompts, text);
-        addUnique(turn.userPrompts, text);
-        addConversation(turn, 'Usuário', text);
-      }
-      continue;
-    }
-
-    if (event.type === 'event_msg' && event.payload?.type === 'agent_message') {
-      const text = event.payload.message || event.payload.text || '';
-      if (text) {
-        const turn = ensureTurn(event.payload.turn_id || result.latestTurnId, event.timestamp);
-        addUnique(result.assistantMessages, text);
-        addUnique(turn.assistantMessages, text);
-        addConversation(turn, 'Assistente', text);
-      }
-      continue;
-    }
-
-    if (event.type === 'event_msg' && event.payload?.type === 'token_count') {
-      const raw = event.payload?.info?.last_token_usage;
-      if (raw) {
-        const turn = currentTurn || ensureTurn(result.latestTurnId, event.timestamp);
-        addUsage(turn.usage, normalizeCodexUsage(raw));
-        if (event.payload?.info?.model) turn.model = event.payload.info.model;
-      }
-      continue;
-    }
-
-    if (event.type !== 'response_item') continue;
-    const payload = event.payload || {};
-
-    if (payload.type === 'message') {
-      const text = extractContentText(payload.content);
-      if (!text) continue;
-      const turn = ensureTurn(payload.turn_id || event.turn_id || result.latestTurnId, event.timestamp);
-      if (payload.role === 'user' && !shouldIgnoreUserText(text)) {
-        addUnique(result.userPrompts, text);
-        addUnique(turn.userPrompts, text);
-        addConversation(turn, 'Usuário', text);
-      }
-      if (payload.role === 'assistant') {
-        addUnique(result.assistantMessages, text);
-        addUnique(turn.assistantMessages, text);
-        addConversation(turn, 'Assistente', text);
-      }
-      continue;
-    }
-
-    if (payload.type === 'function_call') {
-      addUnique(result.tools, payload.name || 'function_call');
-      const turn = ensureTurn(payload.turn_id || event.turn_id || result.latestTurnId, event.timestamp);
-      addUnique(turn.tools, payload.name || 'function_call');
-      const parsed = parseToolArguments(payload.arguments);
-      const combined = typeof parsed.raw === 'string'
-        ? parsed.raw
-        : toolArgumentText(parsed);
-
-      for (const path of extractPaths(combined)) {
-        addUnique(result.consultedFiles, path);
-        addUnique(turn.consultedFiles, path);
-      }
-      for (const path of extractPatchFiles(combined)) {
-        addUnique(result.changedFiles, path);
-        addUnique(turn.changedFiles, path);
-      }
-
-      if (/apply_patch|edit|write|create/i.test(payload.name || '')) {
-        for (const path of extractPaths(combined)) {
-          addUnique(result.changedFiles, path);
-          addUnique(turn.changedFiles, path);
-        }
-      }
-    }
-
-    if (payload.type === 'tool_search_call') {
-      const turn = ensureTurn(payload.turn_id || event.turn_id || result.latestTurnId, event.timestamp);
-      addUnique(result.tools, 'tool_search');
-      addUnique(turn.tools, 'tool_search');
-    }
-    if (payload.type === 'web_search_call') {
-      const turn = ensureTurn(payload.turn_id || event.turn_id || result.latestTurnId, event.timestamp);
-      addUnique(result.tools, 'web_search');
-      addUnique(turn.tools, 'web_search');
-    }
-  }
-
-  for (const prompt of eventUserPrompts) addUnique(result.userPrompts, prompt);
-  const latestTurn = result.turns.find((turn) => turn.turnId === result.latestTurnId)
-    || result.turns.at(-1);
-  result.latestUserPrompt = latestTurn?.userPrompts.at(-1)
-    || eventUserPrompts.at(-1)
-    || result.userPrompts.at(-1)
-    || '';
-  result.latestAssistantMessage = latestTurn?.assistantMessages.at(-1)
-    || result.assistantMessages.at(-1)
-    || '';
-  result.rawTextForDetection = redactSecrets([
-    ...result.userPrompts,
-    ...result.assistantMessages,
-  ].join('\n\n'));
-
-  return result;
+  return parseCodexTranscriptContent(transcriptContent(transcriptPath), transcriptOptions());
 }
 
-// Texto humano de uma mensagem de usuário do Claude Code: mantém só blocos
-// `text`, descartando tool_result e contexto injetado (system-reminder etc.).
-function claudeUserText(content) {
-  if (typeof content === 'string') return content.trim();
-  if (!Array.isArray(content)) return '';
-  return content
-    .map((block) => (typeof block === 'string' ? block : (block?.type === 'text' ? block.text || '' : '')))
-    .map((text) => String(text || '').trim())
-    .filter((text) => text && !text.startsWith('<'))
-    .join('\n')
-    .trim();
-}
-
-// Parser do transcript do Claude Code. Schema por linha:
-// { type:'user'|'assistant', message:{ role, content:[{type:'text'|'thinking'|'tool_use'|'tool_result',...}] } }.
-// Diferente do Codex (sem `payload`), por isso precisa de parser próprio.
 export function parseClaudeTranscript(transcriptPath) {
-  const result = {
-    provider: 'claude',
-    sessionId: '',
-    model: '',
-    latestTurnId: '',
-    latestUserPrompt: '',
-    latestAssistantMessage: '',
-    userPrompts: [],
-    assistantMessages: [],
-    tools: [],
-    consultedFiles: [],
-    changedFiles: [],
-    turns: [],
-    rawTextForDetection: '',
-  };
-
-  if (!transcriptPath || !existsSync(transcriptPath)) return result;
-
-  let currentTurn = null;
-  const ensureTurn = (turnId = '', timestamp = '') => {
-    const normalized = turnId || currentTurn?.turnId || `turn-${result.turns.length + 1}`;
-    const existing = result.turns.find((turn) => turn.turnId === normalized);
-    if (existing) {
-      currentTurn = existing;
-      return existing;
-    }
-    currentTurn = createTurn(normalized, timestamp);
-    result.turns.push(currentTurn);
-    return currentTurn;
-  };
-
-  const recordToolFiles = (turn, name, input) => {
-    const text = toolArgumentText(input);
-    for (const path of extractPaths(text)) {
-      addUnique(result.consultedFiles, path);
-      addUnique(turn.consultedFiles, path);
-    }
-    for (const path of extractPatchFiles(text)) {
-      addUnique(result.changedFiles, path);
-      addUnique(turn.changedFiles, path);
-    }
-    if (/edit|write|create|apply_patch|notebook/i.test(name)) {
-      for (const path of extractPaths(text)) {
-        addUnique(result.changedFiles, path);
-        addUnique(turn.changedFiles, path);
-      }
-    }
-  };
-
-  const lines = readFileSync(transcriptPath, 'utf-8').split('\n').filter(Boolean);
-  for (const line of lines) {
-    let event;
-    try { event = JSON.parse(line); } catch { continue; }
-    if (event.isSidechain || event.isMeta) continue;
-    if (event.sessionId && !result.sessionId) result.sessionId = event.sessionId;
-
-    if (event.type === 'user') {
-      const text = claudeUserText(event.message?.content);
-      if (!text || shouldIgnoreUserText(text)) continue;
-      const turn = ensureTurn(event.uuid || event.promptId || event.timestamp || '', event.timestamp || '');
-      result.latestTurnId = turn.turnId;
-      addUnique(result.userPrompts, text);
-      addUnique(turn.userPrompts, text);
-      addConversation(turn, 'Usuário', text);
-      continue;
-    }
-
-    if (event.type === 'assistant') {
-      const turn = currentTurn || ensureTurn(event.uuid || event.timestamp || '', event.timestamp || '');
-      result.model = event.message?.model || result.model;
-      if (event.message?.model) turn.model = event.message.model;
-      if (event.message?.usage) addUsage(turn.usage, normalizeClaudeUsage(event.message.usage));
-      const content = Array.isArray(event.message?.content) ? event.message.content : [];
-      for (const block of content) {
-        if (!block) continue;
-        if (block.type === 'text' && block.text && block.text.trim()) {
-          addUnique(result.assistantMessages, block.text);
-          addUnique(turn.assistantMessages, block.text);
-          addConversation(turn, 'Assistente', block.text);
-        } else if (block.type === 'tool_use') {
-          const name = block.name || 'tool_use';
-          addUnique(result.tools, name);
-          addUnique(turn.tools, name);
-          recordToolFiles(turn, name, block.input);
-        }
-      }
-      continue;
-    }
-  }
-
-  const latestTurn = result.turns.find((turn) => turn.turnId === result.latestTurnId)
-    || result.turns.at(-1);
-  result.latestUserPrompt = latestTurn?.userPrompts.at(-1) || result.userPrompts.at(-1) || '';
-  result.latestAssistantMessage = latestTurn?.assistantMessages.at(-1) || result.assistantMessages.at(-1) || '';
-  result.rawTextForDetection = redactSecrets([
-    ...result.userPrompts,
-    ...result.assistantMessages,
-  ].join('\n\n'));
-
-  return result;
+  return parseClaudeTranscriptContent(transcriptContent(transcriptPath), transcriptOptions());
 }
 
-function looksLikeCodexEvent(event) {
-  return event.payload !== undefined
-    || event.type === 'session_meta'
-    || event.type === 'response_item'
-    || event.type === 'turn_context'
-    || event.type === 'event_msg';
-}
-
-function looksLikeClaudeEvent(event) {
-  return (event.type === 'user' || event.type === 'assistant') && event.message !== undefined;
-}
-
-// Despacha para o parser certo conforme o schema do transcript (Codex x Claude),
-// já que o mesmo hook Stop atende os dois agentes.
 export function parseTranscript(transcriptPath) {
-  if (!transcriptPath || !existsSync(transcriptPath)) return parseCodexTranscript(transcriptPath);
-  const lines = readFileSync(transcriptPath, 'utf-8').split('\n').filter(Boolean);
-  for (const line of lines) {
-    let event;
-    try { event = JSON.parse(line); } catch { continue; }
-    if (looksLikeCodexEvent(event)) return parseCodexTranscript(transcriptPath);
-    if (looksLikeClaudeEvent(event)) return parseClaudeTranscript(transcriptPath);
-  }
-  return parseCodexTranscript(transcriptPath);
-}
-
-export function resolveTurnIdentity(transcript, requestedTurnId = '') {
-  const turns = Array.isArray(transcript?.turns) ? transcript.turns : [];
-  const requested = String(requestedTurnId || '');
-  let index = requested
-    ? turns.findIndex((turn) => String(turn?.turnId || '') === requested)
-    : -1;
-  if (requested && index < 0) return null;
-  if (index < 0 && transcript?.latestTurnId) {
-    index = turns.findIndex((turn) => String(turn?.turnId || '') === String(transcript.latestTurnId));
-  }
-  if (index < 0) index = turns.length - 1;
-  const turn = turns[index];
-  if (!turn?.turnId) return null;
-  return {
-    id: String(turn.turnId),
-    order: index + 1,
-    observedAt: String(turn.timestamp || ''),
-  };
+  return parseTranscriptContent(transcriptContent(transcriptPath), transcriptOptions());
 }
 
 function escapeMarkdownBackticks(text) {

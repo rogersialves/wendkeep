@@ -233,6 +233,11 @@ test('[req:MEM-STOP-1] [req:MEM-STOP-7] removing lifecycle staging makes the ful
       join(mutantRoot, 'packages', 'vault'),
       { recursive: true },
     );
+    cpSync(
+      join(ROOT, 'packages', 'integrations'),
+      join(mutantRoot, 'packages', 'integrations'),
+      { recursive: true },
+    );
 
     assert.doesNotThrow(() => runMigrationLifecycle(mutantRoot));
 
