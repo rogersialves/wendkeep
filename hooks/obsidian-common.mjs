@@ -7,6 +7,26 @@ import { resolveProjectVault } from '../src/project-vault.mjs';
 import {
   assertVaultPathSafe, mkdirVaultPath, writeVaultFileAtomic,
 } from './vault-path-safety.mjs';
+import {
+  salvageTruncatedJson,
+  parseHookInput,
+  stringifyHookOutput,
+  detectProvider as detectProviderFromEnvironment,
+  providerMeta as providerMetaFromProvider,
+  extractHookPrompt,
+} from '../packages/integrations/src/hook-envelope.mjs';
+import {
+  isBootstrapPrompt,
+  redactSecrets,
+} from '../packages/integrations/src/prompt-content.mjs';
+import { transcriptsMatch } from '../packages/integrations/src/session-identity.mjs';
+export {
+  salvageTruncatedJson,
+  extractHookPrompt,
+  isBootstrapPrompt,
+  redactSecrets,
+  transcriptsMatch,
+};
 
 // Deprecated export kept for consumers that imported it before 0.39.0. Automatic
 // hooks never use this fallback: an unbound project fails closed.
@@ -27,56 +47,12 @@ export const VAULT_COMPLEMENT_RULES = [
   'Atualize `SHARED_MEMORY.md` somente quando a síntese mudar estado ativo que outro agente precise saber.',
 ];
 
-// Codex on Windows serializes the Stop payload with `last_assistant_message` cut mid-string
-// and never closed when the assistant text carries non-ASCII (openai/codex#23784). That field
-// is LAST in codex-rs's StopCommandInput, so everything wendkeep consumes — session_id,
-// turn_id, transcript_path, cwd — sits in the intact prefix.
-//
-// One pass, tracking quotes/escapes/depth, remembering the offset of the last top-level comma
-// that was NOT inside a string. Re-closing there yields the well-formed prefix. Deliberately
-// NOT a decreasing brute-force parse: this runs on every turn and the payload can be tens of
-// KB. The truncated field is dropped, never reconstructed — half an assistant message is
-// invented data, and it is the one field we do not need.
-export function salvageTruncatedJson(raw) {
-  const text = String(raw || '');
-  if (text[0] !== '{') return null;
-  let inString = false;
-  let escaped = false;
-  let depth = 0;
-  let lastBoundary = -1;
-  for (let i = 0; i < text.length; i += 1) {
-    const ch = text[i];
-    if (escaped) { escaped = false; continue; }
-    if (ch === '\\') { if (inString) escaped = true; continue; }
-    if (ch === '"') { inString = !inString; continue; }
-    if (inString) continue;
-    if (ch === '{' || ch === '[') depth += 1;
-    else if (ch === '}' || ch === ']') depth -= 1;
-    else if (ch === ',' && depth === 1) lastBoundary = i;
-  }
-  if (lastBoundary === -1) return null;
-  try {
-    const parsed = JSON.parse(`${text.slice(0, lastBoundary)}}`);
-    return parsed && typeof parsed === 'object' ? parsed : null;
-  } catch { return null; }
-}
-
 export function readHookInput() {
-  const raw = readFileSync(0, 'utf-8').trim();
-  if (!raw) return {};
-  try {
-    return JSON.parse(raw);
-  } catch (error) {
-    const salvaged = salvageTruncatedJson(raw);
-    // `_wk` prefix: the object is the harness payload merged with our own metadata, and a
-    // silent key collision here would be worse than the ugly prefix.
-    if (salvaged) return { ...salvaged, _wkSalvaged: true };
-    throw error;
-  }
+  return parseHookInput(readFileSync(0, 'utf-8'));
 }
 
 export function writeHookOutput(payload = {}) {
-  process.stdout.write(JSON.stringify(payload));
+  process.stdout.write(stringifyHookOutput(payload));
 }
 
 // Resolve from explicit hook payload or the nearest project-local binding. A legacy
@@ -118,17 +94,11 @@ export function warnIfDefaultVault(input = {}) {
 // Detecta o agente real que está executando o hook. Claude Code expõe
 // CLAUDECODE / CLAUDE_CODE_SESSION_ID / CLAUDE_PROJECT_DIR; Codex não.
 export function detectProvider() {
-  if (process.env.CLAUDECODE === '1' || process.env.CLAUDE_CODE_SESSION_ID || process.env.CLAUDE_PROJECT_DIR) {
-    return 'claude';
-  }
-  return 'codex';
+  return detectProviderFromEnvironment(process.env);
 }
 
 export function providerMeta(provider = detectProvider()) {
-  if (provider === 'claude') {
-    return { id: 'claude', label: 'Claude Code', tag: 'claude', source: 'claude-hook' };
-  }
-  return { id: 'codex', label: 'Codex', tag: 'codex', source: 'codex-hook' };
+  return providerMetaFromProvider(provider);
 }
 
 export function ensureDir(path) {
@@ -807,44 +777,6 @@ export function keysBate(a = '', b = '') {
   return a === b || a.startsWith(b) || b.startsWith(a);
 }
 
-export function extractHookPrompt(input = {}) {
-  const candidates = [
-    input.prompt,
-    input.user_prompt,
-    input.userPrompt,
-    input.message,
-    input.input,
-  ];
-
-  for (const candidate of candidates) {
-    if (typeof candidate === 'string' && candidate.trim()) return candidate.trim();
-  }
-
-  if (Array.isArray(input.messages)) {
-    const text = input.messages
-      .map((message) => message?.content || message?.text || '')
-      .filter((item) => typeof item === 'string' && item.trim())
-      .join('\n')
-      .trim();
-    if (text) return text;
-  }
-
-  return '';
-}
-
-export function isBootstrapPrompt(text = '') {
-  const clean = String(text || '').trim();
-  return clean.startsWith('# AGENTS.md instructions')
-    || clean.startsWith('<environment_context>')
-    || clean.startsWith('<permissions instructions>')
-    // Codex injects the available-plugins catalogue as the first userPrompt of turn 1.
-    // Anchored with startsWith on purpose: matching the bare substring would discard a
-    // legitimate prompt that merely asks about plugins.
-    || clean.startsWith('<recommended_plugins>')
-    || clean.includes('You are Codex, a coding agent')
-    || clean.startsWith('## Memory');
-}
-
 export function summarizePromptForTitle(text = '', fallback = 'session') {
   const cleaned = redactSecrets(String(text || ''))
     .replace(/\[@[^\]]+\]\([^)]+\)/g, ' ')
@@ -901,27 +833,6 @@ export function shouldReuseActiveSession(control = {}, now = new Date()) {
   return now.getTime() - startedMs <= windowMinutes * 60 * 1000;
 }
 
-function normalizeTranscript(p) {
-  return String(p || '').replace(/\\/g, '/').toLowerCase();
-}
-
-function transcriptBasename(p) {
-  const n = normalizeTranscript(p);
-  const i = n.lastIndexOf('/');
-  return i === -1 ? n : n.slice(i + 1);
-}
-
-// Mesmo transcript apesar de caixa/separador diferentes (o Claude Code emite o
-// slug do projeto ora `c--`, ora `C--`) ou prefixo de path diferente (WSL vs
-// Windows). Compara normalizado e, em último caso, pelo basename
-// (`<session_id>.jsonl`, globalmente único). Evita rupturas de sessão no restart.
-export function transcriptsMatch(a, b) {
-  if (!a || !b) return false;
-  if (normalizeTranscript(a) === normalizeTranscript(b)) return true;
-  const ba = transcriptBasename(a);
-  return !!ba && ba === transcriptBasename(b);
-}
-
 // O `transcript_path` é estável dentro de uma conversa mesmo quando o
 // SessionStart re-dispara (compactação/resume) com `session_id` novo. Achar a
 // sessão ativa do mesmo transcript evita criar placeholders `HH-MM-codex`.
@@ -938,17 +849,6 @@ export function findActiveSessionByTranscript(vaultBase, transcriptPath) {
     }
   }
   return best;
-}
-
-export function redactSecrets(text) {
-  if (!text) return '';
-  return String(text)
-    .replace(/\b(sk-[A-Za-z0-9_-]{12,})\b/g, '[REDACTED_SECRET]')
-    .replace(/\b(whsec_[A-Za-z0-9_/-]{8,})\b/g, '[REDACTED_SECRET]')
-    .replace(/\b(gh[pousr]_[A-Za-z0-9_]{12,})\b/g, '[REDACTED_SECRET]')
-    .replace(/\b(xox[baprs]-[A-Za-z0-9-]{12,})\b/g, '[REDACTED_SECRET]')
-    .replace(/\b([A-Z0-9_]*(?:TOKEN|SECRET|PASSWORD|API_KEY)[A-Z0-9_]*)\s*[:=]\s*["']?[^"'\s]+/gi, '$1=[REDACTED_SECRET]')
-    .replace(/:\/\/([^:\s/@]+):([^@\s/]+)@/g, '://[REDACTED_SECRET]@');
 }
 
 export function truncate(text, max = 240) {

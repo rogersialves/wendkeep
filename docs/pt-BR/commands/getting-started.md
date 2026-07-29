@@ -79,6 +79,14 @@ e adiciona `wendkeep-vault`. Se o JSON existente for inválido, o arquivo origin
 a byte intacto e a proposta reconciliada é gravada em `.mcp.json.new`. Desde a versão 0.65, essa
 composição pertence ao kernel MCP privado, sem alterar comandos, flags ou a superfície npm pública.
 
+As regras puras que projetam os hooks de Claude/Codex e interpretam envelopes, transcripts, uso e
+identidade pertencem ao workspace privado `@wendkeep/integrations`. As fachadas históricas mantêm
+os efeitos de stdin/stdout, ambiente, filesystem, Vault e registry. Isso não acrescenta comandos ou
+flags, não altera hooks ou sessões e não exige migração de cofre, config, paths ou schemas. MCP e
+Integrations permanecem adapters irmãos sem dependência, e a direção continua
+`cli/mcp/integrations/pi → Harness → Vault`. Tudo permanece dentro do único pacote publicado
+`wendkeep`; não existe `wendkeep/integrations` público. A próxima fase modular é Pi.
+
 ## Erros comuns e diagnóstico
 
 - Cofre errado: confira `.wendkeep.json` e rode `wendkeep doctor --vault <path>`.

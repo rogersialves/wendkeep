@@ -1,5 +1,6 @@
 {
   "name": "@wendkeep/integrations",
   "private": true,
-  "type": "module"
+  "type": "module",
+  "exports": "./src/index.mjs"
 }

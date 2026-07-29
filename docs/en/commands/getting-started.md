@@ -78,6 +78,14 @@ When MCP is enabled, `init` preserves existing properties and servers in `.mcp.j
 and the reconciled proposal is written to `.mcp.json.new`. Since version 0.65, this composition is
 owned by the private MCP kernel without changing commands, flags, or the public npm surface.
 
+Pure rules that project Claude/Codex hooks and interpret envelopes, transcripts, usage, and
+identity belong to the private `@wendkeep/integrations` workspace. Historical facades retain
+stdin/stdout, environment, filesystem, Vault, and registry effects. This adds no commands or flags,
+changes neither hooks nor sessions, and requires no Vault, configuration, path, or schema migration.
+MCP and Integrations remain sibling adapters with no dependency between them, and the direction
+remains `cli/mcp/integrations/pi → Harness → Vault`. Everything stays inside the single published
+`wendkeep` package; there is no public `wendkeep/integrations` surface. Pi is the next modular phase.
+
 ## Common errors and diagnosis
 
 - Wrong vault: inspect `.wendkeep.json` and run `wendkeep doctor --vault <path>`.

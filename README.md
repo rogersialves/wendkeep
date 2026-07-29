@@ -17,13 +17,23 @@
 
 O runtime está sendo separado em seis fronteiras físicas — `cli`, `harness`, `vault`, `mcp`,
 `integrations` e `pi` — sem fragmentar a instalação. Os workspaces privados `cli`, `harness`,
-`vault` e `mcp` agora são donos canônicos do runtime do executável, dos Perfis de
-Operação/engine de sensores, do binding seguro/kernel da Shared Project Memory v2 e do kernel de
-configuração MCP, respectivamente. O pacote raiz expõe Harness e Vault em `wendkeep/harness` e
-`wendkeep/vault`; CLI e MCP permanecem superfícies privadas, acessíveis somente pelos binários e
-pelos efeitos de configuração do `init`. Os imports históricos continuam funcionando por
+`vault`, `mcp` e `integrations` agora são donos canônicos do runtime do executável, dos Perfis de
+Operação/engine de sensores, do binding seguro/kernel da Shared Project Memory v2, do kernel de
+configuração MCP e das regras puras de integração com Claude/Codex, respectivamente. O pacote raiz
+expõe Harness e Vault em `wendkeep/harness` e `wendkeep/vault`; CLI, MCP e Integrations permanecem
+superfícies privadas, acessíveis somente pelos binários, pelos efeitos de configuração do `init` e
+pelas fachadas históricas. Os imports históricos continuam funcionando por
 fachadas de compatibilidade e nenhum dado de sessão precisa ser migrado;
 veja a [arquitetura modular](docs/pt-BR/architecture.md).
+
+Na fase **0.66 Integrations Kernel**, `packages/integrations/src/` passa a ser a autoridade
+canônica para o catálogo e a projeção de hooks, o envelope/provider, os filtros e parsers de
+conteúdo e uso de transcripts e a identidade de sessão. Essas regras são puras: stdin/stdout,
+ambiente, filesystem, Vault e registry continuam nas fachadas históricas. MCP e Integrations são
+adapters irmãos sem dependência entre si, e a direção continua `cli/mcp/integrations/pi → Harness
+→ Vault`. Hooks, sessões, paths, configs e schemas permanecem equivalentes; o workspace privado
+`@wendkeep/integrations` segue dentro do único pacote publicado `wendkeep`, sem subpath público
+`wendkeep/integrations`. A próxima fase é Pi.
 
 Na fase **0.65 MCP Configuration Kernel**, `packages/mcp/src/config.mjs` passa a ser a autoridade
 canônica para a entrada do MCPVault, seleção de servidores descritos pelo catálogo e merge de

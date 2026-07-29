@@ -9,7 +9,7 @@ em workspaces privados para permitir migração incremental e testes explícitos
 | `harness` | Perfis, políticas, changes, sensores e verificação. |
 | `vault` | Keep Core, binding do projeto, kernel de memória e I/O local seguro. |
 | `mcp` | Transporte e configuração MCP. |
-| `integrations` | Adaptadores de eventos dos hosts de agentes. |
+| `integrations` | Regras puras de integração com hosts: hooks, envelopes, transcripts e identidade. |
 | `pi` | Extensão e hooks específicos do Pi. |
 
 ## Direção de dependências
@@ -25,6 +25,26 @@ adapters (cli/mcp/integrations/pi) -> Harness -> Vault
 canônico da resolução/política dos Perfis de Operação e da engine de sensores em
 `packages/harness/src/`; o `vault` continua dono do binding/resolução, da segurança física de paths
 e do kernel de memória em `packages/vault/src/`.
+
+## 0.66 Kernel de Integrations
+
+O workspace privado `@wendkeep/integrations`, em `packages/integrations/src/`, é a autoridade
+canônica para as regras puras compartilhadas por Claude Code e Codex: catálogo e projeção de
+hooks; parsing do envelope, detecção do provider e metadados; filtros e extração de conteúdo;
+normalização de uso; parsing e comparação de transcripts; e resolução de identidade de sessão e
+turno.
+
+Essa fronteira não opera stdin/stdout, consulta ambiente global, toca filesystem/Vault nem opera o
+registry. Esses efeitos continuam nas fachadas históricas em `hooks/` e `src/`, que
+reexportam os mesmos bindings e injetam os dados do host no kernel puro. Assim, os hooks e sessões
+de Claude/Codex permanecem semanticamente equivalentes, sem migração de Vault, config, paths ou
+schemas.
+
+MCP e Integrations são adapters irmãos, sem dependência entre si. Ambos seguem a direção
+`cli/mcp/integrations/pi → Harness → Vault`, e os testes de fronteira rejeitam ciclos ou acesso
+ambiental dentro do kernel. Integrations permanece interno ao tarball raiz: não há publicação npm
+separada de `@wendkeep/integrations` nem subpath público `wendkeep/integrations`. A próxima fase da
+migração modular é Pi.
 
 ## 0.65 Kernel de configuração MCP
 
@@ -109,7 +129,7 @@ migração de dados.
 
 Todos os seis workspaces permanecem privados e internos ao monorepo; eles não são pacotes npm
 independentes. A instalação continua sendo `wendkeep`; `wendkeep/harness` e `wendkeep/vault` são
-subpaths públicos do pacote raiz, não publicações separadas. CLI e MCP já possuem implementações
-canônicas privadas: a primeira continua exposta pelos binários e a segunda pelos efeitos do
-`init`. `integrations` e `pi` permanecem fronteiras reservadas; a sequência planejada da migração
-é MCP → Integrations → Pi.
+subpaths públicos do pacote raiz, não publicações separadas. CLI, MCP e Integrations já possuem
+implementações canônicas privadas: a primeira continua exposta pelos binários, a segunda pelos
+efeitos do `init` e a terceira pelas fachadas históricas de host. `pi` permanece a fronteira
+reservada e é a próxima fase planejada da migração.

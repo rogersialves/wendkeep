@@ -8,6 +8,18 @@ import {
   readControl,
   truncate,
 } from './obsidian-common.mjs';
+import {
+  addUsage,
+  emptyTokenUsage,
+  normalizeClaudeUsage,
+  normalizeCodexUsage,
+} from '../packages/integrations/src/transcript-usage.mjs';
+export {
+  addUsage,
+  emptyTokenUsage,
+  normalizeClaudeUsage,
+  normalizeCodexUsage,
+};
 
 // Preços API por milhão de tokens. cachedInput = cache read.
 // Cache write: 5m = 1.25x input, 1h = 2x input (multiplicadores em calculateCost).
@@ -180,62 +192,6 @@ const MANAGED_FRONTMATTER_KEYS = new Set([
 // input = tokens de entrada NÃO cacheados; cached = cache read; cacheWrite = cache write
 // (cacheWrite1h = subparcela 1h, para custo 2x); thinking = tokens de raciocínio
 // (Claude: estimado de chars/3.5; Codex: reasoning_output_tokens, já contidos em output).
-export function emptyTokenUsage() {
-  return {
-    input: 0,
-    cached: 0,
-    cacheWrite: 0,
-    cacheWrite1h: 0,
-    output: 0,
-    reasoning: 0,
-    total: 0,
-  };
-}
-
-// Formato Codex: cached_input_tokens é SUBCONJUNTO de input_tokens — separa aqui.
-export function normalizeCodexUsage(raw = {}) {
-  const inputAll = Number(raw.input_tokens || 0);
-  const cached = Math.min(Number(raw.cached_input_tokens || 0), inputAll);
-  const output = Number(raw.output_tokens || 0);
-  return {
-    input: inputAll - cached,
-    cached,
-    cacheWrite: 0,
-    cacheWrite1h: 0,
-    output,
-    reasoning: Number(raw.reasoning_output_tokens || 0),
-    total: Number(raw.total_tokens || 0) || inputAll + output,
-  };
-}
-
-// Formato Claude Code: campos já disjuntos.
-export function normalizeClaudeUsage(raw = {}) {
-  const input = Number(raw.input_tokens || 0);
-  const cached = Number(raw.cache_read_input_tokens || 0);
-  const cacheWrite = Number(raw.cache_creation_input_tokens || 0);
-  const cacheWrite1h = Number(raw.cache_creation?.ephemeral_1h_input_tokens || 0);
-  const output = Number(raw.output_tokens || 0);
-  return {
-    input,
-    cached,
-    cacheWrite,
-    cacheWrite1h: Math.min(cacheWrite1h, cacheWrite),
-    output,
-    reasoning: 0,
-    total: input + cached + cacheWrite + output,
-  };
-}
-
-export function addUsage(target, usage) {
-  target.input += usage.input;
-  target.cached += usage.cached;
-  target.cacheWrite += usage.cacheWrite;
-  target.cacheWrite1h += usage.cacheWrite1h;
-  target.output += usage.output;
-  target.reasoning += usage.reasoning;
-  target.total += usage.total;
-}
-
 function normalizeModelName(model) {
   const clean = String(model || 'unknown').trim() || 'unknown';
   // Strip a trailing context-window tag (e.g. `claude-opus-4-8[1m]`, `claude-fable-5[1m]`) so the

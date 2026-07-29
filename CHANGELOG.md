@@ -4,6 +4,38 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.66.0] — 2026-07-29
+
+### Added
+
+- **O workspace privado Integrations passa a ter um kernel canônico para Claude Code e Codex.**
+  Catálogo/projeção de hooks, envelope e provider, filtros de conteúdo, normalização de uso,
+  parsers de transcript e identidade de sessão/turno agora vivem em módulos puros sob
+  `packages/integrations/src/`, sem filesystem, ambiente global, Vault ou registry no import.
+- **O tarball instalado prova a fronteira completa fora do checkout.** O teste executa `init` e
+  um hook `session-ensure` em consumidor temporário, valida estado persistido e as projeções
+  Claude/Codex contra o kernel empacotado, e confirma que Integrations permanece interno à
+  única publicação `wendkeep`.
+
+### Changed
+
+- **As fachadas históricas agora injetam efeitos no kernel de Integrations.** Taxonomia e hooks
+  preservam assinaturas e identidade dos exports enquanto stdin/stdout, `process.env`, leitura de
+  transcripts, acesso ao Vault e ao registry continuam nas bordas; paths, schemas, configs e
+  sessões existentes não exigem migração.
+- **Os workspaces privados deixaram de vazar por deep imports do wildcard raiz.** A allowlist de
+  exports mantém `wendkeep/harness`, `wendkeep/vault` e os caminhos históricos publicados, mas
+  bloqueia `packages/*`, inclusive variantes percent-encoded; MCP e Integrations seguem como
+  adapters irmãos sem dependência direta.
+
+### Fixed
+
+- **A reconexão de sessão por transcript agora respeita o provider.** Uma entrada do registry de
+  outro host é ignorada sem substituir uma identidade canônica válida já inspecionada.
+- **A suíte integral mantém determinismo sob carga de I/O no Windows.** O runner limita a duas as
+  files executadas em paralelo, preservando a concorrência multiprocesso dentro dos testes de
+  CAS/locks e todos os asserts, sem falsos vermelhos causados por starvation entre suítes.
+
 ## [0.65.0] — 2026-07-29
 
 ### Added

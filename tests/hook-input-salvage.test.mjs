@@ -4,12 +4,20 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { salvageTruncatedJson } from '../hooks/obsidian-common.mjs';
+import {
+  salvageTruncatedJson,
+  parseHookInput,
+} from '../packages/integrations/src/hook-envelope.mjs';
+import { salvageTruncatedJson as legacySalvageTruncatedJson } from '../hooks/obsidian-common.mjs';
 
 // Field order mirrors StopCommandInput in codex-rs — last_assistant_message is final.
 const PREFIX = '{"session_id":"019f7764-7627-79a3-b609-65abaa36eedd","turn_id":"turn-abc",'
   + '"transcript_path":"C:\\\\Users\\\\x\\\\rollout.jsonl","cwd":"C:\\\\GitHub\\\\Vendiva",'
   + '"hook_event_name":"Stop","model":"gpt-5.6-sol","permission_mode":"default","stop_hook_active":false';
+
+test('[req:MOD-20] salvageTruncatedJson legado é o binding puro canônico', () => {
+  assert.strictEqual(legacySalvageTruncatedJson, salvageTruncatedJson);
+});
 
 // --- CODEX-8 -----------------------------------------------------------------
 
@@ -106,6 +114,14 @@ test('salvageTruncatedJson: objeto aninhado não fecha a fronteira cedo demais',
   assert.equal(out.transcript_path, '/x.jsonl');
 });
 
+test('[req:MOD-21] parseHookInput preserva array, null e escalares JSON válidos', () => {
+  assert.deepEqual(parseHookInput('[1,{"ok":true}]'), [1, { ok: true }]);
+  assert.equal(parseHookInput('null'), null);
+  assert.equal(parseHookInput('false'), false);
+  assert.equal(parseHookInput('0'), 0);
+  assert.equal(parseHookInput('"texto"'), 'texto');
+});
+
 // readHookInput reads fd 0, so exercise it through a child process. The module URL is derived
 // from this test file so the spawn works on Windows and on the Linux CI matrix alike.
 const COMMON_URL = new URL('../hooks/obsidian-common.mjs', import.meta.url).href;
@@ -122,6 +138,14 @@ test('readHookInput: payload íntegro não é marcado como salvo', () => {
   assert.equal(out.ok, true);
   assert.equal(out.value.session_id, 'abc');
   assert.ok(!('_wkSalvaged' in out.value), 'parse normal não marca salvamento');
+});
+
+test('[req:MOD-21] readHookInput legado preserva valores JSON que não são objetos', () => {
+  assert.deepEqual(runReadHookInput('[1,{"ok":true}]').value, [1, { ok: true }]);
+  assert.equal(runReadHookInput('null').value, null);
+  assert.equal(runReadHookInput('false').value, false);
+  assert.equal(runReadHookInput('0').value, 0);
+  assert.equal(runReadHookInput('"texto"').value, 'texto');
 });
 
 test('readHookInput: payload truncado é salvo e marcado', () => {
