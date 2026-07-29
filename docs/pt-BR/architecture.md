@@ -26,6 +26,26 @@ canônico da resolução/política dos Perfis de Operação e da engine de senso
 `packages/harness/src/`; o `vault` continua dono do binding/resolução, da segurança física de paths
 e do kernel de memória em `packages/vault/src/`.
 
+## 0.65 Kernel de configuração MCP
+
+`packages/mcp/src/config.mjs` é a autoridade canônica para a chave `wendkeep-vault`, a entrada de
+transporte do MCPVault, a seleção de servidores descritos pelo catálogo e o merge imutável de
+configuração MCP. O índice privado `packages/mcp/src/index.mjs` reúne essa superfície interna sem
+executar processos, acessar filesystem ou produzir efeitos durante o import.
+
+`src/taxonomy.mjs` continua dono do catálogo de companions e hosts, mas entrega descritores como
+dados ao kernel. `src/init.mjs` continua dono da orquestração do filesystem e delega a composição
+da configuração ao MCP. Isso preserva a direção entre adapters e evita que o kernel dependa do
+catálogo ou do instalador.
+
+O comportamento do `init` não muda: propriedades de topo e servidores existentes são preservados,
+`wendkeep-vault` continua usando `npx -y @bitbonsai/mcpvault@latest <vault>`, `--no-mcp` continua
+desabilitando essa entrada e JSON inválido permanece byte a byte intacto enquanto a proposta é
+gravada em `.mcp.json.new`. O teste de tarball executa esse fluxo em um consumidor isolado.
+
+O workspace MCP permanece privado nesta fase. Não existe export raiz `wendkeep/mcp`, publicação
+`@wendkeep/mcp` ou servidor MCP nativo; a instalação continua sendo o único pacote `wendkeep`.
+
 ## 0.64 Runtime canônico da CLI
 
 `packages/cli/src/index.mjs` é a autoridade canônica para help, versão, seleção de Vault,
@@ -89,6 +109,7 @@ migração de dados.
 
 Todos os seis workspaces permanecem privados e internos ao monorepo; eles não são pacotes npm
 independentes. A instalação continua sendo `wendkeep`; `wendkeep/harness` e `wendkeep/vault` são
-subpaths públicos do pacote raiz, não publicações separadas. A CLI já possui implementação
-canônica, mas continua exposta pelos binários. `mcp`, `integrations` e `pi` ainda são fronteiras
-reservadas e ganharão implementação em fases posteriores.
+subpaths públicos do pacote raiz, não publicações separadas. CLI e MCP já possuem implementações
+canônicas privadas: a primeira continua exposta pelos binários e a segunda pelos efeitos do
+`init`. `integrations` e `pi` permanecem fronteiras reservadas; a sequência planejada da migração
+é MCP → Integrations → Pi.

@@ -73,7 +73,7 @@ test('every published hook passes node --check (no broken syntax shipped)', () =
   }
 });
 
-test('[req:MOD-4] [req:MOD-8] [req:MOD-10] [req:MOD-11] [req:MOD-12] [req:MOD-13] [req:MOD-16] published tarball contains the modular surfaces', () => {
+test('[req:MOD-4] [req:MOD-8] [req:MOD-10] [req:MOD-11] [req:MOD-12] [req:MOD-13] [req:MOD-16] [req:MOD-19] published tarball contains the modular surfaces', () => {
   const published = publishedFiles();
   for (const path of [
     'packages/cli/package.json',
@@ -84,6 +84,8 @@ test('[req:MOD-4] [req:MOD-8] [req:MOD-10] [req:MOD-11] [req:MOD-12] [req:MOD-13
     'packages/harness/src/operating-profile.mjs',
     'packages/harness/src/sensors-core.mjs',
     'packages/mcp/package.json',
+    'packages/mcp/src/config.mjs',
+    'packages/mcp/src/index.mjs',
     'packages/integrations/package.json',
     'packages/pi/package.json',
     'packages/vault/package.json',
@@ -111,7 +113,18 @@ test('[req:MOD-14] [req:MOD-16] CLI workspace declares its private runtime witho
   assert.equal(Object.hasOwn(root.exports, './cli'), false);
 });
 
-test('[req:MOD-4] [req:MOD-6] [req:MOD-9] [req:MOD-10] [req:MOD-11] [req:MOD-12] [req:MOD-13] [req:MOD-16] installed tarball exposes strict canonical, public, and legacy identities', () => {
+test('[req:MOD-17] [req:MOD-19] MCP workspace declares its private kernel without publishing wendkeep/mcp', () => {
+  const root = JSON.parse(readFileSync(join(pkgRoot, 'package.json'), 'utf8'));
+  const mcp = JSON.parse(readFileSync(join(pkgRoot, 'packages', 'mcp', 'package.json'), 'utf8'));
+
+  assert.equal(mcp.private, true);
+  assert.equal(mcp.exports, './src/index.mjs');
+  assert.equal(Object.hasOwn(root.exports, './mcp'), false);
+  assert.match(root.scripts.check, /node --check packages\/mcp\/src\/config\.mjs/);
+  assert.match(root.scripts.check, /node --check packages\/mcp\/src\/index\.mjs/);
+});
+
+test('[req:MOD-4] [req:MOD-6] [req:MOD-9] [req:MOD-10] [req:MOD-11] [req:MOD-12] [req:MOD-13] [req:MOD-16] [req:MOD-18] [req:MOD-19] installed tarball exposes strict canonical, public, and legacy identities', () => {
   const temp = mkdtempSync(join(tmpdir(), 'wendkeep-installed-tarball-'));
   try {
     const packed = spawnSync(`npm pack --json --pack-destination "${temp}"`, {
@@ -138,6 +151,7 @@ test('[req:MOD-4] [req:MOD-6] [req:MOD-9] [req:MOD-10] [req:MOD-11] [req:MOD-12]
     const imported = spawnSync(process.execPath, ['--input-type=module', '--eval', [
       "const vault = await import('wendkeep/vault');",
       "const harness = await import('wendkeep/harness');",
+      "const canonicalMcp = await import('wendkeep/packages/mcp/src/index.mjs');",
       "const canonicalLocale = await import('wendkeep/packages/vault/src/locale.mjs');",
       "const canonicalFlowStore = await import('wendkeep/packages/harness/src/flow-store.mjs');",
       "const legacyLocale = await import('wendkeep/hooks/locale.mjs');",
@@ -146,6 +160,7 @@ test('[req:MOD-4] [req:MOD-6] [req:MOD-9] [req:MOD-10] [req:MOD-11] [req:MOD-12]
       "const legacyFlowStore = await import('wendkeep/hooks/vault-runtime-store.mjs');",
       "const legacyProfile = await import('wendkeep/src/operating-profile.mjs');",
       "const legacySensors = await import('wendkeep/hooks/sensors-core.mjs');",
+      "const legacyTaxonomy = await import('wendkeep/src/taxonomy.mjs');",
       "if (typeof vault.resolveProjectVault !== 'function') process.exit(11);",
       "if (typeof legacy.assertVaultPathSafe !== 'function') process.exit(12);",
       "const shared = vault.renderSharedMemory({ updatedAt: '2026-07-28T00:00:00.000Z', reviewAfter: '2026-08-04T00:00:00.000Z' });",
@@ -217,6 +232,16 @@ test('[req:MOD-4] [req:MOD-6] [req:MOD-9] [req:MOD-10] [req:MOD-11] [req:MOD-12]
       "});",
       "const promoted = canonicalFlowStore.readFlow(runtimeVault, { sessionId: 'session-promoted', flowId: 'flow-promoted' });",
       "if (promoted.state !== 'promoted' || canonicalFlowStore.listFlows(runtimeVault).length !== 2) process.exit(26);",
+      "if (canonicalMcp.MCP_SERVER_KEY !== legacyTaxonomy.MCP_SERVER_KEY) process.exit(27);",
+      "if (canonicalMcp.mcpServerEntry !== legacyTaxonomy.mcpServerEntry) process.exit(28);",
+      "const mcpMerged = canonicalMcp.mergeMcpConfig({ mcpServers: { user: { command: 'user' } } }, { vaultPath: 'C:/vault' });",
+      "if (mcpMerged.mcpServers.user.command !== 'user') process.exit(29);",
+      "if (mcpMerged.mcpServers['wendkeep-vault'].args.at(-1) !== 'C:/vault') process.exit(30);",
+      "for (const specifier of ['wendkeep/mcp', '@wendkeep/mcp']) {",
+      "  try { await import(specifier); process.exit(31); } catch (error) {",
+      "    if (!['ERR_MODULE_NOT_FOUND', 'ERR_PACKAGE_PATH_NOT_EXPORTED'].includes(error.code)) process.exit(32);",
+      "  }",
+      "}",
     ].join('\n')], { cwd: consumer, encoding: 'utf8' });
     assert.equal(imported.status, 0, `installed imports failed:\n${imported.stderr}`);
 
@@ -241,6 +266,33 @@ test('[req:MOD-4] [req:MOD-6] [req:MOD-9] [req:MOD-10] [req:MOD-11] [req:MOD-12]
       assert.equal(versionResult.status, 0, `${alias} failed:\n${versionResult.stderr}`);
       assert.equal(versionResult.stdout.trim(), installedVersion);
     }
+
+    const installedProject = join(consumer, 'mcp-init-project');
+    const installedVault = join(installedProject, '.Vault');
+    mkdirSync(installedProject);
+    writeFileSync(join(installedProject, '.mcp.json'), JSON.stringify({
+      custom: { keep: true },
+      mcpServers: {
+        user: { type: 'stdio', command: 'user', args: [] },
+      },
+    }, null, 2));
+    const installedInit = spawnSync(process.execPath, [
+      join(consumer, 'node_modules', 'wendkeep', 'bin', 'wendkeep.mjs'),
+      'init',
+      '--project', installedProject,
+      '--vault', installedVault,
+      '--no-companions',
+      '--no-colors',
+      '--yes',
+    ], { cwd: consumer, encoding: 'utf8' });
+    assert.equal(installedInit.status, 0, `installed init failed:\n${installedInit.stderr}`);
+    const installedMcp = JSON.parse(readFileSync(join(installedProject, '.mcp.json'), 'utf8'));
+    assert.deepEqual(installedMcp.custom, { keep: true });
+    assert.equal(installedMcp.mcpServers.user.command, 'user');
+    assert.deepEqual(
+      installedMcp.mcpServers['wendkeep-vault'].args,
+      ['-y', '@bitbonsai/mcpvault@latest', installedVault],
+    );
   } finally {
     rmSync(temp, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
   }

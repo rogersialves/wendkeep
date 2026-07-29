@@ -324,6 +324,42 @@ test('wendkeep init --companions wires plugin layer, UA hook and MCP server', ()
   }
 });
 
+test('[req:MOD-18] init preserves invalid .mcp.json bytes and writes the canonical merge beside it', () => {
+  const parent = mkdtempSync(join(tmpdir(), 'wk-invalid-mcp-'));
+  const projectDir = join(parent, 'Acme');
+  const vaultDir = join(projectDir, '.Vault');
+  const mcpPath = join(projectDir, '.mcp.json');
+  const invalid = '{ invalid MCP JSON\n';
+  mkdirSync(projectDir);
+  writeFileSync(mcpPath, invalid);
+  try {
+    const result = spawnSync(
+      process.execPath,
+      [
+        BIN,
+        'init',
+        '--project', projectDir,
+        '--vault', vaultDir,
+        '--no-companions',
+        '--no-colors',
+        '--yes',
+      ],
+      { encoding: 'utf8' },
+    );
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(readFileSync(mcpPath, 'utf8'), invalid, 'invalid consumer file is byte-identical');
+    const proposed = JSON.parse(readFileSync(`${mcpPath}.new`, 'utf8'));
+    assert.equal(proposed.mcpServers['wendkeep-vault'].command, 'npx');
+    assert.deepEqual(
+      proposed.mcpServers['wendkeep-vault'].args,
+      ['-y', '@bitbonsai/mcpvault@latest', vaultDir],
+    );
+  } finally {
+    rmSync(parent, { recursive: true, force: true });
+  }
+});
+
 // --- 0.46.0: Codex session wiring -------------------------------------------
 // Regression: a fresh project with Codex opened with the vault reachable via .mcp.json but
 // NO session — CURRENT_SESSION.md absent, registrySessions 0 — because init only ever wired

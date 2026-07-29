@@ -73,6 +73,11 @@ pnpm exec wendkeep sync --yes
 The project receives `.wendkeep.json`, managed Claude/Codex hooks, skill definitions, and an
 initialized vault. Existing files are merged or preserved, and the selected vault is printed.
 
+When MCP is enabled, `init` preserves existing properties and servers in `.mcp.json` and adds
+`wendkeep-vault`. If the existing JSON is invalid, the original file remains byte-for-byte intact
+and the reconciled proposal is written to `.mcp.json.new`. Since version 0.65, this composition is
+owned by the private MCP kernel without changing commands, flags, or the public npm surface.
+
 ## Common errors and diagnosis
 
 - Wrong vault: inspect `.wendkeep.json` and run `wendkeep doctor --vault <path>`.

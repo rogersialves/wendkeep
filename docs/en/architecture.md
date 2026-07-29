@@ -26,6 +26,27 @@ canonically owns Operating Profile resolution/policy and the sensor engine under
 `packages/harness/src/`; `vault` continues to own binding/resolution, physical path safety, and the
 memory kernel under `packages/vault/src/`.
 
+## 0.65 MCP Configuration Kernel
+
+`packages/mcp/src/config.mjs` is the canonical authority for the `wendkeep-vault` key, the
+MCPVault transport entry, catalog-described server selection, and immutable MCP configuration
+merging. The private `packages/mcp/src/index.mjs` index collects this internal surface without
+starting processes, accessing the filesystem, or producing import-time effects.
+
+`src/taxonomy.mjs` continues to own the companion and host catalog, but supplies descriptors as
+data to the kernel. `src/init.mjs` continues to own filesystem orchestration and delegates
+configuration composition to MCP. This preserves the adapter direction and keeps the kernel from
+depending on either the catalog or the installer.
+
+`init` behavior does not change: existing top-level properties and servers are preserved,
+`wendkeep-vault` still uses `npx -y @bitbonsai/mcpvault@latest <vault>`, `--no-mcp` still disables
+that entry, and invalid JSON remains byte-for-byte intact while the proposal is written to
+`.mcp.json.new`. The installed-tarball test exercises this flow in an isolated consumer.
+
+The MCP workspace remains private in this phase. There is no root `wendkeep/mcp` export,
+`@wendkeep/mcp` publication, or native MCP server; installation remains the single `wendkeep`
+package.
+
 ## 0.64 Canonical CLI Runtime
 
 `packages/cli/src/index.mjs` is the canonical authority for help, version reporting, Vault
@@ -89,6 +110,7 @@ is no data migration.
 
 All six workspaces remain private and internal to the monorepo; they are not independent npm
 packages. Installation remains `wendkeep`; `wendkeep/harness` and `wendkeep/vault` are public
-subpaths of the root package, not separate publications. CLI now has a canonical implementation
-but remains exposed through the binaries. `mcp`, `integrations`, and `pi` are still reserved
-boundaries and will gain implementations in later phases.
+subpaths of the root package, not separate publications. CLI and MCP now have private canonical
+implementations: the former remains exposed through the binaries and the latter through `init`
+configuration effects. `integrations` and `pi` remain reserved boundaries; the planned migration
+sequence is MCP → Integrations → Pi.

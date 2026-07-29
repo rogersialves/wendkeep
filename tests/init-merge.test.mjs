@@ -6,9 +6,44 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { mergeSettings, mergeMcp, hookCommandFor } from '../src/init.mjs';
-import { MCP_SERVER_KEY } from '../src/taxonomy.mjs';
+import {
+  MCP_SERVER_KEY as LEGACY_MCP_SERVER_KEY,
+  mcpServerEntry as legacyMcpServerEntry,
+  companionMcpPatch,
+} from '../src/taxonomy.mjs';
+import {
+  MCP_SERVER_KEY,
+  mcpServerEntry,
+  mergeMcpConfig,
+} from '../packages/mcp/src/index.mjs';
 
 const UA_CMD = 'npx wendkeep hook understand-inject';
+
+test('[req:MOD-17] [req:MOD-18] legacy MCP exports and merge preserve canonical identity and behavior', () => {
+  assert.strictEqual(LEGACY_MCP_SERVER_KEY, MCP_SERVER_KEY);
+  assert.strictEqual(legacyMcpServerEntry, mcpServerEntry);
+
+  const existing = {
+    custom: true,
+    mcpServers: {
+      user: { type: 'stdio', command: 'user', args: [] },
+    },
+  };
+  const options = {
+    vaultPath: '/v',
+    withVault: true,
+    companions: ['context-mode', 'dotcontext', 'dotcontext'],
+    skipMcp: [],
+  };
+  assert.deepEqual(
+    mergeMcp(existing, options),
+    mergeMcpConfig(existing, {
+      vaultPath: options.vaultPath,
+      withVault: options.withVault,
+      servers: companionMcpPatch(options.companions, options.skipMcp),
+    }),
+  );
+});
 
 // --- 0.31.0: hooks de lifecycle default + invocação node-direta -----------------
 
