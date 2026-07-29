@@ -16,12 +16,18 @@
 **Persistent memory for AI coding agents, built on your Obsidian vault.** Every Claude Code **and Codex** session is captured turn by turn into local Markdown — `init` wires both (Codex asks you to approve its hooks once; `import` backfills past sessions either way) — with token/cost tracking and automatically extracted decisions, bugs, and learnings. That always-on plane is **Keep Core**. On top of it, **Wend Runtime** provides a native, zero-dependency lifecycle (spec → change → TDD → sensor-gated archive), selected through the `OFF`, `FLOW`, `GUIDE`, `GOVERN`, and `ASSURE` Operating Profiles. 100% local, open-core.
 
 The runtime is being separated into six physical boundaries — `cli`, `harness`, `vault`, `mcp`,
-`integrations`, and `pi` — without fragmenting installation. The private `harness` and `vault`
-workspaces now canonically own Operating Profiles/the sensor engine and safe binding/the Shared
-Project Memory v2 kernel, respectively. The root package exposes those surfaces through
-`wendkeep/harness` and `wendkeep/vault`; historical imports keep working through compatibility
+`integrations`, and `pi` — without fragmenting installation. The private `cli`, `harness`, and
+`vault` workspaces now canonically own the executable runtime, Operating Profiles/the sensor
+engine, and safe binding/the Shared Project Memory v2 kernel, respectively. The root package
+exposes Harness and Vault through `wendkeep/harness` and `wendkeep/vault`; CLI remains public only
+through the `wendkeep`/`wk` binaries. Historical imports keep working through compatibility
 facades and no session data needs migration;
 see the [modular architecture](docs/en/architecture.md).
+
+In the **0.64 CLI Runtime** phase, `packages/cli/src/index.mjs` owns help, version reporting, Vault
+selection, error presentation, and lazy dispatch. `bin/wendkeep.mjs` is reduced to the shebang and
+a `runCli()` invocation. The tarball remains a single artifact and proves both aliases in an
+isolated consumer; there is no public `wendkeep/cli` subpath in this phase.
 
 In the **0.63 Harness FLOW Store** phase, `packages/vault/src/locale.mjs` becomes the canonical
 source for Vault locale and taxonomy, while `packages/harness/src/flow-store.mjs` becomes the

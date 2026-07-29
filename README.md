@@ -16,12 +16,18 @@
 **Memória persistente para agentes de código, construída sobre o seu cofre Obsidian.** Cada sessão do Claude Code e do Codex é capturada turno a turno em Markdown local — o `init` wira os hooks dos dois agentes (no Codex, valendo depois que você aprovar o prompt de confiança dele); o `import` recupera as sessões passadas — com rastreio de tokens/custo, decisões, bugs e aprendizados extraídos automaticamente. Esse plano sempre ativo é o **Keep Core**. Sobre ele, o **Wend Runtime** oferece um ciclo nativo e sem dependências (spec → change → TDD → archive com gate por sensor), selecionável pelos Perfis de Operação `OFF`, `FLOW`, `GUIDE`, `GOVERN` e `ASSURE`. 100% local, open‑core.
 
 O runtime está sendo separado em seis fronteiras físicas — `cli`, `harness`, `vault`, `mcp`,
-`integrations` e `pi` — sem fragmentar a instalação. Os workspaces privados `harness` e `vault`
-agora são donos canônicos, respectivamente, dos Perfis de Operação/engine de sensores e do binding
-seguro/kernel da Shared Project Memory v2. O pacote raiz expõe essas superfícies em
-`wendkeep/harness` e `wendkeep/vault`; os imports históricos continuam funcionando por fachadas de
+`integrations` e `pi` — sem fragmentar a instalação. Os workspaces privados `cli`, `harness` e
+`vault` agora são donos canônicos do runtime do executável, dos Perfis de Operação/engine de
+sensores e do binding seguro/kernel da Shared Project Memory v2, respectivamente. O pacote raiz
+expõe Harness e Vault em `wendkeep/harness` e `wendkeep/vault`; a CLI continua pública somente
+pelos binários `wendkeep`/`wk`. Os imports históricos continuam funcionando por fachadas de
 compatibilidade e nenhum dado de sessão precisa ser migrado;
 veja a [arquitetura modular](docs/pt-BR/architecture.md).
+
+Na fase **0.64 CLI Runtime**, `packages/cli/src/index.mjs` passa a concentrar help, versão,
+seleção de Vault, apresentação de erros e dispatch lazy. `bin/wendkeep.mjs` fica reduzido ao
+shebang e à invocação de `runCli()`. O tarball continua único e prova os aliases em um consumidor
+isolado; não existe subpath público `wendkeep/cli` nesta fase.
 
 Na fase **0.63 Harness FLOW Store**, `packages/vault/src/locale.mjs` passa a ser a fonte canônica
 do locale e da taxonomia do cofre, enquanto `packages/harness/src/flow-store.mjs` passa a ser o

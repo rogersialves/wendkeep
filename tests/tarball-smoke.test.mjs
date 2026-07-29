@@ -73,10 +73,11 @@ test('every published hook passes node --check (no broken syntax shipped)', () =
   }
 });
 
-test('[req:MOD-4] [req:MOD-8] [req:MOD-10] [req:MOD-11] [req:MOD-12] [req:MOD-13] published tarball contains the modular Vault and Harness surfaces', () => {
+test('[req:MOD-4] [req:MOD-8] [req:MOD-10] [req:MOD-11] [req:MOD-12] [req:MOD-13] [req:MOD-16] published tarball contains the modular surfaces', () => {
   const published = publishedFiles();
   for (const path of [
     'packages/cli/package.json',
+    'packages/cli/src/index.mjs',
     'packages/harness/package.json',
     'packages/harness/src/flow-store.mjs',
     'packages/harness/src/index.mjs',
@@ -101,7 +102,16 @@ test('[req:MOD-4] [req:MOD-8] [req:MOD-10] [req:MOD-11] [req:MOD-12] [req:MOD-13
   }
 });
 
-test('[req:MOD-4] [req:MOD-6] [req:MOD-9] [req:MOD-10] [req:MOD-11] [req:MOD-12] [req:MOD-13] installed tarball exposes strict canonical, public, and legacy identities', () => {
+test('[req:MOD-14] [req:MOD-16] CLI workspace declares its private runtime without publishing wendkeep/cli', () => {
+  const root = JSON.parse(readFileSync(join(pkgRoot, 'package.json'), 'utf8'));
+  const cli = JSON.parse(readFileSync(join(pkgRoot, 'packages', 'cli', 'package.json'), 'utf8'));
+
+  assert.equal(cli.private, true);
+  assert.equal(cli.exports, './src/index.mjs');
+  assert.equal(Object.hasOwn(root.exports, './cli'), false);
+});
+
+test('[req:MOD-4] [req:MOD-6] [req:MOD-9] [req:MOD-10] [req:MOD-11] [req:MOD-12] [req:MOD-13] [req:MOD-16] installed tarball exposes strict canonical, public, and legacy identities', () => {
   const temp = mkdtempSync(join(tmpdir(), 'wendkeep-installed-tarball-'));
   try {
     const packed = spawnSync(`npm pack --json --pack-destination "${temp}"`, {
@@ -216,6 +226,21 @@ test('[req:MOD-4] [req:MOD-6] [req:MOD-9] [req:MOD-10] [req:MOD-11] [req:MOD-12]
     ], { cwd: consumer, encoding: 'utf8' });
     assert.equal(cli.status, 0, `installed CLI failed:\n${cli.stderr}`);
     assert.match(cli.stdout, /wendkeep/);
+
+    const installedVersion = JSON.parse(readFileSync(
+      join(consumer, 'node_modules', 'wendkeep', 'package.json'),
+      'utf8',
+    )).version;
+    for (const alias of ['wendkeep', 'wk']) {
+      const executable = join(consumer, 'node_modules', '.bin', alias);
+      const versionResult = spawnSync(`"${executable}" --version`, {
+        cwd: consumer,
+        encoding: 'utf8',
+        shell: true,
+      });
+      assert.equal(versionResult.status, 0, `${alias} failed:\n${versionResult.stderr}`);
+      assert.equal(versionResult.stdout.trim(), installedVersion);
+    }
   } finally {
     rmSync(temp, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
   }
