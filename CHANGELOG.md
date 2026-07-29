@@ -4,6 +4,26 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.65.0] — 2026-07-29
+
+### Added
+
+- **O workspace privado MCP passa a ter um kernel canônico de configuração.**
+  `packages/mcp/src/config.mjs` concentra a entrada do MCPVault, a seleção de servidores por
+  descritores e o merge imutável de `.mcp.json`, sem efeitos no import.
+- **O tarball instalado prova a composição MCP fora do checkout.** O teste executa `init` em um
+  consumidor temporário, confirma a preservação de configuração existente e rejeita exports
+  públicos prematuros como `wendkeep/mcp` e `@wendkeep/mcp`.
+
+### Changed
+
+- **Taxonomia e instalador agora delegam ao kernel MCP.** `src/taxonomy.mjs` fornece descritores
+  como dados e preserva a identidade dos exports históricos; `src/init.mjs` mantém a orquestração
+  do filesystem e o comportamento de reconciliação, inclusive `.mcp.json.new` para JSON inválido.
+- **A publicação continua unificada e compatível.** Não há servidor MCP nativo, subpath público ou
+  pacote npm separado nesta fase; comandos, flags, transporte MCPVault e arquivos existentes
+  preservam o comportamento anterior.
+
 ## [0.64.0] — 2026-07-28
 
 ### Added

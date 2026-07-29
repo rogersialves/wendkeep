@@ -16,13 +16,21 @@
 **Persistent memory for AI coding agents, built on your Obsidian vault.** Every Claude Code **and Codex** session is captured turn by turn into local Markdown — `init` wires both (Codex asks you to approve its hooks once; `import` backfills past sessions either way) — with token/cost tracking and automatically extracted decisions, bugs, and learnings. That always-on plane is **Keep Core**. On top of it, **Wend Runtime** provides a native, zero-dependency lifecycle (spec → change → TDD → sensor-gated archive), selected through the `OFF`, `FLOW`, `GUIDE`, `GOVERN`, and `ASSURE` Operating Profiles. 100% local, open-core.
 
 The runtime is being separated into six physical boundaries — `cli`, `harness`, `vault`, `mcp`,
-`integrations`, and `pi` — without fragmenting installation. The private `cli`, `harness`, and
-`vault` workspaces now canonically own the executable runtime, Operating Profiles/the sensor
-engine, and safe binding/the Shared Project Memory v2 kernel, respectively. The root package
-exposes Harness and Vault through `wendkeep/harness` and `wendkeep/vault`; CLI remains public only
-through the `wendkeep`/`wk` binaries. Historical imports keep working through compatibility
-facades and no session data needs migration;
+`integrations`, and `pi` — without fragmenting installation. The private `cli`, `harness`,
+`vault`, and `mcp` workspaces now canonically own the executable runtime, Operating Profiles/the
+sensor engine, safe binding/the Shared Project Memory v2 kernel, and the MCP configuration kernel,
+respectively. The root package exposes Harness and Vault through `wendkeep/harness` and
+`wendkeep/vault`; CLI and MCP remain private surfaces, reached only through the binaries and the
+configuration effects of `init`. Historical imports keep working through compatibility facades
+and no session data needs migration;
 see the [modular architecture](docs/en/architecture.md).
+
+In the **0.65 MCP Configuration Kernel** phase, `packages/mcp/src/config.mjs` becomes the
+canonical authority for the MCPVault entry, catalog-described server selection, and `.mcp.json`
+merging. `src/taxonomy.mjs` supplies descriptors while `src/init.mjs` retains only filesystem
+orchestration. Existing keys and servers remain preserved; invalid JSON stays byte-for-byte intact
+and the reconciled proposal is written to `.mcp.json.new`. The workspace remains private, with no
+public `wendkeep/mcp` subpath or separate npm package.
 
 In the **0.64 CLI Runtime** phase, `packages/cli/src/index.mjs` owns help, version reporting, Vault
 selection, error presentation, and lazy dispatch. `bin/wendkeep.mjs` is reduced to the shebang and

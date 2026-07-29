@@ -74,6 +74,11 @@ O projeto recebe `.wendkeep.json`, hooks gerenciados de Claude/Codex, definiçõ
 cofre inicializado. Arquivos preexistentes são mesclados ou preservados; o comando informa o
 cofre efetivamente selecionado.
 
+Quando MCP está habilitado, o `init` preserva propriedades e servidores existentes em `.mcp.json`
+e adiciona `wendkeep-vault`. Se o JSON existente for inválido, o arquivo original permanece byte
+a byte intacto e a proposta reconciliada é gravada em `.mcp.json.new`. Desde a versão 0.65, essa
+composição pertence ao kernel MCP privado, sem alterar comandos, flags ou a superfície npm pública.
+
 ## Erros comuns e diagnóstico
 
 - Cofre errado: confira `.wendkeep.json` e rode `wendkeep doctor --vault <path>`.

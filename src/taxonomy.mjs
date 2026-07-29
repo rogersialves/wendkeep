@@ -1,3 +1,11 @@
+import {
+  MCP_SERVER_KEY,
+  mcpServerEntry,
+  selectMcpServers,
+} from '../packages/mcp/src/index.mjs';
+
+export { MCP_SERVER_KEY, mcpServerEntry };
+
 // Shared, data-only constants for the wendkeep installer and CLI.
 // Kept free of side effects so both bin/ and src/ can import it cheaply.
 
@@ -92,17 +100,6 @@ export const RUNNABLE_HOOKS = [
   'change-nag',
   'plan-capture',
 ];
-
-// The MCP server entry wendkeep wires into .mcp.json so the agent can read/write the
-// vault. Uses the published mcpvault server (no secrets).
-export function mcpServerEntry(vaultPath) {
-  return {
-    type: 'stdio',
-    command: 'npx',
-    args: ['-y', '@bitbonsai/mcpvault@latest', vaultPath],
-  };
-}
-export const MCP_SERVER_KEY = 'wendkeep-vault';
 
 // The three Claude Code session hooks, expressed as `wendkeep hook <name>` so the
 // installed package is the single source of truth (update with `npm update wendkeep`,
@@ -281,14 +278,11 @@ export function companionSettingsPatch(ids) {
 // `skip` omits ids whose MCP is already configured elsewhere (e.g. dotcontext set
 // globally in ~/.claude.json — avoids a duplicate project-scoped server).
 export function companionMcpPatch(ids, skip = []) {
-  const skipSet = new Set(skip);
-  const servers = {};
-  for (const id of ids) {
-    if (skipSet.has(id)) continue;
-    const c = COMPANION_BY_ID[id];
-    if (c?.mcp) servers[c.mcp.key] = c.mcp.entry;
-  }
-  return servers;
+  const descriptors = ids.map((id) => {
+    const mcp = COMPANION_BY_ID[id]?.mcp;
+    return mcp ? { id, key: mcp.key, entry: mcp.entry } : { id };
+  });
+  return selectMcpServers(descriptors, skip);
 }
 
 // SessionStart hook specs wendkeep must author for companions that lack a native

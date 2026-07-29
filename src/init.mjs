@@ -6,13 +6,12 @@ import { spawnSync } from 'node:child_process';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { basename, isAbsolute, join, resolve } from 'node:path';
 import { createInterface } from 'node:readline/promises';
+import { MCP_SERVER_KEY, mergeMcpConfig } from '../packages/mcp/src/index.mjs';
 import {
   VAULT_FOLDERS,
   SESSION_HOOKS,
   CHANGE_NUDGE_HOOKS,
   CHANGE_GATE_HOOKS,
-  MCP_SERVER_KEY,
-  mcpServerEntry,
   hookCommand,
   hookCommandLocal,
   hookCommandLocalLegacy,
@@ -245,11 +244,11 @@ export function mergeCodexHooks(existing, { force = false } = {}) {
 }
 
 export function mergeMcp(existing, { vaultPath, withVault = true, companions = [], skipMcp = [] }) {
-  const m = existing && typeof existing === 'object' ? { ...existing } : {};
-  m.mcpServers = { ...(m.mcpServers || {}) };
-  if (withVault) m.mcpServers[MCP_SERVER_KEY] = mcpServerEntry(vaultPath);
-  Object.assign(m.mcpServers, companionMcpPatch(companions, skipMcp));
-  return m;
+  return mergeMcpConfig(existing, {
+    vaultPath,
+    withVault,
+    servers: companionMcpPatch(companions, skipMcp),
+  });
 }
 
 // Run caveman's cross-agent installer (non-Claude skill coverage). Downloads the
