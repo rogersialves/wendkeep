@@ -25,6 +25,14 @@ All notable changes to **wendkeep** are documented here. Format based on
   de depender do Harness, enquanto CLI, MCP, Integrations, Pi e flow-core permanecem fora deste
   corte modular.
 
+### Fixed
+
+- **Promoções concorrentes no Windows/Node 22 não confundem a liberação transitória do lock com
+  um path inseguro.** O Vault agora revalida, com backoff curto e limitado, o lock público que
+  desaparece entre `lstat` e `realpath` e leituras `ENOENT` de owner/lease. A aquisição compartilha
+  um único budget/deadline e a liberação limpa o lock sem resíduo; junctions, reparse points, links
+  dangling, erros não transitórios e locks privados `.pending` continuam falhando fechado.
+
 ## [0.62.0] — 2026-07-28
 
 ### Added

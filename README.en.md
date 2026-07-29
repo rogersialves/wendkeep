@@ -29,6 +29,9 @@ canonical durable FLOW store. The historical `hooks/locale.mjs` and
 `hooks/vault-runtime-store.mjs` facades preserve export identity. Harness depends only on Vault's
 public index — never the reverse — with no migration of paths, schemas, or locks; the tarball
 remains a single artifact published by the root `wendkeep` package.
+Under multiprocess contention, transient release of the public lock and its owner/lease metadata
+is revalidated with a bounded budget/deadline, including final cleanup; junctions, reparse points,
+dangling locks, and non-transient errors are still rejected before any write.
 
 ```bash
 npm i -D wendkeep && npx wendkeep init      # captures from the next session on

@@ -37,6 +37,13 @@ bindings by identity. The extraction changes neither persisted paths, schemas, n
 so it requires no migration. Publication also remains unfragmented: a single tarball from the root
 `wendkeep` package contains the modular surfaces.
 
+A public lock or owner/lease metadata may legitimately disappear during release. Vault retries
+only operations explicitly scoped to the public lock and only for `ENOENT`, with short backoff, a
+global budget, and the acquisition's original deadline. Final cleanup uses an independent short
+budget so owner/lease state is not left behind. Retry never applies to `.pending`, junctions,
+symlinks, reparse points, `EACCES`, unexpected types, or persistently unresolvable state, which
+continue to fail closed.
+
 The `OFF` profile disables only automatic Wend Runtime governance activation — router, skill gate,
 FLOW, and automatic gates. Keep Core, Vault, sessions, and memory remain active, and explicit
 WendKeep commands remain available as a deliberate opt-in.

@@ -29,6 +29,9 @@ store durável canônico do FLOW. As fachadas históricas `hooks/locale.mjs` e
 `hooks/vault-runtime-store.mjs` preservam a identidade dos exports. O Harness depende somente do
 índice público do Vault — nunca o inverso —, sem migração de paths, schemas ou locks; o tarball
 continua único, publicado pelo pacote raiz `wendkeep`.
+Na contenção multiprocesso, a liberação transitória do lock público e de seus metadados owner/lease
+é revalidada com budget/deadline limitados, inclusive na limpeza final; junctions, reparse points,
+locks dangling e erros não transitórios continuam recusados antes de qualquer escrita.
 
 ```bash
 npm i -D wendkeep && npx wendkeep init      # captura a partir da próxima sessão

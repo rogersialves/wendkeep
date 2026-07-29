@@ -37,6 +37,13 @@ mesmos bindings por identidade. A extração não muda paths persistidos, schema
 locks, portanto não exige migração. A publicação também não se fragmenta: há um único tarball do
 pacote raiz `wendkeep`, que contém as superfícies modulares.
 
+O lock público ou um metadado owner/lease pode desaparecer legitimamente durante a liberação. O
+Vault repete apenas operações explicitamente escopadas ao lock público e apenas para `ENOENT`, com
+backoff curto, um budget global e o deadline original da aquisição. A limpeza final usa um budget
+curto independente para não deixar owner/lease residual. O retry nunca se aplica a `.pending`,
+junction, symlink, reparse point, `EACCES`, tipo inesperado ou estado irresolvível persistente, que
+continuam falhando fechado.
+
 O perfil `OFF` desativa somente a ativação automática da governança do Wend Runtime — router,
 skill gate, FLOW e gates automáticos. Keep Core, Vault, sessões e memória continuam ativos, e os
 comandos explícitos do WendKeep permanecem disponíveis como opt-in deliberado.
