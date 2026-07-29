@@ -1,5 +1,6 @@
 {
   "name": "@wendkeep/cli",
   "private": true,
-  "type": "module"
+  "type": "module",
+  "exports": "./src/index.mjs"
 }

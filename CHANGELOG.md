@@ -4,6 +4,26 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.64.0] — 2026-07-28
+
+### Added
+
+- **O workspace privado CLI passa a ter runtime canônico em `packages/cli/src/index.mjs`.** Help,
+  versão, seleção de Vault, apresentação de erros e dispatch lazy agora pertencem à fronteira
+  `@wendkeep/cli`, com import sem autoexecução.
+- **O tarball instalado prova a CLI fora do checkout.** A distribuição inclui o runtime novo e
+  exercita os aliases `wendkeep` e `wk` em um consumidor temporário, mantendo o pacote raiz como
+  a única unidade npm.
+
+### Changed
+
+- **`bin/wendkeep.mjs` agora é uma fachada executável fina.** O arquivo preserva o shebang e
+  apenas invoca `runCli()`, enquanto comandos, flags, help antes do Vault, streams, mensagens e
+  códigos de saída mantêm o comportamento anterior.
+- **A CLI programática permanece privada durante a migração.** Não há export raiz
+  `wendkeep/cli`; as superfícies públicas continuam sendo os binários, `wendkeep/harness` e
+  `wendkeep/vault`.
+
 ## [0.63.0] — 2026-07-28
 
 ### Added

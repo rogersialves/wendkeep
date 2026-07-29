@@ -26,6 +26,19 @@ canônico da resolução/política dos Perfis de Operação e da engine de senso
 `packages/harness/src/`; o `vault` continua dono do binding/resolução, da segurança física de paths
 e do kernel de memória em `packages/vault/src/`.
 
+## 0.64 Runtime canônico da CLI
+
+`packages/cli/src/index.mjs` é a autoridade canônica para help, versão, seleção de Vault,
+apresentação de erros e dispatch lazy dos comandos. O entrypoint público
+`bin/wendkeep.mjs` mantém apenas o shebang, importa `runCli` e o invoca. Assim, regras de
+composição não voltam a se acumular na fachada executável.
+
+O workspace continua privado. Os aliases `wendkeep` e `wk` são a superfície pública da CLI;
+o pacote raiz não declara `wendkeep/cli` como API programática. As implementações de comandos em
+`src/` e `hooks/` permanecem consumidores temporários durante a migração incremental. Help antes
+do Vault, mensagens, streams, exit codes, hooks e precedência de binding não mudam. O tarball
+instalado valida o runtime empacotado e ambos os aliases fora do checkout.
+
 ## 0.63 Harness FLOW Store
 
 Nesta fase, o locale e a taxonomia canônicos ficam em `packages/vault/src/locale.mjs`; o store
@@ -76,5 +89,6 @@ migração de dados.
 
 Todos os seis workspaces permanecem privados e internos ao monorepo; eles não são pacotes npm
 independentes. A instalação continua sendo `wendkeep`; `wendkeep/harness` e `wendkeep/vault` são
-subpaths públicos do pacote raiz, não publicações separadas. Os demais workspaces são fronteiras
-reservadas e ganharão superfícies públicas somente quando suas implementações forem migradas.
+subpaths públicos do pacote raiz, não publicações separadas. A CLI já possui implementação
+canônica, mas continua exposta pelos binários. `mcp`, `integrations` e `pi` ainda são fronteiras
+reservadas e ganharão implementação em fases posteriores.
