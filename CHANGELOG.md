@@ -4,6 +4,18 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.66.2] — 2026-07-29
+
+### Fixed
+
+- **Promoção preserva valor e identidade causal do evento escolhido.** `memory promote` não
+  converte mais objetos/arrays JSON em texto e mantém sessão, activation/epoch, turno de origem e
+  sequência; o próximo `SessionStop` da mesma cadeia avança o handoff sem recriar candidate.
+- **A recuperação 0.66.1 cobre inversão física/temporal sem ampliar autoridade.** Quando uma
+  promoção legada projetada fica fora do candidate por `observed_at`, `memory promote` só a inclui
+  em `supersedes` sob prova de ancestralidade e mesma linhagem; fonte moderna ou alheia falha antes
+  de anexar. O E2E percorre o dispatcher público e prova Stop posterior e duplicado idempotentes.
+
 ## [0.66.1] — 2026-07-29
 
 ### Fixed

@@ -256,7 +256,7 @@ Hot memory now separates human authorship, operational state, and evidence:
 - **`CORE.md` is canonical.** It is the short, hand-curated nucleus for durable preferences, active patterns, and open issues; no projector may infer or overwrite it.
 - **`SHARED_MEMORY.md` is generated operational state.** The `Stop` hook turns the session handoff into sanitized events; the projector deterministically reduces the ledger and publishes a verifiable revision, cursor, and hash. Facts are `verified` only with local evidence; unsupported reports remain `reported`, and disagreements become candidates for human judgment.
 - **`MEMORY_EVENTS.jsonl` is the append-only authority.** `Stop` makes events durable in the outbox before acknowledging the attempt; the projector runs outside the registry lock and retries reuse the same IDs. Repeating an identical `event_id`/payload is a no-op; reusing the ID with different bytes is observable corruption.
-- **`MEMORY_CANDIDATES.jsonl` is the curation queue.** Conflicts and legacy content are never silently promoted. `promote` and `reject` record the decision as a new event.
+- **`MEMORY_CANDIDATES.jsonl` is the curation queue.** Conflicts and legacy content are never silently promoted. `promote` and `reject` record the decision as a new event; promotion preserves the selected event's JSON type, session, activation/epoch, and source turn.
 
 Artifacts stay under `.brain/` only. Sanitization strips secrets, tokens, local paths, transcripts, and harness payloads both before persistence and before injection. Events carry a `project_id`, and one vault never accepts another project's events.
 
@@ -295,9 +295,15 @@ ambiguity uses `memory reconcile <session> --by-session <successor>
 --reason <reason>` as a dry run and requires `--apply`; the decision is backed up and audited
 without rewriting ledger, CORE, or notes. Run `status --gate` again afterwards. Conflicts require
 explicit, durable curation: `memory promote <id> --event <event-id>` selects one event from the
-candidate, while `memory reject <id>` keeps the current value. Decisions are idempotent and
-survive repair/replay; `blocked_by_core` cannot override CORE. Doctor only diagnoses. See
-[memory and curation](docs/en/commands/memory.md).
+candidate, while `memory reject <id>` keeps the current value. The decision is idempotent, and a
+new promotion accepts a later Stop from the same session/activation without recreating a conflict.
+A promotion written by 0.66.1 remains historical: if the next Stop forms a new candidate, update
+the package and explicitly promote the current event once; repair/reconcile do not choose causal
+lineage. If physical order and `observed_at` leave another projected 0.66.1 promotion outside the
+candidate, the command adds it to `supersedes` only after proving the same lineage, a later turn,
+and the temporal inversion; a modern or unrelated source fails before appending bytes. Decisions
+survive repair/replay; `blocked_by_core` cannot override CORE. Doctor only
+diagnoses. See [memory and curation](docs/en/commands/memory.md).
 
 Session notes use one live `## Agentes, tokens e custos` snapshot. Main-agent and subagent hooks recompose it atomically, with costs, token dimensions, reasoning tokens and effort per model/source. Every hook that rewrites a session note takes a per-file lock and writes through a temp file + rename, so the `SubagentStop` fan-out (one hook run per subagent) can never leave a note half-written; a note whose frontmatter reads back damaged is left untouched rather than patched.
 
