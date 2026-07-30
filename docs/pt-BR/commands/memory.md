@@ -68,6 +68,14 @@ npx wendkeep validate-memory --vault <cofre-v2>
   promover exige antes alterar CORE pela curadoria canônica. Se o evento escolhido ainda pertence
   ao último attempt `projected` correspondente, a promoção também atualiza causalmente checkpoint
   e espelho; o JSON retorna `checkpointRefreshed`, e um attempt concorrente mais novo não é tocado.
+  A decisão conserva, sem coerção para string, o valor JSON já validado e copia do evento escolhido
+  `canonical_session_id`, activation/epoch, `source_turn_id` e `turn_sequence`. Por isso, um Stop
+  posterior da mesma sessão/activation avança o valor em vez de abrir outro candidate. Quando
+  append físico e `observed_at` deixam uma promoção 0.66.1 projetada fora do candidate, ela só é
+  acrescentada a `supersedes` se tiver a forma legada exata, compartilhar ancestral no candidate e
+  o evento escolhido provar a mesma sessão/activation/epoch, turno maior e a inversão temporal.
+  `candidate_decision.event_ids` continua sendo exatamente a escolha mostrada ao operador; fonte
+  moderna, outra linhagem ou prova incompleta falha antes de anexar um evento.
 - `validate-memory <CORE.md>` valida cap de 25 linhas, seções e segredos.
 - `validate-memory --vault` exige bundle v2 completo; não é o gate correto para vault legado.
 
@@ -104,6 +112,11 @@ prefixo válido de uma projeção global que já avançou com eventos concorrent
 - `promote` informa que `--event` é obrigatório: leia os `event_ids` do candidate, compare a
   proveniência/valor e indique explicitamente o vencedor. ID que não pertence ao candidate falha
   sem mutar ledger ou projeções.
+- Promoção feita pela 0.66.1 seguida de novo candidate: atualize para 0.66.2 ou superior,
+  confira a proveniência e promova explicitamente o evento atual uma vez. O ledger antigo não é
+  reinterpretado; `memory repair` e `memory reconcile` não substituem essa escolha humana.
+- `promote` informa que o candidate não corresponde mais à projeção causal: nenhum evento foi
+  anexado. Rode `memory status`, releia o candidate atual e não force uma linhagem diferente.
 - `event_cursor` ausente ou hash divergente em v2: preserve o bundle e avalie `memory repair`.
 - `validate-memory --vault` falha no legado: valide apenas CORE ou migre primeiro.
 

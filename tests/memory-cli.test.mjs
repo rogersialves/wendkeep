@@ -11,7 +11,8 @@ import { join } from 'node:path';
 import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  canonicalMemoryJson, deriveMemoryProjection, prepareMemoryProjection, reduceMemoryEvents,
+  canonicalMemoryJson, deriveMemoryProjection, hashMemoryValue, prepareMemoryProjection,
+  reduceMemoryEvents,
 } from '../hooks/memory-store.mjs';
 import { renderSharedMemory } from '../hooks/memory-schema.mjs';
 import { renderCoreSkeleton } from '../src/validate-core.mjs';
@@ -59,6 +60,100 @@ function memoryEvent(eventId, value, turnSequence) {
     observed_at: `2026-07-26T12:0${turnSequence}:00.000Z`,
     evidence: [`turn:${turnSequence}`],
   };
+}
+
+function legacyPromotionEvent(eventId, candidate, selected, observedAt, overrides = {}) {
+  const eventIds = [...candidate.event_ids].sort();
+  return {
+    v: 1,
+    event_id: eventId,
+    project_id: selected.project_id,
+    memory_key: selected.memory_key,
+    operation: 'replace',
+    value: selected.value,
+    authority: 'verified',
+    activation_id: selected.activation_id,
+    activation_epoch: selected.activation_epoch,
+    turn_sequence: selected.turn_sequence,
+    observed_at: observedAt,
+    evidence: [`candidate:${candidate.candidate_id}`],
+    candidate_decision: {
+      candidate_id: candidate.candidate_id,
+      action: 'promote',
+      event_ids: eventIds,
+      selected_event_id: selected.event_id,
+    },
+    supersedes: eventIds,
+    ...overrides,
+  };
+}
+
+function seedOutOfOrderPromotionBridge(vault, {
+  currentOverrides = {}, selectedOverrides = {}, mutateCurrentPromotion = null,
+  selectedBeforeCurrent = false,
+} = {}) {
+  const base = {
+    ...memoryEvent('mem-bridge-base', 'bridge base', 0),
+    canonical_session_id: 'bridge-session',
+    activation_id: 'bridge-activation',
+    source_turn_id: 'bridge-turn-base',
+    observed_at: '2026-07-26T12:00:00.000Z',
+  };
+  const competing = {
+    ...base,
+    event_id: 'mem-bridge-competing',
+    value: 'bridge competing',
+    canonical_session_id: 'bridge-competing-session',
+    activation_id: 'bridge-competing-activation',
+    source_turn_id: 'bridge-competing-turn',
+    observed_at: '2026-07-26T12:01:00.000Z',
+  };
+  writeMemoryProjection(vault, [base, competing]);
+  const initial = readCandidates(vault).find((item) => item.event_ids.includes(base.event_id));
+  const firstPromotion = legacyPromotionEvent(
+    'mem-bridge-first-promotion', initial, base, '2026-07-26T12:02:00.000Z',
+  );
+  const prior = {
+    ...base,
+    event_id: 'mem-bridge-prior',
+    value: 'bridge prior',
+    turn_sequence: 1,
+    source_turn_id: 'bridge-turn-prior',
+    observed_at: '2026-07-26T12:03:00.000Z',
+  };
+  const prefix = [base, competing, firstPromotion, prior];
+  writeMemoryProjection(vault, prefix);
+  const priorCandidate = readCandidates(vault)
+    .find((item) => item.event_ids.includes(prior.event_id));
+  const prefixProjection = deriveMemoryProjection(vault, prefix);
+  let currentPromotion = legacyPromotionEvent(
+    'mem-bridge-current-promotion',
+    priorCandidate,
+    prior,
+    '2026-07-26T12:05:00.000Z',
+    currentOverrides,
+  );
+  const selected = {
+    ...base,
+    event_id: 'mem-bridge-selected',
+    value: 'bridge selected',
+    turn_sequence: 2,
+    source_turn_id: 'bridge-turn-selected',
+    observed_at: '2026-07-26T12:04:00.000Z',
+    ...selectedOverrides,
+  };
+  if (mutateCurrentPromotion) {
+    currentPromotion = mutateCurrentPromotion({
+      currentPromotion, prefixProjection, prior, priorCandidate,
+    });
+  }
+  const suffix = selectedBeforeCurrent
+    ? [selected, currentPromotion]
+    : [currentPromotion, selected];
+  writeMemoryProjection(vault, [...prefix, ...suffix]);
+  const candidate = readCandidates(vault)
+    .find((item) => item.event_ids.includes(selected.event_id));
+  return { candidate, currentPromotion, selected };
 }
 
 function checkpoint(reduced) {
@@ -518,6 +613,148 @@ test('[req:MEM-CUR-1] [req:MEM-CUR-2] [req:MEM-CUR-3] decisões sobre candidates
       action: 'reject', candidateId: promoted.candidate_id,
     }), /decisão incompatível|already.*promot|já.*promov/i);
   } finally { rmSync(vault, { recursive: true, force: true }); }
+});
+
+test('[req:MEM-CUR-2] promoção preserva valor JSON e identidade causal do evento escolhido', async () => {
+  const vault = fixture();
+  try {
+    const { decideMemoryCandidate } = await import('../src/memory.mjs');
+    const selected = {
+      ...memoryEvent('mem-typed-selected', { branch: 'main', commit: 'abc123' }, 2),
+      memory_key: 'git.local-head',
+      canonical_session_id: 'selected-session',
+      activation_id: 'selected-activation',
+      source_turn_id: 'selected-turn',
+    };
+    const competing = {
+      ...memoryEvent('mem-typed-competing', { branch: 'feature', commit: 'def456' }, 2),
+      memory_key: 'git.local-head',
+      canonical_session_id: 'competing-session',
+      activation_id: 'competing-activation',
+      source_turn_id: 'competing-turn',
+    };
+    writeMemoryProjection(vault, [selected, competing]);
+    const candidate = readCandidates(vault).find((item) => item.event_ids.includes(selected.event_id));
+    assert.ok(candidate);
+
+    const result = decideMemoryCandidate(vault, {
+      action: 'promote', candidateId: candidate.candidate_id, eventId: selected.event_id,
+    });
+    const ledger = readFileSync(join(vault, '.brain', 'MEMORY_EVENTS.jsonl'), 'utf8')
+      .trim().split('\n').map(JSON.parse);
+    const decision = ledger.find((event) => event.event_id === result.eventId);
+
+    assert.deepEqual(decision.value, selected.value);
+    assert.equal(decision.canonical_session_id, selected.canonical_session_id);
+    assert.equal(decision.activation_id, selected.activation_id);
+    assert.equal(decision.activation_epoch, selected.activation_epoch);
+    assert.equal(decision.source_turn_id, selected.source_turn_id);
+    assert.equal(decision.turn_sequence, selected.turn_sequence);
+
+    const later = {
+      ...selected,
+      event_id: 'mem-typed-later',
+      value: { branch: 'main', commit: 'fedcba' },
+      turn_sequence: selected.turn_sequence + 1,
+      source_turn_id: 'selected-turn-later',
+      observed_at: new Date(Date.parse(decision.observed_at) + 1_000).toISOString(),
+    };
+    const reduced = reduceMemoryEvents([...ledger, later]);
+    assert.equal(reduced.candidates.length, 0, JSON.stringify(reduced.candidates));
+    assert.deepEqual(reduced.state['git.local-head'], later.value);
+    assert.equal(reduced.records['git.local-head'].source.event_id, later.event_id);
+  } finally { rmSync(vault, { recursive: true, force: true }); }
+});
+
+test('[req:MEM-CUR-2] bridge temporal exige todas as provas legadas e causais', async () => {
+  const { decideMemoryCandidate } = await import('../src/memory.mjs');
+  const scenarios = [
+    {
+      name: 'promoção atual já possui identidade moderna',
+      options: {
+        currentOverrides: {
+          canonical_session_id: 'bridge-session',
+          source_turn_id: 'bridge-turn-prior',
+        },
+      },
+    },
+    {
+      name: 'evento escolhido pertence a outra linhagem causal',
+      options: {
+        selectedOverrides: {
+          canonical_session_id: 'bridge-other-session',
+          activation_id: 'bridge-other-activation',
+          source_turn_id: 'bridge-other-turn',
+        },
+      },
+    },
+    {
+      name: 'supersedes diverge dos membros auditados pela decisão legada',
+      options: {
+        mutateCurrentPromotion: ({ currentPromotion }) => ({
+          ...currentPromotion,
+          candidate_decision: {
+            ...currentPromotion.candidate_decision,
+            event_ids: [...currentPromotion.candidate_decision.event_ids, 'mem-bridge-base'].sort(),
+          },
+        }),
+      },
+    },
+    {
+      name: 'promoção atual não compartilha ancestral com o candidate posterior',
+      options: {
+        mutateCurrentPromotion: ({ currentPromotion, prefixProjection, prior }) => {
+          const current = prefixProjection.records['handoff.latest'];
+          return {
+            ...currentPromotion,
+            supersedes: [prior.event_id],
+            base_revision: current.revision,
+            base_value_hash: hashMemoryValue(current.value),
+            candidate_decision: {
+              ...currentPromotion.candidate_decision,
+              event_ids: [prior.event_id],
+            },
+          };
+        },
+      },
+    },
+    {
+      name: 'evento escolhido não possui turno maior',
+      options: { selectedOverrides: { turn_sequence: 1 } },
+    },
+    {
+      name: 'evento escolhido não foi anexado depois da promoção atual',
+      options: { selectedBeforeCurrent: true },
+    },
+    {
+      name: 'observed_at não está invertido em relação à ordem física',
+      options: {
+        selectedOverrides: { observed_at: '2026-07-26T12:06:00.000Z' },
+        mutateCurrentPromotion: ({ currentPromotion, prefixProjection }) => {
+          const current = prefixProjection.records['handoff.latest'];
+          return {
+            ...currentPromotion,
+            base_revision: current.revision,
+            base_value_hash: hashMemoryValue(current.value),
+          };
+        },
+      },
+    },
+  ];
+
+  for (const scenario of scenarios) {
+    const vault = fixture();
+    try {
+      const { candidate, selected } = seedOutOfOrderPromotionBridge(vault, scenario.options);
+      assert.ok(candidate, scenario.name);
+      const ledgerPath = join(vault, '.brain', 'MEMORY_EVENTS.jsonl');
+      const ledgerBefore = readFileSync(ledgerPath, 'utf8');
+      assert.throws(() => decideMemoryCandidate(vault, {
+        action: 'promote', candidateId: candidate.candidate_id, eventId: selected.event_id,
+      }), /não corresponde mais à projeção causal atual/i, scenario.name);
+      assert.equal(readFileSync(ledgerPath, 'utf8'), ledgerBefore, `${scenario.name}: ledger imutável`);
+    } finally { rmSync(vault, { recursive: true, force: true }); }
+  }
 });
 
 test('[req:MEM-CUR-2] CAS não atualiza attempt novo que ainda contém o evento promovido', async () => {

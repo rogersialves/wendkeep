@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -11,8 +11,13 @@ import {
   cleanSyntheticHookEnv,
   seedSyntheticHybridLifecycle,
 } from './fixtures/synthetic-memory-lifecycle.mjs';
+import {
+  enqueueMemoryEvent, projectMemoryOutbox, readMemoryLedger,
+} from '../hooks/memory-store.mjs';
+import { decideMemoryCandidate } from '../src/memory.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
+const BIN = join(ROOT, 'bin', 'wendkeep.mjs');
 const STOP = join(ROOT, 'hooks', 'session-stop.mjs');
 const START = join(ROOT, 'hooks', 'session-start.mjs');
 const INJECT = join(ROOT, 'hooks', 'brain-inject.mjs');
@@ -36,6 +41,22 @@ function runHook(script, { project, vault, input }) {
     encoding: 'utf8',
     input: JSON.stringify(input),
   });
+}
+
+function runPublicHook(name, { project, vault, input }) {
+  const env = cleanSyntheticHookEnv(vault);
+  env.OBSIDIAN_VAULT_PATH = join(project, '.wk-fixture-wrong-global-vault');
+  return spawnSync(process.execPath, [BIN, 'hook', name], {
+    cwd: project,
+    env,
+    encoding: 'utf8',
+    input: JSON.stringify(input),
+  });
+}
+
+function readCandidates(brain) {
+  const content = readFileSync(join(brain, 'MEMORY_CANDIDATES.jsonl'), 'utf8').trim();
+  return content ? content.split('\n').map(JSON.parse) : [];
 }
 
 function escapeRegExp(value) {
@@ -126,6 +147,216 @@ test('[req:MEM-STOP-7] synthetic Stop projects lifecycle memory and remains idem
       '[wk-fixture] injected context contains projected memory',
     );
   }
+});
+
+test('[req:MEM-CUR-2] recovery after a 0.66.1 promotion accepts the next public Stop', () => {
+  const { project, vault, brain, sessionPath, transcript } = seedSyntheticHybridLifecycle();
+  const legacyBase = Date.now() - 10_000;
+  const selected = {
+    v: 1,
+    event_id: 'wk-fixture-promoted-handoff',
+    project_id: SYNTHETIC_MEMORY.projectId,
+    memory_key: 'handoff.latest',
+    operation: 'assert',
+    value: '[wk-fixture] selected handoff before the next Stop.',
+    authority: 'reported',
+    canonical_session_id: SYNTHETIC_MEMORY.sessionId,
+    activation_id: SYNTHETIC_MEMORY.activationOne,
+    activation_epoch: 1,
+    turn_sequence: 0,
+    source_turn_id: 'wk-fixture-turn-before-stop',
+    observed_at: new Date(legacyBase).toISOString(),
+    evidence: ['wk-fixture:selected'],
+  };
+  const competing = {
+    ...selected,
+    event_id: 'wk-fixture-competing-handoff',
+    value: '[wk-fixture] competing handoff.',
+    canonical_session_id: 'wk-fixture-competing-session',
+    activation_id: 'wk-fixture-competing-activation',
+    source_turn_id: 'wk-fixture-competing-turn',
+    observed_at: new Date(legacyBase + 1_000).toISOString(),
+    evidence: ['wk-fixture:competing'],
+  };
+  enqueueMemoryEvent(vault, selected);
+  enqueueMemoryEvent(vault, competing);
+  projectMemoryOutbox(vault);
+  const candidate = readCandidates(brain).find((item) => item.event_ids.includes(selected.event_id));
+  assert.ok(candidate);
+
+  const legacyPromotion = {
+    v: 1,
+    event_id: 'wk-fixture-0661-promotion',
+    project_id: SYNTHETIC_MEMORY.projectId,
+    memory_key: selected.memory_key,
+    operation: 'replace',
+    value: selected.value,
+    authority: 'verified',
+    activation_id: selected.activation_id,
+    activation_epoch: selected.activation_epoch,
+    turn_sequence: selected.turn_sequence,
+    observed_at: new Date(legacyBase + 2_000).toISOString(),
+    evidence: [`candidate:${candidate.candidate_id}`],
+    candidate_decision: {
+      candidate_id: candidate.candidate_id,
+      action: 'promote',
+      event_ids: [...candidate.event_ids].sort(),
+      selected_event_id: selected.event_id,
+    },
+    supersedes: [...candidate.event_ids].sort(),
+  };
+  enqueueMemoryEvent(vault, legacyPromotion);
+  projectMemoryOutbox(vault);
+  assert.deepEqual(readCandidates(brain), []);
+
+  const priorContinuation = {
+    ...selected,
+    event_id: 'wk-fixture-prior-0661-continuation',
+    value: '[wk-fixture] prior continuation promoted by 0.66.1.',
+    source_turn_id: 'wk-fixture-turn-prior-0661',
+    observed_at: new Date(legacyBase + 3_000).toISOString(),
+    evidence: ['wk-fixture:prior-0661'],
+  };
+  enqueueMemoryEvent(vault, priorContinuation);
+  projectMemoryOutbox(vault);
+  const priorCandidate = readCandidates(brain).find(
+    (item) => item.event_ids.includes(priorContinuation.event_id),
+  );
+  assert.ok(priorCandidate);
+  const laterLegacyPromotion = {
+    ...legacyPromotion,
+    event_id: 'wk-fixture-later-0661-promotion',
+    value: priorContinuation.value,
+    observed_at: new Date(legacyBase + 5_000).toISOString(),
+    evidence: [`candidate:${priorCandidate.candidate_id}`],
+    candidate_decision: {
+      candidate_id: priorCandidate.candidate_id,
+      action: 'promote',
+      event_ids: [...priorCandidate.event_ids].sort(),
+      selected_event_id: priorContinuation.event_id,
+    },
+    supersedes: [...priorCandidate.event_ids].sort(),
+  };
+  enqueueMemoryEvent(vault, laterLegacyPromotion);
+  projectMemoryOutbox(vault);
+  assert.deepEqual(readCandidates(brain), []);
+
+  const postLegacyHandoff = {
+    ...selected,
+    event_id: 'wk-fixture-post-0661-handoff',
+    value: '[wk-fixture] handoff observed after the 0.66.1 decision.',
+    turn_sequence: 1,
+    source_turn_id: 'wk-fixture-turn-after-0661',
+    observed_at: new Date(legacyBase + 4_000).toISOString(),
+    evidence: ['wk-fixture:post-0661'],
+  };
+  enqueueMemoryEvent(vault, postLegacyHandoff);
+  projectMemoryOutbox(vault);
+  const recoveryCandidate = readCandidates(brain).find(
+    (item) => item.event_ids.includes(postLegacyHandoff.event_id),
+  );
+  assert.ok(recoveryCandidate, 'a decisão 0.66.1 sem sessão causal produz o candidate conhecido');
+  assert.ok(
+    recoveryCandidate.event_ids.includes(legacyPromotion.event_id),
+    'o candidate de recuperação é causado pela promoção 0.66.1 persistida',
+  );
+  assert.equal(
+    recoveryCandidate.event_ids.includes(laterLegacyPromotion.event_id),
+    false,
+    'a promoção projetada mais nova pode ficar fora do candidate por ordenação temporal',
+  );
+  const historicalPrefix = readFileSync(join(brain, 'MEMORY_EVENTS.jsonl'));
+
+  const promotion = decideMemoryCandidate(vault, {
+    action: 'promote',
+    candidateId: recoveryCandidate.candidate_id,
+    eventId: postLegacyHandoff.event_id,
+  });
+  assert.equal(promotion.status, 'promoted');
+  assert.deepEqual(readCandidates(brain), []);
+  assert.ok(
+    readFileSync(join(brain, 'MEMORY_EVENTS.jsonl')).subarray(0, historicalPrefix.length)
+      .equals(historicalPrefix),
+    'a recuperação acrescenta uma decisão sem reinterpretar o prefixo 0.66.1',
+  );
+
+  const decision = readMemoryLedger(vault).events.find((event) => event.event_id === promotion.eventId);
+  assert.ok(
+    decision.supersedes.includes(laterLegacyPromotion.event_id),
+    'a nova decisão cobre a promoção legada que avançou a projeção fora do candidate',
+  );
+  assert.deepEqual(
+    decision.candidate_decision.event_ids,
+    [...recoveryCandidate.event_ids].sort(),
+    'a auditoria da escolha continua descrevendo somente os membros do candidate',
+  );
+  const ledgerAfterPromotion = readFileSync(join(brain, 'MEMORY_EVENTS.jsonl'));
+  const promotionRetry = decideMemoryCandidate(vault, {
+    action: 'promote',
+    candidateId: recoveryCandidate.candidate_id,
+    eventId: postLegacyHandoff.event_id,
+  });
+  assert.equal(promotionRetry.alreadyApplied, true);
+  assert.deepEqual(
+    readFileSync(join(brain, 'MEMORY_EVENTS.jsonl')),
+    ledgerAfterPromotion,
+    'retry da recuperação temporal não duplica a decisão',
+  );
+  const baseInstant = Date.parse(decision.observed_at) + 1_000;
+  const transcriptEvents = readFileSync(transcript, 'utf8').trim().split('\n').map(JSON.parse);
+  const secondTurnId = 'wk-fixture-example-turn-two';
+  transcriptEvents.push(
+    {
+      type: 'event_msg',
+      payload: { type: 'task_started', turn_id: secondTurnId },
+    },
+    {
+      type: 'event_msg',
+      payload: {
+        type: 'user_message', turn_id: secondTurnId,
+        message: '[wk-fixture] second artificial lifecycle request.',
+      },
+    },
+    {
+      type: 'event_msg',
+      payload: {
+        type: 'agent_message', turn_id: secondTurnId,
+        message: '[wk-fixture] second artificial lifecycle response.',
+      },
+    },
+  );
+  transcriptEvents.forEach((event, index) => {
+    event.timestamp = new Date(baseInstant + (index * 1_000)).toISOString();
+  });
+  writeFileSync(transcript, `${transcriptEvents.map(JSON.stringify).join('\n')}\n`);
+
+  const input = {
+    ...stopInput(project, transcript), turn_id: secondTurnId, turn_sequence: 2,
+  };
+  const stop = runPublicHook('session-stop', { project, vault, input });
+  assert.equal(stop.status, 0, stop.stderr);
+  assert.equal(JSON.parse(stop.stdout || '{}').systemMessage, undefined);
+  assert.deepEqual(readCandidates(brain), []);
+  const ledgerAfterStop = readFileSync(join(brain, 'MEMORY_EVENTS.jsonl'));
+  const eventsAfterStop = readMemoryLedger(vault).events;
+  const latest = eventsAfterStop.find((event) => (
+    event.memory_key === 'handoff.latest' && event.source_turn_id === secondTurnId
+  ));
+  assert.ok(latest);
+  assert.equal(latest.canonical_session_id, SYNTHETIC_MEMORY.sessionId);
+  assert.equal(latest.activation_id, SYNTHETIC_MEMORY.activationOne);
+
+  const stable = {
+    shared: readFileSync(join(brain, 'SHARED_MEMORY.md')),
+    registry: readFileSync(join(brain, 'SESSION_REGISTRY.json')),
+    note: readFileSync(sessionPath),
+  };
+  const repeated = runPublicHook('session-stop', { project, vault, input });
+  assert.equal(repeated.status, 0, repeated.stderr);
+  assert.deepEqual(readFileSync(join(brain, 'MEMORY_EVENTS.jsonl')), ledgerAfterStop);
+  assert.deepEqual(readFileSync(join(brain, 'SHARED_MEMORY.md')), stable.shared);
+  assert.deepEqual(readFileSync(join(brain, 'SESSION_REGISTRY.json')), stable.registry);
+  assert.deepEqual(readFileSync(sessionPath), stable.note);
 });
 
 test('[req:MEM-STOP-7] synthetic busy projector preserves active session and durable outbox', () => {

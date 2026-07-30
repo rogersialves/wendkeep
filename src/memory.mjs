@@ -263,6 +263,80 @@ function assertCompatibleDecision(prior, { action, eventId }) {
   }
 }
 
+function promotedMemoryValue(value) {
+  return typeof value === 'string' ? sanitizeMemoryText(value) : cloneJson(value);
+}
+
+function eventSupersedes(event) {
+  if (Array.isArray(event?.supersedes)) return event.supersedes;
+  return event?.supersedes_event_id ? [event.supersedes_event_id] : [];
+}
+
+function hasCompleteCausalIdentity(event) {
+  return Boolean(event?.canonical_session_id && event?.activation_id && event?.source_turn_id)
+    && Number.isInteger(event.activation_epoch)
+    && Number.isInteger(event.turn_sequence);
+}
+
+function sameCausalLineage(left, right) {
+  return hasCompleteCausalIdentity(left) && hasCompleteCausalIdentity(right)
+    && left.canonical_session_id === right.canonical_session_id
+    && left.activation_id === right.activation_id
+    && left.activation_epoch === right.activation_epoch;
+}
+
+function promotedSupersedes(vault, candidate, selected) {
+  const memberIds = new Set(Array.isArray(candidate.event_ids) ? candidate.event_ids : []);
+  const ledger = readMemoryLedger(vault);
+  if (ledger.status !== 'ok') throw new Error('Ledger de memória inválido durante a promoção.');
+  const current = deriveMemoryProjection(vault, ledger.events)
+    .records?.[candidate.memory_key]?.source;
+  if (!current?.event_id || memberIds.has(current.event_id)) return [...memberIds].sort();
+
+  const currentSelectedId = current.candidate_decision?.selected_event_id;
+  const currentSelected = currentSelectedId
+    ? ledger.events.find((event) => event.event_id === currentSelectedId)
+    : null;
+  const selectedLedger = ledger.events.find((event) => event.event_id === selected.event_id);
+  const currentAncestors = eventSupersedes(current);
+  const decisionMembers = Array.isArray(current.candidate_decision?.event_ids)
+    ? current.candidate_decision.event_ids
+    : [];
+  const canonicalAncestors = [...new Set(currentAncestors)].sort();
+  const canonicalDecisionMembers = [...new Set(decisionMembers)].sort();
+  const currentObserved = String(current.effective_at || current.observed_at || '');
+  const selectedObserved = String(selectedLedger?.effective_at || selectedLedger?.observed_at || '');
+  const currentPhysicalIndex = ledger.events.findIndex((event) => event.event_id === current.event_id);
+  const selectedPhysicalIndex = ledger.events.findIndex((event) => event.event_id === selected.event_id);
+  const bridgeChecks = {
+    legacyShape: current.operation === 'replace' && current.authority === 'verified'
+      && !current.canonical_session_id && !current.source_turn_id,
+    promotion: current.candidate_decision?.action === 'promote',
+    selectedPresent: Boolean(currentSelected),
+    selectedPersisted: Boolean(selectedLedger),
+    exactDecisionMembers: canonicalAncestors.length === currentAncestors.length
+      && canonicalDecisionMembers.length === decisionMembers.length
+      && canonicalAncestors.length === canonicalDecisionMembers.length
+      && canonicalAncestors.every((eventId, index) => eventId === canonicalDecisionMembers[index]),
+    selectedSuperseded: currentAncestors.includes(currentSelectedId)
+      && decisionMembers.includes(currentSelectedId),
+    candidateAncestor: currentAncestors.some((eventId) => memberIds.has(eventId)),
+    sameLineage: sameCausalLineage(currentSelected, selectedLedger),
+    laterTurn: selectedLedger?.turn_sequence > currentSelected?.turn_sequence,
+    appendedAfterCurrent: selectedPhysicalIndex > currentPhysicalIndex && currentPhysicalIndex >= 0,
+    observedBeforeCurrent: selectedObserved < currentObserved,
+  };
+  const bridgesObservedOrder = Object.values(bridgeChecks).every(Boolean);
+  if (!bridgesObservedOrder) {
+    throw new Error(
+      `Candidate ${candidate.candidate_id} não corresponde mais à projeção causal atual; `
+      + 'recarregue os candidates antes de promover.',
+    );
+  }
+  memberIds.add(current.event_id);
+  return [...memberIds].sort();
+}
+
 function matchesPromotedAttempt(attempt, selected) {
   if (attempt?.memory_mode !== 'v2' || attempt.state !== 'projected'
       || !Array.isArray(attempt.event_ids) || !attempt.event_ids.includes(selected.event_id)) return false;
@@ -378,6 +452,9 @@ export function decideMemoryCandidate(vault, {
   if (action === 'promote' && selectedValue === undefined) {
     throw new Error(`Candidate ${candidateId} não contém valor promovível.`);
   }
+  const supersedes = action === 'promote' && selected
+    ? promotedSupersedes(vault, candidate, selected)
+    : [];
   const now = new Date().toISOString();
   const decision = {
     candidate_id: candidateId,
@@ -391,15 +468,19 @@ export function decideMemoryCandidate(vault, {
     project_id: projectId(vault),
     memory_key: action === 'promote' ? candidate.memory_key : `candidate.decision.${candidateId}`,
     operation: action === 'promote' && selected ? 'replace' : 'assert',
-    value: sanitizeMemoryText(action === 'promote' ? selectedValue : 'rejected'),
+    value: action === 'promote' ? promotedMemoryValue(selectedValue) : 'rejected',
     authority: 'verified',
+    ...(selected?.canonical_session_id
+      ? { canonical_session_id: selected.canonical_session_id }
+      : {}),
     activation_id: selected?.activation_id || 'wendkeep-memory-cli',
     ...(Number.isInteger(selected?.activation_epoch) ? { activation_epoch: selected.activation_epoch } : {}),
     turn_sequence: selected?.turn_sequence ?? 0,
+    ...(selected?.source_turn_id ? { source_turn_id: selected.source_turn_id } : {}),
     observed_at: now,
     evidence: [`candidate:${candidateId}`],
     candidate_decision: decision,
-    ...(selected ? { supersedes: decision.event_ids } : {}),
+    ...(selected ? { supersedes } : {}),
   };
   enqueueMemoryEvent(vault, event);
   const projection = projectMemoryOutbox(vault);
