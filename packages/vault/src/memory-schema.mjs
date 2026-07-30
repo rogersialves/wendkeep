@@ -108,6 +108,31 @@ export function validateMemoryEvent(event, { projectId } = {}) {
     errors.push(`project_id não pertence ao vault esperado (${projectId}).`);
   }
 
+  if (event.candidate_decision !== undefined) {
+    const decision = event.candidate_decision;
+    if (!decision || typeof decision !== 'object' || Array.isArray(decision)) {
+      errors.push('candidate_decision deve ser objeto.');
+    } else {
+      if (typeof decision.candidate_id !== 'string' || !decision.candidate_id) {
+        errors.push('candidate_decision.candidate_id deve ser string não vazia.');
+      }
+      if (!['promote', 'reject'].includes(decision.action)) {
+        errors.push('candidate_decision.action deve ser promote ou reject.');
+      }
+      if (!Array.isArray(decision.event_ids)
+          || decision.event_ids.some((item) => typeof item !== 'string' || !item)) {
+        errors.push('candidate_decision.event_ids deve ser array de strings não vazias.');
+      }
+      if (decision.action === 'promote' && decision.selected_event_id !== undefined
+          && (typeof decision.selected_event_id !== 'string' || !decision.selected_event_id)) {
+        errors.push('candidate_decision.selected_event_id deve ser string não vazia.');
+      }
+      if (decision.action === 'reject' && decision.selected_event_id !== undefined) {
+        errors.push('candidate_decision.selected_event_id não é permitido em reject.');
+      }
+    }
+  }
+
   for (const field of ['value', 'evidence']) sanitizedField(event, field, errors);
   return { ok: errors.length === 0, errors, warnings };
 }

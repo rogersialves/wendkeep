@@ -64,7 +64,8 @@ to revision 1. Replaying that prompt or Stop does not duplicate the event/revisi
 - Partial/corrupt v2 bundle: use status and repair; migration is not a corruption tool.
 - First post-migration Stop is `ambiguous`: verify that its `turn_id` belongs to the transcript and
   that `UserPromptSubmit` opened/advanced the recovery activation.
-- Many candidates: curate gradually with `memory promote`/`memory reject`.
+- Many candidates: curate gradually with `memory promote`/`memory reject`; conflicts require
+  `memory promote <candidate> --event <event-id>` to choose the winner explicitly.
 - Legacy warning remains after apply: verify the selected vault and project binding.
 
 ## Next steps

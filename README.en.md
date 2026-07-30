@@ -294,7 +294,10 @@ backup/audit; divergent mirrors fail closed. A demonstrably superseded
 ambiguity uses `memory reconcile <session> --by-session <successor>
 --reason <reason>` as a dry run and requires `--apply`; the decision is backed up and audited
 without rewriting ledger, CORE, or notes. Run `status --gate` again afterwards. Conflicts require
-explicit curation with `memory promote <id>` or `memory reject <id>`; doctor only diagnoses.
+explicit, durable curation: `memory promote <id> --event <event-id>` selects one event from the
+candidate, while `memory reject <id>` keeps the current value. Decisions are idempotent and
+survive repair/replay; `blocked_by_core` cannot override CORE. Doctor only diagnoses. See
+[memory and curation](docs/en/commands/memory.md).
 
 Session notes use one live `## Agentes, tokens e custos` snapshot. Main-agent and subagent hooks recompose it atomically, with costs, token dimensions, reasoning tokens and effort per model/source. Every hook that rewrites a session note takes a per-file lock and writes through a temp file + rename, so the `SubagentStop` fan-out (one hook run per subagent) can never leave a note half-written; a note whose frontmatter reads back damaged is left untouched rather than patched.
 

@@ -64,7 +64,8 @@ revision 1. Repetir esse prompt ou Stop não duplica evento/revision.
 - Bundle v2 parcial/corrompido: use status e repair; migração não é ferramenta de corrupção.
 - Primeiro Stop pós-migração fica `ambiguous`: confirme que o `turn_id` pertence ao transcript e
   que `UserPromptSubmit` abriu/avançou a activation de recuperação.
-- Candidates numerosos: curate gradualmente com `memory promote`/`memory reject`.
+- Candidates numerosos: curate gradualmente com `memory promote`/`memory reject`; conflitos
+  exigem `memory promote <candidate> --event <event-id>` para escolher o vencedor explicitamente.
 - Warning legado após apply: confirme o vault efetivamente selecionado e o vínculo do projeto.
 
 ## Próximos passos

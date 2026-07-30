@@ -461,6 +461,19 @@ export function reduceMemoryEvents(inputEvents = [], { coreInvariants = new Map(
     if (!existing) unique.set(event.event_id, event);
   }
   const events = [...unique.values()].sort(eventOrder);
+  const candidateDecisions = new Map();
+  for (const item of events) {
+    const decision = item.candidate_decision;
+    if (!decision) continue;
+    const existing = candidateDecisions.get(decision.candidate_id);
+    if (existing && canonicalMemoryJson(existing.decision) !== canonicalMemoryJson(decision)) {
+      throw new MemoryEventCollision(
+        decision.candidate_id,
+        `Ledger contains incompatible decisions for candidate ${decision.candidate_id}`,
+      );
+    }
+    if (!existing) candidateDecisions.set(decision.candidate_id, { decision, event: item });
+  }
 
   const peerGroups = new Map();
   for (const item of events) {
@@ -488,6 +501,11 @@ export function reduceMemoryEvents(inputEvents = [], { coreInvariants = new Map(
   let revision = 0;
 
   for (const item of events) {
+    if (item.candidate_decision && item.candidate_decision.action === 'reject') {
+      appliedEventIds.push(item.event_id);
+      continue;
+    }
+
     if (protectedValues.has(item.memory_key)) {
       const coreValue = protectedValues.get(item.memory_key);
       const agreesWithCore = item.operation === 'assert'
@@ -604,7 +622,9 @@ export function reduceMemoryEvents(inputEvents = [], { coreInvariants = new Map(
   const state = sortedObject(stateEntries);
   const recordObject = sortedObject(recordEntries);
   const tombstoneObject = sortedObject(tombstoneEntries);
-  candidates.sort((left, right) => left.candidate_id.localeCompare(right.candidate_id));
+  const unresolvedCandidates = candidates
+    .filter((item) => !candidateDecisions.has(item.candidate_id));
+  unresolvedCandidates.sort((left, right) => left.candidate_id.localeCompare(right.candidate_id));
   superseded.sort((left, right) => left.event_id.localeCompare(right.event_id));
   const activeEvents = Object.entries(recordObject).map(([memoryKey, record]) => ({
     ...record.source,
@@ -618,7 +638,7 @@ export function reduceMemoryEvents(inputEvents = [], { coreInvariants = new Map(
   return {
     state,
     records: recordObject,
-    candidates,
+    candidates: unresolvedCandidates,
     tombstones: tombstoneObject,
     superseded,
     appliedEventIds,
