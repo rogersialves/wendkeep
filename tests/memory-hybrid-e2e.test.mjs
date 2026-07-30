@@ -12,9 +12,8 @@ import {
   seedSyntheticHybridLifecycle,
 } from './fixtures/synthetic-memory-lifecycle.mjs';
 import {
-  enqueueMemoryEvent, projectMemoryOutbox, readMemoryLedger,
+  deriveMemoryProjection, enqueueMemoryEvent, projectMemoryOutbox, readMemoryLedger,
 } from '../hooks/memory-store.mjs';
-import { decideMemoryCandidate } from '../src/memory.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const BIN = join(ROOT, 'bin', 'wendkeep.mjs');
@@ -51,6 +50,13 @@ function runPublicHook(name, { project, vault, input }) {
     env,
     encoding: 'utf8',
     input: JSON.stringify(input),
+  });
+}
+
+function runCli(args, { project }) {
+  return spawnSync(process.execPath, [BIN, ...args], {
+    cwd: project,
+    encoding: 'utf8',
   });
 }
 
@@ -149,7 +155,7 @@ test('[req:MEM-STOP-7] synthetic Stop projects lifecycle memory and remains idem
   }
 });
 
-test('[req:MEM-CUR-2] recovery after a 0.66.1 promotion accepts the next public Stop', () => {
+test('[req:MEM-CUR-2] public Stop advances after CLI recovery despite physical/temporal inversion', () => {
   const { project, vault, brain, sessionPath, transcript } = seedSyntheticHybridLifecycle();
   const legacyBase = Date.now() - 10_000;
   const selected = {
@@ -267,11 +273,13 @@ test('[req:MEM-CUR-2] recovery after a 0.66.1 promotion accepts the next public 
   );
   const historicalPrefix = readFileSync(join(brain, 'MEMORY_EVENTS.jsonl'));
 
-  const promotion = decideMemoryCandidate(vault, {
-    action: 'promote',
-    candidateId: recoveryCandidate.candidate_id,
-    eventId: postLegacyHandoff.event_id,
-  });
+  const promoted = runCli([
+    'memory', 'promote', recoveryCandidate.candidate_id,
+    '--event', postLegacyHandoff.event_id,
+    '--vault', vault,
+  ], { project });
+  assert.equal(promoted.status, 0, promoted.stderr || promoted.stdout);
+  const promotion = JSON.parse(promoted.stdout);
   assert.equal(promotion.status, 'promoted');
   assert.deepEqual(readCandidates(brain), []);
   assert.ok(
@@ -291,18 +299,24 @@ test('[req:MEM-CUR-2] recovery after a 0.66.1 promotion accepts the next public 
     'a auditoria da escolha continua descrevendo somente os membros do candidate',
   );
   const ledgerAfterPromotion = readFileSync(join(brain, 'MEMORY_EVENTS.jsonl'));
-  const promotionRetry = decideMemoryCandidate(vault, {
-    action: 'promote',
-    candidateId: recoveryCandidate.candidate_id,
-    eventId: postLegacyHandoff.event_id,
-  });
+  const promotionRetryResult = runCli([
+    'memory', 'promote', recoveryCandidate.candidate_id,
+    '--event', postLegacyHandoff.event_id,
+    '--vault', vault,
+  ], { project });
+  assert.equal(
+    promotionRetryResult.status,
+    0,
+    promotionRetryResult.stderr || promotionRetryResult.stdout,
+  );
+  const promotionRetry = JSON.parse(promotionRetryResult.stdout);
   assert.equal(promotionRetry.alreadyApplied, true);
   assert.deepEqual(
     readFileSync(join(brain, 'MEMORY_EVENTS.jsonl')),
     ledgerAfterPromotion,
     'retry da recuperação temporal não duplica a decisão',
   );
-  const baseInstant = Date.parse(decision.observed_at) + 1_000;
+  const stopEffectiveInstant = Date.parse(laterLegacyPromotion.observed_at) - 500;
   const transcriptEvents = readFileSync(transcript, 'utf8').trim().split('\n').map(JSON.parse);
   const secondTurnId = 'wk-fixture-example-turn-two';
   transcriptEvents.push(
@@ -326,7 +340,8 @@ test('[req:MEM-CUR-2] recovery after a 0.66.1 promotion accepts the next public 
     },
   );
   transcriptEvents.forEach((event, index) => {
-    event.timestamp = new Date(baseInstant + (index * 1_000)).toISOString();
+    const distanceFromTail = transcriptEvents.length - index;
+    event.timestamp = new Date(stopEffectiveInstant - (distanceFromTail * 10)).toISOString();
   });
   writeFileSync(transcript, `${transcriptEvents.map(JSON.stringify).join('\n')}\n`);
 
@@ -345,6 +360,49 @@ test('[req:MEM-CUR-2] recovery after a 0.66.1 promotion accepts the next public 
   assert.ok(latest);
   assert.equal(latest.canonical_session_id, SYNTHETIC_MEMORY.sessionId);
   assert.equal(latest.activation_id, SYNTHETIC_MEMORY.activationOne);
+  assert.equal(latest.activation_epoch, 1);
+  assert.equal(latest.turn_sequence, 2);
+  assert.ok(
+    Date.parse(latest.observed_at) < Date.parse(laterLegacyPromotion.observed_at),
+    'o Stop é efetivamente anterior às decisões CLI embora seja anexado fisicamente depois',
+  );
+  assert.ok(
+    eventsAfterStop.findIndex((event) => event.event_id === latest.event_id)
+      > eventsAfterStop.findIndex((event) => event.event_id === decision.event_id),
+    'o Stop foi anexado fisicamente depois da correção CLI',
+  );
+  assert.ok(
+    readFileSync(join(brain, 'MEMORY_EVENTS.jsonl')).subarray(0, historicalPrefix.length)
+      .equals(historicalPrefix),
+    'o Stop preserva byte a byte o prefixo legado auditado',
+  );
+
+  const sharedAfterStop = readFileSync(join(brain, 'SHARED_MEMORY.md'), 'utf8');
+  assert.match(sharedAfterStop, /second artificial lifecycle response/i);
+  assert.doesNotMatch(sharedAfterStop, /prior continuation promoted by 0\.66\.1/i);
+  const registryAfterStop = JSON.parse(readFileSync(join(brain, 'SESSION_REGISTRY.json'), 'utf8'));
+  const sessionAfterStop = registryAfterStop.sessions[SYNTHETIC_MEMORY.sessionId];
+  const expectedCheckpoint = deriveMemoryProjection(vault, eventsAfterStop).checkpoint;
+  assert.equal(sessionAfterStop.memory_status, 'projected');
+  assert.deepEqual(sessionAfterStop.memory_checkpoint, expectedCheckpoint);
+  assert.equal(sessionAfterStop.last_memory_attempt.disposition, 'applied');
+  assert.equal(sessionAfterStop.last_memory_attempt.state, 'projected');
+  assert.deepEqual(
+    sessionAfterStop.last_memory_attempt.checkpoint,
+    sessionAfterStop.memory_checkpoint,
+    'o attempt projetado espelha o checkpoint físico/causal persistido',
+  );
+  assert.equal(readdirSync(join(brain, 'memory-outbox')).length, 0);
+
+  const healthResult = runCli(['memory', 'status', '--gate', '--vault', vault], { project });
+  const health = JSON.parse(healthResult.stdout);
+  assert.ok(
+    health.failures.every((failure) => /^core:/i.test(failure)),
+    'a fixture mínima pode omitir seções curadas, mas não possui falha operacional de memória',
+  );
+  assert.equal(health.metrics.candidates, 0);
+  assert.equal(health.metrics.pendingOutbox, 0);
+  assert.equal(health.metrics.activeConflicts, 0);
 
   const stable = {
     shared: readFileSync(join(brain, 'SHARED_MEMORY.md')),

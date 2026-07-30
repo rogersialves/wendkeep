@@ -298,11 +298,13 @@ explicit, durable curation: `memory promote <id> --event <event-id>` selects one
 candidate, while `memory reject <id>` keeps the current value. The decision is idempotent, and a
 new promotion accepts a later Stop from the same session/activation without recreating a conflict.
 A promotion written by 0.66.1 remains historical: if the next Stop forms a new candidate, update
-the package and explicitly promote the current event once; repair/reconcile do not choose causal
-lineage. If physical order and `observed_at` leave another projected 0.66.1 promotion outside the
-candidate, the command adds it to `supersedes` only after proving the same lineage, a later turn,
-and the temporal inversion; a modern or unrelated source fails before appending bytes. Decisions
-survive repair/replay; `blocked_by_core` cannot override CORE. Doctor only
+to 0.66.3 and run `memory repair`. During replay, a transient candidate is re-evaluated against the
+final modern source: the same session/activation/epoch and a higher turn advances; a lower turn is
+superseded. Repair migrates the checkpoint and mirror only when it proves the exact previous
+replay, attempt identity, and absence of a real conflict; it creates a backup and audit without
+appending or rewriting events. Ambiguity stays queued for explicit curation. Do not publish or
+install 0.66.2; use 0.66.3. Decisions survive repair/replay;
+`blocked_by_core` cannot override CORE. Doctor only
 diagnoses. See [memory and curation](docs/en/commands/memory.md).
 
 Session notes use one live `## Agentes, tokens e custos` snapshot. Main-agent and subagent hooks recompose it atomically, with costs, token dimensions, reasoning tokens and effort per model/source. Every hook that rewrites a session note takes a per-file lock and writes through a temp file + rename, so the `SubagentStop` fan-out (one hook run per subagent) can never leave a note half-written; a note whose frontmatter reads back damaged is left untouched rather than patched.

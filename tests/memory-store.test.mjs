@@ -11,6 +11,7 @@ import {
   MemoryEventCollision,
   MemoryLedgerCorruption,
   canonicalMemoryJson,
+  deriveMemoryProjection,
   enqueueMemoryEvent,
   hashMemoryValue,
   projectMemoryOutbox,
@@ -44,6 +45,82 @@ function event(eventId, memoryKey, operation, value, extra = {}) {
     evidence: ['ADR-0107'],
     ...extra,
   };
+}
+
+function deferredAssertReplayFixture({ assertOverrides = {}, correctionOverrides = {} } = {}) {
+  const selected = event('mem-replay-selected', 'handoff.latest', 'assert', 'resumo promovido', {
+    canonical_session_id: 'replay-session',
+    activation_id: 'replay-activation',
+    activation_epoch: 7,
+    turn_sequence: 1,
+    source_turn_id: 'replay-turn-1',
+    observed_at: '2026-07-26T12:01:00.000Z',
+  });
+  const competing = event('mem-replay-competing', 'handoff.latest', 'assert', 'resumo concorrente', {
+    canonical_session_id: 'competing-session',
+    activation_id: 'competing-activation',
+    activation_epoch: 7,
+    turn_sequence: 1,
+    source_turn_id: 'competing-turn-1',
+    observed_at: '2026-07-26T12:02:00.000Z',
+  });
+  const initialCandidate = reduceMemoryEvents([selected, competing]).candidates[0];
+  const legacyPromotion = event(
+    'mem-replay-legacy-promotion', 'handoff.latest', 'replace', selected.value, {
+      canonical_session_id: undefined,
+      activation_id: selected.activation_id,
+      activation_epoch: selected.activation_epoch,
+      turn_sequence: selected.turn_sequence,
+      observed_at: '2026-07-26T12:04:00.000Z',
+      candidate_decision: {
+        candidate_id: initialCandidate.candidate_id,
+        action: 'promote',
+        event_ids: [...initialCandidate.event_ids],
+        selected_event_id: selected.event_id,
+      },
+      supersedes: [...initialCandidate.event_ids],
+    },
+  );
+  const correction = event(
+    'mem-replay-modern-correction', 'handoff.latest', 'replace', selected.value, {
+      canonical_session_id: selected.canonical_session_id,
+      activation_id: selected.activation_id,
+      activation_epoch: selected.activation_epoch,
+      turn_sequence: selected.turn_sequence,
+      source_turn_id: selected.source_turn_id,
+      observed_at: '2026-07-26T12:06:00.000Z',
+      supersedes: [...initialCandidate.event_ids, legacyPromotion.event_id],
+      ...correctionOverrides,
+    },
+  );
+  const deferredAssert = event(
+    'mem-replay-physical-late', 'handoff.latest', 'assert', 'resumo do Stop posterior', {
+      canonical_session_id: selected.canonical_session_id,
+      activation_id: selected.activation_id,
+      activation_epoch: selected.activation_epoch,
+      turn_sequence: 2,
+      source_turn_id: 'replay-turn-2',
+      observed_at: '2026-07-26T12:05:00.000Z',
+      ...assertOverrides,
+    },
+  );
+  return {
+    selected,
+    competing,
+    legacyPromotion,
+    correction,
+    deferredAssert,
+    events: [selected, competing, legacyPromotion, correction, deferredAssert],
+  };
+}
+
+function transientDeferredCandidate(fixture) {
+  return reduceMemoryEvents([
+    fixture.selected,
+    fixture.competing,
+    fixture.legacyPromotion,
+    fixture.deferredAssert,
+  ]).candidates.find((candidate) => candidate.event_ids.includes(fixture.deferredAssert.event_id));
 }
 
 function transientNames(vault) {
@@ -195,6 +272,121 @@ test('[req:MEM-HYB-4] late older handoff from the same activation stays supersed
     event_id: 'mem-handoff-late-old', by_event_id: 'mem-handoff-new',
   }]);
   assert.equal(reduced.candidates.length, 0);
+});
+
+test('[req:MEM-CUR-2] assert fisicamente posterior converge contra a fonte moderna final', () => {
+  const fixture = deferredAssertReplayFixture();
+
+  const forward = reduceMemoryEvents(fixture.events);
+  const reverse = reduceMemoryEvents([...fixture.events].reverse());
+
+  assert.deepEqual(reverse, forward, 'a ordem de chegada não altera o fixpoint causal');
+  assert.equal(forward.state['handoff.latest'], fixture.deferredAssert.value);
+  assert.equal(forward.records['handoff.latest'].source.event_id, fixture.deferredAssert.event_id);
+  assert.equal(forward.records['handoff.latest'].revision, 4);
+  assert.equal(forward.revision, 4);
+  assert.equal(forward.candidates.length, 0, JSON.stringify(forward.candidates));
+  assert.ok(forward.appliedEventIds.includes(fixture.deferredAssert.event_id));
+  assert.ok(forward.superseded.some((entry) => entry.event_id === fixture.correction.event_id
+    && entry.by_event_id === fixture.deferredAssert.event_id));
+});
+
+test('[req:MEM-CUR-2] replay legado pode ser derivado sem pós-passe para validar checkpoint antigo', () => {
+  const vault = scratch();
+  try {
+    const fixture = deferredAssertReplayFixture();
+    const legacy = reduceMemoryEvents(fixture.events, { resolveDeferredAsserts: false });
+    const legacyReverse = reduceMemoryEvents([...fixture.events].reverse(), {
+      resolveDeferredAsserts: false,
+    });
+    const legacyProjection = deriveMemoryProjection(
+      vault, fixture.events, { resolveDeferredAsserts: false },
+    );
+    const current = deriveMemoryProjection(vault, fixture.events);
+    const explicitCurrent = deriveMemoryProjection(
+      vault, fixture.events, { resolveDeferredAsserts: true },
+    );
+
+    assert.equal(legacy.state['handoff.latest'], fixture.correction.value);
+    assert.deepEqual(legacyReverse, legacy, 'replay antigo também independe da ordem de chegada');
+    assert.equal(legacy.records['handoff.latest'].source.event_id, fixture.correction.event_id);
+    assert.equal(legacy.candidates.length, 1, 'semântica anterior reproduz o candidate transitório');
+    assert.equal(legacy.appliedEventIds.includes(fixture.deferredAssert.event_id), false);
+    assert.equal(legacyProjection.stateHash, legacy.stateHash);
+    assert.equal(legacyProjection.revision, legacy.revision);
+    assert.deepEqual(explicitCurrent, current, 'default true e opção explícita convergem igualmente');
+    assert.equal(current.state['handoff.latest'], fixture.deferredAssert.value);
+    assert.equal(current.candidates.length, 0);
+    assert.notEqual(current.stateHash, legacyProjection.stateHash);
+  } finally {
+    rmSync(vault, { recursive: true, force: true });
+  }
+});
+
+test('[req:MEM-CUR-2] assert pendente de turno menor é superseded pela fonte moderna final', () => {
+  const fixture = deferredAssertReplayFixture({ assertOverrides: { turn_sequence: 0 } });
+
+  const reduced = reduceMemoryEvents(fixture.events);
+  const withoutStaleAssert = reduceMemoryEvents(
+    fixture.events.filter((item) => item.event_id !== fixture.deferredAssert.event_id),
+  );
+
+  assert.equal(reduced.state['handoff.latest'], fixture.correction.value);
+  assert.equal(reduced.records['handoff.latest'].source.event_id, fixture.correction.event_id);
+  assert.equal(reduced.revision, 3, 'supersede não cria uma revisão artificial');
+  assert.equal(reduced.stateHash, withoutStaleAssert.stateHash, 'supersede não altera estado ou hash');
+  assert.equal(reduced.candidates.length, 0);
+  assert.equal(reduced.appliedEventIds.includes(fixture.deferredAssert.event_id), false);
+  assert.ok(reduced.superseded.some((entry) => entry.event_id === fixture.deferredAssert.event_id
+    && entry.by_event_id === fixture.correction.event_id));
+});
+
+test('[req:MEM-CUR-2] fixpoint preserva conflito com linhagem incompleta, divergente ou turno ambíguo', () => {
+  const scenarios = [
+    ['sessão divergente', { canonical_session_id: 'other-session' }],
+    ['activation divergente', { activation_id: 'other-activation' }],
+    ['epoch divergente', { activation_epoch: 8 }],
+    ['identidade incompleta', { activation_epoch: undefined }],
+    ['turno de origem ausente', { source_turn_id: undefined }],
+    ['turno ambíguo', { turn_sequence: 1 }],
+  ];
+
+  for (const [name, assertOverrides] of scenarios) {
+    const fixture = deferredAssertReplayFixture({ assertOverrides });
+    const reduced = reduceMemoryEvents(fixture.events);
+
+    assert.equal(reduced.state['handoff.latest'], fixture.correction.value, name);
+    assert.equal(reduced.records['handoff.latest'].source.event_id, fixture.correction.event_id, name);
+    assert.equal(reduced.candidates.length, 1, name);
+    assert.deepEqual(
+      reduced.candidates[0].event_ids.sort(),
+      [fixture.legacyPromotion.event_id, fixture.deferredAssert.event_id].sort(),
+      name,
+    );
+    assert.equal(reduced.appliedEventIds.includes(fixture.deferredAssert.event_id), false, name);
+  }
+});
+
+test('[req:MEM-CUR-2] decisão explícita prevalece sobre reavaliação do assert pendente', () => {
+  const fixture = deferredAssertReplayFixture();
+  const transient = transientDeferredCandidate(fixture);
+  assert.ok(transient);
+  const reject = event('mem-replay-explicit-reject', `candidate.decision.${transient.candidate_id}`, 'assert', 'rejected', {
+    observed_at: '2026-07-26T12:07:00.000Z',
+    candidate_decision: {
+      candidate_id: transient.candidate_id,
+      action: 'reject',
+      event_ids: [...transient.event_ids],
+    },
+  });
+
+  const reduced = reduceMemoryEvents([...fixture.events, reject]);
+
+  assert.equal(reduced.state['handoff.latest'], fixture.correction.value);
+  assert.equal(reduced.records['handoff.latest'].source.event_id, fixture.correction.event_id);
+  assert.equal(reduced.candidates.length, 0, 'a decisão explícita aposenta o candidate');
+  assert.equal(reduced.appliedEventIds.includes(fixture.deferredAssert.event_id), false);
+  assert.equal(reduced.superseded.some((entry) => entry.event_id === fixture.deferredAssert.event_id), false);
 });
 
 test('[req:OP-10] ledger-only reprojection separates the physical checkpoint from causal order without consuming outbox', () => {
