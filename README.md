@@ -290,8 +290,10 @@ a fronteira física correta; espelhos divergentes falham fechados. Uma
 ambiguidade comprovadamente substituída usa `memory reconcile <sessão>
 --by-session <sucessora> --reason <motivo>` como dry-run e exige `--apply`; a decisão faz backup e
 auditoria sem reescrever ledger, CORE ou notas. Depois rode `status --gate` novamente. Conflitos
-exigem curadoria explícita com `memory promote <id>` ou `memory reject <id>`; o doctor apenas
-diagnostica.
+exigem curadoria explícita e durável: `memory promote <id> --event <event-id>` escolhe um dos
+eventos do candidate; `memory reject <id>` mantém o valor atual. As decisões são idempotentes e
+sobrevivem a repair/replay; `blocked_by_core` não pode sobrescrever CORE. O doctor apenas
+diagnostica. Veja [memória e curadoria](docs/pt-BR/commands/memory.md).
 
 As notas de sessão usam um único snapshot vivo `## Agentes, tokens e custos`. Os hooks do agente principal e dos subagents recompõem o bloco atomicamente, incluindo custo, dimensões de tokens, reasoning e effort por modelo/origem.
 

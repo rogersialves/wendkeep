@@ -10,7 +10,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { canonicalMemoryJson, deriveMemoryProjection, reduceMemoryEvents } from '../hooks/memory-store.mjs';
+import {
+  canonicalMemoryJson, deriveMemoryProjection, prepareMemoryProjection, reduceMemoryEvents,
+} from '../hooks/memory-store.mjs';
 import { renderSharedMemory } from '../hooks/memory-schema.mjs';
 import { renderCoreSkeleton } from '../src/validate-core.mjs';
 
@@ -65,6 +67,20 @@ function checkpoint(reduced) {
     event_cursor: reduced.eventCursor,
     state_hash: reduced.stateHash,
   };
+}
+
+function writeMemoryProjection(vault, events) {
+  const brain = join(vault, '.brain');
+  const projection = prepareMemoryProjection(vault, events);
+  writeFileSync(join(brain, 'MEMORY_EVENTS.jsonl'), `${events.map(canonicalMemoryJson).join('\n')}\n`);
+  writeFileSync(join(brain, 'MEMORY_CANDIDATES.jsonl'), projection.candidatesContent);
+  writeFileSync(join(brain, 'SHARED_MEMORY.md'), projection.sharedContent);
+  return projection;
+}
+
+function readCandidates(vault) {
+  const content = readFileSync(join(vault, '.brain', 'MEMORY_CANDIDATES.jsonl'), 'utf8').trim();
+  return content ? content.split('\n').map(JSON.parse) : [];
 }
 
 function projectedAttempt(sessionId, event, checkpointValue = null, overrides = {}) {
@@ -405,20 +421,218 @@ test('falha durante publish restaura todos os paths finais e mantém backup', as
   } finally { rmSync(vault, { recursive: true, force: true }); }
 });
 
-test('promote e reject referenciam candidate e apenas acrescentam eventos ao ledger', async () => {
+test('[req:MEM-CUR-1] [req:MEM-CUR-2] [req:MEM-CUR-3] decisões sobre candidates sobrepostos sobrevivem a repair e retry', async () => {
   const vault = fixture();
   try {
-    const { migrateMemory, decideMemoryCandidate } = await import('../src/memory.mjs');
-    migrateMemory(vault, { apply: true });
-    const candidates = readFileSync(join(vault, '.brain', 'MEMORY_CANDIDATES.jsonl'), 'utf8').trim().split('\n').map(JSON.parse);
-    assert.ok(candidates.length >= 2);
-    const first = decideMemoryCandidate(vault, { action: 'promote', candidateId: candidates[0].candidate_id });
-    const second = decideMemoryCandidate(vault, { action: 'reject', candidateId: candidates[1].candidate_id });
-    assert.equal(first.status, 'promoted');
-    assert.equal(second.status, 'rejected');
-    const ledger = readFileSync(join(vault, '.brain', 'MEMORY_EVENTS.jsonl'), 'utf8').trim().split('\n').map(JSON.parse);
-    assert.ok(ledger.some((event) => event.evidence.includes(`candidate:${candidates[0].candidate_id}`)));
-    assert.ok(ledger.some((event) => event.evidence.includes(`candidate:${candidates[1].candidate_id}`)));
+    const { decideMemoryCandidate, repairMemory } = await import('../src/memory.mjs');
+    const base = { ...memoryEvent('mem-base', 'base handoff', 1), activation_id: 'activation-base' };
+    const discarded = { ...memoryEvent('mem-discarded', 'discarded handoff', 2), activation_id: 'activation-a' };
+    const winner = {
+      ...memoryEvent('mem-winner', 'winning handoff', 3),
+      activation_id: 'activation-b',
+      canonical_session_id: 'current',
+    };
+    writeMemoryProjection(vault, [base, discarded, winner]);
+    const historicalLedger = readFileSync(join(vault, '.brain', 'MEMORY_EVENTS.jsonl'), 'utf8');
+    const staleCheckpoint = { revision: 0, event_cursor: winner.event_id, state_hash: 'stale' };
+    const newerCheckpoint = { revision: 9, event_cursor: 'mem-newer', state_hash: 'newer' };
+    const newerAttemptEvent = {
+      ...memoryEvent('mem-newer', 'newer handoff', 4),
+      activation_id: 'activation-newer',
+      canonical_session_id: 'newer',
+    };
+    writeFileSync(join(vault, '.brain', 'SESSION_REGISTRY.json'), `${JSON.stringify({
+      version: 2,
+      sessions: {
+        current: {
+          memory_status: 'projected',
+          memory_checkpoint: staleCheckpoint,
+          last_memory_attempt: projectedAttempt('current', winner, staleCheckpoint),
+        },
+        newer: {
+          memory_status: 'projected',
+          memory_checkpoint: newerCheckpoint,
+          last_memory_attempt: projectedAttempt('newer', newerAttemptEvent, newerCheckpoint),
+        },
+      },
+    }, null, 2)}\n`);
+    const candidates = readCandidates(vault);
+    const rejected = candidates.find((item) => item.event_ids.includes(discarded.event_id));
+    const promoted = candidates.find((item) => item.event_ids.includes(winner.event_id));
+    assert.ok(rejected);
+    assert.ok(promoted);
+
+    assert.equal(decideMemoryCandidate(vault, {
+      action: 'reject', candidateId: rejected.candidate_id,
+    }).status, 'rejected');
+    assert.deepEqual(readCandidates(vault).map((item) => item.candidate_id), [promoted.candidate_id]);
+
+    const promotedResult = decideMemoryCandidate(vault, {
+      action: 'promote',
+      candidateId: promoted.candidate_id,
+      eventId: winner.event_id,
+      value: 'override que não pode vencer o evento escolhido',
+    });
+    assert.equal(promotedResult.status, 'promoted');
+    assert.deepEqual(readCandidates(vault), []);
+    const refreshed = JSON.parse(readFileSync(join(vault, '.brain', 'SESSION_REGISTRY.json'), 'utf8'))
+      .sessions.current;
+    assert.deepEqual(refreshed.last_memory_attempt.checkpoint, promotedResult.projection.checkpoint);
+    assert.deepEqual(refreshed.memory_checkpoint, promotedResult.projection.checkpoint);
+    assert.equal(refreshed.memory_candidate_decisions.length, 1);
+    const concurrent = JSON.parse(readFileSync(join(vault, '.brain', 'SESSION_REGISTRY.json'), 'utf8'))
+      .sessions.newer;
+    assert.deepEqual(concurrent.last_memory_attempt.checkpoint, newerCheckpoint);
+    assert.deepEqual(concurrent.memory_checkpoint, newerCheckpoint);
+
+    repairMemory(vault);
+    assert.deepEqual(readCandidates(vault), [], 'repair/replay não recria decisões concluídas');
+    const ledgerPath = join(vault, '.brain', 'MEMORY_EVENTS.jsonl');
+    const ledgerAfterDecisions = readFileSync(ledgerPath, 'utf8');
+    assert.ok(ledgerAfterDecisions.startsWith(historicalLedger), 'decisões somente acrescentam ao ledger histórico');
+    const ledger = ledgerAfterDecisions.trim().split('\n').map(JSON.parse);
+    assert.deepEqual(
+      ledger.filter((event) => event.candidate_decision).map((event) => event.candidate_decision.action).sort(),
+      ['promote', 'reject'],
+      'promote e reject permanecem auditáveis no ledger',
+    );
+    const reduced = reduceMemoryEvents(ledger);
+    assert.equal(reduced.state['handoff.latest'], winner.value);
+    assert.equal(Object.keys(reduced.state).some((key) => key.startsWith('candidate.')), false);
+    assert.equal(reduced.records['handoff.latest'].source.candidate_decision.selected_event_id, winner.event_id);
+    assert.equal(reduced.records['handoff.latest'].source.activation_id, winner.activation_id);
+    assert.ok(reduced.records['handoff.latest'].source.supersedes.includes(winner.event_id));
+
+    const beforeRetry = readFileSync(ledgerPath, 'utf8');
+    const sharedBeforeRetry = readFileSync(join(vault, '.brain', 'SHARED_MEMORY.md'), 'utf8');
+    const retry = decideMemoryCandidate(vault, {
+      action: 'promote', candidateId: promoted.candidate_id, eventId: winner.event_id,
+    });
+    assert.equal(retry.status, 'promoted');
+    assert.equal(retry.alreadyApplied, true);
+    assert.equal(readFileSync(ledgerPath, 'utf8'), beforeRetry, 'retry não duplica evento');
+    assert.equal(readFileSync(join(vault, '.brain', 'SHARED_MEMORY.md'), 'utf8'), sharedBeforeRetry);
+    assert.equal(retry.projection.revision, promotedResult.projection.revision);
+    assert.equal(retry.projection.stateHash, promotedResult.projection.stateHash);
+    assert.throws(() => decideMemoryCandidate(vault, {
+      action: 'reject', candidateId: promoted.candidate_id,
+    }), /decisão incompatível|already.*promot|já.*promov/i);
+  } finally { rmSync(vault, { recursive: true, force: true }); }
+});
+
+test('[req:MEM-CUR-2] CAS não atualiza attempt novo que ainda contém o evento promovido', async () => {
+  const vault = fixture();
+  try {
+    const { decideMemoryCandidate } = await import('../src/memory.mjs');
+    const base = { ...memoryEvent('mem-cas-base', 'base', 1), activation_id: 'activation-base' };
+    const winner = {
+      ...memoryEvent('mem-cas-winner', 'winner', 2),
+      activation_id: 'activation-winner',
+      canonical_session_id: 'current',
+    };
+    writeMemoryProjection(vault, [base, winner]);
+    const [candidate] = readCandidates(vault);
+    const staleCheckpoint = { revision: 0, event_cursor: winner.event_id, state_hash: 'stale' };
+    const newerCheckpoint = { revision: 77, event_cursor: 'mem-same-turn-newer', state_hash: 'newer' };
+    const registryPath = join(vault, '.brain', 'SESSION_REGISTRY.json');
+    writeFileSync(registryPath, `${JSON.stringify({
+      version: 2,
+      sessions: {
+        current: {
+          memory_status: 'projected',
+          memory_checkpoint: staleCheckpoint,
+          last_memory_attempt: projectedAttempt('current', winner, staleCheckpoint),
+        },
+      },
+    }, null, 2)}\n`);
+
+    const result = decideMemoryCandidate(vault, {
+      action: 'promote',
+      candidateId: candidate.candidate_id,
+      eventId: winner.event_id,
+      beforeCheckpointRefresh: () => {
+        const registry = JSON.parse(readFileSync(registryPath, 'utf8'));
+        registry.sessions.current.last_memory_attempt = {
+          ...registry.sessions.current.last_memory_attempt,
+          event_ids: [winner.event_id, 'mem-same-turn-newer'],
+          checkpoint: newerCheckpoint,
+        };
+        registry.sessions.current.memory_checkpoint = newerCheckpoint;
+        writeFileSync(registryPath, `${JSON.stringify(registry, null, 2)}\n`);
+      },
+    });
+
+    assert.equal(result.status, 'promoted');
+    assert.equal(result.checkpointRefreshed, 0);
+    const current = JSON.parse(readFileSync(registryPath, 'utf8')).sessions.current;
+    assert.deepEqual(current.last_memory_attempt.checkpoint, newerCheckpoint);
+    assert.deepEqual(current.memory_checkpoint, newerCheckpoint);
+    assert.deepEqual(current.last_memory_attempt.event_ids, [winner.event_id, 'mem-same-turn-newer']);
+  } finally { rmSync(vault, { recursive: true, force: true }); }
+});
+
+test('[req:MEM-CUR-2] promoção de conflito exige event_id pertencente ao candidate', async () => {
+  const vault = fixture();
+  try {
+    const { decideMemoryCandidate } = await import('../src/memory.mjs');
+    const base = { ...memoryEvent('mem-choice-base', 'base', 1), activation_id: 'activation-base' };
+    const proposal = { ...memoryEvent('mem-choice-proposal', 'proposal', 2), activation_id: 'activation-proposal' };
+    writeMemoryProjection(vault, [base, proposal]);
+    const [candidate] = readCandidates(vault);
+    const ledgerBefore = readFileSync(join(vault, '.brain', 'MEMORY_EVENTS.jsonl'), 'utf8');
+
+    assert.throws(() => decideMemoryCandidate(vault, {
+      action: 'promote', candidateId: candidate.candidate_id,
+    }), /event_id|eventId|--event/i);
+    assert.throws(() => decideMemoryCandidate(vault, {
+      action: 'promote', candidateId: candidate.candidate_id, eventId: 'mem-not-a-member',
+    }), /não pertence|not.*candidate/i);
+    assert.equal(readFileSync(join(vault, '.brain', 'MEMORY_EVENTS.jsonl'), 'utf8'), ledgerBefore);
+    assert.equal(readCandidates(vault).length, 1);
+  } finally { rmSync(vault, { recursive: true, force: true }); }
+});
+
+test('[req:MEM-CUR-2] CLI promote encaminha --event e falha fechado sem a escolha', () => {
+  const vault = fixture();
+  try {
+    const base = { ...memoryEvent('mem-cli-choice-base', 'base', 1), activation_id: 'activation-base' };
+    const proposal = { ...memoryEvent('mem-cli-choice-proposal', 'proposal', 2), activation_id: 'activation-proposal' };
+    writeMemoryProjection(vault, [base, proposal]);
+    const [candidate] = readCandidates(vault);
+    const args = ['memory', 'promote', candidate.candidate_id, '--vault', vault];
+
+    const missing = spawnSync(process.execPath, [BIN, ...args], { encoding: 'utf8' });
+    assert.equal(missing.status, 1);
+    assert.match(missing.stderr, /--event|eventId/i);
+
+    const applied = spawnSync(process.execPath, [BIN, ...args, '--event', proposal.event_id], { encoding: 'utf8' });
+    assert.equal(applied.status, 0, applied.stderr);
+    assert.equal(JSON.parse(applied.stdout).status, 'promoted');
+    assert.deepEqual(readCandidates(vault), []);
+  } finally { rmSync(vault, { recursive: true, force: true }); }
+});
+
+test('[req:MEM-CUR-2] blocked_by_core não pode ser promovido e pode ser rejeitado durablemente', async () => {
+  const vault = fixture();
+  try {
+    const { decideMemoryCandidate, repairMemory } = await import('../src/memory.mjs');
+    const corePath = join(vault, '.brain', 'CORE.md');
+    writeFileSync(corePath, `${readFileSync(corePath, 'utf8')}\n<!-- wk-memory: release.push="manual-only" -->\n`);
+    const proposal = {
+      ...memoryEvent('mem-core-conflict', 'automatic', 1),
+      memory_key: 'release.push',
+    };
+    writeMemoryProjection(vault, [proposal]);
+    const [candidate] = readCandidates(vault);
+    assert.equal(candidate.reason, 'blocked_by_core');
+    assert.throws(() => decideMemoryCandidate(vault, {
+      action: 'promote', candidateId: candidate.candidate_id, eventId: proposal.event_id,
+    }), /CORE|blocked_by_core/i);
+    assert.equal(decideMemoryCandidate(vault, {
+      action: 'reject', candidateId: candidate.candidate_id,
+    }).status, 'rejected');
+    repairMemory(vault);
+    assert.deepEqual(readCandidates(vault), []);
   } finally { rmSync(vault, { recursive: true, force: true }); }
 });
 

@@ -4,6 +4,18 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.66.1] — 2026-07-29
+
+### Fixed
+
+- **A curadoria de candidates agora é durável e idempotente.** `memory promote` e
+  `memory reject` registram decisões causais no ledger; repair/replay não recriam o conflito
+  resolvido, retries não duplicam eventos, candidates sobrepostos permanecem isolados e a
+  promoção recupera o checkpoint divergente do attempt correspondente sem tocar attempt novo.
+- **Promoção de conflito exige escolha explícita.** `memory promote <candidate> --event
+  <event-id>` publica exatamente o evento escolhido, rejeita IDs externos ao candidate e não
+  permite que `blocked_by_core` sobrescreva a autoridade canônica de CORE.
+
 ## [0.66.0] — 2026-07-29
 
 ### Added

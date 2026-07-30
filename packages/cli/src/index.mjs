@@ -101,7 +101,7 @@ Usage:
   wendkeep lesson add "t" "l"   Record a project-local lesson (injected at SessionStart).
   wendkeep memory <sub>          Shared memory v2: status | migrate [--apply] | repair |
                            reconcile <session> --by-session <session> --reason <text> [--apply] |
-                           promote <candidate> | reject <candidate>. --vault P.
+                           promote <candidate> [--event <event-id>] | reject <candidate>. --vault P.
                            Reconcile is dry-run by default; the original attempt remains audited.
   wendkeep validate-memory [path]  Validate .brain/CORE.md against the compaction
                            protocol (cap 25, 3 sections, no secrets/PII).

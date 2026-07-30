@@ -26,7 +26,7 @@ Pass the vault explicitly in automation. Preserve backups and evidence before re
 npx wendkeep memory status [--gate] --vault <vault>
 npx wendkeep memory repair --vault <vault>
 npx wendkeep memory reconcile <ambiguous-session> --by-session <successor-session> --reason <reason> [--apply] --vault <vault>
-npx wendkeep memory promote <candidate> --vault <vault>
+npx wendkeep memory promote <candidate> [--event <event-id>] --vault <vault>
 npx wendkeep memory reject <candidate> --vault <vault>
 npx wendkeep validate-memory [CORE-path]
 npx wendkeep validate-memory --vault <v2-vault>
@@ -63,7 +63,14 @@ npx wendkeep validate-memory --vault <v2-vault>
   Junctions, symlinks, reparse points, or hardlinks fail closed without touching external bytes.
   Locks publish owner and lease atomically, never reap a live PID by age alone, and release only
   the lease they acquired.
-- `promote`/`reject` append auditable decisions and never rewrite the ledger in place.
+- `promote`/`reject` append an auditable, idempotent decision to the ledger. Replay and repair
+  preserve that decision and do not recreate the resolved candidate. For a `conflict` candidate,
+  `promote` requires an `--event <event-id>` that belongs to the candidate; date or random ID
+  never picks an implicit winner. `reject` preserves the current operational value. A
+  `blocked_by_core` candidate can only be rejected: promotion first requires canonical CORE
+  curation. If the selected event still belongs to the matching latest `projected` attempt,
+  promotion also refreshes its checkpoint and mirror causally; JSON reports
+  `checkpointRefreshed`, and a newer concurrent attempt remains untouched.
 - `validate-memory <CORE.md>` checks the 25-line cap, required sections, and secrets.
 - `validate-memory --vault` requires a complete v2 bundle and is not the legacy-vault gate.
 
@@ -74,7 +81,8 @@ npx wendkeep memory status --gate --vault .MyApp-vault
 npx wendkeep memory reconcile old --by-session current --reason "delivery continued" --vault .MyApp-vault
 npx wendkeep memory reconcile old --by-session current --reason "delivery continued" --apply --vault .MyApp-vault
 npx wendkeep validate-memory .MyApp-vault/.brain/CORE.md
-npx wendkeep memory promote candidate-123 --vault .MyApp-vault
+npx wendkeep memory promote candidate-123 --event mem-selected --vault .MyApp-vault
+npx wendkeep memory reject candidate-456 --vault .MyApp-vault
 ```
 
 ## Expected result
@@ -97,6 +105,9 @@ of a global projection that has already advanced with concurrent events.
   `memory reconcile` dry run before authorizing `--apply`; the command fails when the ambiguous
   attempt already contains event IDs.
 - Ordinary pending candidate: recoverable warning, requiring human choice when appropriate.
+- `promote` reports that `--event` is required: inspect the candidate `event_ids`, compare their
+  provenance/value, and name the winner explicitly. An ID outside the candidate fails without
+  mutating the ledger or projections.
 - Missing `event_cursor` or mismatched v2 hash: preserve the bundle and assess `memory repair`.
 - `validate-memory --vault` fails on legacy: validate CORE only or migrate first.
 

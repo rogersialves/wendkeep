@@ -237,37 +237,191 @@ function readCandidates(vault) {
     .split('\n').filter(Boolean).map((line) => JSON.parse(line));
 }
 
-export function decideMemoryCandidate(vault, { action, candidateId, value } = {}) {
+function priorCandidateDecision(vault, candidateId) {
+  return readMemoryLedger(vault).events.find(
+    (event) => event.candidate_decision?.candidate_id === candidateId,
+  ) || null;
+}
+
+function candidateEvent(candidate, eventId) {
+  const events = Array.isArray(candidate.events) ? candidate.events : [];
+  if (candidate.reason === 'conflict' && !eventId) {
+    throw new Error('Candidate de conflito exige eventId (--event na CLI).');
+  }
+  if (!eventId) return events.length === 1 ? events[0] : null;
+  const selected = events.find((event) => event.event_id === eventId);
+  if (!selected) throw new Error(`event_id ${eventId} não pertence ao candidate ${candidate.candidate_id}.`);
+  return selected;
+}
+
+function assertCompatibleDecision(prior, { action, eventId }) {
+  const decision = prior.candidate_decision;
+  const sameSelection = action !== 'promote'
+    || (decision.selected_event_id || null) === (eventId || null);
+  if (decision.action !== action || !sameSelection) {
+    throw new Error(`Candidate ${decision.candidate_id} já possui decisão incompatível (${decision.action}).`);
+  }
+}
+
+function matchesPromotedAttempt(attempt, selected) {
+  if (attempt?.memory_mode !== 'v2' || attempt.state !== 'projected'
+      || !Array.isArray(attempt.event_ids) || !attempt.event_ids.includes(selected.event_id)) return false;
+  if (attempt.activation_id && selected.activation_id
+      && attempt.activation_id !== selected.activation_id) return false;
+  if (Number.isInteger(attempt.activation_epoch) && Number.isInteger(selected.activation_epoch)
+      && attempt.activation_epoch !== selected.activation_epoch) return false;
+  if (Number.isInteger(attempt.turn_sequence) && Number.isInteger(selected.turn_sequence)
+      && attempt.turn_sequence !== selected.turn_sequence) return false;
+  if (attempt.canonical_session_id && selected.canonical_session_id
+      && attempt.canonical_session_id !== selected.canonical_session_id) return false;
+  return true;
+}
+
+function snapshotPromotedAttemptCheckpoints(vault, selected) {
+  if (!selected) return new Map();
+  const registry = readSessionRegistry(vault);
+  return new Map(Object.entries(registry.sessions || {})
+    .filter(([, entry]) => matchesPromotedAttempt(entry?.last_memory_attempt, selected))
+    .map(([sessionId, entry]) => [sessionId, {
+      attempt: attemptFingerprint(entry.last_memory_attempt),
+      checkpoint: memoryCheckpointFingerprint(entry),
+    }]));
+}
+
+function refreshPromotedAttemptCheckpoint(vault, {
+  candidateId, decisionEventId, selected, checkpoint, decidedAt, expectedAttempts,
+}) {
+  if (!selected || !checkpoint || !expectedAttempts?.size) return 0;
+  return mutateSessionRegistry(vault, (registry) => {
+    let refreshed = 0;
+    for (const [sessionId, entry] of Object.entries(registry.sessions || {})) {
+      const expected = expectedAttempts.get(sessionId);
+      if (!expected) continue;
+      const attempt = entry?.last_memory_attempt;
+      if (attemptFingerprint(attempt) !== expected.attempt
+          || memoryCheckpointFingerprint(entry) !== expected.checkpoint) continue;
+
+      const alreadyAudited = (entry.memory_candidate_decisions || [])
+        .some((audit) => audit.decision_event_id === decisionEventId);
+      if (alreadyAudited && sameCheckpoint(attempt.checkpoint, checkpoint)
+          && sameCheckpoint(entry.memory_checkpoint, checkpoint)) continue;
+      const originalCheckpoint = cloneJson(attempt.checkpoint || entry.memory_checkpoint || null);
+      attempt.checkpoint = cloneJson(checkpoint);
+      entry.memory_checkpoint = cloneJson(checkpoint);
+      entry.memory_status = 'projected';
+      if (!alreadyAudited) {
+        entry.memory_candidate_decisions = [
+          ...(Array.isArray(entry.memory_candidate_decisions) ? entry.memory_candidate_decisions : []),
+          {
+            v: 1,
+            type: 'candidate_checkpoint_refreshed',
+            candidate_id: candidateId,
+            decision_event_id: decisionEventId,
+            selected_event_id: selected.event_id,
+            decided_at: decidedAt,
+            original_checkpoint: originalCheckpoint,
+            checkpoint: cloneJson(checkpoint),
+          },
+        ];
+      }
+      refreshed += 1;
+    }
+    return refreshed;
+  });
+}
+
+export function decideMemoryCandidate(vault, {
+  action, candidateId, value, eventId, beforeCheckpointRefresh,
+} = {}) {
   if (!['promote', 'reject'].includes(action)) throw new TypeError('action deve ser promote ou reject.');
   if (!candidateId) throw new TypeError('candidateId é obrigatório.');
+  const preflight = projectMemoryOutbox(vault);
+  if (preflight.status === 'busy') return { status: 'busy', candidateId };
+  const prior = priorCandidateDecision(vault, candidateId);
+  if (prior) {
+    assertCompatibleDecision(prior, { action, eventId });
+    const selected = action === 'promote' && prior.candidate_decision.selected_event_id
+      ? readMemoryLedger(vault).events.find(
+        (event) => event.event_id === prior.candidate_decision.selected_event_id,
+      )
+      : null;
+    const expectedAttempts = snapshotPromotedAttemptCheckpoints(vault, selected);
+    beforeCheckpointRefresh?.();
+    const checkpointRefreshed = action === 'promote'
+      ? refreshPromotedAttemptCheckpoint(vault, {
+        candidateId,
+        decisionEventId: prior.event_id,
+        selected,
+        checkpoint: preflight.checkpoint,
+        decidedAt: prior.observed_at,
+        expectedAttempts,
+      })
+      : 0;
+    return {
+      status: action === 'promote' ? 'promoted' : 'rejected',
+      candidateId,
+      eventId: prior.event_id,
+      alreadyApplied: true,
+      checkpointRefreshed,
+      projection: preflight,
+    };
+  }
   const candidates = readCandidates(vault);
   const candidate = candidates.find((item) => item.candidate_id === candidateId);
   if (!candidate) throw new Error(`Candidate não encontrado: ${candidateId}`);
+  if (action === 'promote' && candidate.reason === 'blocked_by_core') {
+    throw new Error(`Candidate ${candidateId} está blocked_by_core; edite CORE ou rejeite o candidate.`);
+  }
+  const selected = action === 'promote' ? candidateEvent(candidate, eventId) : null;
+  const expectedAttempts = snapshotPromotedAttemptCheckpoints(vault, selected);
+  const selectedValue = selected?.value ?? value ?? candidate.value ?? candidate.proposed_value;
+  if (action === 'promote' && selectedValue === undefined) {
+    throw new Error(`Candidate ${candidateId} não contém valor promovível.`);
+  }
   const now = new Date().toISOString();
+  const decision = {
+    candidate_id: candidateId,
+    action,
+    event_ids: Array.isArray(candidate.event_ids) ? [...candidate.event_ids].sort() : [],
+    ...(selected ? { selected_event_id: selected.event_id } : {}),
+  };
   const event = {
     v: 1,
-    event_id: `cli-${action}-${hash(candidateId).slice(0, 20)}`,
+    event_id: `cli-${action}-${hash(`${candidateId}\0${selected?.event_id || ''}`).slice(0, 20)}`,
     project_id: projectId(vault),
-    memory_key: action === 'promote' ? candidate.memory_key : `candidate.rejected.${candidateId}`,
-    operation: 'assert',
-    value: sanitizeMemoryText(action === 'promote' ? (value ?? candidate.value ?? candidate.values?.[0] ?? '') : 'rejected'),
+    memory_key: action === 'promote' ? candidate.memory_key : `candidate.decision.${candidateId}`,
+    operation: action === 'promote' && selected ? 'replace' : 'assert',
+    value: sanitizeMemoryText(action === 'promote' ? selectedValue : 'rejected'),
     authority: 'verified',
-    activation_id: 'wendkeep-memory-cli',
-    turn_sequence: 0,
+    activation_id: selected?.activation_id || 'wendkeep-memory-cli',
+    ...(Number.isInteger(selected?.activation_epoch) ? { activation_epoch: selected.activation_epoch } : {}),
+    turn_sequence: selected?.turn_sequence ?? 0,
     observed_at: now,
     evidence: [`candidate:${candidateId}`],
+    candidate_decision: decision,
+    ...(selected ? { supersedes: decision.event_ids } : {}),
   };
   enqueueMemoryEvent(vault, event);
   const projection = projectMemoryOutbox(vault);
   if (projection.status === 'busy') return { status: 'busy', candidateId };
-  const remaining = candidates.filter((item) => item.candidate_id !== candidateId);
-  const projected = readCandidates(vault);
-  const merged = new Map([...remaining, ...projected].map((item) => [item.candidate_id, item]));
-  writeVaultFileAtomic(
-    vault, brainPath(vault, CANDIDATES), candidateText([...merged.values()]), 'utf8',
-    { label: 'candidates após decisão humana' },
-  );
-  return { status: action === 'promote' ? 'promoted' : 'rejected', candidateId, eventId: event.event_id, projection };
+  beforeCheckpointRefresh?.();
+  const checkpointRefreshed = action === 'promote'
+    ? refreshPromotedAttemptCheckpoint(vault, {
+      candidateId,
+      decisionEventId: event.event_id,
+      selected,
+      checkpoint: projection.checkpoint,
+      decidedAt: now,
+      expectedAttempts,
+    })
+    : 0;
+  return {
+    status: action === 'promote' ? 'promoted' : 'rejected',
+    candidateId,
+    eventId: event.event_id,
+    checkpointRefreshed,
+    projection,
+  };
 }
 
 function cloneJson(value) {
@@ -1038,8 +1192,14 @@ export function runMemory(argv) {
         apply: reconcileArgs.apply,
       });
     }
-    else if (sub === 'promote' || sub === 'reject') result = decideMemoryCandidate(vault, { action: sub, candidateId: positional });
-    else { process.stderr.write('wendkeep memory: use status | migrate [--apply] | repair | reconcile <session> --by-session <session> --reason <text> [--apply] | promote <candidate> | reject <candidate>.\n'); process.exitCode = 2; return; }
+    else if (sub === 'promote' || sub === 'reject') {
+      const eventId = option(argv, '--event');
+      if (sub === 'reject' && eventId) throw memoryUsageError('--event é permitido somente em memory promote.');
+      result = decideMemoryCandidate(vault, {
+        action: sub, candidateId: positional, ...(eventId ? { eventId } : {}),
+      });
+    }
+    else { process.stderr.write('wendkeep memory: use status | migrate [--apply] | repair | reconcile <session> --by-session <session> --reason <text> [--apply] | promote <candidate> [--event <event-id>] | reject <candidate>.\n'); process.exitCode = 2; return; }
     process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
     if (sub === 'status' && argv.includes('--gate')) process.exitCode = result.status === 'blocked' ? 1 : 0;
     else if (sub === 'reconcile' && reconcileArgs.apply) process.exitCode = result.health?.status === 'blocked' ? 1 : 0;
