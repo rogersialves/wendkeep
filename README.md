@@ -294,11 +294,13 @@ exigem curadoria explícita e durável: `memory promote <id> --event <event-id>`
 eventos do candidate; `memory reject <id>` mantém o valor atual. A decisão é idempotente, e uma
 promoção nova aceita um Stop posterior da mesma sessão/activation sem recriar conflito. Uma
 promoção gravada pela 0.66.1 permanece histórica: se o próximo Stop formar novo candidate,
-atualize o pacote e promova explicitamente o evento atual uma vez; repair/reconcile não escolhem
-causalidade. Se a ordem física e `observed_at` deixarem outra promoção 0.66.1 projetada fora do
-candidate, o comando só a inclui em `supersedes` após provar a mesma linhagem, turno maior e a
-inversão temporal; fonte moderna ou alheia falha antes de anexar bytes. Decisões sobrevivem a
-repair/replay; `blocked_by_core` não pode sobrescrever CORE.
+atualize para a 0.66.3 e rode `memory repair`. Durante o replay, um candidate transitório é
+reavaliado contra a fonte moderna final: mesma sessão/activation/epoch e turno maior avança;
+turno menor fica superseded. O repair só migra checkpoint e espelho quando prova exatamente o
+replay anterior, a identidade do attempt e a ausência de conflito real; faz backup, registra audit
+e não acrescenta nem reescreve eventos. Ambiguidade continua na fila para curadoria explícita.
+Não publique nem instale a 0.66.2; use a 0.66.3. Decisões sobrevivem a repair/replay;
+`blocked_by_core` não pode sobrescrever CORE.
 O doctor apenas diagnostica. Veja [memória e curadoria](docs/pt-BR/commands/memory.md).
 
 As notas de sessão usam um único snapshot vivo `## Agentes, tokens e custos`. Os hooks do agente principal e dos subagents recompõem o bloco atomicamente, incluindo custo, dimensões de tokens, reasoning e effort por modelo/origem.

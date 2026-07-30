@@ -74,11 +74,11 @@ npx wendkeep validate-memory --vault <v2-vault>
   the already validated JSON value without string coercion and copies the selected event's
   `canonical_session_id`, activation/epoch, `source_turn_id`, and `turn_sequence`. A later Stop
   from the same session/activation therefore advances the value instead of opening another candidate.
-  When physical append order and `observed_at` leave a projected 0.66.1 promotion outside the
-  candidate, it is added to `supersedes` only if it has the exact legacy shape, shares a candidate
-  ancestor, and the selected event proves the same session/activation/epoch, a later turn, and the
-  temporal inversion. `candidate_decision.event_ids` remains exactly the choice shown to the
-  operator; a modern source, different lineage, or incomplete proof fails before appending an event.
+  During replay, a transient candidate is re-evaluated against the final modern source. The same
+  session/activation/epoch and a higher turn applies the Stop; a lower turn is superseded. A
+  different, incomplete, or ambiguous identity keeps the candidate queued for curation. `memory
+  repair` compares the old and current replay and migrates checkpoint+mirror only with exact
+  identity, backup, audit, and CAS; it does not reorder, rewrite, or append a ledger event.
 - `validate-memory <CORE.md>` checks the 25-line cap, required sections, and secrets.
 - `validate-memory --vault` requires a complete v2 bundle and is not the legacy-vault gate.
 
@@ -116,9 +116,10 @@ of a global projection that has already advanced with concurrent events.
 - `promote` reports that `--event` is required: inspect the candidate `event_ids`, compare their
   provenance/value, and name the winner explicitly. An ID outside the candidate fails without
   mutating the ledger or projections.
-- A promotion made by 0.66.1 followed by a new candidate: update to 0.66.2 or newer, inspect the
-  provenance, and explicitly promote the current event once. The old ledger is not reinterpreted;
-  `memory repair` and `memory reconcile` do not replace that human choice.
+- A promotion made by 0.66.1 followed by a transient candidate: update to 0.66.3, preserve a backup,
+  and run `memory repair`. Do not publish or install 0.66.2. Repair migrates the checkpoint only
+  when the old replay, attempt identity, and new event match exactly; a real conflict stays blocked
+  for a human `promote`/`reject` choice.
 - `promote` says that the candidate no longer matches the causal projection: no event was appended.
   Run `memory status`, inspect the current candidate again, and do not force a different lineage.
 - Missing `event_cursor` or mismatched v2 hash: preserve the bundle and assess `memory repair`.

@@ -344,6 +344,22 @@ function sameCausalActivation(left, right) {
     && left.activation_id === right?.activation_id;
 }
 
+function hasCompleteCausalIdentity(event) {
+  return Boolean(event?.canonical_session_id)
+    && Boolean(event?.activation_id)
+    && Boolean(event?.source_turn_id)
+    && Number.isInteger(event?.activation_epoch)
+    && Number.isInteger(event?.turn_sequence);
+}
+
+function sameCompleteCausalLineage(left, right) {
+  return hasCompleteCausalIdentity(left)
+    && hasCompleteCausalIdentity(right)
+    && left.canonical_session_id === right.canonical_session_id
+    && left.activation_id === right.activation_id
+    && left.activation_epoch === right.activation_epoch;
+}
+
 function comparable(left, right) {
   if (sameCausalActivation(left, right)) return true;
   const leftSupersedes = left.supersedes_event_id || left.supersedes;
@@ -447,7 +463,9 @@ function isCausallyOlder(event, current) {
  * Pure deterministic reducer. It pre-detects incomparable scalar siblings so replay order
  * never turns one concurrent writer into an accidental winner.
  */
-export function reduceMemoryEvents(inputEvents = [], { coreInvariants = new Map() } = {}) {
+export function reduceMemoryEvents(inputEvents = [], {
+  coreInvariants = new Map(), resolveDeferredAsserts = true,
+} = {}) {
   const protectedValues = coreInvariants instanceof Map
     ? coreInvariants
     : new Map(Object.entries(coreInvariants || {}));
@@ -495,6 +513,8 @@ export function reduceMemoryEvents(inputEvents = [], { coreInvariants = new Map(
   const records = new Map();
   const tombstones = new Map();
   const candidates = [];
+  const pendingAssertConflicts = [];
+  const resolvedCandidateIds = new Set();
   const emittedGroups = new Set();
   const appliedEventIds = [];
   const superseded = [];
@@ -543,7 +563,9 @@ export function reduceMemoryEvents(inputEvents = [], { coreInvariants = new Map(
           appliedEventIds.push(item.event_id);
           continue;
         }
-        candidates.push(conflictCandidate(item.memory_key, [currentEventFromRecord(current), item]));
+        const candidate = conflictCandidate(item.memory_key, [currentEventFromRecord(current), item]);
+        candidates.push(candidate);
+        pendingAssertConflicts.push({ candidate, event: item });
         continue;
       }
       if (!current) {
@@ -616,6 +638,46 @@ export function reduceMemoryEvents(inputEvents = [], { coreInvariants = new Map(
     appliedEventIds.push(item.event_id);
   }
 
+  if (resolveDeferredAsserts) {
+    // A physically late assert can sort before a corrective promotion because effective time
+    // precedes CLI decision time. Revisit only scalar assert conflicts left without an explicit
+    // decision, against the final complete causal source; the ledger and global ordering stay put.
+    const deferredAsserts = pendingAssertConflicts
+      .filter((pending) => !candidateDecisions.has(pending.candidate.candidate_id))
+      .sort((left, right) => String(left.event.memory_key).localeCompare(String(right.event.memory_key))
+        || String(left.event.canonical_session_id || '').localeCompare(String(right.event.canonical_session_id || ''))
+        || String(left.event.activation_id || '').localeCompare(String(right.event.activation_id || ''))
+        || Number(left.event.activation_epoch ?? -1) - Number(right.event.activation_epoch ?? -1)
+        || Number(left.event.turn_sequence ?? -1) - Number(right.event.turn_sequence ?? -1)
+        || eventOrder(left.event, right.event));
+    let advanced = true;
+    while (advanced) {
+      advanced = false;
+      for (const pending of deferredAsserts) {
+        if (resolvedCandidateIds.has(pending.candidate.candidate_id)) continue;
+        const current = records.get(pending.event.memory_key);
+        const currentSource = current?.source;
+        if (!sameCompleteCausalLineage(pending.event, currentSource)) continue;
+        if (pending.event.turn_sequence > currentSource.turn_sequence) {
+          records.set(pending.event.memory_key, {
+            value: pending.event.value,
+            revision: current.revision + 1,
+            source: pending.event,
+          });
+          tombstones.delete(pending.event.memory_key);
+          superseded.push({ event_id: currentSource.event_id, by_event_id: pending.event.event_id });
+          revision += 1;
+          appliedEventIds.push(pending.event.event_id);
+          resolvedCandidateIds.add(pending.candidate.candidate_id);
+          advanced = true;
+        } else if (pending.event.turn_sequence < currentSource.turn_sequence) {
+          superseded.push({ event_id: pending.event.event_id, by_event_id: currentSource.event_id });
+          resolvedCandidateIds.add(pending.candidate.candidate_id);
+        }
+      }
+    }
+  }
+
   const stateEntries = [...records].map(([key, record]) => [key, record.value]);
   const recordEntries = [...records].map(([key, record]) => [key, record]);
   const tombstoneEntries = [...tombstones];
@@ -623,7 +685,8 @@ export function reduceMemoryEvents(inputEvents = [], { coreInvariants = new Map(
   const recordObject = sortedObject(recordEntries);
   const tombstoneObject = sortedObject(tombstoneEntries);
   const unresolvedCandidates = candidates
-    .filter((item) => !candidateDecisions.has(item.candidate_id));
+    .filter((item) => !candidateDecisions.has(item.candidate_id)
+      && !resolvedCandidateIds.has(item.candidate_id));
   unresolvedCandidates.sort((left, right) => left.candidate_id.localeCompare(right.candidate_id));
   superseded.sort((left, right) => left.event_id.localeCompare(right.event_id));
   const activeEvents = Object.entries(recordObject).map(([memoryKey, record]) => ({
@@ -655,8 +718,12 @@ export function reduceMemoryEvents(inputEvents = [], { coreInvariants = new Map(
  * `eventCursor` is the reducer's deterministic causal cursor; `ledgerCursor` is the
  * physical prefix boundary used by durable checkpoints.
  */
-export function deriveMemoryProjection(vaultBase, inputEvents = []) {
-  const reduced = reduceMemoryEvents(inputEvents, { coreInvariants: readCoreInvariants(vaultBase) });
+export function deriveMemoryProjection(vaultBase, inputEvents = [], {
+  resolveDeferredAsserts = true,
+} = {}) {
+  const reduced = reduceMemoryEvents(inputEvents, {
+    coreInvariants: readCoreInvariants(vaultBase), resolveDeferredAsserts,
+  });
   const ledgerCursor = inputEvents.at(-1)?.event_id || 'none';
   const checkpoint = {
     revision: reduced.revision,

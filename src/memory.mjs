@@ -1013,6 +1013,67 @@ function historicalAssertOnlyCheckpoint(vault, attempt, authority, checkpoint) {
   return currentPrefix.checkpoint;
 }
 
+function deferredAssertReplayCheckpointMigration(
+  sessionId, entry, authority, legacyReplay, fullReplay,
+) {
+  const attempt = entry?.last_memory_attempt;
+  const checkpoint = attempt?.checkpoint;
+  if (attempt?.memory_mode !== 'v2' || attempt?.state !== 'projected'
+      || attempt?.disposition !== 'applied' || !checkpointShape(checkpoint)) return null;
+  if (!Object.prototype.hasOwnProperty.call(entry, 'memory_checkpoint')
+      || !sameCheckpoint(entry.memory_checkpoint, checkpoint)
+      || !sameCheckpoint(checkpoint, legacyReplay.checkpoint)
+      || sameCheckpoint(checkpoint, fullReplay.checkpoint)) return null;
+
+  const requiredEventIds = Array.isArray(attempt.event_ids) ? [...attempt.event_ids] : [];
+  if (!requiredEventIds.length || new Set(requiredEventIds).size !== requiredEventIds.length) return null;
+  const current = fullReplay.records?.['handoff.latest']?.source;
+  if (!current?.event_id || !requiredEventIds.includes(current.event_id)) return null;
+  const relevantLegacyCandidate = legacyReplay.candidates.some(
+    (candidate) => candidate.memory_key === 'handoff.latest'
+      && candidate.event_ids.includes(current.event_id),
+  );
+  const relevantCandidateStillReal = fullReplay.candidates.some(
+    (candidate) => candidate.memory_key === 'handoff.latest',
+  );
+  if (!relevantLegacyCandidate || relevantCandidateStillReal) return null;
+
+  const currentIdentity = {
+    canonical_session_id: current.canonical_session_id,
+    activation_id: current.activation_id,
+    activation_epoch: current.activation_epoch,
+    source_turn_id: current.source_turn_id,
+    turn_sequence: current.turn_sequence,
+  };
+  if (currentIdentity.canonical_session_id !== sessionId
+      || attempt.canonical_session_id !== currentIdentity.canonical_session_id
+      || attempt.activation_id !== currentIdentity.activation_id
+      || attempt.activation_epoch !== currentIdentity.activation_epoch
+      || attempt.turn_id !== currentIdentity.source_turn_id
+      || attempt.turn_sequence !== currentIdentity.turn_sequence) return null;
+
+  const newerAttemptEvent = authority.ledgerEvents.some((event) => (
+    event.canonical_session_id === currentIdentity.canonical_session_id
+      && event.activation_id === currentIdentity.activation_id
+      && event.activation_epoch === currentIdentity.activation_epoch
+      && Number.isInteger(event.turn_sequence)
+      && event.turn_sequence > currentIdentity.turn_sequence
+  ));
+  if (newerAttemptEvent) return null;
+
+  const proof = validateSuccessorProof({ bySessionId: sessionId }, attempt, authority);
+  return {
+    sessionId,
+    expectedFingerprint: attemptFingerprint(attempt),
+    expectedMemoryCheckpointFingerprint: memoryCheckpointFingerprint(entry),
+    originalCheckpoint: cloneJson(checkpoint),
+    checkpoint: cloneJson(fullReplay.checkpoint),
+    proof,
+    migrationType: 'deferred_assert_replay_migrated',
+    eventIds: requiredEventIds,
+  };
+}
+
 function legacyCheckpointMigration(vault, sessionId, entry, authority, fullReplay) {
   const attempt = entry?.last_memory_attempt;
   const checkpoint = attempt?.checkpoint;
@@ -1042,6 +1103,8 @@ function legacyCheckpointMigration(vault, sessionId, entry, authority, fullRepla
     originalCheckpoint: cloneJson(checkpoint),
     checkpoint: cloneJson(nextCheckpoint),
     proof,
+    migrationType: 'legacy_causal_checkpoint_migrated',
+    eventIds: requiredEventIds,
   };
 }
 
@@ -1053,11 +1116,14 @@ export function migrateLegacyMemoryCheckpoints(vault, {
     const authority = readMemoryAuthority(vault);
     assertAuthorityMatches(expectedAuthority, authority);
     const inspected = readSessionRegistry(vault);
+    const legacyReplay = deriveMemoryProjection(vault, authority.ledgerEvents, {
+      resolveDeferredAsserts: false,
+    });
     const fullReplay = deriveMemoryProjection(vault, authority.ledgerEvents);
     const plans = Object.entries(inspected.sessions || {})
-      .map(([sessionId, entry]) => legacyCheckpointMigration(
-        vault, sessionId, entry, authority, fullReplay,
-      ))
+      .map(([sessionId, entry]) => deferredAssertReplayCheckpointMigration(
+        sessionId, entry, authority, legacyReplay, fullReplay,
+      ) || legacyCheckpointMigration(vault, sessionId, entry, authority, fullReplay))
       .filter(Boolean);
     assertAuthorityMatches(expectedAuthority, readMemoryAuthority(vault));
     if (!plans.length) return {
@@ -1096,14 +1162,20 @@ export function migrateLegacyMemoryCheckpoints(vault, {
 
         for (const plan of plans) {
           const entry = registry.sessions[plan.sessionId];
-          const reconciliationId = `memcp-${hash(`${plan.sessionId}\0${plan.expectedFingerprint}\0${plan.expectedMemoryCheckpointFingerprint}\0${canonicalMemoryJson(plan.checkpoint)}`).slice(0, 20)}`;
+          const reconciliationSeed = plan.migrationType === 'legacy_causal_checkpoint_migrated'
+            ? `${plan.sessionId}\0${plan.expectedFingerprint}\0${plan.expectedMemoryCheckpointFingerprint}\0${canonicalMemoryJson(plan.checkpoint)}`
+            : `${plan.migrationType}\0${plan.sessionId}\0${plan.expectedFingerprint}\0${plan.expectedMemoryCheckpointFingerprint}\0${canonicalMemoryJson(plan.checkpoint)}`;
+          const reconciliationId = `memcp-${hash(reconciliationSeed).slice(0, 20)}`;
           entry.memory_reconciliations = [
             ...(Array.isArray(entry.memory_reconciliations) ? entry.memory_reconciliations : []),
             {
               v: 1,
               reconciliation_id: reconciliationId,
-              type: 'legacy_causal_checkpoint_migrated',
+              type: plan.migrationType,
               reconciled_at: now,
+              ...(plan.migrationType === 'deferred_assert_replay_migrated'
+                ? { event_ids: [...plan.eventIds] }
+                : {}),
               causal_proof: cloneJson(plan.proof),
               original_checkpoint: cloneJson(plan.originalCheckpoint),
               checkpoint: cloneJson(plan.checkpoint),

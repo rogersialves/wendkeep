@@ -4,6 +4,18 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.66.3] — 2026-07-30
+
+### Fixed
+
+- **O replay reavalia candidates transitórios contra a fonte moderna final.** Um Stop da mesma
+  sessão/activation/epoch e turno maior agora avança depois que a correção causal já presente se
+  torna ativa; turno menor fica superseded e divergências reais continuam para curadoria.
+- **`memory repair` migra o checkpoint antigo somente com prova e CAS.** O repair compara a
+  semântica anterior e a atual, faz backup, atualiza attempt e espelho e registra auditoria sem
+  reordenar, reescrever ou acrescentar evento ao ledger. Prova incompleta continua bloqueada. A
+  0.66.2 não deve ser publicada no npm; publique e instale a 0.66.3.
+
 ## [0.66.2] — 2026-07-29
 
 ### Fixed
