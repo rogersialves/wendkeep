@@ -283,8 +283,10 @@ ou checkpoint divergente bloqueiam. Veja [migração](docs/pt-BR/commands/memory
 [diagnóstico](docs/pt-BR/commands/maintenance-and-diagnostics.md).
 
 Se o status bloquear, preserve a evidência e rode `wendkeep memory repair --vault <cofre>` para
-salvar backup do ledger corrompido, reter linhas válidas e reprojetar. Repair nunca reclassifica
-attempts; checkpoints causais válidos pré-0.59 e prefixos históricos assert-only exatamente
+salvar backup do ledger corrompido, reter linhas válidas e reprojetar. Repair continua estrutural:
+só reconhece a exceção estreita dos attempts integralmente cobertos pela outbox que a própria
+execução consumiu; não varre nem reclassifica attempts históricos. Checkpoints causais válidos
+pré-0.59 e prefixos históricos assert-only exatamente
 rederiváveis são migrados por CAS do attempt e de `memory_checkpoint`, com backup/auditoria, para
 a fronteira física correta; espelhos divergentes falham fechados. Uma
 ambiguidade comprovadamente substituída usa `memory reconcile <sessão>
@@ -299,9 +301,12 @@ reavaliado contra a fonte moderna final: mesma sessão/activation/epoch e turno 
 turno menor fica superseded. O repair só migra checkpoint e espelho quando prova exatamente o
 replay anterior, a identidade do attempt e a ausência de conflito real; faz backup, registra audit
 e não acrescenta nem reescreve eventos. Ambiguidade continua na fila para curadoria explícita.
-Não publique nem instale a 0.66.2; use a 0.66.3. Decisões sobrevivem a repair/replay;
+Não publique nem instale a 0.66.2; use a 0.66.3 ou mais recente. Decisões sobrevivem a repair/replay;
 `blocked_by_core` não pode sobrescrever CORE.
-O doctor apenas diagnostica. Veja [memória e curadoria](docs/pt-BR/commands/memory.md).
+Desde a 0.66.4, quando status/doctor indicar acknowledgement projetado pendente, use o dry-run
+dirigido `memory recover-attempt <sessão> --vault <cofre>` e só então autorize `--apply`; ele
+altera apenas registry/checkpoint. O doctor apenas diagnostica. Veja sintaxe, pré-condições e
+falhas fechadas em [memória e curadoria](docs/pt-BR/commands/memory.md).
 
 As notas de sessão usam um único snapshot vivo `## Agentes, tokens e custos`. Os hooks do agente principal e dos subagents recompõem o bloco atomicamente, incluindo custo, dimensões de tokens, reasoning e effort por modelo/origem.
 

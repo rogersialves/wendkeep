@@ -313,6 +313,8 @@ export function readMemoryLedger(vaultBase) {
     if (eventIds.has(parsed.event_id)) {
       if (eventPayloads.get(parsed.event_id) !== payload) {
         errors.push(ledgerError(lineNumber, `event_id collision: ${parsed.event_id}`, partial));
+      } else {
+        errors.push(ledgerError(lineNumber, `duplicate event_id: ${parsed.event_id}`, partial));
       }
       return;
     }
@@ -911,15 +913,18 @@ function projectLocked(vaultBase, { faultAt } = {}) {
   const projection = publishMemoryProjection(vaultBase, prepared);
   injectFault(faultAt, 'after-projection');
 
+  const consumedEventIds = [];
   for (const entry of outbox) {
     unlinkVaultFile(vaultBase, entry.path, {
       missingOk: false, label: 'evento consumido do outbox de memória',
     });
+    consumedEventIds.push(entry.event.event_id);
   }
   return {
     status: 'projected',
     appended: newEvents.length,
     consumed: outbox.length,
+    consumedEventIds,
     pending: 0,
     ...projection,
   };

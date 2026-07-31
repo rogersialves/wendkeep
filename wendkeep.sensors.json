@@ -96,6 +96,14 @@
       "severity": "critical",
       "type": "command",
       "command": "node --test tests/session-stop-migration-lifecycle.test.mjs tests/memory-activation.test.mjs tests/session-memory-lifecycle.test.mjs tests/vault-health-memory.test.mjs"
+    },
+    {
+      "id": "memory-recovery",
+      "name": "Memory recovery",
+      "description": "Exercises projected-attempt acknowledgement recovery, causal safety, topology defenses and diagnostics",
+      "severity": "critical",
+      "type": "command",
+      "command": "node --test tests/memory-cli.test.mjs tests/memory-attempt-recovery.test.mjs tests/memory-attempt-recovery-topology.test.mjs tests/vault-health-memory.test.mjs"
     }
   ]
 }

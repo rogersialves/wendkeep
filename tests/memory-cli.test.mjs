@@ -11,7 +11,7 @@ import { join } from 'node:path';
 import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  canonicalMemoryJson, deriveMemoryProjection, hashMemoryValue, prepareMemoryProjection,
+  canonicalMemoryJson, deriveMemoryProjection, enqueueMemoryEvent, hashMemoryValue, prepareMemoryProjection,
   reduceMemoryEvents,
 } from '../hooks/memory-store.mjs';
 import { renderSharedMemory } from '../hooks/memory-schema.mjs';
@@ -942,6 +942,472 @@ test('memory repair preserva bytes corrompidos em backup antes de reconstruir', 
     assert.ok(existsSync(result.repaired.backupPath));
     assert.equal(readFileSync(result.repaired.backupPath, 'utf8'), '{parcial');
     assert.equal(readFileSync(ledgerPath, 'utf8'), '');
+  } finally { rmSync(vault, { recursive: true, force: true }); }
+});
+
+function enqueuedMemoryEntry(sessionId, event, checkpointValue, eventIds = [event.event_id]) {
+  return {
+    status: 'active',
+    active_activation_id: event.activation_id,
+    activation_epoch: event.activation_epoch,
+    last_turn_id: event.source_turn_id,
+    last_turn_sequence: event.turn_sequence,
+    turn_sequences: { [event.source_turn_id]: event.turn_sequence },
+    activations: {
+      [event.activation_id]: {
+        activation_id: event.activation_id,
+        epoch: event.activation_epoch,
+        status: 'active',
+        last_stop_turn_id: event.source_turn_id,
+        last_stop_turn_sequence: event.turn_sequence,
+        last_turn_sequence: event.turn_sequence,
+      },
+    },
+    memory_status: 'enqueued',
+    memory_activation_id: event.activation_id,
+    memory_checkpoint: checkpointValue,
+    last_memory_attempt: {
+      v: 1,
+      memory_mode: 'v2',
+      canonical_session_id: sessionId,
+      activation_id: event.activation_id,
+      activation_epoch: event.activation_epoch,
+      turn_id: event.source_turn_id,
+      turn_sequence: event.turn_sequence,
+      disposition: 'applied',
+      state: 'enqueued',
+      event_ids: eventIds,
+      checkpoint: null,
+    },
+  };
+}
+
+test('[req:MEM-ACK-1] [sensor:memory-recovery] repair acknowledges only its consumed outbox', async () => {
+  const vault = fixture();
+  const brain = join(vault, '.brain');
+  const ledgerPath = join(brain, 'MEMORY_EVENTS.jsonl');
+  const sharedPath = join(brain, 'SHARED_MEMORY.md');
+  const candidatesPath = join(brain, 'MEMORY_CANDIDATES.jsonl');
+  const corePath = join(brain, 'CORE.md');
+  const registryPath = join(brain, 'SESSION_REGISTRY.json');
+  const outboxPath = join(brain, 'memory-outbox');
+  const existing = {
+    ...memoryEvent('mem-repair-ack-existing', 'synthetic checkpoint N', 1),
+    memory_key: 'handoff.existing',
+  };
+  const pending = {
+    ...memoryEvent('mem-repair-ack-pending', 'synthetic consumed outbox', 2),
+    memory_key: 'handoff.pending',
+  };
+  const projectionN = writeMemoryProjection(vault, [existing]);
+  enqueueMemoryEvent(vault, pending);
+  writeFileSync(registryPath, `${JSON.stringify({
+    version: 2,
+    sessions: {
+      'current-session': {
+        status: 'active',
+        active_activation_id: pending.activation_id,
+        activation_epoch: pending.activation_epoch,
+        last_turn_id: pending.source_turn_id,
+        last_turn_sequence: pending.turn_sequence,
+        turn_sequences: { [pending.source_turn_id]: pending.turn_sequence },
+        activations: {
+          [pending.activation_id]: {
+            activation_id: pending.activation_id,
+            epoch: pending.activation_epoch,
+            status: 'active',
+            last_stop_turn_id: pending.source_turn_id,
+            last_stop_turn_sequence: pending.turn_sequence,
+            last_turn_sequence: pending.turn_sequence,
+          },
+        },
+        memory_status: 'enqueued',
+        memory_activation_id: pending.activation_id,
+        memory_checkpoint: projectionN.checkpoint,
+        last_memory_attempt: {
+          v: 1,
+          memory_mode: 'v2',
+          canonical_session_id: 'current-session',
+          activation_id: pending.activation_id,
+          activation_epoch: pending.activation_epoch,
+          turn_id: pending.source_turn_id,
+          turn_sequence: pending.turn_sequence,
+          disposition: 'applied',
+          state: 'enqueued',
+          event_ids: [pending.event_id],
+          checkpoint: null,
+        },
+      },
+    },
+  }, null, 2)}\n`);
+  const ledgerBefore = readFileSync(ledgerPath);
+  const sharedBefore = readFileSync(sharedPath);
+  const coreBefore = readFileSync(corePath);
+
+  try {
+    const { repairMemory } = await import('../src/memory.mjs');
+    const repaired = repairMemory(vault, { now: '2026-07-30T15:00:00.000Z' });
+    const ledgerAfter = readFileSync(ledgerPath);
+    const sharedAfter = readFileSync(sharedPath);
+    const registryAfter = JSON.parse(readFileSync(registryPath, 'utf8'));
+    const current = registryAfter.sessions['current-session'];
+
+    assert.equal(repaired.projection.appended, 1);
+    assert.equal(ledgerAfter.toString('utf8').trim().split('\n').length, 2);
+    assert.notDeepEqual(ledgerAfter, ledgerBefore);
+    assert.notDeepEqual(sharedAfter, sharedBefore);
+    assert.equal(readdirSync(outboxPath).length, 0);
+    assert.deepEqual(readFileSync(corePath), coreBefore);
+    assert.equal(current.memory_status, 'projected');
+    assert.equal(current.last_memory_attempt.state, 'projected');
+    assert.equal(current.last_memory_attempt.disposition, 'applied');
+    assert.deepEqual(current.last_memory_attempt.event_ids, [pending.event_id]);
+    assert.deepEqual(current.memory_checkpoint, repaired.projection.checkpoint);
+    assert.deepEqual(current.last_memory_attempt.checkpoint, repaired.projection.checkpoint);
+
+    const stableBytes = new Map([
+      [ledgerPath, readFileSync(ledgerPath)],
+      [sharedPath, readFileSync(sharedPath)],
+      [candidatesPath, readFileSync(candidatesPath)],
+      [corePath, readFileSync(corePath)],
+      [registryPath, readFileSync(registryPath)],
+    ]);
+    const retry = repairMemory(vault, { now: '2026-07-30T15:01:00.000Z' });
+    assert.equal(retry.projection.appended, 0);
+    assert.equal(retry.projection.consumed, 0);
+    for (const [path, bytes] of stableBytes) assert.deepEqual(readFileSync(path), bytes);
+    assert.equal(readdirSync(outboxPath).length, 0);
+  } finally { rmSync(vault, { recursive: true, force: true }); }
+});
+
+test('[req:MEM-ACK-1] [req:MEM-ACK-3] [sensor:memory-recovery] repair fails closed before acknowledging a physically duplicated ledger event', async () => {
+  const vault = fixture();
+  const brain = join(vault, '.brain');
+  const ledgerPath = join(brain, 'MEMORY_EVENTS.jsonl');
+  const sharedPath = join(brain, 'SHARED_MEMORY.md');
+  const candidatesPath = join(brain, 'MEMORY_CANDIDATES.jsonl');
+  const registryPath = join(brain, 'SESSION_REGISTRY.json');
+  const pending = {
+    ...memoryEvent('mem-repair-duplicate-physical', 'synthetic duplicate authority', 2),
+    memory_key: 'handoff.duplicate.physical',
+  };
+  const projection = writeMemoryProjection(vault, [pending]);
+  const canonicalLine = canonicalMemoryJson(pending);
+  writeFileSync(ledgerPath, `${canonicalLine}\n${canonicalLine}\n`);
+  enqueueMemoryEvent(vault, pending);
+  const outboxPath = join(brain, 'memory-outbox', `${pending.event_id}.json`);
+  writeFileSync(registryPath, `${JSON.stringify({
+    version: 2,
+    sessions: {
+      'current-session': enqueuedMemoryEntry(
+        'current-session', pending, projection.checkpoint,
+      ),
+    },
+  }, null, 2)}\n`);
+  const stable = new Map([
+    [registryPath, readFileSync(registryPath)],
+    [outboxPath, readFileSync(outboxPath)],
+    [ledgerPath, readFileSync(ledgerPath)],
+    [sharedPath, readFileSync(sharedPath)],
+    [candidatesPath, readFileSync(candidatesPath)],
+  ]);
+
+  try {
+    const { repairMemory } = await import('../src/memory.mjs');
+    let result;
+    let failure;
+    try {
+      result = repairMemory(vault, { now: '2026-07-30T15:00:30.000Z' });
+    } catch (error) {
+      failure = error;
+    }
+
+    for (const [path, bytes] of stable) {
+      assert.deepEqual(
+        readFileSync(path),
+        bytes,
+        `${path} must remain byte-stable when physical ledger authority is duplicated`,
+      );
+    }
+    assert.ok(
+      failure
+        || result?.status === 'attention'
+        || result?.attemptAcknowledgements?.status === 'attention',
+      'repair must fail or return attention for a physically duplicated event_id',
+    );
+  } finally { rmSync(vault, { recursive: true, force: true }); }
+});
+
+test('[req:MEM-ACK-1] [sensor:memory-recovery] repair projects a partial outbox without partially acknowledging its attempt', async () => {
+  const vault = fixture();
+  const brain = join(vault, '.brain');
+  const registryPath = join(brain, 'SESSION_REGISTRY.json');
+  const present = {
+    ...memoryEvent('mem-repair-partial-present', 'synthetic partial event present', 2),
+    memory_key: 'handoff.partial.present',
+  };
+  const absent = {
+    ...memoryEvent('mem-repair-partial-absent', 'synthetic partial event absent', 2),
+    memory_key: 'handoff.partial.absent',
+  };
+  const projectionN = writeMemoryProjection(vault, [{
+    ...memoryEvent('mem-repair-partial-existing', 'synthetic partial checkpoint N', 1),
+    memory_key: 'handoff.partial.existing',
+  }]);
+  enqueueMemoryEvent(vault, present);
+  writeFileSync(registryPath, `${JSON.stringify({
+    version: 2,
+    sessions: {
+      'current-session': enqueuedMemoryEntry(
+        'current-session', present, projectionN.checkpoint, [present.event_id, absent.event_id],
+      ),
+    },
+  }, null, 2)}\n`);
+  const registryBefore = readFileSync(registryPath);
+
+  try {
+    const { repairMemory } = await import('../src/memory.mjs');
+    const repaired = repairMemory(vault, { now: '2026-07-30T15:02:00.000Z' });
+    const ledger = readFileSync(join(brain, 'MEMORY_EVENTS.jsonl'), 'utf8');
+
+    assert.equal(repaired.projection.appended, 1);
+    assert.match(ledger, new RegExp(present.event_id));
+    assert.doesNotMatch(ledger, new RegExp(absent.event_id));
+    assert.deepEqual(repaired.attemptAcknowledgements, {
+      status: 'unchanged', eligible: 0, acknowledged: 0, stale: 0,
+    });
+    assert.deepEqual(readFileSync(registryPath), registryBefore);
+  } finally { rmSync(vault, { recursive: true, force: true }); }
+});
+
+test('[req:MEM-ACK-1] [sensor:memory-recovery] repair does not acknowledge an outbox payload from a divergent causal context', async (t) => {
+  const variants = [
+    ['session', { canonical_session_id: 'different-session' }],
+    ['activation', { activation_id: 'different-activation' }],
+    ['epoch', { activation_epoch: 2 }],
+    ['turn', { source_turn_id: 'different-turn', turn_sequence: 99 }],
+  ];
+
+  for (const [label, divergence] of variants) {
+    await t.test(label, async () => {
+      const vault = fixture();
+      const brain = join(vault, '.brain');
+      const registryPath = join(brain, 'SESSION_REGISTRY.json');
+      const intended = {
+        ...memoryEvent(`mem-repair-divergent-${label}`, `synthetic divergent ${label}`, 2),
+        memory_key: `handoff.divergent.${label}`,
+      };
+      const payload = { ...intended, ...divergence };
+      const projectionN = writeMemoryProjection(vault, [{
+        ...memoryEvent(`mem-repair-divergent-existing-${label}`, 'synthetic divergent checkpoint N', 1),
+        memory_key: `handoff.divergent.existing.${label}`,
+      }]);
+      enqueueMemoryEvent(vault, payload);
+      writeFileSync(registryPath, `${JSON.stringify({
+        version: 2,
+        sessions: {
+          'current-session': enqueuedMemoryEntry(
+            'current-session', intended, projectionN.checkpoint,
+          ),
+        },
+      }, null, 2)}\n`);
+      const registryBefore = readFileSync(registryPath);
+
+      try {
+        const { repairMemory } = await import('../src/memory.mjs');
+        const repaired = repairMemory(vault, { now: '2026-07-30T15:03:00.000Z' });
+        const ledger = readFileSync(join(brain, 'MEMORY_EVENTS.jsonl'), 'utf8');
+
+        assert.equal(repaired.projection.appended, 1);
+        assert.match(ledger, new RegExp(payload.event_id));
+        assert.deepEqual(repaired.attemptAcknowledgements, {
+          status: 'unchanged', eligible: 0, acknowledged: 0, stale: 0,
+        });
+        assert.deepEqual(readFileSync(registryPath), registryBefore);
+      } finally { rmSync(vault, { recursive: true, force: true }); }
+    });
+  }
+});
+
+test('[req:MEM-ACK-3] [sensor:memory-recovery] repair loses CAS when a newer attempt replaces the frozen context before acknowledgement', async () => {
+  const vault = fixture();
+  const brain = join(vault, '.brain');
+  const registryPath = join(brain, 'SESSION_REGISTRY.json');
+  const pending = {
+    ...memoryEvent('mem-repair-cas-pending', 'synthetic CAS pending attempt', 2),
+    memory_key: 'handoff.cas.pending',
+  };
+  const projectionN = writeMemoryProjection(vault, [{
+    ...memoryEvent('mem-repair-cas-existing', 'synthetic CAS checkpoint N', 1),
+    memory_key: 'handoff.cas.existing',
+  }]);
+  enqueueMemoryEvent(vault, pending);
+  writeFileSync(registryPath, `${JSON.stringify({
+    version: 2,
+    sessions: {
+      'current-session': enqueuedMemoryEntry('current-session', pending, projectionN.checkpoint),
+    },
+  }, null, 2)}\n`);
+  const newerEvent = {
+    ...memoryEvent('mem-repair-cas-newer', 'synthetic newer CAS attempt', 3),
+    activation_id: 'newer-activation',
+    activation_epoch: 2,
+    memory_key: 'handoff.cas.newer',
+  };
+  const newerCheckpoint = {
+    revision: 73,
+    event_cursor: 'mem-repair-cas-newer-checkpoint',
+    causal_event_cursor: 'mem-repair-cas-newer-checkpoint',
+    state_hash: 'synthetic-newer-checkpoint-state',
+  };
+  const newerEntry = enqueuedMemoryEntry(
+    'current-session', newerEvent, newerCheckpoint, [newerEvent.event_id],
+  );
+  newerEntry.last_memory_attempt.checkpoint = newerCheckpoint;
+  const newerRegistryBytes = Buffer.from(`${JSON.stringify({
+    version: 2,
+    sessions: { 'current-session': newerEntry },
+  }, null, 2)}\n`);
+
+  try {
+    const { repairMemory } = await import('../src/memory.mjs');
+    const repaired = repairMemory(vault, {
+      now: '2026-07-30T15:04:00.000Z',
+      beforeAttemptAcknowledgement() {
+        writeFileSync(registryPath, newerRegistryBytes);
+      },
+    });
+    const current = JSON.parse(readFileSync(registryPath, 'utf8')).sessions['current-session'];
+
+    assert.equal(repaired.projection.appended, 1);
+    assert.deepEqual(repaired.attemptAcknowledgements, {
+      status: 'attention',
+      eligible: 1,
+      acknowledged: 0,
+      stale: 1,
+      sessionIds: [],
+    });
+    assert.deepEqual(readFileSync(registryPath), newerRegistryBytes);
+    assert.deepEqual(current.last_memory_attempt, newerEntry.last_memory_attempt);
+    assert.deepEqual(current.memory_checkpoint, newerCheckpoint);
+  } finally { rmSync(vault, { recursive: true, force: true }); }
+});
+
+test('[req:MEM-ACK-1] [req:MEM-ACK-3] [sensor:memory-recovery] repair does not drain outbox when attempt freeze loses MEMORY.lock', async () => {
+  const vault = fixture();
+  const brain = join(vault, '.brain');
+  const registryPath = join(brain, 'SESSION_REGISTRY.json');
+  const lockPath = join(brain, 'MEMORY.lock');
+  const pending = {
+    ...memoryEvent('mem-repair-freeze-busy', 'synthetic freeze busy attempt', 2),
+    memory_key: 'handoff.freeze.busy',
+  };
+  const projectionN = writeMemoryProjection(vault, [{
+    ...memoryEvent('mem-repair-freeze-existing', 'synthetic freeze checkpoint N', 1),
+    memory_key: 'handoff.freeze.existing',
+  }]);
+  enqueueMemoryEvent(vault, pending);
+  writeFileSync(registryPath, `${JSON.stringify({
+    version: 2,
+    sessions: {
+      'current-session': enqueuedMemoryEntry('current-session', pending, projectionN.checkpoint),
+    },
+  }, null, 2)}\n`);
+  const outboxPath = join(brain, 'memory-outbox', `${pending.event_id}.json`);
+  const stable = new Map([
+    [join(brain, 'MEMORY_EVENTS.jsonl'), readFileSync(join(brain, 'MEMORY_EVENTS.jsonl'))],
+    [join(brain, 'SHARED_MEMORY.md'), readFileSync(join(brain, 'SHARED_MEMORY.md'))],
+    [join(brain, 'MEMORY_CANDIDATES.jsonl'), readFileSync(join(brain, 'MEMORY_CANDIDATES.jsonl'))],
+    [registryPath, readFileSync(registryPath)],
+    [outboxPath, readFileSync(outboxPath)],
+  ]);
+
+  try {
+    const { repairMemory } = await import('../src/memory.mjs');
+    const result = repairMemory(vault, {
+      beforeAttemptFreeze() { mkdirSync(lockPath); },
+      memoryLock: { timeoutMs: 20, staleMs: 60_000 },
+    });
+
+    assert.equal(result.status, 'busy');
+    assert.equal(existsSync(outboxPath), true, 'outbox must remain durable for a retry');
+    for (const [path, bytes] of stable) assert.deepEqual(readFileSync(path), bytes);
+  } finally { rmSync(vault, { recursive: true, force: true }); }
+});
+
+test('[req:MEM-ACK-1] [req:MEM-ACK-3] [sensor:memory-recovery] repair acknowledges two fully covered attempts once and retry is byte-idempotent', async () => {
+  const vault = fixture();
+  const brain = join(vault, '.brain');
+  const ledgerPath = join(brain, 'MEMORY_EVENTS.jsonl');
+  const sharedPath = join(brain, 'SHARED_MEMORY.md');
+  const candidatesPath = join(brain, 'MEMORY_CANDIDATES.jsonl');
+  const corePath = join(brain, 'CORE.md');
+  const registryPath = join(brain, 'SESSION_REGISTRY.json');
+  const outboxPath = join(brain, 'memory-outbox');
+  const first = {
+    ...memoryEvent('mem-repair-batch-first', 'synthetic batch first', 2),
+    canonical_session_id: 'first-session',
+    activation_id: 'first-activation',
+    memory_key: 'handoff.batch.first',
+  };
+  const second = {
+    ...memoryEvent('mem-repair-batch-second', 'synthetic batch second', 3),
+    canonical_session_id: 'second-session',
+    activation_id: 'second-activation',
+    memory_key: 'handoff.batch.second',
+  };
+  const projectionN = writeMemoryProjection(vault, [{
+    ...memoryEvent('mem-repair-batch-existing', 'synthetic batch checkpoint N', 1),
+    memory_key: 'handoff.batch.existing',
+  }]);
+  enqueueMemoryEvent(vault, first);
+  enqueueMemoryEvent(vault, second);
+  writeFileSync(registryPath, `${JSON.stringify({
+    version: 2,
+    sessions: {
+      'first-session': enqueuedMemoryEntry('first-session', first, projectionN.checkpoint),
+      'second-session': enqueuedMemoryEntry('second-session', second, projectionN.checkpoint),
+    },
+  }, null, 2)}\n`);
+
+  try {
+    const { repairMemory } = await import('../src/memory.mjs');
+    const repaired = repairMemory(vault, { now: '2026-07-30T15:05:00.000Z' });
+    const registry = JSON.parse(readFileSync(registryPath, 'utf8'));
+
+    assert.equal(repaired.projection.appended, 2);
+    assert.deepEqual(repaired.attemptAcknowledgements, {
+      status: 'acknowledged',
+      eligible: 2,
+      acknowledged: 2,
+      stale: 0,
+      sessionIds: ['first-session', 'second-session'],
+    });
+    for (const sessionId of ['first-session', 'second-session']) {
+      const entry = registry.sessions[sessionId];
+      assert.equal(entry.memory_status, 'projected');
+      assert.equal(entry.last_memory_attempt.state, 'projected');
+      assert.deepEqual(entry.memory_checkpoint, repaired.projection.checkpoint);
+      assert.deepEqual(entry.last_memory_attempt.checkpoint, repaired.projection.checkpoint);
+    }
+    assert.equal(readdirSync(outboxPath).length, 0);
+
+    const stableBytes = new Map([
+      [ledgerPath, readFileSync(ledgerPath)],
+      [sharedPath, readFileSync(sharedPath)],
+      [candidatesPath, readFileSync(candidatesPath)],
+      [corePath, readFileSync(corePath)],
+      [registryPath, readFileSync(registryPath)],
+    ]);
+    const retry = repairMemory(vault, { now: '2026-07-30T15:06:00.000Z' });
+
+    assert.equal(retry.projection.appended, 0);
+    assert.equal(retry.projection.consumed, 0);
+    assert.deepEqual(retry.attemptAcknowledgements, {
+      status: 'unchanged', eligible: 0, acknowledged: 0, stale: 0,
+    });
+    for (const [path, bytes] of stableBytes) assert.deepEqual(readFileSync(path), bytes);
+    assert.equal(readdirSync(outboxPath).length, 0);
   } finally { rmSync(vault, { recursive: true, force: true }); }
 });
 
