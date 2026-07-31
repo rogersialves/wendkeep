@@ -100,6 +100,7 @@ Usage:
                            behind the closing block. Dry-run by default · --apply · --json.
   wendkeep lesson add "t" "l"   Record a project-local lesson (injected at SessionStart).
   wendkeep memory <sub>          Shared memory v2: status | migrate [--apply] | repair |
+                           recover-attempt <session> [--apply] |
                            reconcile <session> --by-session <session> --reason <text> [--apply] |
                            promote <candidate> [--event <event-id>] | reject <candidate>. --vault P.
                            Reconcile is dry-run by default; the original attempt remains audited.

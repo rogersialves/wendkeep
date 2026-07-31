@@ -4,6 +4,18 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.66.4] — 2026-07-30
+
+### Fixed
+
+- **`memory repair` fecha o acknowledgement apenas para a outbox que a própria execução
+  consumiu integralmente.** O receipt do projetor preserva idempotência e impede que attempts
+  históricos, parciais, causalmente divergentes ou concorrentes sejam reclassificados.
+- **`memory recover-attempt <session>` recupera com segurança o estado já projetado pela
+  0.66.3.** O dry-run é padrão e `--apply` altera somente o registry/checkpoint sob prova física,
+  lock e CAS; A→B→A, ledger/sidecars divergentes, outbox pendente e links inseguros falham sem
+  escrita. O diagnóstico agora orienta esse comando quando o acknowledgement ficou pendente.
+
 ## [0.66.3] — 2026-07-30
 
 ### Fixed

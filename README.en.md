@@ -287,8 +287,10 @@ lost publication, or mismatched checkpoint blocks. See [migration](docs/en/comma
 and [diagnostics](docs/en/commands/maintenance-and-diagnostics.md).
 
 If status blocks, preserve the evidence and run `wendkeep memory repair --vault <vault>` to back up
-the corrupt ledger, retain valid lines, and re-project. Repair never reclassifies attempts. Valid
-pre-0.59 causal checkpoints and exactly re-derived assert-only historical prefixes are
+the corrupt ledger, retain valid lines, and re-project. Repair remains structural: its only narrow
+acknowledgement exception covers attempts entirely represented by the outbox consumed by that same
+run; it does not scan or reclassify historical attempts. Valid pre-0.59 causal checkpoints and
+exactly re-derived assert-only historical prefixes are
 CAS-migrated on both the attempt and `memory_checkpoint` to the correct physical boundary with
 backup/audit; divergent mirrors fail closed. A demonstrably superseded
 ambiguity uses `memory reconcile <session> --by-session <successor>
@@ -303,9 +305,12 @@ final modern source: the same session/activation/epoch and a higher turn advance
 superseded. Repair migrates the checkpoint and mirror only when it proves the exact previous
 replay, attempt identity, and absence of a real conflict; it creates a backup and audit without
 appending or rewriting events. Ambiguity stays queued for explicit curation. Do not publish or
-install 0.66.2; use 0.66.3. Decisions survive repair/replay;
-`blocked_by_core` cannot override CORE. Doctor only
-diagnoses. See [memory and curation](docs/en/commands/memory.md).
+install 0.66.2; use 0.66.3 or later. Decisions survive repair/replay;
+`blocked_by_core` cannot override CORE. Doctor only diagnoses. When status/doctor reports projected
+acknowledgement pending on 0.66.4 or later, first run the targeted dry run
+`memory recover-attempt <session> --vault <vault>`, then authorize `--apply`; it changes only
+registry/checkpoint. See syntax, preconditions, and fail-closed behavior in
+[memory and curation](docs/en/commands/memory.md).
 
 Session notes use one live `## Agentes, tokens e custos` snapshot. Main-agent and subagent hooks recompose it atomically, with costs, token dimensions, reasoning tokens and effort per model/source. Every hook that rewrites a session note takes a per-file lock and writes through a temp file + rename, so the `SubagentStop` fan-out (one hook run per subagent) can never leave a note half-written; a note whose frontmatter reads back damaged is left untouched rather than patched.
 

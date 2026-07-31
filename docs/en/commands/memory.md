@@ -25,6 +25,7 @@ Pass the vault explicitly in automation. Preserve backups and evidence before re
 ```bash
 npx wendkeep memory status [--gate] --vault <vault>
 npx wendkeep memory repair --vault <vault>
+npx wendkeep memory recover-attempt <session> [--apply] --vault <vault>
 npx wendkeep memory reconcile <ambiguous-session> --by-session <successor-session> --reason <reason> [--apply] --vault <vault>
 npx wendkeep memory promote <candidate> [--event <event-id>] --vault <vault>
 npx wendkeep memory reject <candidate> --vault <vault>
@@ -51,8 +52,23 @@ npx wendkeep validate-memory --vault <v2-vault>
   historical prefix only when revision, cursor, hash, identity, turns, and the
   `memory_checkpoint` mirror exactly reproduce the old semantics; the target is the current replay
   of that prefix, without absorbing later events. Both paths CAS-check the attempt and mirror and
-  record backup/audit. Repair never reclassifies registry attempts or accepts a tuple, operation,
-  or mirror that cannot be fully re-derived.
+  record backup/audit. The only narrow acknowledgement exception covers `enqueued`/`degraded`
+  attempts whose outbox was frozen and whose event IDs that same repair run consumed in full;
+  partial coverage does not change the attempt. Repair does not scan or reclassify historical
+  attempts and does not accept a tuple, operation, or mirror that cannot be fully re-derived.
+- As of 0.66.4, `memory recover-attempt` targets one session and is a dry run by default. The
+  session must exist in the registry and its latest attempt must be `v2`, `applied`, and `enqueued`
+  or `degraded`, with non-empty, unique `event_ids`. Every event must be present in the ledger and
+  belong to the attempt's project/session/activation/epoch/turn; no later event from that session
+  or target event still in the outbox may exist, and SHARED/candidates must byte-for-byte reproduce
+  the full ledger projection. An already `projected` attempt is accepted only with a valid
+  checkpoint and returns `unchanged`.
+- With `--apply`, `memory recover-attempt` changes only `SESSION_REGISTRY`: it marks
+  `last_memory_attempt`/`memory_status` as `projected` and stores the same checkpoint in the
+  attempt and `memory_checkpoint`. Ledger, CORE, SHARED, candidates, outbox, and notes remain
+  byte-identical. The command validates all authority again under `MEMORY.lock`, CAS-checks the
+  attempt, activation, epoch, turn, and checkpoint, and fails closed if any byte/context changes.
+  A busy lock is not reaped; retry after application returns `unchanged` without writing.
 - `memory reconcile` is a dry run by default. `--apply` requires two named sessions plus a reason,
   CAS-checks the exact attempt, backs up the registry, and limits mutation to the ambiguous attempt
   and its successor. Replay is CORE-aware, checkpoints use the physical ledger cursor, and the
@@ -81,11 +97,16 @@ npx wendkeep validate-memory --vault <v2-vault>
   identity, backup, audit, and CAS; it does not reorder, rewrite, or append a ledger event.
 - `validate-memory <CORE.md>` checks the 25-line cap, required sections, and secrets.
 - `validate-memory --vault` requires a complete v2 bundle and is not the legacy-vault gate.
+- For `recover-attempt`, exit `0` means a valid dry run/apply, including `unchanged`; exit `1`
+  means a precondition, authority, CAS, topology, or lock check failed; exit `2` means a missing
+  session/`--vault`, unknown or duplicate option, extra argument, or invalid value.
 
 ## Examples
 
 ```bash
 npx wendkeep memory status --gate --vault .MyApp-vault
+npx wendkeep memory recover-attempt session-123 --vault .MyApp-vault
+npx wendkeep memory recover-attempt session-123 --apply --vault .MyApp-vault
 npx wendkeep memory reconcile old --by-session current --reason "delivery continued" --vault .MyApp-vault
 npx wendkeep memory reconcile old --by-session current --reason "delivery continued" --apply --vault .MyApp-vault
 npx wendkeep validate-memory .MyApp-vault/.brain/CORE.md
@@ -107,6 +128,14 @@ of a global projection that has already advanced with concurrent events.
   repair merely to manufacture the first event.
 - `degraded` with every event ID present in either the ledger or an intact outbox is recoverable;
   let idempotent replay finish. An event ID absent from both locations means lost publication.
+- Status/doctor reports `projected acknowledgement pending` and suggests
+  `memory recover-attempt <session>`: preserve the artifacts, inspect the dry-run JSON first, and
+  use `--apply` only when `eligible: true`. `dry-run` confirms eligibility; `applied` updates
+  registry/checkpoint; `unchanged` means the recovery was already applied idempotently.
+- `recover-attempt` rejects a missing/divergent event, a target still in the outbox, stale
+  SHARED/candidates, a historical attempt, mismatched session/causal context, invalid checkpoint,
+  or busy lock. Do not bypass the gate by editing files: rerun `memory status --gate`, preserve
+  evidence, and resolve the divergent authority.
 - An `ambiguous` attempt, an `applied` attempt without event IDs, a `projected` event found only in
   the outbox, or a mismatched checkpoint is blocking: preserve the artifacts and investigate
   before repair. If the ambiguity is demonstrably superseded by a successor session, inspect the

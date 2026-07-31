@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import {
   constants as fsConstants, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync,
-  rmSync, writeFileSync,
+  readdirSync, rmSync, statSync, writeFileSync,
 } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { sanitizeMemoryText, renderSharedMemory, validateSharedMemory } from '../hooks/memory-schema.mjs';
@@ -536,6 +536,520 @@ function memoryCheckpointFingerprint(entry) {
     present,
     checkpoint: present ? (entry.memory_checkpoint ?? null) : null,
   }));
+}
+
+function fieldSnapshot(value, key) {
+  const present = Object.prototype.hasOwnProperty.call(value || {}, key);
+  return { present, value: present ? (value[key] ?? null) : null };
+}
+
+function attemptAuthorityFingerprint(entry, attempt) {
+  const activation = entry?.activations?.[attempt?.activation_id];
+  return hash(canonicalMemoryJson({
+    status: fieldSnapshot(entry, 'status'),
+    active_activation_id: fieldSnapshot(entry, 'active_activation_id'),
+    activation_epoch: fieldSnapshot(entry, 'activation_epoch'),
+    last_turn_id: fieldSnapshot(entry, 'last_turn_id'),
+    last_turn_sequence: fieldSnapshot(entry, 'last_turn_sequence'),
+    turn_sequence: fieldSnapshot(entry?.turn_sequences, attempt?.turn_id),
+    activation: {
+      status: fieldSnapshot(activation, 'status'),
+      epoch: fieldSnapshot(activation, 'epoch'),
+      last_stop_turn_id: fieldSnapshot(activation, 'last_stop_turn_id'),
+      last_stop_turn_sequence: fieldSnapshot(activation, 'last_stop_turn_sequence'),
+      last_turn_sequence: fieldSnapshot(activation, 'last_turn_sequence'),
+    },
+    memory_status: fieldSnapshot(entry, 'memory_status'),
+    memory_activation_id: fieldSnapshot(entry, 'memory_activation_id'),
+  }));
+}
+
+function ownsAttemptContext(entry, attempt) {
+  const activation = entry?.activations?.[attempt?.activation_id];
+  return entry?.status === 'active'
+    && entry.active_activation_id === attempt.activation_id
+    && entry.activation_epoch === attempt.activation_epoch
+    && activation?.status === 'active'
+    && activation.epoch === attempt.activation_epoch
+    && entry.last_turn_id === attempt.turn_id
+    && entry.last_turn_sequence === attempt.turn_sequence
+    && entry.turn_sequences?.[attempt.turn_id] === attempt.turn_sequence
+    && activation.last_stop_turn_id === attempt.turn_id
+    && activation.last_stop_turn_sequence === attempt.turn_sequence
+    && activation.last_turn_sequence === attempt.turn_sequence
+    && entry.memory_status === attempt.state
+    && entry.memory_activation_id === attempt.activation_id;
+}
+
+function attemptEventMatches(event, attempt, expectedProjectId) {
+  return event?.project_id === expectedProjectId
+    && event.canonical_session_id === attempt.canonical_session_id
+    && event.activation_id === attempt.activation_id
+    && event.activation_epoch === attempt.activation_epoch
+    && event.source_turn_id === attempt.turn_id
+    && event.turn_sequence === attempt.turn_sequence;
+}
+
+function readAttemptOutboxEvents(vault, eventIds) {
+  const events = [];
+  for (const eventId of eventIds) {
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(eventId)) return null;
+    const path = brainPath(vault, join('memory-outbox', `${eventId}.json`));
+    const checked = checkedVaultFile(vault, path, `outbox do attempt ${eventId}`);
+    if (!checked.exists) return null;
+    try {
+      const event = JSON.parse(readVaultFile(
+        vault, checked.target, 'utf8', `outbox do attempt ${eventId}`,
+      ));
+      if (event?.event_id !== eventId) return null;
+      events.push(event);
+    } catch (error) {
+      if (error?.code === 'VAULT_PATH_UNSAFE') throw error;
+      return null;
+    }
+  }
+  return events;
+}
+
+function targetOutboxIsAbsent(vault, eventIds) {
+  return eventIds.every((eventId) => {
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(eventId)) return false;
+    const path = brainPath(vault, join('memory-outbox', `${eventId}.json`));
+    return !checkedVaultFile(vault, path, `outbox do attempt ${eventId}`).exists;
+  });
+}
+
+function freezeRepairAttemptAcknowledgements(vault, options = {}) {
+  const result = withMemoryLock(vault, () => {
+    const expectedProjectId = projectId(vault);
+    const registry = readSessionRegistry(vault);
+    const frozen = [];
+    let pending = false;
+    for (const [sessionId, entry] of Object.entries(registry.sessions || {})) {
+      const attempt = entry?.last_memory_attempt;
+      const eventIds = Array.isArray(attempt?.event_ids) ? [...attempt.event_ids] : [];
+      if (attempt?.memory_mode !== 'v2' || attempt.disposition !== 'applied'
+          || !['enqueued', 'degraded'].includes(attempt.state)) continue;
+      pending = true;
+      if (!eventIds.length || new Set(eventIds).size !== eventIds.length
+          || eventIds.some((eventId) => typeof eventId !== 'string' || !eventId)
+          || sessionId !== attempt.canonical_session_id
+          || !ownsAttemptContext(entry, attempt)) continue;
+      const outboxEvents = readAttemptOutboxEvents(vault, eventIds);
+      if (!outboxEvents
+          || outboxEvents.some((event) => !attemptEventMatches(event, attempt, expectedProjectId))) {
+        continue;
+      }
+      frozen.push({
+        sessionId,
+        projectId: expectedProjectId,
+        eventIds,
+        eventFingerprints: new Map(outboxEvents.map((event) => [
+          event.event_id, hash(canonicalMemoryJson(event)),
+        ])),
+        attemptFingerprint: attemptFingerprint(attempt),
+        checkpointFingerprint: memoryCheckpointFingerprint(entry),
+        authorityFingerprint: attemptAuthorityFingerprint(entry, attempt),
+      });
+    }
+    if (pending) {
+      const ledger = readLedgerForValidation(vault, { projectId: expectedProjectId });
+      if (!ledger.ok) {
+        throw new Error(`Ledger físico inválido para acknowledgement de repair: ${(ledger.errors || []).join(' ')}`);
+      }
+    }
+    return { attempts: frozen, pending };
+  }, options.memoryLock || {});
+  return result;
+}
+
+function publishedProjectionMatches(vault, events, projection) {
+  const prepared = prepareMemoryProjection(vault, events);
+  if (!sameCheckpoint(prepared.checkpoint, projection?.checkpoint)) return false;
+  const shared = readVaultFile(
+    vault, brainPath(vault, SHARED), 'utf8', 'projeção SHARED_MEMORY.md',
+  );
+  const candidates = readVaultFile(
+    vault, brainPath(vault, CANDIDATES), 'utf8', 'projeção MEMORY_CANDIDATES.jsonl',
+  );
+  return shared === prepared.sharedContent && candidates === prepared.candidatesContent;
+}
+
+function acknowledgeRepairAttempts(vault, frozen, projection, options = {}) {
+  const receipt = new Set(Array.isArray(projection?.consumedEventIds)
+    ? projection.consumedEventIds
+    : []);
+  const covered = frozen.filter((item) => item.eventIds.every((eventId) => receipt.has(eventId)));
+  if (!covered.length) {
+    return {
+      status: 'unchanged', eligible: frozen.length, acknowledged: 0, stale: frozen.length,
+    };
+  }
+
+  const outcome = withMemoryLock(vault, () => {
+    if (options.beforeAttemptAcknowledgement) options.beforeAttemptAcknowledgement();
+    const ledger = readMemoryLedger(vault);
+    if (ledger.status !== 'ok' || !publishedProjectionMatches(vault, ledger.events, projection)) {
+      return {
+        status: 'attention', eligible: frozen.length, acknowledged: 0, stale: frozen.length,
+      };
+    }
+    const byId = new Map(ledger.events.map((event) => [event.event_id, event]));
+    const valid = covered.filter((item) => {
+      if (projectId(vault) !== item.projectId || !targetOutboxIsAbsent(vault, item.eventIds)) {
+        return false;
+      }
+      return item.eventIds.every((eventId) => {
+        const event = byId.get(eventId);
+        return event
+          && item.eventFingerprints.get(eventId) === hash(canonicalMemoryJson(event));
+      });
+    });
+    if (!valid.length) {
+      return {
+        status: 'attention', eligible: frozen.length, acknowledged: 0, stale: frozen.length,
+      };
+    }
+
+    const acknowledged = mutateSessionRegistry(vault, (registry) => {
+      const sessionIds = [];
+      for (const item of valid) {
+        const entry = registry.sessions?.[item.sessionId];
+        const attempt = entry?.last_memory_attempt;
+        if (!attempt || attemptFingerprint(attempt) !== item.attemptFingerprint
+            || memoryCheckpointFingerprint(entry) !== item.checkpointFingerprint
+            || attemptAuthorityFingerprint(entry, attempt) !== item.authorityFingerprint
+            || !ownsAttemptContext(entry, attempt)
+            || item.eventIds.some((eventId) => !attemptEventMatches(
+              byId.get(eventId), attempt, item.projectId,
+            ))) continue;
+        attempt.state = 'projected';
+        attempt.checkpoint = cloneJson(projection.checkpoint);
+        entry.memory_status = 'projected';
+        entry.memory_checkpoint = cloneJson(projection.checkpoint);
+        sessionIds.push(item.sessionId);
+      }
+      return sessionIds;
+    });
+    return {
+      status: acknowledged.length === valid.length ? 'acknowledged' : 'attention',
+      eligible: frozen.length,
+      acknowledged: acknowledged.length,
+      stale: frozen.length - acknowledged.length,
+      sessionIds: acknowledged,
+    };
+  }, options.memoryLock || {});
+  return outcome === MEMORY_LOCK_BUSY
+    ? {
+      status: 'busy', eligible: frozen.length, acknowledged: 0, stale: frozen.length,
+    }
+    : outcome;
+}
+
+function normalizeProjectedAttemptRecoveryRequest({ sessionId } = {}) {
+  const normalizedSessionId = String(sessionId || '').trim();
+  if (!normalizedSessionId) {
+    throw new TypeError('sessionId é obrigatório para recuperar attempt projetado.');
+  }
+  return { sessionId: normalizedSessionId };
+}
+
+function readStrictSessionRegistry(vault) {
+  const path = registryPath(vault);
+  const checked = checkedVaultFile(vault, path, 'SESSION_REGISTRY da recuperação', {
+    allowMissing: false,
+  });
+  const generationBefore = filesystemGeneration(checked.target);
+  let bytes;
+  try {
+    bytes = readVaultFile(vault, checked.target, undefined, 'SESSION_REGISTRY da recuperação');
+  } catch (error) {
+    throw new Error(`SESSION_REGISTRY ausente ou ilegível para recuperação: ${error?.message || error}`);
+  }
+  const generationAfter = filesystemGeneration(checked.target);
+  if (canonicalMemoryJson(generationBefore) !== canonicalMemoryJson(generationAfter)) {
+    throw new Error('SESSION_REGISTRY mudou durante o preflight da recuperação targeted.');
+  }
+  let registry;
+  try {
+    registry = JSON.parse(bytes.toString('utf8'));
+  } catch (error) {
+    throw new Error(`SESSION_REGISTRY contém JSON inválido para recuperação: ${error?.message || error}`);
+  }
+  if (!registry || typeof registry !== 'object' || Array.isArray(registry)
+      || !Number.isInteger(registry.version) || registry.version < 2
+      || !registry.sessions || typeof registry.sessions !== 'object'
+      || Array.isArray(registry.sessions)) {
+    throw new Error('SESSION_REGISTRY inválido para recuperação targeted.');
+  }
+  return {
+    registry,
+    registryHash: hash(canonicalMemoryJson(registry)),
+    registryGeneration: generationAfter,
+  };
+}
+
+function filesystemGeneration(path) {
+  const stat = statSync(path, { bigint: true });
+  return {
+    dev: String(stat.dev),
+    ino: String(stat.ino),
+    size: String(stat.size),
+    mtimeNs: String(stat.mtimeNs),
+    ctimeNs: String(stat.ctimeNs),
+    birthtimeNs: String(stat.birthtimeNs),
+  };
+}
+
+function projectedRecoveryOutboxProof(vault) {
+  const path = brainPath(vault, 'memory-outbox');
+  const checked = assertVaultPathSafe(vault, path, {
+    allowMissing: true,
+    expectedType: 'directory',
+    label: 'diretório memory-outbox da recuperação',
+  });
+  if (!checked.exists) return { exists: false, entries: [] };
+
+  const namesBefore = readdirSync(checked.target).sort();
+  const entries = namesBefore.map((name) => {
+    const memberPath = join(checked.target, name);
+    const member = checkedVaultFile(
+      vault, memberPath, `membro ${name} da memory-outbox`, { allowMissing: false },
+    );
+    const bytes = readVaultFile(
+      vault, member.target, undefined, `membro ${name} da memory-outbox`,
+    );
+    let event;
+    try {
+      event = JSON.parse(bytes.toString('utf8'));
+    } catch (error) {
+      throw new Error(`Membro ${name} da memory-outbox contém JSON inválido: ${error?.message || error}`);
+    }
+    if (!event || typeof event !== 'object' || Array.isArray(event)
+        || typeof event.event_id !== 'string' || !event.event_id.trim()) {
+      throw new Error(`Membro ${name} da memory-outbox não contém event_id válido.`);
+    }
+    return {
+      name,
+      eventId: event.event_id,
+      generation: filesystemGeneration(member.target),
+      hash: byteHash(bytes),
+    };
+  });
+  const namesAfter = readdirSync(checked.target).sort();
+  if (canonicalMemoryJson(namesBefore) !== canonicalMemoryJson(namesAfter)) {
+    throw new Error('memory-outbox mudou durante o preflight da recuperação targeted.');
+  }
+  return {
+    exists: true,
+    generation: filesystemGeneration(checked.target),
+    entries,
+  };
+}
+
+function recoveryContextFingerprint(entry, attempt) {
+  return hash(canonicalMemoryJson({
+    status: fieldSnapshot(entry, 'status'),
+    session_id: fieldSnapshot(entry, 'session_id'),
+    activation_id: fieldSnapshot(entry, 'activation_id'),
+    active_activation_id: fieldSnapshot(entry, 'active_activation_id'),
+    activation_epoch: fieldSnapshot(entry, 'activation_epoch'),
+    last_turn_id: fieldSnapshot(entry, 'last_turn_id'),
+    last_turn_sequence: fieldSnapshot(entry, 'last_turn_sequence'),
+    turn_sequences: cloneJson(entry?.turn_sequences || null),
+    activation: cloneJson(entry?.activations?.[attempt?.activation_id] || null),
+    memory_status: fieldSnapshot(entry, 'memory_status'),
+    memory_activation_id: fieldSnapshot(entry, 'memory_activation_id'),
+  }));
+}
+
+function recoveryRegistryProof(entry, attempt) {
+  return {
+    attemptFingerprint: attemptFingerprint(attempt),
+    contextFingerprint: recoveryContextFingerprint(entry, attempt),
+    checkpointFingerprint: memoryCheckpointFingerprint(entry),
+  };
+}
+
+function validStoredProjectedCheckpoint(vault, authority, attempt, entry) {
+  if (!checkpointShape(attempt?.checkpoint)
+      || !sameCheckpoint(attempt.checkpoint, entry?.memory_checkpoint)) return false;
+  const cursorIndex = authority.ledgerEvents
+    .findIndex((event) => event.event_id === attempt.checkpoint.event_cursor);
+  if (cursorIndex < 0) return false;
+  const prefix = authority.ledgerEvents.slice(0, cursorIndex + 1);
+  const prefixIds = new Set(prefix.map((event) => event.event_id));
+  if (attempt.event_ids.some((eventId) => !prefixIds.has(eventId))) return false;
+  return sameCheckpoint(
+    attempt.checkpoint,
+    prepareMemoryProjection(vault, prefix).checkpoint,
+  );
+}
+
+function prepareProjectedAttemptRecovery(vault, rawRequest) {
+  const request = normalizeProjectedAttemptRecoveryRequest(rawRequest);
+  const authority = readMemoryAuthority(vault);
+  const registrySnapshot = readStrictSessionRegistry(vault);
+  const { registry } = registrySnapshot;
+  const outboxProof = projectedRecoveryOutboxProof(vault);
+  const entry = registry.sessions[request.sessionId];
+  if (!entry) throw new Error(`Sessão não encontrada para recuperação: ${request.sessionId}`);
+
+  const attempt = entry.last_memory_attempt;
+  const eventIds = Array.isArray(attempt?.event_ids) ? [...attempt.event_ids] : [];
+  if (attempt?.memory_mode !== 'v2' || attempt?.disposition !== 'applied'
+      || !['enqueued', 'degraded', 'projected'].includes(attempt?.state)) {
+    throw new Error(`Attempt da sessão ${request.sessionId} não é v2/applied recuperável.`);
+  }
+  if (!eventIds.length
+      || eventIds.some((eventId) => typeof eventId !== 'string' || !eventId.trim())
+      || new Set(eventIds).size !== eventIds.length) {
+    throw new Error('Attempt recuperável deve possuir event_ids não vazios e únicos.');
+  }
+  if (request.sessionId !== attempt.canonical_session_id
+      || (Object.prototype.hasOwnProperty.call(entry, 'session_id')
+        && entry.session_id !== request.sessionId)
+      || !ownsAttemptContext(entry, attempt)) {
+    throw new Error('Contexto causal do attempt não pertence mais à sessão ativa.');
+  }
+
+  const eventIndexes = eventIds.map((eventId) => (
+    authority.ledgerEvents.findIndex((event) => event.event_id === eventId)
+  ));
+  if (eventIndexes.some((index) => index < 0)) {
+    throw new Error('Attempt recuperável referencia event_ids ausentes do ledger.');
+  }
+  for (const eventId of eventIds) {
+    if (!attemptEventMatches(authority.ledgerById.get(eventId), attempt, authority.projectId)) {
+      throw new Error(`Identidade causal inválida no evento ${eventId}.`);
+    }
+  }
+  const lastAttemptEventIndex = Math.max(...eventIndexes);
+  if (authority.ledgerEvents.slice(lastAttemptEventIndex + 1)
+    .some((event) => event.canonical_session_id === request.sessionId)) {
+    throw new Error('Existe evento posterior da mesma sessão; attempt histórico não pode ser recuperado.');
+  }
+  if (!targetOutboxIsAbsent(vault, eventIds)
+      || outboxProof.entries.some((item) => eventIds.includes(item.eventId))) {
+    throw new Error('A outbox ainda contém evento alvo; recuperação targeted recusada.');
+  }
+
+  const projection = prepareMemoryProjection(vault, authority.ledgerEvents);
+  const sharedBytes = readVaultFile(
+    vault, brainPath(vault, SHARED), undefined, 'projeção SHARED_MEMORY.md',
+  );
+  const candidatesBytes = readVaultFile(
+    vault, brainPath(vault, CANDIDATES), undefined, 'projeção MEMORY_CANDIDATES.jsonl',
+  );
+  if (!sharedBytes.equals(Buffer.from(projection.sharedContent))
+      || !candidatesBytes.equals(Buffer.from(projection.candidatesContent))) {
+    throw new Error('SHARED/candidates divergem da autoridade integral do ledger.');
+  }
+  assertAuthorityMatches(authority, readMemoryAuthority(vault));
+
+  const alreadyProjected = attempt.state === 'projected';
+  if (alreadyProjected && !validStoredProjectedCheckpoint(vault, authority, attempt, entry)) {
+    throw new Error('Attempt projected não possui checkpoint armazenado válido.');
+  }
+
+  return {
+    request,
+    eligible: !alreadyProjected,
+    alreadyProjected,
+    checkpoint: cloneJson(alreadyProjected ? attempt.checkpoint : projection.checkpoint),
+    proof: {
+      projectId: authority.projectId,
+      projectHash: authority.projectHash,
+      coreHash: authority.coreHash,
+      ledgerHash: authority.ledgerHash,
+      sharedHash: byteHash(sharedBytes),
+      candidatesHash: byteHash(candidatesBytes),
+      outboxProof,
+      registryHash: registrySnapshot.registryHash,
+      registryGeneration: registrySnapshot.registryGeneration,
+      eventIds,
+      eventFingerprints: eventIds.map((eventId) => (
+        hash(canonicalMemoryJson(authority.ledgerById.get(eventId)))
+      )),
+      ...recoveryRegistryProof(entry, attempt),
+    },
+  };
+}
+
+function projectedAttemptRecoveryResult(prepared, status) {
+  return {
+    status,
+    eligible: prepared.eligible,
+    sessionId: prepared.request.sessionId,
+    checkpoint: cloneJson(prepared.checkpoint),
+  };
+}
+
+function assertProjectedAttemptRecoveryProof(expected, actual) {
+  if (canonicalMemoryJson(expected.proof) !== canonicalMemoryJson(actual.proof)
+      || expected.alreadyProjected !== actual.alreadyProjected
+      || !sameCheckpoint(expected.checkpoint, actual.checkpoint)) {
+    throw new Error('CAS perdido: autoridade, attempt, contexto causal ou checkpoint mudou.');
+  }
+}
+
+export function inspectProjectedAttemptRecovery(vault, { sessionId } = {}) {
+  const prepared = prepareProjectedAttemptRecovery(vault, { sessionId });
+  return projectedAttemptRecoveryResult(
+    prepared, prepared.alreadyProjected ? 'unchanged' : 'eligible',
+  );
+}
+
+export function recoverProjectedAttempt(vault, {
+  sessionId,
+  apply = false,
+  beforeRegistryMutation,
+  memoryLock = {},
+} = {}) {
+  const prepared = prepareProjectedAttemptRecovery(vault, { sessionId });
+  if (prepared.alreadyProjected) {
+    return projectedAttemptRecoveryResult(prepared, 'unchanged');
+  }
+  if (!apply) return projectedAttemptRecoveryResult(prepared, 'dry-run');
+
+  const outcome = withMemoryLock(vault, () => {
+    const locked = prepareProjectedAttemptRecovery(vault, prepared.request);
+    assertProjectedAttemptRecoveryProof(prepared, locked);
+    if (beforeRegistryMutation) beforeRegistryMutation();
+    const current = prepareProjectedAttemptRecovery(vault, prepared.request);
+    assertProjectedAttemptRecoveryProof(locked, current);
+
+    mutateSessionRegistry(vault, (registry) => {
+      const entry = registry.sessions?.[current.request.sessionId];
+      const attempt = entry?.last_memory_attempt;
+      const expectedRegistryProof = {
+        attemptFingerprint: current.proof.attemptFingerprint,
+        contextFingerprint: current.proof.contextFingerprint,
+        checkpointFingerprint: current.proof.checkpointFingerprint,
+      };
+      if (!entry || !attempt
+          || hash(canonicalMemoryJson(registry)) !== current.proof.registryHash
+          || canonicalMemoryJson(filesystemGeneration(registryPath(vault)))
+            !== canonicalMemoryJson(current.proof.registryGeneration)
+          || canonicalMemoryJson(recoveryRegistryProof(entry, attempt))
+            !== canonicalMemoryJson(expectedRegistryProof)) {
+        throw new Error('CAS perdido: registry mudou antes do acknowledgement targeted.');
+      }
+      attempt.state = 'projected';
+      attempt.checkpoint = cloneJson(current.checkpoint);
+      entry.memory_status = 'projected';
+      entry.memory_activation_id = attempt.activation_id;
+      entry.memory_checkpoint = cloneJson(current.checkpoint);
+    });
+    return projectedAttemptRecoveryResult(current, 'applied');
+  }, memoryLock);
+
+  if (outcome === MEMORY_LOCK_BUSY) {
+    const error = new Error('MEMORY.lock indisponível; recuperação targeted não foi aplicada.');
+    error.code = 'WENDKEEP_MEMORY_LOCK_BUSY';
+    throw error;
+  }
+  return outcome;
 }
 
 function matchingAppliedReconciliation(entry, request) {
@@ -1217,13 +1731,28 @@ export function migrateLegacyMemoryCheckpoints(vault, {
 }
 
 export function repairMemory(vault, options = {}) {
-  const repaired = repairMemoryLedger(vault);
+  if (options.beforeAttemptFreeze) options.beforeAttemptFreeze();
+  const acknowledgementPreflight = freezeRepairAttemptAcknowledgements(vault, options);
+  if (acknowledgementPreflight === MEMORY_LOCK_BUSY) {
+    return { status: 'busy', stage: 'attempt-freeze' };
+  }
+  const frozenAttempts = acknowledgementPreflight.attempts;
+  const repaired = acknowledgementPreflight.pending
+    ? { status: 'unchanged', repairedLines: 0, backupPath: null }
+    : repairMemoryLedger(vault);
   if (repaired.status === 'busy') return repaired;
   const projection = projectMemoryOutbox(vault);
   if (projection.status === 'busy') return { status: 'busy', repaired, projection };
+  const attemptAcknowledgements = acknowledgeRepairAttempts(
+    vault, frozenAttempts, projection, options,
+  );
   const checkpointMigration = migrateLegacyMemoryCheckpoints(vault, options);
   return {
-    status: 'repaired', repaired, projection, checkpointMigration,
+    status: 'repaired',
+    repaired,
+    projection,
+    attemptAcknowledgements,
+    checkpointMigration,
   };
 }
 
@@ -1317,9 +1846,61 @@ function parseReconcileArgs(argv) {
   };
 }
 
+function parseRecoverAttemptArgs(argv) {
+  const positionals = [];
+  const seen = new Set();
+  let apply = false;
+  let vault = '';
+
+  for (let index = 1; index < argv.length; index += 1) {
+    const token = argv[index];
+    if (!token.startsWith('--')) {
+      positionals.push(token);
+      if (positionals.length > 1) {
+        throw memoryUsageError(`memory recover-attempt recebeu argumento posicional extra: ${token}.`);
+      }
+      continue;
+    }
+
+    const equalAt = token.indexOf('=');
+    const name = equalAt >= 0 ? token.slice(0, equalAt) : token;
+    if (name !== '--apply' && name !== '--vault') {
+      throw memoryUsageError(`memory recover-attempt recebeu opção desconhecida: ${name}.`);
+    }
+    if (seen.has(name)) {
+      throw memoryUsageError(`memory recover-attempt recebeu opção duplicada: ${name}.`);
+    }
+    seen.add(name);
+
+    if (name === '--apply') {
+      if (equalAt >= 0) throw memoryUsageError('--apply não aceita valor.');
+      apply = true;
+      continue;
+    }
+
+    const value = equalAt >= 0 ? token.slice(equalAt + 1) : argv[index + 1];
+    if (!value || !value.trim() || value.startsWith('--')) {
+      throw memoryUsageError('--vault requer valor não vazio que não comece com --.');
+    }
+    vault = value;
+    if (equalAt < 0) index += 1;
+  }
+
+  if (positionals.length !== 1) {
+    throw memoryUsageError('memory recover-attempt requer exatamente uma sessão obrigatória.');
+  }
+
+  return {
+    sessionId: positionals[0],
+    apply,
+    vault,
+  };
+}
+
 export function runMemory(argv) {
   const [sub, positional] = argv;
   let reconcileArgs = null;
+  let recoverAttemptArgs = null;
   if (sub === 'reconcile') {
     try {
       reconcileArgs = parseReconcileArgs(argv);
@@ -1329,7 +1910,18 @@ export function runMemory(argv) {
       return;
     }
   }
-  const vault = (reconcileArgs?.vault || option(argv, '--vault')) || process.env.OBSIDIAN_VAULT_PATH;
+  if (sub === 'recover-attempt') {
+    try {
+      recoverAttemptArgs = parseRecoverAttemptArgs(argv);
+    } catch (error) {
+      process.stderr.write(`wendkeep memory: ${error.message}\n`);
+      process.exitCode = error.code === 'WENDKEEP_MEMORY_USAGE' ? 2 : 1;
+      return;
+    }
+  }
+  const vault = (
+    recoverAttemptArgs?.vault || reconcileArgs?.vault || option(argv, '--vault')
+  ) || process.env.OBSIDIAN_VAULT_PATH;
   if (!vault) { process.stderr.write('wendkeep memory: passe --vault <path>.\n'); process.exitCode = 2; return; }
   if (!existsSync(vault)) { process.stderr.write(`wendkeep memory: not found: ${vault}\n`); process.exitCode = 2; return; }
   try {
@@ -1345,6 +1937,12 @@ export function runMemory(argv) {
         apply: reconcileArgs.apply,
       });
     }
+    else if (sub === 'recover-attempt') {
+      result = recoverProjectedAttempt(vault, {
+        sessionId: recoverAttemptArgs.sessionId,
+        apply: recoverAttemptArgs.apply,
+      });
+    }
     else if (sub === 'promote' || sub === 'reject') {
       const eventId = option(argv, '--event');
       if (sub === 'reject' && eventId) throw memoryUsageError('--event é permitido somente em memory promote.');
@@ -1352,7 +1950,7 @@ export function runMemory(argv) {
         action: sub, candidateId: positional, ...(eventId ? { eventId } : {}),
       });
     }
-    else { process.stderr.write('wendkeep memory: use status | migrate [--apply] | repair | reconcile <session> --by-session <session> --reason <text> [--apply] | promote <candidate> [--event <event-id>] | reject <candidate>.\n'); process.exitCode = 2; return; }
+    else { process.stderr.write('wendkeep memory: use status | migrate [--apply] | repair | recover-attempt <session> [--apply] | reconcile <session> --by-session <session> --reason <text> [--apply] | promote <candidate> [--event <event-id>] | reject <candidate>.\n'); process.exitCode = 2; return; }
     process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
     if (sub === 'status' && argv.includes('--gate')) process.exitCode = result.status === 'blocked' ? 1 : 0;
     else if (sub === 'reconcile' && reconcileArgs.apply) process.exitCode = result.health?.status === 'blocked' ? 1 : 0;

@@ -338,6 +338,12 @@ function checkMemoryAttempts(registry, {
       const missing = eventIds.filter((eventId) => !ledgerEventIds.has(eventId) && !outboxEventIds.has(eventId));
       if (missing.length) {
         failures.push(`Attempt v2 perdeu ${missing.length} evento(s): ausentes do ledger e da outbox. Inspecione com: ${MEMORY_STATUS_COMMAND}.`);
+      } else if (
+        state === 'enqueued'
+        && eventIds.every((eventId) => ledgerEventIds.has(eventId))
+        && eventIds.every((eventId) => !outboxEventIds.has(eventId))
+      ) {
+        warnings.push(`Attempt de memória v2 possui acknowledgement projetado pendente. Recupere com: wendkeep memory recover-attempt ${sessionId}.`);
       } else {
         warnings.push(`Attempt de memória v2 ${state} permanece recuperável: ${eventIds.length} evento(s) durável(is) no ledger e/ou outbox.`);
       }

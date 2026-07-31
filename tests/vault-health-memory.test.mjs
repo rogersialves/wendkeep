@@ -80,13 +80,19 @@ function byteSnapshot(vault) {
   return entries;
 }
 
-function writeLastMemoryAttempt(vault, attempt, sessionId = 'example-session-health') {
+function writeLastMemoryAttempt(
+  vault,
+  attempt,
+  sessionId = 'example-session-health',
+  entryOverrides = {},
+) {
   writeFileSync(join(vault, '.brain', 'SESSION_REGISTRY.json'), `${JSON.stringify({
     version: 2,
     sessions: {
       [sessionId]: {
         status: 'done',
         session_file: '02-Sessions/example-session.md',
+        ...entryOverrides,
         last_memory_attempt: attempt,
       },
     },
@@ -262,6 +268,44 @@ test('[req:MEM-STOP-5] [req:MEM-STOP-6] [sensor:memory-health] degraded attempt 
     assert.equal(result.status, 'warning');
     assert.match(result.warnings.join('\n'), /recuper|attempt/i);
     assert.doesNotMatch(JSON.stringify(result), /example-private-payload-must-not-be-rendered/);
+  } finally { rmSync(vault, { recursive: true, force: true }); }
+});
+
+test('[req:MEM-ACK-2] [sensor:memory-recovery] health identifies projected acknowledgement pending', () => {
+  const previous = event('mem-example-previous-checkpoint', {
+    memory_key: 'example.previous', value: 'synthetic previous checkpoint', turn_sequence: 0,
+  });
+  const projected = event('mem-example-projected-ack-pending', {
+    memory_key: 'example.projected-ack', value: 'synthetic projected acknowledgement',
+  });
+  const vault = createBundle([previous, projected]);
+  const brain = join(vault, '.brain');
+  const outbox = join(brain, 'memory-outbox');
+  try {
+    mkdirSync(outbox);
+    writeLastMemoryAttempt(vault, memoryAttempt({
+      event_ids: [projected.event_id],
+      checkpoint: null,
+    }), 'example-session-health', {
+      memory_status: 'enqueued',
+      memory_checkpoint: checkpointFor([previous]),
+    });
+    const snapshot = () => ({
+      registry: readFileSync(join(brain, 'SESSION_REGISTRY.json')),
+      ledger: readFileSync(join(brain, 'MEMORY_EVENTS.jsonl')),
+      shared: readFileSync(join(brain, 'SHARED_MEMORY.md')),
+      outbox: readdirSync(outbox),
+    });
+    const before = snapshot();
+
+    const result = checkMemoryBundle(vault);
+
+    assert.equal(result.ok, true, result.failures.join('; '));
+    assert.equal(result.status, 'warning');
+    assert.deepEqual(result.failures, []);
+    assert.match(result.warnings.join('\n'), /acknowledgement projetado pendente/i);
+    assert.match(result.warnings.join('\n'), /memory recover-attempt example-session-health/i);
+    assert.deepEqual(snapshot(), before, 'health must not change registry, ledger, SHARED, or outbox');
   } finally { rmSync(vault, { recursive: true, force: true }); }
 });
 

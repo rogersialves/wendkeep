@@ -25,6 +25,7 @@ Informe o vault explicitamente em automações. Preserve backups e evidências a
 ```bash
 npx wendkeep memory status [--gate] --vault <cofre>
 npx wendkeep memory repair --vault <cofre>
+npx wendkeep memory recover-attempt <sessão> [--apply] --vault <cofre>
 npx wendkeep memory reconcile <sessão-ambígua> --by-session <sessão-sucessora> --reason <motivo> [--apply] --vault <cofre>
 npx wendkeep memory promote <candidate> [--event <event-id>] --vault <cofre>
 npx wendkeep memory reject <candidate> --vault <cofre>
@@ -51,8 +52,24 @@ npx wendkeep validate-memory --vault <cofre-v2>
   assert-only somente quando revision, cursor, hash, identidade, turns e o espelho
   `memory_checkpoint` reproduzem exatamente a semântica antiga; o alvo é o replay atual daquele
   prefixo, sem absorver eventos posteriores. Ambos os casos fazem CAS do attempt e do espelho e
-  registram backup/auditoria. O repair nunca reclassifica attempts do registry nem aceita tuple,
-  operação ou espelho que não seja rederivado integralmente.
+  registram backup/auditoria. A única exceção estreita de acknowledgement cobre attempts
+  `enqueued`/`degraded` cuja outbox foi congelada e cujos event IDs a mesma execução do repair
+  consumiu integralmente; cobertura parcial não altera o attempt. O repair não varre nem
+  reclassifica attempts históricos e não aceita tuple, operação ou espelho que não seja
+  rederivado integralmente.
+- Desde a 0.66.4, `memory recover-attempt` é dirigido a uma única sessão e faz dry-run por padrão.
+  A sessão deve existir no registry e possuir o último attempt `v2`, `applied`, em `enqueued` ou
+  `degraded`, com `event_ids` não vazios e únicos. Todos os eventos devem estar integralmente no
+  ledger, pertencer ao mesmo projeto/sessão/activation/epoch/turn do attempt, não pode haver evento
+  posterior da mesma sessão nem evento alvo restante na outbox, e SHARED/candidates devem
+  reproduzir byte a byte a projeção integral do ledger. Um attempt já `projected` só é aceito com
+  checkpoint válido e retorna `unchanged`.
+- Com `--apply`, `memory recover-attempt` altera somente `SESSION_REGISTRY`: marca
+  `last_memory_attempt`/`memory_status` como `projected` e grava o checkpoint idêntico no attempt e
+  em `memory_checkpoint`. Ledger, CORE, SHARED, candidates, outbox e notas permanecem byte-intactos.
+  O comando valida novamente toda a autoridade sob `MEMORY.lock`, faz CAS do attempt, activation,
+  epoch, turno e checkpoint e falha fechado se qualquer byte/contexto mudar. Lock ocupado não é
+  colhido; retry após aplicação retorna `unchanged` sem escrita.
 - `memory reconcile` é dry-run por padrão. `--apply` exige duas sessões nomeadas e motivo, faz CAS
   do attempt exato, salva backup do registry e limita a mutação ao attempt ambíguo e à sucessora.
   O replay é CORE-aware, usa cursor físico do ledger no checkpoint e não reescreve ledger, CORE ou
@@ -78,11 +95,16 @@ npx wendkeep validate-memory --vault <cofre-v2>
   CAS; ele não reordena, reescreve nem acrescenta evento ao ledger.
 - `validate-memory <CORE.md>` valida cap de 25 linhas, seções e segredos.
 - `validate-memory --vault` exige bundle v2 completo; não é o gate correto para vault legado.
+- Para `recover-attempt`, exit `0` indica dry-run/apply válido, inclusive `unchanged`; exit `1`
+  indica falha de pré-condição, autoridade, CAS, topologia ou lock; exit `2` indica
+  sessão/`--vault` ausente, opção desconhecida/duplicada, argumento extra ou valor inválido.
 
 ## Exemplos
 
 ```bash
 npx wendkeep memory status --gate --vault .MeuApp-vault
+npx wendkeep memory recover-attempt sessao-123 --vault .MeuApp-vault
+npx wendkeep memory recover-attempt sessao-123 --apply --vault .MeuApp-vault
 npx wendkeep memory reconcile antiga --by-session atual --reason "entrega continuada" --vault .MeuApp-vault
 npx wendkeep memory reconcile antiga --by-session atual --reason "entrega continuada" --apply --vault .MeuApp-vault
 npx wendkeep validate-memory .MeuApp-vault/.brain/CORE.md
@@ -104,6 +126,14 @@ prefixo válido de uma projeção global que já avançou com eventos concorrent
   fabricar o primeiro evento.
 - `degraded` com todos os event IDs presentes no ledger ou na outbox íntegra é recuperável; deixe o
   replay idempotente concluir. Event ID ausente nos dois lugares indica publicação perdida.
+- Status/doctor informa `acknowledgement projetado pendente` e sugere
+  `memory recover-attempt <sessão>`: preserve os artefatos, revise primeiro o JSON do dry-run e só
+  use `--apply` se `eligible: true`. `dry-run` confirma elegibilidade; `applied` atualiza
+  registry/checkpoint; `unchanged` indica que a recuperação já foi aplicada de forma idempotente.
+- `recover-attempt` recusa evento ausente/divergente, outbox alvo ainda presente, SHARED/candidates
+  stale, attempt histórico, sessão/contexto causal divergente, checkpoint inválido ou lock ocupado.
+  Não tente contornar o gate com edição manual: rode novamente `memory status --gate`, preserve a
+  evidência e resolva a autoridade divergente.
 - Attempt `ambiguous`, attempt `applied` sem event IDs, evento `projected` apenas na outbox ou
   checkpoint divergente são bloqueantes: preserve os artefatos e investigue antes de repair. Se a
   ambiguidade for comprovadamente substituída por uma sessão sucessora, revise o dry-run de
