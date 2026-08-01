@@ -5,14 +5,49 @@ import {
   inspectTranscriptIdentityContent,
   resolveSessionIdentitySnapshot,
 } from '../packages/integrations/src/session-identity.mjs';
+import { readCodexRolloutMeta } from './codex-rollout-meta.mjs';
+
+function unknownTranscriptIdentity() {
+  return {
+    transcriptProvider: 'unknown',
+    provider: 'unknown',
+    canonicalConversationId: '',
+    transcriptId: '',
+    parentConversationId: '',
+  };
+}
+
+function inspectCodexMeta(meta, fallbackTranscriptId) {
+  return {
+    transcriptProvider: 'openai',
+    provider: 'codex',
+    canonicalConversationId: meta.session_id || meta.id || '',
+    transcriptId: meta.id || fallbackTranscriptId,
+    parentConversationId: meta.parent_thread_id || meta.forked_from_id || '',
+  };
+}
+
+function withoutCodexSessionMeta(content) {
+  return String(content || '').split('\n').filter((line) => {
+    try { return JSON.parse(line)?.type !== 'session_meta'; } catch { return true; }
+  }).join('\n');
+}
 
 export function inspectTranscriptIdentity(transcriptPath) {
-  const content = transcriptPath && existsSync(transcriptPath)
-    ? readFileSync(transcriptPath, 'utf-8')
-    : '';
-  return inspectTranscriptIdentityContent(content, {
-    fallbackTranscriptId: transcriptPath ? basename(transcriptPath, '.jsonl') : '',
+  const fallbackTranscriptId = transcriptPath ? basename(transcriptPath, '.jsonl') : '';
+  if (!transcriptPath || !existsSync(transcriptPath)) return unknownTranscriptIdentity();
+
+  const codexMeta = readCodexRolloutMeta(transcriptPath);
+  if (codexMeta.ok) return inspectCodexMeta(codexMeta.meta, fallbackTranscriptId);
+
+  // Claude JSONL has no session_meta header. Preserve its existing full-content inspection,
+  // but never reinterpret a later/misplaced Codex meta as the file identity.
+  let content;
+  try { content = readFileSync(transcriptPath, 'utf-8'); } catch { return unknownTranscriptIdentity(); }
+  const inspected = inspectTranscriptIdentityContent(withoutCodexSessionMeta(content), {
+    fallbackTranscriptId,
   });
+  return inspected.provider === 'claude' ? inspected : unknownTranscriptIdentity();
 }
 
 export function resolveSessionIdentity(vaultBase, input = {}, provider = detectProvider()) {

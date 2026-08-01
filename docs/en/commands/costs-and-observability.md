@@ -26,7 +26,7 @@ A consistent registry, complete price table, and transcript access for rebuilt s
 ```bash
 npx wendkeep stats [--vault <vault>] [--json]
 npx wendkeep cost [--since <date>] [--top [N]] [--trend day|week|month] [--write] [--json]
-npx wendkeep cost rebuild [--session <id|file>] [--limit N] [--apply] [--json]
+npx wendkeep cost rebuild [--session <id|file>] [--limit N] [--max-graph-nodes N] [--max-fallback-days N] [--max-fallback-candidates N] [--apply] [--json]
 ```
 
 ## Options and exit codes
@@ -34,10 +34,18 @@ npx wendkeep cost rebuild [--session <id|file>] [--limit N] [--apply] [--json]
 - `wendkeep stats` emits one shareable line or JSON.
 - `wendkeep cost` aggregates total/model/day; `--trend` adds projection and `--write` refreshes
   `00-Custo.md`.
-- `wendkeep cost rebuild` is dry-run by default; `--apply` writes notes and
-  `.brain/COST_REBUILD.json`.
-- Exit `0` means a consistent calculation; non-zero reports insufficient registry, price,
-  transcript, or parsing state.
+- `wendkeep cost rebuild` is dry-run by default and performs **zero writes**: it acquires no write
+  lock, changes no note, registry, or runtime state, and does not create `.brain/COST_REBUILD.json`.
+- `--apply` publishes only `complete` or `none` candidates. The `none` state clears the section
+  only after a stable offline scan proves that no subagent was started.
+- A `degraded` or `stale` candidate returns exit `1` and preserves the note without changes; the
+  batch continues so other safe sessions can be processed and the report can expose sanitized
+  diagnostic codes.
+- The `--max-graph-nodes`, `--max-fallback-days`, and `--max-fallback-candidates` overrides are
+  exclusively for a targeted rebuild with `--session`. Using them without `--session` is invalid
+  usage and returns exit `2`; hooks, import, and bulk rebuild retain the default limits.
+- Exit `0` means a consistent preview/apply; exit `1` means a partial `degraded`/`stale` result;
+  exit `2` means invalid syntax or context.
 
 ## Examples
 
@@ -45,12 +53,16 @@ npx wendkeep cost rebuild [--session <id|file>] [--limit N] [--apply] [--json]
 npx wendkeep stats --vault .MyApp-vault
 npx wendkeep cost --since 2026-07-01 --top 10 --trend week
 npx wendkeep cost rebuild --session 019abc --json
+npx wendkeep cost rebuild --session 019abc --max-graph-nodes 8192 --json
+npx wendkeep cost rebuild --session 019abc --apply
 ```
 
 ## Expected result
 
-Totals retain input/output/cache/reasoning dimensions by model and period. Rebuild shows a preview
-before changing notes and leaves a reproducible report when applied.
+Totals retain input/output/cache/reasoning dimensions by model and period. Tri-state composition
+returns `complete`, `none`, or `degraded`, plus a frontier, manifest, and sanitized diagnostics.
+Run and review the dry-run before repeating the same command with `--apply`; a semantically
+identical second apply preserves the note, checkpoint, report, and mtime.
 
 ## Common errors and diagnosis
 
@@ -58,6 +70,8 @@ before changing notes and leaves a reproducible report when applied.
 - Wrong-provider costs: validate the session identity chain.
 - Missing transcript: do not estimate silently; keep the gap visible.
 - Duplicated parent/subagent/fork totals: verify registry relationships and deduplication.
+- `degraded`/`stale`: preserve the note and inspect diagnostics/frontier before authorizing apply.
+- Rejected override: add `--session <id|file>` or remove the three targeted limits.
 
 ## Next steps
 

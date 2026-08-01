@@ -67,7 +67,7 @@ test('discoverCodexTranscripts expõe o marcador de subagent do session_meta', (
   assert.equal(child.subagent?.nickname, 'Lovelace');
 });
 
-test('runImport: subagent nunca vira nota; só o pai produz sessão', () => {
+test('[req:IMPORT-5] runImport: subagent nunca vira nota; só o pai produz sessão', () => {
   const { src } = seedRollouts();
   const vault = mkdtempSync(join(tmpdir(), 'wk-sub-vault-'));
   mkdirSync(join(vault, '.brain'), { recursive: true });

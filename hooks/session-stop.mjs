@@ -8,8 +8,13 @@ import { addUsage, costBreakdown, emptyTokenUsage, normalizeClaudeUsage, normali
 import { buildBrainDigest, buildBrainIndex } from './brain-core.mjs';
 import { activeChangeLink, pruneChangeSentinels } from './change-core.mjs';
 import { getLocale } from './locale.mjs';
-import { updateSessionObservability } from './session-observability.mjs';
+import { materializeSessionObservability } from './session-observability.mjs';
 import { resolveSessionEntry } from './session-identity.mjs';
+import { resolveObservabilityRoots } from './session-observability-lifecycle.mjs';
+import {
+  markObservabilityCheckpoint,
+  readObservabilityStore,
+} from './session-observability-store.mjs';
 import { mutateSessionNote } from './session-note-io.mjs';
 import { applyDerivedSections, provenanceSessions } from './derived-sections.mjs';
 import { buildSessionMemoryEvents, collectLifecycleEvidence } from './memory-handoff.mjs';
@@ -794,7 +799,206 @@ export function shouldAbortStopAfterStaging(causalStop, memoryAttempt) {
   );
 }
 
-export function main({ stageMemory = stageStopMemoryAttempt } = {}) {
+const STOP_OBSERVABILITY_DEADLINE_MS = 45_000;
+
+function stopEntryCausalSnapshot(entry) {
+  const activationId = String(entry?.active_activation_id || '');
+  const activation = entry?.activations?.[activationId] || {};
+  return {
+    activationId,
+    activationEpoch: Number(activation.epoch || entry?.activation_epoch || 0),
+    turnSequence: Number(entry?.last_turn_sequence || activation.last_turn_sequence || 0),
+  };
+}
+
+function expectedStopCausalSnapshot(entry, causalStop, turnSequence) {
+  if (!causalStop) return stopEntryCausalSnapshot(entry);
+  return {
+    activationId: String(causalStop.activationId || ''),
+    activationEpoch: Number(causalStop.activation?.epoch || entry?.activation_epoch || 0),
+    turnSequence: Number(turnSequence || 0),
+  };
+}
+
+function sameStopCausalSnapshot(left, right) {
+  return left.activationId === right.activationId
+    && left.activationEpoch === right.activationEpoch
+    && left.turnSequence === right.turnSequence;
+}
+
+function stopClaudeRoots(entry) {
+  const paths = new Set();
+  const add = (value) => {
+    if (typeof value === 'string' && value.trim()) paths.add(value.trim());
+  };
+  add(entry?.transcript_path);
+  for (const path of entry?.transcript_paths || []) add(path);
+  for (const activation of Object.values(entry?.activations || {})) {
+    add(activation?.transcript_path);
+    for (const path of activation?.transcript_paths || []) add(path);
+  }
+  return { state: 'complete', rootPaths: [...paths], descendantPaths: [], diagnostics: [] };
+}
+
+function materializeStopObservability(request) {
+  return materializeSessionObservability({
+    vaultBase: request.vaultBase,
+    sessionPath: request.sessionPath,
+    transcriptPath: request.transcriptPath,
+    entry: request.entry,
+    canonicalConversationId: request.canonicalConversationId,
+    frontier: request.frontier,
+    signals: request.signals,
+    cache: request.cache,
+    mode: 'live',
+    deadlineAt: request.deadlineAt,
+    now: request.now,
+    allowNone: request.allowNone,
+    readRuntimeFrontier: request.readRuntimeFrontier,
+    withPublicationGuard: request.withPublicationGuard,
+    writeRegistryCheckpoint: request.writeRegistryCheckpoint,
+  });
+}
+
+export async function refreshStopObservability({
+  vaultBase,
+  input,
+  sessionPath,
+  sessionId,
+  entry,
+  causalStop,
+  turnSequence,
+  hookStartedAt,
+  expectedSignalSequence,
+}, {
+  now = Date.now,
+  resolveEntry = resolveSessionEntry,
+  mutateRegistry = mutateSessionRegistry,
+  readStore = readObservabilityStore,
+  resolveRoots = resolveObservabilityRoots,
+  materialize = materializeStopObservability,
+} = {}) {
+  if (causalStop && !causalStop.canPromoteMemory) return false;
+  const deadlineAt = hookStartedAt + STOP_OBSERVABILITY_DEADLINE_MS;
+  if (now() >= deadlineAt) return false;
+
+  const expected = expectedStopCausalSnapshot(entry, causalStop, turnSequence);
+  const fresh = resolveEntry(vaultBase, input, entry?.provider);
+  if (fresh.identity?.state !== 'resolved'
+    || fresh.identity.canonicalConversationId !== sessionId
+    || !fresh.entry?.session_file
+    || fresh.entry.session_file !== entry?.session_file
+    || !sameStopCausalSnapshot(expected, stopEntryCausalSnapshot(fresh.entry))) return false;
+
+  const runtime = readStore(vaultBase, sessionId);
+  const signalSequence = Number(runtime?.observability_signal_sequence || 0);
+  if (expectedSignalSequence !== undefined
+    && signalSequence !== Number(expectedSignalSequence)) return false;
+  if (now() >= deadlineAt) return false;
+
+  const roots = fresh.identity.provider === 'codex'
+    ? resolveRoots(fresh.entry)
+    : stopClaudeRoots(fresh.entry);
+  if (roots?.state !== 'complete' || !roots.rootPaths?.length) return false;
+
+  const frontier = {
+    canonical_session_id: sessionId,
+    activation_id: expected.activationId || 'legacy',
+    activation_epoch: expected.activationEpoch,
+    turn_sequence: expected.turnSequence,
+    signal_sequence: signalSequence,
+    roots_stat_hash: 'pending',
+    graph_cursor: 'pending',
+    source_manifest_hash: 'pending',
+  };
+  const readRuntimeFrontier = (candidateFrontier, guardContext) => {
+    const currentEntry = guardContext?.entry;
+    const current = currentEntry
+      ? { identity: { state: 'resolved', canonicalConversationId: sessionId }, entry: currentEntry }
+      : resolveEntry(vaultBase, input, entry?.provider);
+    if (current.identity?.state !== 'resolved'
+      || current.identity.canonicalConversationId !== sessionId
+      || !current.entry) {
+      return { ...candidateFrontier, canonical_session_id: 'unresolved' };
+    }
+    const currentCausal = stopEntryCausalSnapshot(current.entry);
+    const currentRuntime = readStore(vaultBase, sessionId);
+    return {
+      ...candidateFrontier,
+      activation_id: currentCausal.activationId || 'legacy',
+      activation_epoch: currentCausal.activationEpoch,
+      turn_sequence: currentCausal.turnSequence,
+      signal_sequence: Math.max(
+        Number(currentRuntime?.observability_signal_sequence || 0),
+        Number(current.entry.observability_signal_sequence || 0),
+      ),
+    };
+  };
+  const withPublicationGuard = (_candidateFrontier, publishGuarded) => (
+    mutateRegistry(vaultBase, (registry) => publishGuarded({
+      registry,
+      entry: registry.sessions?.[sessionId] || null,
+    }))
+  );
+  const writeRegistryCheckpoint = ({
+    frontier: checkpointFrontier,
+    state,
+    diagnostics,
+    snapshot,
+  }, guardContext) => {
+    const registry = guardContext?.registry;
+    const current = registry?.sessions?.[sessionId];
+    if (!current) return null;
+    const currentSignal = Number(current.observability_signal_sequence || checkpointFrontier.signal_sequence);
+    registry.sessions[sessionId] = {
+      ...current,
+      observability_signal_sequence: currentSignal,
+      observability_checkpoint_sequence: checkpointFrontier.signal_sequence,
+      observability_dirty: currentSignal > checkpointFrontier.signal_sequence,
+      observability_checkpoint_frontier: checkpointFrontier,
+      subagents_observability_state: state,
+      subagents_diagnostics: diagnostics || [],
+    };
+    return markObservabilityCheckpoint(vaultBase, sessionId, {
+      checkpointSequence: checkpointFrontier.signal_sequence,
+      frontier: checkpointFrontier,
+      sourceManifest: snapshot?.subagents?.sourceManifest,
+      graphCache: snapshot?.subagents?.cache,
+      diagnostics,
+    });
+  };
+
+  const result = await Promise.resolve(materialize({
+    vaultBase,
+    sessionPath,
+    entry: fresh.entry,
+    rootPaths: roots.rootPaths,
+    transcriptPath: roots.rootPaths[0],
+    caller: 'stop',
+    canonicalConversationId: sessionId,
+    activationId: expected.activationId,
+    activationEpoch: expected.activationEpoch,
+    turnSequence: expected.turnSequence,
+    signalSequence,
+    deadlineAt,
+    allowNone: true,
+    frontier,
+    signals: runtime?.signals || [],
+    cache: runtime?.graph_cache || null,
+    now,
+    readRuntimeFrontier,
+    withPublicationGuard,
+    writeRegistryCheckpoint,
+  }));
+  return !['stale', 'conflict', 'degraded', 'missing'].includes(result?.status);
+}
+
+export async function main({
+  stageMemory = stageStopMemoryAttempt,
+  clock = Date.now,
+  refreshObservability = refreshStopObservability,
+} = {}) {
+  const hookStartedAt = clock();
   const input = readHookInput();
   if (input.stop_hook_active) {
     writeHookOutput({});
@@ -961,8 +1165,17 @@ export function main({ stageMemory = stageStopMemoryAttempt } = {}) {
   }
 
   try {
-    updateSessionObservability({
-      vaultBase, sessionPath, transcriptPath, caller: 'stop', canonicalConversationId: sessionId,
+    await refreshObservability({
+      vaultBase,
+      input,
+      sessionPath,
+      sessionId,
+      entry,
+      causalStop,
+      turnSequence: stopTurnSequence,
+      hookStartedAt,
+    }, {
+      now: clock,
     });
   } catch (error) {
     process.stderr.write(`[wendkeep] Token usage falhou: ${error.message}\n`);
@@ -1062,7 +1275,7 @@ export function main({ stageMemory = stageStopMemoryAttempt } = {}) {
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   try {
-    main();
+    await main();
   } catch (error) {
     process.stderr.write(`[wendkeep] Stop falhou: ${error.message}\n`);
     // Same reasoning as the identity bail: stderr is discarded by Codex. Exit stays 0 —

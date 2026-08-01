@@ -46,6 +46,13 @@ npx wendkeep import [opções]
 - `Stop` aceita somente o turno comprovado pelo transcript e pela activation ativa compatível.
   Duplicatas são no-op; Stops stale/superseded não publicam memória nem sobrescrevem o checkpoint
   de um epoch mais novo.
+- `Stop` recebe deadline absoluto de **45 s** desde a entrada do hook. A leitura verifica o relógio
+  entre rollouts e a cada chunk; ao atingir o limite, devolve `degraded` antes do timeout do host.
+- `SubagentStop` recebe deadline absoluto de **15 s**. Sinais que chegam na janela de **250 ms**
+  são coalescidos: somente a maior sequência recompõe/publica, sem perder o último filho.
+- A observabilidade usa tri-state: `complete` publica o snapshot integral; `none` representa zero
+  comprovado por Stop causal ou scan offline estável; `degraded` preserva o snapshot anterior e
+  diagnostics allowlisted. `SubagentStop` isolado nunca publica `none`.
 - Ao compactar conversas em `## Iterações`, o hook escapa delimitadores de código cortados pelo
   limite de tamanho; backticks inline ou fences nunca ficam abertos para engolir a linha seguinte.
 - `session list` lê `SESSION_REGISTRY`; `show` exibe uma sessão e `use` muda apenas o foco humano
@@ -53,6 +60,9 @@ npx wendkeep import [opções]
 - `import --source all|claude|codex`, `--since`, `--limit`, `--from` e `--codex-from` limitam escopo.
 - `--dry-run`/`--json` permitem auditar antes de gravar; `--stamp-ids` e `--rescan-decisions`
   corrigem históricos específicos.
+- `import` reconcilia a observabilidade mesmo quando nenhum `wk-turn` está ausente: schema legado,
+  frontier stale ou manifest não comprovado disparam recomposição sem duplicar iterações. Um
+  checkpoint fresco permanece byte-idêntico; `degraded` é reportado e não altera a nota.
 - Exit `0` indica processamento consistente; exit não zero indica configuração, fonte ou escrita
   inválida sem transformar isso em sucesso parcial silencioso.
 
@@ -70,7 +80,9 @@ Cada sessão canônica aponta para provider, transcript, arquivo de nota e custo
 O registry mantém um epoch de `SessionStart` por activation e o turno nativo mais recente; vários
 `Stop` podem confirmar turnos do mesmo epoch sem fechá-lo. Importações repetidas do mesmo
 `session_id` são deduplicadas; o foco humano não encerra nem altera a identidade dos hooks. Cada
-iteração automática permanece Markdown válido mesmo quando uma fala precisa ser truncada.
+iteração automática permanece Markdown válido mesmo quando uma fala precisa ser truncada. Hooks
+duplicados/stale convergem no mesmo frontier, e importações podem atualizar só a observabilidade
+sem criar um novo bloco de turno.
 
 ## Erros comuns e diagnóstico
 
@@ -82,6 +94,8 @@ iteração automática permanece Markdown válido mesmo quando uma fala precisa 
 - Duplicatas de forks: limite por fonte/data e revise `forked_from_id`/`source.subagent`.
 - Codex não captura: aprove os hooks e reinicie a sessão após `sync`.
 - Custo contaminado: valide `session_id → session_file → transcript_path → provider`.
+- Observabilidade `degraded`: preserve a nota e rode o rebuild direcionado em dry-run; não force
+  um snapshot parcial sobre o último `complete`.
 
 ## Próximos passos
 

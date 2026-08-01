@@ -4,7 +4,7 @@ import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { checkHarness, checkVaultLinks, checkSessionActivity, checkStackedFrontmatter, renderStackedFrontmatterLines, checkUnpricedModels, renderUnpricedModelLines, checkStaleDerivedSections, renderStaleDerivedSectionLines } from '../hooks/harness-doctor.mjs';
+import { checkHarness, checkVaultLinks, checkSessionActivity, checkStackedFrontmatter, renderStackedFrontmatterLines, checkUnpricedModels, renderUnpricedModelLines, checkStaleDerivedSections, renderStaleDerivedSectionLines, checkSessionObservability, renderSessionObservabilityLines } from '../hooks/harness-doctor.mjs';
 import { checkSyncDefs } from './sync-defs.mjs';
 import { resolveProjectVault } from './project-vault.mjs';
 
@@ -78,6 +78,9 @@ export function runDoctor(argv) {
 
   // 3d. Seções derivadas do corpo que ficaram para trás do Encerramento (notas pré-0.53.0).
   process.stdout.write(`\n${renderStaleDerivedSectionLines(checkStaleDerivedSections(vaultBase)).join('\n')}\n`);
+
+  // 3e. Observabilidade materializada: schema vigente não basta sem frontier + manifest frescos.
+  process.stdout.write(`\n${renderSessionObservabilityLines(checkSessionObservability(vaultBase)).join('\n')}\n`);
 
   // 4. Sessão: não mente "inativa" quando há atividade recente (workflow/subagente em background).
   const act = checkSessionActivity(vaultBase);

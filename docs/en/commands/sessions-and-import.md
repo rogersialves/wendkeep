@@ -46,6 +46,14 @@ npx wendkeep import [options]
 - `Stop` accepts only a transcript-proven turn from the compatible active activation. Duplicates
   are no-ops; stale/superseded Stops neither publish memory nor overwrite a newer epoch's
   checkpoint.
+- `Stop` receives an absolute **45 s** deadline from hook entry. Reads check the clock between
+  rollouts and on every chunk; reaching the limit returns `degraded` before the host timeout.
+- `SubagentStop` receives an absolute **15 s** deadline. Signals arriving within the **250 ms**
+  window are coalesced: only the highest sequence recomposes/publishes, without losing the last
+  child.
+- Observability is tri-state: `complete` publishes the full snapshot; `none` means zero proven by
+  a causal Stop or stable offline scan; `degraded` preserves the previous snapshot and allowlisted
+  diagnostics. An isolated `SubagentStop` never publishes `none`.
 - When compacting conversations into `## Iterações`, the hook escapes code delimiters cut by the
   size limit; inline backticks and fences never remain open and consume the following line.
 - `session list` reads `SESSION_REGISTRY`; `show` displays one session and `use` only changes human
@@ -53,6 +61,9 @@ npx wendkeep import [options]
 - `import --source all|claude|codex`, `--since`, `--limit`, `--from`, and `--codex-from` bound scope.
 - `--dry-run`/`--json` support audit before writes; `--stamp-ids` and `--rescan-decisions` address
   specific historical gaps.
+- `import` reconciles observability even when no `wk-turn` is missing: a legacy schema, stale
+  frontier, or unproven manifest triggers recomposition without duplicating iterations. A fresh
+  checkpoint remains byte-identical; `degraded` is reported and does not change the note.
 - Exit `0` means consistent processing; non-zero reports invalid source/config/write instead of
   presenting silent partial success.
 
@@ -71,6 +82,8 @@ registry keeps one `SessionStart` epoch per activation plus the latest native tu
 `Stop` events may acknowledge turns in that epoch without closing it. Repeated imports of the
 same `session_id` deduplicate; human focus does not close or re-identify live hooks. Every
 automatic iteration remains valid Markdown even when a message must be truncated.
+Duplicate/stale hooks converge on the same frontier, and imports may refresh only observability
+without creating a new turn block.
 
 ## Common errors and diagnosis
 
@@ -82,6 +95,8 @@ automatic iteration remains valid Markdown even when a message must be truncated
 - Fork duplicates: bound source/date and inspect `forked_from_id`/`source.subagent`.
 - Codex does not capture: approve hooks and start a new session after `sync`.
 - Contaminated cost: validate `session_id → session_file → transcript_path → provider`.
+- `degraded` observability: preserve the note and run a targeted rebuild dry-run; never force a
+  partial snapshot over the last `complete` one.
 
 ## Next steps
 

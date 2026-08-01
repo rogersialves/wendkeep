@@ -510,14 +510,17 @@ function detectTranscriptFormat(lines) {
   return 'codex';
 }
 
-export function parseTokenUsageFromTranscript(transcriptPath) {
+export function parseTokenUsageFromContent(content, { transcriptPath = '' } = {}) {
   const result = emptyParseResult(transcriptPath);
-  if (!transcriptPath || !existsSync(transcriptPath)) return result;
-
-  const lines = readFileSync(transcriptPath, 'utf-8').split('\n').filter(Boolean);
+  const lines = String(content || '').split('\n').filter(Boolean);
   return detectTranscriptFormat(lines) === 'claude'
     ? parseClaudeLines(lines, result)
     : parseCodexLines(lines, result);
+}
+
+export function parseTokenUsageFromTranscript(transcriptPath) {
+  if (!transcriptPath || !existsSync(transcriptPath)) return emptyParseResult(transcriptPath);
+  return parseTokenUsageFromContent(readFileSync(transcriptPath, 'utf-8'), { transcriptPath });
 }
 
 function modelCost(usage, model) {
@@ -932,6 +935,80 @@ export function collectSessionUsage({ sessionContent, transcriptPath }) {
     aggregate: agg,
     entries,
     content: withFrontmatter,
+  };
+}
+
+function normalizedTranscriptKey(value) {
+  return String(value || '').replace(/\.jsonl?$/i, '').trim().toLowerCase();
+}
+
+// Rebuild the main bucket from every validated top-level rollout. Existing history is used
+// only to preserve stable timestamps; an entry that is neither a known root nor a proven
+// descendant makes the reconstruction fail closed instead of silently deleting a legitimate
+// reopening.
+export function collectSessionUsageForRoots({
+  sessionContent,
+  rootPaths = [],
+  descendantIds = [],
+} = {}) {
+  const fmMatch = String(sessionContent || '').match(/^---\n([\s\S]*?)\n---/);
+  if (!fmMatch) return null;
+
+  const roots = [...new Set(rootPaths.filter(Boolean))].sort((a, b) => String(a).localeCompare(String(b)));
+  const rootKeys = new Set(roots.map((path) => normalizedTranscriptKey(transcriptIdFromPath(path))));
+  const descendantKeys = new Set(descendantIds.map(normalizedTranscriptKey).filter(Boolean));
+  const existingEntries = parseUsageHistory(fmMatch[1]);
+  const unresolved = existingEntries.filter((entry) => {
+    const key = normalizedTranscriptKey(entry.transcript_id);
+    return key && !rootKeys.has(key) && !descendantKeys.has(key);
+  });
+  if (unresolved.length) {
+    return {
+      state: 'degraded',
+      diagnostics: [{ code: 'MAIN_TRANSCRIPT_UNRESOLVED', count: unresolved.length }],
+      entries: existingEntries,
+      content: sessionContent,
+    };
+  }
+
+  const entries = [];
+  const summaries = [];
+  for (const transcriptPath of roots) {
+    if (!existsSync(transcriptPath)) {
+      return {
+        state: 'degraded',
+        diagnostics: [{ code: 'MAIN_TRANSCRIPT_UNRESOLVED', count: 1 }],
+        entries: existingEntries,
+        content: sessionContent,
+      };
+    }
+    const summary = summarizeTokenUsage(parseTokenUsageFromTranscript(transcriptPath));
+    if (!summary.calls) {
+      return {
+        state: 'degraded',
+        diagnostics: [{ code: 'MAIN_TRANSCRIPT_UNRESOLVED', count: 1 }],
+        entries: existingEntries,
+        content: sessionContent,
+      };
+    }
+    const transcriptId = transcriptIdFromPath(transcriptPath);
+    const current = entryFromSummary(summary, transcriptId);
+    const previous = existingEntries.find((entry) => normalizedTranscriptKey(entry.transcript_id) === normalizedTranscriptKey(transcriptId));
+    if (previous && sameUsageData(previous, current)) current.atualizado_em = previous.atualizado_em;
+    entries.push(current);
+    summaries.push(summary);
+  }
+
+  const agg = aggregateEntries(entries);
+  const content = upsertSessionFrontmatter(sessionContent, agg, entries);
+  if (content === null) return null;
+  return {
+    state: 'complete',
+    diagnostics: [],
+    summaries,
+    aggregate: agg,
+    entries,
+    content,
   };
 }
 

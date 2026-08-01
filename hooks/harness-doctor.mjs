@@ -8,7 +8,88 @@ import { buildEffectiveRequirementPackage, checkSpecsState, evaluateVerdict, tas
 import { getLocale } from './locale.mjs';
 import { priceForModel } from './token-usage.mjs';
 import { countMissing, indexDerivedBySession, listSessionNotes, missingDerivedLinks } from './derived-sections.mjs';
-import { readControl } from './obsidian-common.mjs';
+import { readControl, readSessionRegistry } from './obsidian-common.mjs';
+import { parseObservabilityCheckpoint } from './session-observability-state.mjs';
+import { readObservabilityStore } from './session-observability-store.mjs';
+import { assessObservabilityFreshness } from './session-observability-lifecycle.mjs';
+
+export function checkSessionObservability(vaultBase, deps = {}) {
+  const readRegistry = deps.readRegistry || readSessionRegistry;
+  const readStore = deps.readStore || readObservabilityStore;
+  const readNote = deps.readNote || readFileSync;
+  const statSource = deps.statSource || statSync;
+  const registry = readRegistry(vaultBase);
+  const result = { ok: true, scanned: 0, healthy: 0, issues: [] };
+  const entries = Object.entries(registry?.sessions || {})
+    .map(([sessionId, entry]) => ({ sessionId, ...entry }))
+    .filter((entry) => entry.session_file)
+    .sort((a, b) => a.sessionId.localeCompare(b.sessionId));
+
+  for (const entry of entries) {
+    if (entry.provider && entry.provider !== 'codex') continue;
+    const notePath = join(vaultBase, entry.session_file);
+    let content;
+    try { content = readNote(notePath, 'utf8'); } catch { continue; }
+    if (!entry.provider && /^provider:\s*["']?claude/m.test(content)) continue;
+    result.scanned += 1;
+    const command = `wendkeep cost rebuild --session ${entry.sessionId} --json`;
+    const checkpoint = parseObservabilityCheckpoint(content);
+    if (!checkpoint) {
+      result.issues.push({
+        sessionId: entry.sessionId, status: 'legacy', diagnostics: [], command,
+      });
+      continue;
+    }
+    if (checkpoint.state === 'degraded') {
+      result.issues.push({
+        sessionId: entry.sessionId,
+        status: 'degraded',
+        diagnostics: checkpoint.diagnostics,
+        command,
+      });
+      continue;
+    }
+
+    let runtime;
+    try { runtime = readStore(vaultBase, entry.sessionId); } catch {
+      runtime = null;
+    }
+    const assessment = assessObservabilityFreshness({
+      checkpoint,
+      runtimeState: runtime,
+      statSource,
+    });
+    if (!assessment.fresh) {
+      result.issues.push({
+        sessionId: entry.sessionId,
+        status: assessment.status,
+        diagnostics: assessment.diagnostics,
+        command,
+      });
+      continue;
+    }
+    result.healthy += 1;
+  }
+  result.ok = result.issues.length === 0;
+  return result;
+}
+
+export function renderSessionObservabilityLines(result) {
+  const issues = result?.issues || [];
+  const lines = [
+    `[observabilidade] ${result?.healthy || 0} saudável(is) · ${issues.length} reparável(is)`,
+  ];
+  for (const issue of issues) {
+    const diagnostics = issue.diagnostics?.length
+      ? ` (${issue.diagnostics.map(({ code, count }) => `${code}:${count}`).join(', ')})`
+      : '';
+    lines.push(`  ✗ ${issue.sessionId}: ${issue.status}${diagnostics}`);
+    lines.push(`    → ${issue.command}`);
+    lines.push(`    → ${issue.command} --apply`);
+  }
+  if (!issues.length) lines.push('  ✓ frontiers, checkpoints e manifests consistentes');
+  return lines;
+}
 
 export function checkHarness(vaultBase, projectRoot) {
   const loc = getLocale(vaultBase);
