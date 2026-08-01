@@ -16,10 +16,20 @@ import {
 } from './session-stop.mjs';
 import { buildSessionContent, allocateSessionPath } from './session-start.mjs';
 import { createLinkedNotes } from './linked-notes.mjs';
-import { updateSessionObservability } from './session-observability.mjs';
+import {
+  composeSessionObservability,
+  publishSessionObservability,
+} from './session-observability.mjs';
 import { readSessionRegistry, upsertSessionRegistry, removeSessionRegistryEntry, formatLocalIso, formatDate, providerMeta, isBootstrapPrompt } from './obsidian-common.mjs';
 import { getLocale } from './locale.mjs';
 import { captureProseDecisions } from './decision-capture.mjs';
+import { readCodexRolloutMeta } from './codex-rollout-meta.mjs';
+import {
+  parseObservabilityCheckpoint,
+  sanitizeObservabilityDiagnostics,
+} from './session-observability-state.mjs';
+import { readObservabilityStore } from './session-observability-store.mjs';
+import { assessObservabilityFreshness } from './session-observability-lifecycle.mjs';
 
 // Claude encodes a project's absolute path as its `.claude/projects` dir name by replacing each
 // path separator and the drive colon with '-'. `C:\GitHub\WendKeep` -> `C--GitHub-WendKeep`.
@@ -97,41 +107,6 @@ function readPrefix(path, bytes = 4096) {
   }
 }
 
-// Read the first physical line in full, growing the buffer until a newline is found (capped).
-// A fixed prefix truncated any rollout whose session_meta line exceeded the window, silently
-// dropping that session from discovery — Codex meta lines can be large (env, git, instructions).
-function readFirstLine(path, maxBytes = 4 * 1024 * 1024) {
-  let fd;
-  try {
-    fd = openSync(path, 'r');
-    const chunk = Buffer.alloc(65536);
-    let acc = '';
-    let pos = 0;
-    while (pos < maxBytes) {
-      const n = readSync(fd, chunk, 0, chunk.length, pos);
-      if (n <= 0) break;
-      acc += chunk.slice(0, n).toString('utf-8');
-      const nl = acc.indexOf('\n');
-      if (nl >= 0) return acc.slice(0, nl);
-      pos += n;
-    }
-    return acc; // single-line file, or gave up at the cap
-  } catch {
-    return '';
-  } finally {
-    if (fd !== undefined) { try { closeSync(fd); } catch { /* already closed */ } }
-  }
-}
-
-// Pull the session_meta payload (id + cwd). session_meta is line 1 of a rollout.
-function readSessionMeta(path) {
-  const line = readFirstLine(path);
-  if (!line.trim()) return null;
-  let e;
-  try { e = JSON.parse(line); } catch { return null; }
-  return e.type === 'session_meta' ? (e.payload || {}) : null;
-}
-
 // The `session_id` recorded in a note's frontmatter (empty when absent).
 function noteSessionId(path) {
   const m = readPrefix(path, 2048).match(/^session_id:\s*["']?([^"'\r\n]+)["']?\s*$/m);
@@ -189,8 +164,9 @@ export function discoverCodexTranscripts(projectPath, fromDir) {
   if (!dir || !existsSync(dir)) return { dir, transcripts: [] };
   const transcripts = [];
   for (const path of walkFiles(dir, /\.jsonl$/i)) {
-    const meta = readSessionMeta(path);
-    if (!meta || !meta.id) continue;
+    const metaResult = readCodexRolloutMeta(path);
+    if (!metaResult.ok || !metaResult.meta.id) continue;
+    const meta = metaResult.meta;
     if (projectPath && !cwdMatchesProject(meta.cwd, projectPath)) continue;
     // A subagent thread's rollout is a SIBLING file of its parent's — same dir, own id. The
     // meta says what the file IS; ignoring it turned hierarchy into a duplicate session note.
@@ -248,11 +224,6 @@ export function importSession(vaultBase, txPath, opts = {}) {
     insertIteration(absPath, block, turn.turnId, tx, vaultBase);
   }
 
-  // Cost + subagent telemetry, exactly like the live Stop hook. Fail-open.
-  try {
-    updateSessionObservability({ vaultBase, sessionPath: absPath, transcriptPath: txPath });
-  } catch { /* observability is best-effort */ }
-
   // Finalize: derived notes + closing section + ended_at from the last turn.
   const endedAt = formatLocalIso(endDate);
   const created = mergeCreatedNotes(
@@ -270,6 +241,17 @@ export function importSession(vaultBase, txPath, opts = {}) {
     transcript_path: txPath,
     imported: true,
   });
+
+  // Materialize only after the authoritative registry entry exists. This gives import the
+  // same causal CAS + runtime manifest as live hooks instead of a note-only legacy snapshot.
+  try {
+    reconcileImportedObservability({
+      vaultBase,
+      sessionId,
+      sessionPath: absPath,
+      transcriptPath: txPath,
+    });
+  } catch { /* observability is best-effort and reported on a later reconciliation */ }
 
   return { sessionId, relPath, turns: turns.length };
 }
@@ -333,12 +315,105 @@ export function stampSessionIds(vaultBase) {
   return report;
 }
 
+export function reconcileImportedObservability({
+  vaultBase,
+  sessionId,
+  sessionPath,
+  transcriptPath,
+  dryRun = false,
+} = {}, dependencies = {}) {
+  const readRegistry = dependencies.readRegistry || readSessionRegistry;
+  const readStore = dependencies.readStore || readObservabilityStore;
+  const compose = dependencies.compose || composeSessionObservability;
+  const publish = dependencies.publish || publishSessionObservability;
+  if (!vaultBase || !sessionId || !sessionPath || !existsSync(sessionPath)) {
+    return {
+      status: 'degraded',
+      diagnostics: [{ code: 'PARENT_META_INVALID', count: 1 }],
+    };
+  }
+
+  let entry;
+  let content;
+  let runtimeState;
+  try {
+    entry = readRegistry(vaultBase)?.sessions?.[sessionId];
+    content = readFileSync(sessionPath, 'utf8');
+    runtimeState = readStore(vaultBase, sessionId);
+  } catch {
+    return { status: 'degraded', diagnostics: [{ code: 'CACHE_INVALID', count: 1 }] };
+  }
+  if (!entry) {
+    return {
+      status: 'degraded',
+      diagnostics: [{ code: 'PARENT_META_INVALID', count: 1 }],
+    };
+  }
+  const checkpoint = parseObservabilityCheckpoint(content);
+  const assessment = assessObservabilityFreshness({ checkpoint, runtimeState });
+  if (assessment.fresh) return { status: 'fresh', diagnostics: [] };
+
+  let candidate;
+  try {
+    candidate = compose({
+      sessionContent: content,
+      sessionEntry: { ...entry, transcript_path: entry.transcript_path || transcriptPath },
+      canonicalConversationId: sessionId,
+      runtimeState,
+      allowNone: true,
+      mode: 'offline',
+    });
+  } catch {
+    return {
+      status: 'degraded',
+      diagnostics: [{ code: 'PARENT_META_INVALID', count: 1 }],
+    };
+  }
+  const diagnostics = sanitizeObservabilityDiagnostics(candidate?.diagnostics || []);
+  if (candidate?.state === 'degraded') return { status: 'degraded', diagnostics };
+  if (candidate?.state !== 'complete' && candidate?.state !== 'none') {
+    return {
+      status: 'degraded',
+      diagnostics: [{ code: 'PARENT_META_INVALID', count: 1 }],
+    };
+  }
+  if (dryRun) return { status: 'would-reconcile', diagnostics };
+
+  let outcome;
+  try {
+    outcome = publish({
+      vaultBase,
+      sessionPath,
+      canonicalConversationId: sessionId,
+      candidate,
+      caller: 'import-reconcile',
+      allowSourceRefresh: true,
+      allowDegradedRecovery: true,
+    });
+  } catch {
+    return { status: 'degraded', diagnostics: [{ code: 'CACHE_INVALID', count: 1 }] };
+  }
+  if (outcome?.status === 'published' || outcome?.status === 'unchanged') {
+    return { status: 'published', diagnostics };
+  }
+  if (outcome?.status === 'stale' || outcome?.status === 'conflict') {
+    return {
+      status: 'stale',
+      diagnostics: [{ code: 'STALE_FRONTIER', count: 1 }],
+    };
+  }
+  return { status: 'degraded', diagnostics };
+}
+
 // Import every not-yet-captured transcript from the requested source(s). Deduped by session_id
 // against the registry. Options: { projectPath, source ('all'|'claude'|'codex'), from, codexFrom,
 // since (ISO/date), limit, dryRun }. importSession is provider-agnostic, so both sources share
 // the same dedup + import loop.
 export function runImport(vaultBase, opts = {}) {
-  const { projectPath = process.cwd(), source = 'all', from = '', codexFrom = '', since = '', limit = 0, dryRun = false } = opts;
+  const {
+    projectPath = process.cwd(), source = 'all', from = '', codexFrom = '', since = '',
+    limit = 0, dryRun = false, reconcileObservability = reconcileImportedObservability,
+  } = opts;
   const src = String(source).toLowerCase();
   const transcripts = [];
   let claudeDir = '';
@@ -355,7 +430,57 @@ export function runImport(vaultBase, opts = {}) {
   }
   const notes = capturedSessionNotes(vaultBase);
   const sinceMs = since ? Date.parse(since) : 0;
-  const report = { source: src, claudeDir, codexDir, scanned: transcripts.length, imported: 0, repaired: 0, skipped: 0, subagents: 0, errors: [], sessions: [] };
+  const report = {
+    source: src, claudeDir, codexDir, scanned: transcripts.length, imported: 0,
+    repaired: 0, skipped: 0, subagents: 0, observabilityReconciled: 0,
+    observabilityFresh: 0, observabilityDegraded: 0, errors: [], sessions: [],
+  };
+
+  const degradedObservability = () => ({
+    status: 'degraded',
+    diagnostics: [{ code: 'CACHE_INVALID', count: 1 }],
+  });
+  const reportableObservabilityStatuses = new Set([
+    'degraded', 'fresh', 'published', 'stale', 'unchanged', 'would-reconcile',
+  ]);
+  const sanitizeReportedObservability = (result) => {
+    try {
+      const status = String(result?.status || 'degraded');
+      if (!reportableObservabilityStatuses.has(status)) return degradedObservability();
+      const projected = (result?.diagnostics || []).map((diagnostic) => ({
+        code: diagnostic?.code,
+        count: diagnostic?.count,
+      }));
+      return { status, diagnostics: sanitizeObservabilityDiagnostics(projected) };
+    } catch {
+      return degradedObservability();
+    }
+  };
+
+  const reconcileExistingObservability = (transcript, sessionPath, turns) => {
+    if (typeof reconcileObservability !== 'function') return null;
+    let result;
+    try {
+      result = reconcileObservability({
+        vaultBase,
+        sessionId: transcript.sessionId,
+        sessionPath,
+        transcriptPath: transcript.path,
+        dryRun,
+      });
+    } catch {
+      result = degradedObservability();
+    }
+    const observability = sanitizeReportedObservability(result);
+    if (observability.status === 'fresh' || observability.status === 'unchanged') {
+      report.observabilityFresh++;
+    } else if (observability.status === 'published' || observability.status === 'would-reconcile') {
+      report.observabilityReconciled++;
+    } else {
+      report.observabilityDegraded++;
+    }
+    return observability;
+  };
 
   let done = 0;
   for (const t of transcripts) {
@@ -390,7 +515,14 @@ export function runImport(vaultBase, opts = {}) {
     if (existingNote) {
       const have = noteTurnIds(existingNote);
       const missing = turns.filter((turn) => !have.has(String(turn.turnId)));
-      if (!missing.length) { report.skipped++; continue; }
+      if (!missing.length) {
+        const observability = reconcileExistingObservability(t, existingNote, 0);
+        if (observability) report.sessions.push({
+          sessionId: t.sessionId, turns: 0, observability,
+        });
+        report.skipped++;
+        continue;
+      }
       if (dryRun) {
         report.sessions.push({ sessionId: t.sessionId, turns: missing.length, repaired: true, dryRun: true });
         report.repaired++;
@@ -404,10 +536,13 @@ export function runImport(vaultBase, opts = {}) {
             turn.turnId, tx, vaultBase,
           );
         }
-        try {
-          updateSessionObservability({ vaultBase, sessionPath: existingNote, transcriptPath: t.path });
-        } catch { /* best-effort */ }
-        report.sessions.push({ sessionId: t.sessionId, turns: missing.length, repaired: true });
+        const observability = reconcileExistingObservability(t, existingNote, missing.length);
+        report.sessions.push({
+          sessionId: t.sessionId,
+          turns: missing.length,
+          repaired: true,
+          ...(observability ? { observability } : {}),
+        });
         report.repaired++;
         done++;
       } catch (error) {

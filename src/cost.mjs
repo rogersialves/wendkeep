@@ -196,19 +196,53 @@ function opt(argv, name) {
   return eq ? eq.slice(name.length + 1) : undefined;
 }
 
+const REBUILD_LIMIT_FLAGS = [
+  ['--max-graph-nodes', 'maxGraphNodes'],
+  ['--max-fallback-days', 'maxFallbackDays'],
+  ['--max-fallback-candidates', 'maxFallbackCandidates'],
+];
+
+export function parseRebuildOptions(argv = []) {
+  const session = opt(argv, '--session') || '';
+  const overrides = {};
+  for (const [flag, key] of REBUILD_LIMIT_FLAGS) {
+    const present = argv.includes(flag) || argv.some((arg) => arg.startsWith(`${flag}=`));
+    if (!present) continue;
+    const value = Number(opt(argv, flag));
+    if (!Number.isSafeInteger(value) || value <= 0) {
+      return { ok: false, exitCode: 2, code: 'INVALID_LIMIT_OVERRIDE' };
+    }
+    overrides[key] = value;
+  }
+  if (Object.keys(overrides).length > 0 && !session) {
+    return { ok: false, exitCode: 2, code: 'TARGET_REQUIRED_FOR_LIMIT_OVERRIDE' };
+  }
+  return {
+    ok: true,
+    options: {
+      apply: argv.includes('--apply'),
+      session,
+      limit: Number(opt(argv, '--limit')) || 0,
+      limits: { ...overrides },
+      overrides: { ...overrides },
+    },
+  };
+}
+
 export function runCost(argv) {
   const vaultRaw = opt(argv, '--vault') || process.env.OBSIDIAN_VAULT_PATH;
   if (!vaultRaw) { process.stderr.write('wendkeep cost: no vault (--vault or OBSIDIAN_VAULT_PATH).\n'); process.exit(2); }
   const vaultBase = isAbsolute(vaultRaw) ? vaultRaw : resolve(process.cwd(), vaultRaw);
   if (!existsSync(vaultBase)) { process.stderr.write(`wendkeep cost: vault not found: ${vaultBase}\n`); process.exit(2); }
   if (argv[0] === 'rebuild') {
-    const report = rebuildSessionCosts(vaultBase, {
-      apply: argv.includes('--apply'),
-      session: opt(argv, '--session') || '',
-      limit: Number(opt(argv, '--limit')) || 0,
-    });
+    const parsed = parseRebuildOptions(argv);
+    if (!parsed.ok) {
+      process.stderr.write(`wendkeep cost rebuild: ${parsed.code}\n`);
+      process.exit(parsed.exitCode);
+    }
+    const report = rebuildSessionCosts(vaultBase, parsed.options);
     if (argv.includes('--json')) process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
-    else process.stdout.write(`cost rebuild (${report.mode}): ${report.scanned} lidas · ${report.changed} alteradas · ${report.unchanged} iguais · ${report.missing.length} sem fonte · ${report.errors.length} erros\n${report.mode === 'apply' ? 'Relatório: .brain/COST_REBUILD.json\n' : 'Nenhum arquivo foi alterado; use --apply para gravar.\n'}`);
+    else process.stdout.write(`cost rebuild (${report.mode}): ${report.scanned} lidas · ${report.changed} alteradas · ${report.unchanged} iguais · ${report.degraded} degradadas · ${report.stale} stale · ${report.missing} sem fonte · ${report.errors} erros\n${report.mode === 'apply' ? 'Relatório: .brain/COST_REBUILD.json\n' : 'Nenhum arquivo foi alterado; use --apply para gravar.\n'}`);
     process.exit(report.ok ? 0 : 1);
   }
   const agg = collectVaultCost(vaultBase, { since: opt(argv, '--since') });

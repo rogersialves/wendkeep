@@ -399,7 +399,7 @@ test('[req:MEM-STOP-4] concurrent activation between Stop CAS and staging preser
 import { main } from ${JSON.stringify(stopModule)};
 import { stageStopMemoryAttempt } from ${JSON.stringify(lifecycleModule)};
 import { mutateSessionRegistry, openActivation } from ${JSON.stringify(commonModule)};
-main({
+await main({
   stageMemory(vaultBase, context) {
     mutateSessionRegistry(vaultBase, (registry) => {
       const next = openActivation(registry, {

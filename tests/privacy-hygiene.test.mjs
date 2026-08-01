@@ -1,153 +1,16 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import {
+  inspectDiagnosticRecords,
+  inspectFixtureSource,
+  inspectStagedDiff,
+  repositoryPrivacySources,
+} from '../scripts/privacy-hygiene.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-const FIXTURE_SOURCES = new Set([
-  'tests/memory-handoff.test.mjs',
-  'tests/memory-hybrid-e2e.test.mjs',
-  'tests/session-stop-memory.test.mjs',
-  'tests/fixtures/synthetic-memory-lifecycle.mjs',
-]);
-
-const SENSITIVE_FIELDS = new Set([
-  'NOTE',
-  'SID',
-  'SUMMARY',
-  'canonicalConversationId',
-  'context',
-  'contexto',
-  'message',
-  'noteRel',
-  'objective',
-  'pedido',
-  'projectId',
-  'project_id',
-  'sessionId',
-  'sessionRel',
-  'session_id',
-  'summary',
-  'title',
-  'transcriptId',
-  'transcript_id',
-  'vault',
-  'vaultName',
-]);
-
-const SAFE_RELATIVE_SEGMENTS = new Set([
-  '.brain',
-  '03-Sessões',
-  '03-Sessions',
-]);
-
-function decodeLiteral(raw, quote) {
-  if (quote === '"') {
-    try { return JSON.parse(`${quote}${raw}${quote}`); } catch { return raw; }
-  }
-  return raw
-    .replaceAll('\\\\', '\\')
-    .replaceAll(`\\${quote}`, quote)
-    .replaceAll('\\n', '\n')
-    .replaceAll('\\r', '\r')
-    .replaceAll('\\t', '\t');
-}
-
-function literalsOnLine(line) {
-  const literals = [];
-  const pattern = /(["'`])((?:\\.|(?!\1).)*)\1/g;
-  for (const match of line.matchAll(pattern)) {
-    literals.push({
-      column: match.index ?? 0,
-      raw: match[0],
-      value: decodeLiteral(match[2], match[1]),
-    });
-  }
-  return literals;
-}
-
-function allowedFixtureValue(value) {
-  if (!value) return true;
-  if (/^\[wk-fixture\]/.test(value)) return true;
-  if (/^\.?wk-fixture-[a-z0-9-]+(?:\.[a-z0-9]+)?$/i.test(value)) return true;
-
-  const segments = value.split(/[\\/]/).filter(Boolean);
-  return segments.length > 0 && segments.every((segment) => (
-    SAFE_RELATIVE_SEGMENTS.has(segment)
-    || /^\.?wk-fixture-[a-z0-9-]+(?:\.[a-z0-9]+)?$/i.test(segment)
-  ));
-}
-
-function sensitiveFieldBefore(line, column) {
-  const prefix = line.slice(0, column);
-  const match = prefix.match(/(?:^|[,{;]\s*|\bconst\s+)["']?([A-Za-z_][A-Za-z0-9_]*)["']?\s*[:=]\s*$/);
-  return match && SENSITIVE_FIELDS.has(match[1]) ? match[1] : '';
-}
-
-function structuralCategories(value) {
-  const categories = [];
-  if (/^[A-Za-z]:[\\/]/.test(value)
-    || /^\/(?:Users|home)\//.test(value)
-    || /^\\\\[^\\/]+[\\/][^\\/]+/.test(value)) {
-    categories.push('absolute-local-path');
-  }
-  if (/\b[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\b/i.test(value)
-    || /\b[0-9a-f]{24,}\b/i.test(value)
-    || /\b[A-Za-z0-9_-]{32,}\b/.test(value)) {
-    if (!allowedFixtureValue(value)) categories.push('opaque-identifier');
-  }
-  return categories;
-}
-
-function categoriesForLiteral(value, field) {
-  const categories = structuralCategories(value);
-  if (field && !allowedFixtureValue(value)) categories.push('unapproved-fixture-value');
-  return categories;
-}
-
-function unescapedBackticks(line) {
-  let found = 0;
-  for (let index = 0; index < line.length; index += 1) {
-    if (line[index] !== '`') continue;
-    let slashes = 0;
-    for (let cursor = index - 1; cursor >= 0 && line[cursor] === '\\'; cursor -= 1) slashes += 1;
-    if (slashes % 2 === 0) found += 1;
-  }
-  return found;
-}
-
-export function inspectFixtureSource(relativePath, source) {
-  const findings = new Set();
-  const lines = String(source).replaceAll('\r\n', '\n').split('\n');
-  let insideTemplate = false;
-  for (let index = 0; index < lines.length; index += 1) {
-    const line = lines[index];
-    if (insideTemplate) {
-      for (const category of structuralCategories(line)) {
-        findings.add(`${relativePath}:${index + 1}:${category}`);
-      }
-    }
-    for (const literal of literalsOnLine(line)) {
-      const field = sensitiveFieldBefore(line, literal.column);
-      for (const category of categoriesForLiteral(literal.value, field)) {
-        findings.add(`${relativePath}:${index + 1}:${category}`);
-      }
-    }
-    if (unescapedBackticks(line) % 2 === 1) insideTemplate = !insideTemplate;
-  }
-  return [...findings].sort();
-}
-
-function repositoryFixtureSources() {
-  const listed = spawnSync('git', ['ls-files', '--cached', '--others', '--exclude-standard', '-z'], {
-    cwd: ROOT,
-    encoding: 'utf8',
-  });
-  assert.equal(listed.status, 0, listed.stderr);
-  return listed.stdout.split('\0').filter((relativePath) => FIXTURE_SOURCES.has(relativePath));
-}
 
 function runtimeSamples() {
   const slash = '\\';
@@ -201,8 +64,116 @@ test('[req:MEM-STOP-7] privacy diagnostics never disclose rejected values', () =
 });
 
 test('[req:MEM-STOP-7] versioned memory lifecycle fixtures contain only synthetic data', () => {
-  const findings = repositoryFixtureSources().flatMap((relativePath) => (
+  const findings = repositoryPrivacySources(ROOT).flatMap((relativePath) => (
     inspectFixtureSource(relativePath, readFileSync(join(ROOT, relativePath), 'utf8'))
   ));
   if (findings.length) throw new Error(findings.join('\n'));
+});
+
+test('[req:OBS-14] generated verification hashes are allowed only in their structural fields', () => {
+  const contentHash = 'a'.repeat(64);
+  const generated = JSON.stringify({
+    tasksHash: 'b'.repeat(12),
+    effectiveSpecHash: contentHash,
+  }, null, 2);
+
+  assert.deepEqual(inspectFixtureSource(
+    '.WendKeep-vault/08-Mudanças/codex-subagent-observability/verificacao.json',
+    generated,
+  ), []);
+  assert.deepEqual(inspectFixtureSource(
+    '.WendKeep-vault/08-Mudanças/codex-subagent-observability/evidencia.json',
+    JSON.stringify({ transcriptId: contentHash }, null, 2),
+  ), [
+    '.WendKeep-vault/08-Mudanças/codex-subagent-observability/evidencia.json:2:opaque-identifier',
+    '.WendKeep-vault/08-Mudanças/codex-subagent-observability/evidencia.json:2:unapproved-fixture-value',
+  ]);
+});
+
+test('[req:OBS-14] generated verdict evidence allows only relative source locations', () => {
+  const verdictPath = '.WendKeep-vault/08-Mudanças/codex-subagent-observability/verdict.json';
+  const evidence = [
+    'tests/session-observability-reconciliation.test.mjs:267',
+    'hooks/session-observability.mjs:640',
+  ].join('; ');
+
+  assert.deepEqual(inspectFixtureSource(
+    verdictPath,
+    JSON.stringify({ evidence }, null, 2),
+  ), []);
+  assert.deepEqual(inspectFixtureSource(
+    verdictPath,
+    JSON.stringify({ evidence: `tests/${'a'.repeat(40)}` }, null, 2),
+  ), [`${verdictPath}:2:opaque-identifier`]);
+});
+
+test('[req:MEM-STOP-7] lifecycle paths allow only the declared synthetic interpolation', () => {
+  const interpolation = ['${', 'SYNTHETIC_MEMORY.changeSlug', '}'].join('');
+  const privateInterpolation = ['${', 'runtimeProject.changeSlug', '}'].join('');
+  const syntheticSource = [
+    `const evidence = { path: \`04-Decisões/ADR-0001-${interpolation}.md\` };`,
+    `const verdict = { path: \`08-Mudanças/_arquivo/${interpolation}/verdict.json\` };`,
+  ].join('\n');
+
+  assert.deepEqual(inspectFixtureSource('tests/memory-handoff.test.mjs', syntheticSource), []);
+  assert.deepEqual(inspectFixtureSource(
+    'tests/memory-handoff.test.mjs',
+    `const evidence = { path: \`04-Decisões/ADR-0001-${privateInterpolation}.md\` };`,
+  ), ['tests/memory-handoff.test.mjs:1:unapproved-fixture-value']);
+});
+
+test('[req:OBS-14] diagnostics reject unknown codes, extra fields and sensitive values', () => {
+  const sample = runtimeSamples();
+  const pathField = ['pa', 'th'].join('');
+  const promptField = ['pro', 'mpt'].join('');
+  const sessionField = ['session', 'Id'].join('');
+  const records = [
+    { code: ['NOT', 'ALLOWLISTED'].join('_'), count: 1 },
+    { code: 'CHILD_MISSING', count: 1, [pathField]: sample.homePath },
+    { code: 'CHILD_MISSING', count: 1, [promptField]: ['raw', ' prompt'].join('') },
+    { code: 'CHILD_MISSING', count: 1, [sessionField]: sample.opaqueId },
+  ];
+
+  assert.deepEqual(inspectDiagnosticRecords('virtual.json', records), [
+    'virtual.json:1:diagnostic-code-not-allowlisted',
+    'virtual.json:2:absolute-local-path',
+    'virtual.json:2:diagnostic-unapproved-field',
+    'virtual.json:3:diagnostic-prompt-or-message',
+    'virtual.json:3:diagnostic-unapproved-field',
+    'virtual.json:4:diagnostic-unapproved-field',
+    'virtual.json:4:opaque-identifier',
+  ]);
+});
+
+test('[req:OBS-14] staged diff scans only added content and reports destination line numbers', () => {
+  const sample = runtimeSamples();
+  const diff = [
+    'diff --git a/tests/fixtures/wk-fixture-observability.mjs b/tests/fixtures/wk-fixture-observability.mjs',
+    '--- a/tests/fixtures/wk-fixture-observability.mjs',
+    '+++ b/tests/fixtures/wk-fixture-observability.mjs',
+    '@@ -1,2 +1,2 @@',
+    `-const projectId = ${JSON.stringify(sample.consumerLabel)};`,
+    "+const projectId = 'wk-fixture-example-project';",
+    `+const transcriptId = ${JSON.stringify(sample.opaqueId)};`,
+  ].join('\n');
+
+  assert.deepEqual(inspectStagedDiff(diff), [
+    'tests/fixtures/wk-fixture-observability.mjs:2:opaque-identifier',
+    'tests/fixtures/wk-fixture-observability.mjs:2:unapproved-fixture-value',
+  ]);
+});
+
+test('[req:OBS-14] every privacy diagnostic is redacted to file line and category', () => {
+  const sample = runtimeSamples();
+  const pathField = ['pa', 'th'].join('');
+  const report = [
+    ...inspectFixtureSource('virtual.test.mjs', `const message = ${JSON.stringify(sample.consumerLabel)};`),
+    ...inspectDiagnosticRecords('virtual.json', [
+      { code: 'CHILD_MISSING', count: 1, [pathField]: sample.homePath },
+    ]),
+  ].join('\n');
+
+  assert.match(report, /^(?:[^:\r\n]+(?:[/\\][^:\r\n]+)*:\d+:[a-z-]+)(?:\n[^:\r\n]+(?:[/\\][^:\r\n]+)*:\d+:[a-z-]+)*$/);
+  assert.equal(report.includes(sample.consumerLabel), false);
+  assert.equal(report.includes(sample.homePath), false);
 });

@@ -29,6 +29,49 @@ function walkAgentJsonl(dir) {
   return out;
 }
 
+function inspectAgentJsonlDirectory(dir) {
+  let names;
+  try {
+    names = readdirSync(dir);
+  } catch (error) {
+    return { state: error?.code === 'ENOENT' ? 'absent' : 'error', files: [] };
+  }
+  const files = [];
+  for (const name of names) {
+    const path = join(dir, name);
+    let stat;
+    try {
+      stat = statSync(path);
+    } catch {
+      return { state: 'error', files: [] };
+    }
+    if (stat.isDirectory()) {
+      const nested = inspectAgentJsonlDirectory(path);
+      if (nested.state === 'error' || nested.state === 'absent') return { state: 'error', files: [] };
+      files.push(...nested.files);
+    } else if (name.startsWith('agent-') && name.endsWith('.jsonl')) {
+      files.push(path);
+    }
+  }
+  return { state: 'ok', files };
+}
+
+function validJsonl(path) {
+  let lines;
+  try {
+    lines = readFileSync(path, 'utf8').split(/\r?\n/).filter((line) => line.trim());
+  } catch {
+    return false;
+  }
+  if (!lines.length) return false;
+  try {
+    for (const line of lines) JSON.parse(line);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 // workflows/scripts/<name>-wf_<rid>.js  ->  { wf_<rid>: <name> }
 function workflowNameMap(sessionDir) {
   const map = {};
@@ -274,6 +317,28 @@ export function collectSubagentUsage(sessionDir) {
       modelRows: [...modelMap.values()].map((r) => ({ ...r, cost: round4(r.cost), source: 'subagent' })),
     },
   };
+}
+
+// Schema-2 callers need to distinguish proven absence from read/parse failure. Keep the
+// legacy aggregate API above intact while exposing a fail-closed state for observability.
+export function collectClaudeSubagentUsageState(sessionDir) {
+  const scan = inspectAgentJsonlDirectory(join(sessionDir, 'subagents'));
+  if (scan.state === 'absent' || (scan.state === 'ok' && scan.files.length === 0)) {
+    return { state: 'none', diagnostics: [] };
+  }
+  if (scan.state !== 'ok' || scan.files.some((path) => !validJsonl(path))) {
+    return {
+      state: 'degraded',
+      diagnostics: [{ code: 'CHILD_META_INVALID', count: 1 }],
+    };
+  }
+  const collected = collectSubagentUsage(sessionDir);
+  return collected
+    ? { ...collected, state: 'complete', diagnostics: [] }
+    : {
+      state: 'degraded',
+      diagnostics: [{ code: 'CHILD_META_INVALID', count: 1 }],
+    };
 }
 
 function workflowLine(w) {

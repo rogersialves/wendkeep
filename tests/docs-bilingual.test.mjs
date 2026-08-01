@@ -353,3 +353,93 @@ test('DOC-7: links Markdown locais resolvem para arquivos e âncoras existentes'
     for (const guide of GUIDES) assertLocalLinksResolve(join(dir, guide));
   }
 });
+
+test('[req:OBS-13] DOC-10: rebuild documenta preview puro, apply causal, flags direcionadas e exits', () => {
+  const cases = {
+    pt: {
+      text: readFileSync(join(GUIDE_DIR.pt, 'costs-and-observability.md'), 'utf8'),
+      zeroWrite: /dry-run[\s\S]*zero escrita|dry-run[\s\S]*não (?:grava|escreve)[\s\S]*(?:nota|registry|runtime|relatório|lock)/i,
+      applySafe: /--apply[\s\S]*(?:somente|apenas)[\s\S]*`complete`[\s\S]*`none`/i,
+      preserve: /(?:`degraded`|`stale`)[\s\S]*exit `?1`?[\s\S]*(?:preserva|não altera)[\s\S]*nota/i,
+      targeted: /(?:overrides|limites)[\s\S]*(?:exclusiv|somente)[\s\S]*--session/i,
+      invalidUsage: /sem `?--session`?[\s\S]*exit `?2`?/i,
+    },
+    en: {
+      text: readFileSync(join(GUIDE_DIR.en, 'costs-and-observability.md'), 'utf8'),
+      zeroWrite: /dry-run[\s\S]*zero writes|dry-run[\s\S]*(?:does not|never) write[\s\S]*(?:note|registry|runtime|report|lock)/i,
+      applySafe: /--apply[\s\S]*(?:only)[\s\S]*`complete`[\s\S]*`none`/i,
+      preserve: /(?:`degraded`|`stale`)[\s\S]*exit `?1`?[\s\S]*(?:preserves|does not change)[\s\S]*note/i,
+      targeted: /(?:overrides|limits)[\s\S]*(?:exclusiv|only)[\s\S]*--session/i,
+      invalidUsage: /without `?--session`?[\s\S]*exit `?2`?/i,
+    },
+  };
+  const flags = ['--max-graph-nodes', '--max-fallback-days', '--max-fallback-candidates'];
+  for (const [locale, contract] of Object.entries(cases)) {
+    for (const flag of flags) assert.match(contract.text, new RegExp(flag), `${locale}: flag ausente ${flag}`);
+    for (const key of ['zeroWrite', 'applySafe', 'preserve', 'targeted', 'invalidUsage']) {
+      assert.match(contract.text, contract[key], `${locale}: contrato rebuild ausente: ${key}`);
+    }
+  }
+});
+
+test('[req:OBS-11] [req:OBS-12] [req:IMPORT-5] DOC-11: hooks e import têm contrato causal bilíngue', () => {
+  const cases = {
+    pt: {
+      text: readFileSync(join(GUIDE_DIR.pt, 'sessions-and-import.md'), 'utf8'),
+      reconcile: /import[\s\S]*reconcilia[\s\S]*observabilidade[\s\S]*(?:mesmo|ainda que)[\s\S]*(?:nenhum `wk-turn`|sem `wk-turn`)[\s\S]*(?:ausente|faltando)/i,
+      coalesce: /SubagentStop[\s\S]*250\s*ms[\s\S]*(?:coalesc|agrup)/i,
+    },
+    en: {
+      text: readFileSync(join(GUIDE_DIR.en, 'sessions-and-import.md'), 'utf8'),
+      reconcile: /import[\s\S]*reconcile[\s\S]*observability[\s\S]*(?:even|although)[\s\S]*no `wk-turn`[\s\S]*(?:missing|absent)/i,
+      coalesce: /SubagentStop[\s\S]*250\s*ms[\s\S]*(?:coalesc|batch)/i,
+    },
+  };
+  for (const [locale, contract] of Object.entries(cases)) {
+    assert.match(contract.text, /Stop[^\n]*45\s*s/i, `${locale}: deadline Stop 45 s`);
+    assert.match(contract.text, /SubagentStop[^\n]*15\s*s/i, `${locale}: deadline SubagentStop 15 s`);
+    assert.match(contract.text, contract.coalesce, `${locale}: coalescência SubagentStop`);
+    assert.match(contract.text, contract.reconcile, `${locale}: reconciliação sem turno faltante`);
+    for (const state of ['complete', 'none', 'degraded']) {
+      assert.match(contract.text, new RegExp(`\\b${state}\\b`), `${locale}: estado ${state}`);
+    }
+  }
+});
+
+test('[req:DIAG-9] DOC-12: doctor distingue frescor e recomenda dry-run antes de apply', () => {
+  const cases = {
+    pt: readFileSync(join(GUIDE_DIR.pt, 'maintenance-and-diagnostics.md'), 'utf8'),
+    en: readFileSync(join(GUIDE_DIR.en, 'maintenance-and-diagnostics.md'), 'utf8'),
+  };
+  for (const [locale, text] of Object.entries(cases)) {
+    for (const state of ['legacy', 'degraded', 'stale', 'manifest-unproven', 'none', 'complete']) {
+      assert.match(text, new RegExp(`\\b${state}\\b`), `${locale}: doctor sem estado ${state}`);
+    }
+    assert.match(text, /(?:`none`|`complete`)[\s\S]*(?:fresc|fresh)/i, `${locale}: estado saudável sem frescor`);
+    assert.match(text, /wendkeep cost rebuild --session <[^>]+> --json[\s\S]*wendkeep cost rebuild --session <[^>]+> --apply/i,
+      `${locale}: doctor não recomenda dry-run antes de apply`);
+    assert.match(text, /doctor[\s\S]*(?:read-only|somente leitura)/i, `${locale}: doctor não é read-only`);
+  }
+});
+
+test('[req:OBS-11] [req:OBS-12] DOC-13: READMEs resumem observabilidade e delegam detalhes aos guias', () => {
+  const cases = {
+    pt: {
+      text: readFileSync(join(ROOT, 'README.md'), 'utf8'),
+      summary: /Custos e observabilidade[^\n]*(?:dry-run)[^\n]*(?:tri-state|complete|degraded)/i,
+      sessions: /Sessões e importação[^\n]*(?:hooks causais|reconciliação)/i,
+      doctor: /Manutenção e diagnóstico[^\n]*(?:frescor|frontier|manifest)/i,
+    },
+    en: {
+      text: readFileSync(join(ROOT, 'README.en.md'), 'utf8'),
+      summary: /Costs and observability[^\n]*(?:dry-run)[^\n]*(?:tri-state|complete|degraded)/i,
+      sessions: /Sessions and import[^\n]*(?:causal hooks|reconciliation)/i,
+      doctor: /Maintenance and diagnostics[^\n]*(?:freshness|frontier|manifest)/i,
+    },
+  };
+  for (const [locale, contract] of Object.entries(cases)) {
+    assert.match(contract.text, contract.summary, `${locale}: resumo de rebuild/tri-state`);
+    assert.match(contract.text, contract.sessions, `${locale}: resumo de hooks/import`);
+    assert.match(contract.text, contract.doctor, `${locale}: resumo de doctor/frescor`);
+  }
+});

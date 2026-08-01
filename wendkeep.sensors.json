@@ -98,6 +98,14 @@
       "command": "node --test tests/session-stop-migration-lifecycle.test.mjs tests/memory-activation.test.mjs tests/session-memory-lifecycle.test.mjs tests/vault-health-memory.test.mjs"
     },
     {
+      "id": "privacy-hygiene",
+      "name": "Privacy hygiene",
+      "description": "Rejects non-allowlisted observability diagnostics and sensitive data in persistable fixtures, evidence and staged changes",
+      "severity": "critical",
+      "type": "command",
+      "command": "node scripts/privacy-hygiene.mjs"
+    },
+    {
       "id": "memory-recovery",
       "name": "Memory recovery",
       "description": "Exercises projected-attempt acknowledgement recovery, causal safety, topology defenses and diagnostics",

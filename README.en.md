@@ -211,10 +211,10 @@ The README is the map; the guides provide syntax, options, exit codes, examples,
 | **Operating profiles** | `profile`, `flow`, always-on Keep Core, and Wend Runtime governance | [Operating profiles](https://github.com/rogersialves/wendkeep/blob/main/docs/en/commands/operating-profiles.md) |
 | **Changes and verification** | `change`, specs, sensors, TDD, evidence, and archive | [Changes and verification](https://github.com/rogersialves/wendkeep/blob/main/docs/en/commands/changes-and-verification.md) |
 | **Shared memory** | CORE, SHARED, status, validation, repair, and curation | [Memory](https://github.com/rogersialves/wendkeep/blob/main/docs/en/commands/memory.md) |
-| **Sessions and import** | hooks, registry, session focus, and Claude/Codex backfill | [Sessions and import](https://github.com/rogersialves/wendkeep/blob/main/docs/en/commands/sessions-and-import.md) |
+| **Sessions and import** | causal hooks, observability reconciliation, and Claude/Codex backfill | [Sessions and import](https://github.com/rogersialves/wendkeep/blob/main/docs/en/commands/sessions-and-import.md) |
 | **Notes and knowledge** | BUG/APR/ADR, repairs, renumbering, lessons, and dashboard | [Notes and knowledge](https://github.com/rogersialves/wendkeep/blob/main/docs/en/commands/notes-and-knowledge.md) |
-| **Costs and observability** | stats, aggregation, trends, and historical rebuild | [Costs and observability](https://github.com/rogersialves/wendkeep/blob/main/docs/en/commands/costs-and-observability.md) |
-| **Maintenance and diagnostics** | doctor, definition drift, theme, version, and help | [Maintenance and diagnostics](https://github.com/rogersialves/wendkeep/blob/main/docs/en/commands/maintenance-and-diagnostics.md) |
+| **Costs and observability** | safe dry-run, tri-state, aggregation, trends, and historical rebuild | [Costs and observability](https://github.com/rogersialves/wendkeep/blob/main/docs/en/commands/costs-and-observability.md) |
+| **Maintenance and diagnostics** | doctor, frontier/manifest freshness, drift, version, and help | [Maintenance and diagnostics](https://github.com/rogersialves/wendkeep/blob/main/docs/en/commands/maintenance-and-diagnostics.md) |
 
 Operations that deserve step-by-step guidance: [verify and exits 0/1/2](https://github.com/rogersialves/wendkeep/blob/main/docs/en/commands/verify.md),
 [legacy-memory migration](https://github.com/rogersialves/wendkeep/blob/main/docs/en/commands/memory-migration.md), and

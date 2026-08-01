@@ -5,6 +5,8 @@ import { extractReleaseNotes } from '../src/release-changelog.mjs';
 
 const AUTO_TAG_WORKFLOW = readFileSync(new URL('../.github/workflows/auto-tag.yml', import.meta.url), 'utf8');
 const AGENT_RULES = readFileSync(new URL('../AGENTS.md', import.meta.url), 'utf8');
+const CHANGELOG = readFileSync(new URL('../CHANGELOG.md', import.meta.url), 'utf8');
+const PACKAGE = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
 
 const FIXTURE = `# Changelog
 
@@ -64,6 +66,18 @@ test('extractReleaseNotes: body is trimmed (no leading/trailing blank lines)', (
 
 test('extractReleaseNotes: throws when the version is absent', () => {
   assert.throws(() => extractReleaseNotes(FIXTURE, '9.9.9'), /9\.9\.9/);
+});
+
+test('[sensor:release-tests] 0.66.5 notes are extractable and match the package', () => {
+  const release = extractReleaseNotes(CHANGELOG, '0.66.5');
+  assert.equal(PACKAGE.version, '0.66.5');
+  assert.equal(release.date, '2026-08-01');
+  assert.match(release.notes, /Codex/i);
+  assert.match(release.notes, /rebuild/i);
+  assert.match(release.notes, /import/i);
+  assert.match(release.notes, /doctor/i);
+  assert.match(release.notes, /privacidade|diagnostic/i);
+  assert.doesNotMatch(release.notes, /memory recover-attempt/);
 });
 
 test('auto-tag: existing tag still refreshes the GitHub Release from CHANGELOG', () => {

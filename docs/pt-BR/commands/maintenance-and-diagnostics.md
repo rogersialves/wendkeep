@@ -39,6 +39,11 @@ npx wendkeep --help
   continuam duráveis na outbox/ledger é warning recuperável.
 - Attempt ambíguo, event ID perdido (ausente de ledger e outbox), estado `projected` apenas na
   outbox ou checkpoint divergente são falhas bloqueantes.
+- Para observabilidade de sessão, `legacy`, `degraded`, `stale` e `manifest-unproven` exigem
+  reconciliação ou evidência adicional. Somente `none` fresco e `complete` fresco são saudáveis:
+  frontier, checkpoint, root stat e source manifest precisam concordar.
+- O `doctor` permanece somente leitura/read-only. Ele recomenda primeiro o dry-run direcionado;
+  somente depois da revisão humana orienta repetir com `--apply`.
 - `sync-defs --check` detecta drift sem gravar; `--reseed` restaura skills `wk-*` do pacote.
 - `theme sync` reaplica snippet CSS e grupos do grafo sem recriar o cofre.
 - `wendkeep --version` imprime a versão executada; `wendkeep --help` lista a interface pública.
@@ -52,6 +57,8 @@ npx wendkeep --version
 npx wendkeep sync-defs --check --vault .MeuApp-vault --project .
 npx wendkeep doctor --vault .MeuApp-vault
 npx wendkeep memory status --gate --vault .MeuApp-vault
+npx wendkeep cost rebuild --session <id> --json
+npx wendkeep cost rebuild --session <id> --apply
 ```
 
 ## Resultado esperado
@@ -59,7 +66,9 @@ npx wendkeep memory status --gate --vault .MeuApp-vault
 O doctor nomeia sessões, registry, links, notas, preços, derivadas e memória como saudáveis ou
 fornece um comando específico de diagnóstico/reparo. Na memória, ele distingue vazio inicial
 válido, replay pendente recuperável e lifecycle perdido/divergente. Nenhum reparo é aplicado
-implicitamente nem o conteúdo privado do erro do projector é reproduzido no relatório.
+implicitamente nem o conteúdo privado do erro do projector é reproduzido no relatório. Na
+observabilidade de sessão, ele separa `none`/`complete` frescos de estado legado, degradado, stale
+ou sem manifest comprovado e oferece um caminho dry-run antes de qualquer escrita.
 
 ## Erros comuns e diagnóstico
 
@@ -70,6 +79,8 @@ implicitamente nem o conteúdo privado do erro do projector é reproduzido no re
 - `ambiguous`, publicação perdida ou checkpoint divergente: bloqueante; preserve registry, ledger,
   outbox e SHARED para correlacionar `last_memory_attempt` antes de reparar.
 - Bundle corrompido: preserve a evidência e use `memory status --gate` antes de `memory repair`.
+- Observabilidade `legacy`/`degraded`/`stale`/`manifest-unproven`: rode
+  `wendkeep cost rebuild --session <id> --json`, revise diagnostics e só então autorize `--apply`.
 
 ## Próximos passos
 

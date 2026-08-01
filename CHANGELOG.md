@@ -4,6 +4,28 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.66.5] — 2026-08-01
+
+### Fixed
+
+- **A observabilidade Codex passa a registrar o grafo completo de subagentes.** Metadata é
+  lida incrementalmente mesmo em rollouts grandes; descendentes em dias posteriores ou níveis
+  aninhados são atribuídos uma única vez, enquanto transcripts top-level permanecem no bucket
+  principal e sinais duplicados ou atrasados não regridem o snapshot publicado.
+- **SessionStop e SubagentStop convergem sob frontier causal e estado explícito.** O schema 2
+  distingue `complete`, `none` e `degraded`, coalesce rajadas com lease, preserva o último
+  snapshot íntegro diante de fonte incompleta e mantém cache/runtime reconstruíveis sem publicar
+  zero silencioso.
+- **Rebuild, import e doctor agora reconciliam a observabilidade persistida.** Preview permanece
+  sem escrita, apply rejeita resultado parcial, import atualiza notas completas porém stale e o
+  doctor correlaciona checkpoint, manifest e dirty para expor degradação real.
+
+### Security
+
+- **Diagnostics e provas públicas aplicam uma fronteira de privacidade estável.** Somente pares
+  allowlisted `{code,count}` podem ser persistidos; paths, identificadores, prompts e exceções
+  brutas ficam fora de fixtures, evidências e notas de release.
+
 ## [0.66.4] — 2026-07-30
 
 ### Fixed

@@ -15,6 +15,13 @@ import { HOOK_FILES } from '../src/taxonomy.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const pkgRoot = join(here, '..');
+const OBSERVABILITY_HOOK_MODULES = Object.freeze([
+  'codex-rollout-meta.mjs',
+  'codex-subagent-graph.mjs',
+  'session-observability-state.mjs',
+  'session-observability-store.mjs',
+  'session-observability-lifecycle.mjs',
+]);
 
 // Files that `npm publish` would include, per `npm pack`.
 // Command is a single string with shell:true (npm is a .cmd shim on Windows); this
@@ -63,6 +70,24 @@ test('every relative import in hooks/ resolves to a published file', () => {
       );
     }
   }
+});
+
+test('[req:OBS-3] [req:OBS-11] [req:OBS-12] Codex observability modules ship together', () => {
+  const published = publishedFiles();
+  for (const file of OBSERVABILITY_HOOK_MODULES) {
+    assert.ok(published.has(`hooks/${file}`), `missing observability module: hooks/${file}`);
+  }
+});
+
+test('[req:OBS-14] published tarball excludes local vault and runtime state', () => {
+  const published = [...publishedFiles()];
+  const forbidden = published.filter((path) => (
+    /(^|\/)\.brain(?:\/|$)/i.test(path)
+    || /(^|\/)\.[^/]+-vault(?:\/|$)/i.test(path)
+    || /(^|\/)(?:SESSION_REGISTRY\.json|CURRENT_SESSION\.md|MEMORY_EVENTS\.jsonl|SHARED_MEMORY\.md)$/i.test(path)
+  ));
+
+  assert.deepEqual(forbidden, []);
 });
 
 test('every published hook passes node --check (no broken syntax shipped)', () => {
@@ -204,6 +229,10 @@ test('[req:MOD-4] [req:MOD-6] [req:MOD-9] [req:MOD-10] [req:MOD-11] [req:MOD-12]
       "const legacyCommon = await import('wendkeep/hooks/obsidian-common.mjs');",
       "const legacyUsage = await import('wendkeep/hooks/token-usage.mjs');",
       "const legacySessionStop = await import('wendkeep/hooks/session-stop.mjs');",
+      `const observabilitySpecifiers = ${JSON.stringify(
+        OBSERVABILITY_HOOK_MODULES.map((file) => `wendkeep/hooks/${file}`),
+      )};`,
+      "for (const specifier of observabilitySpecifiers) await import(specifier);",
       "if (typeof vault.resolveProjectVault !== 'function') process.exit(11);",
       "if (typeof legacy.assertVaultPathSafe !== 'function') process.exit(12);",
       "const shared = vault.renderSharedMemory({ updatedAt: '2026-07-28T00:00:00.000Z', reviewAfter: '2026-08-04T00:00:00.000Z' });",
