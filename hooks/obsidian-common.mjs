@@ -67,6 +67,14 @@ export function getVaultBase(input = {}) {
   return resolveVault(input).base;
 }
 
+// Diagnostic commands must use the project-local package even when `wendkeep` is not installed
+// globally. Quotes preserve resolved Windows paths with spaces in copy/pasteable output.
+export const WENDKEEP_COMMAND = 'npx --no-install wendkeep';
+
+export function quoteCommandArgument(value) {
+  return `"${String(value ?? '').replaceAll('"', '\\"')}"`;
+}
+
 // Diagnostic logger. No-op unless WENDKEEP_DEBUG is set, so it never pollutes the
 // stdout hook contract during normal runs but makes fail-open paths debuggable.
 export function debugLog(...args) {

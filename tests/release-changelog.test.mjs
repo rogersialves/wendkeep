@@ -68,15 +68,13 @@ test('extractReleaseNotes: throws when the version is absent', () => {
   assert.throws(() => extractReleaseNotes(FIXTURE, '9.9.9'), /9\.9\.9/);
 });
 
-test('[sensor:release-tests] 0.67.1 notes are extractable and match the package', () => {
-  const release = extractReleaseNotes(CHANGELOG, '0.67.1');
-  assert.equal(PACKAGE.version, '0.67.1');
+test('[sensor:release-tests] 0.67.2 notes are extractable and match the package', () => {
+  const release = extractReleaseNotes(CHANGELOG, '0.67.2');
+  assert.equal(PACKAGE.version, '0.67.2');
   assert.equal(release.date, '2026-08-02');
-  assert.match(release.notes, /turn_sequences\[turn_id\]/i);
-  assert.match(release.notes, /agent_transcript_path/i);
-  assert.match(release.notes, /session-backfill/i);
-  assert.match(release.notes, /task_complete/i);
-  assert.match(release.notes, /incompleteTurns/i);
+  assert.match(release.notes, /npx --no-install wendkeep/i);
+  assert.match(release.notes, /--vault/i);
+  assert.match(release.notes, /--apply/i);
   assert.doesNotMatch(release.notes, /019f[0-9a-f-]+/i);
 });
 

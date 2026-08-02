@@ -6,8 +6,10 @@ import {
   controlPath,
   getVaultBase,
   listMarkdownFiles,
+  quoteCommandArgument,
   readControl,
   readSessionRegistry,
+  WENDKEEP_COMMAND,
   wikilinkFromRel,
 } from './obsidian-common.mjs';
 import { getLocale } from './locale.mjs';
@@ -98,8 +100,12 @@ function linkedNotesFromSession(content) {
   return notes;
 }
 
-const MEMORY_STATUS_COMMAND = 'wendkeep memory status --gate --vault <vault>';
-const MEMORY_REPAIR_COMMAND = 'wendkeep memory repair --vault <vault>';
+const memoryStatusCommand = (vaultBase) => (
+  `${WENDKEEP_COMMAND} memory status --gate --vault ${quoteCommandArgument(vaultBase)}`
+);
+const memoryRepairCommand = (vaultBase) => (
+  `${WENDKEEP_COMMAND} memory repair --vault ${quoteCommandArgument(vaultBase)}`
+);
 
 function readJsonLines(vaultBase, path, label) {
   let checked;
@@ -279,13 +285,13 @@ function checkMemoryAttempts(registry, {
       : [];
 
     if (state === 'skipped' && disposition === 'ambiguous') {
-      failures.push(`Lifecycle de memória v2 ambíguo: Stop pulou a publicação sem identidade causal suficiente. Inspecione com: ${MEMORY_STATUS_COMMAND}.`);
+      failures.push(`Lifecycle de memória v2 ambíguo: Stop pulou a publicação sem identidade causal suficiente. Inspecione com: ${memoryStatusCommand(vaultBase)}.`);
       continue;
     }
 
     if (state === 'skipped' && ['stale_turn', 'superseded'].includes(disposition)) {
       if (eventIds.length) {
-        failures.push(`Stop stale/superseded emitiu event_ids apesar da rejeição causal. Inspecione com: ${MEMORY_STATUS_COMMAND}.`);
+        failures.push(`Stop stale/superseded emitiu event_ids apesar da rejeição causal. Inspecione com: ${memoryStatusCommand(vaultBase)}.`);
       } else {
         warnings.push('Stop stale/superseded foi descartado sem publicar memória.');
       }
@@ -294,12 +300,12 @@ function checkMemoryAttempts(registry, {
 
     if (disposition !== 'applied') {
       if (state === 'skipped') warnings.push('Attempt de memória v2 foi descartado sem publicação.');
-      else failures.push(`Attempt de memória v2 possui disposition não reconhecida para o estado informado. Inspecione com: ${MEMORY_STATUS_COMMAND}.`);
+      else failures.push(`Attempt de memória v2 possui disposition não reconhecida para o estado informado. Inspecione com: ${memoryStatusCommand(vaultBase)}.`);
       continue;
     }
 
     if (!eventIds.length) {
-      failures.push(`Attempt v2 aplicado não declarou event_ids; publicação perdida. Inspecione com: ${MEMORY_STATUS_COMMAND}.`);
+      failures.push(`Attempt v2 aplicado não declarou event_ids; publicação perdida. Inspecione com: ${memoryStatusCommand(vaultBase)}.`);
       continue;
     }
 
@@ -317,7 +323,7 @@ function checkMemoryAttempts(registry, {
     if (typeof attempt.turn_id !== 'string' || !attempt.turn_id) invalidAttemptFields.push('turn_id');
     if (!Number.isInteger(attempt.turn_sequence) || attempt.turn_sequence < 0) invalidAttemptFields.push('turn_sequence');
     if (invalidAttemptFields.length) {
-      failures.push(`Attempt v2 da sessão ${sessionId} possui identidade causal inválida (${invalidAttemptFields.join(', ')}). Inspecione com: ${MEMORY_STATUS_COMMAND}.`);
+      failures.push(`Attempt v2 da sessão ${sessionId} possui identidade causal inválida (${invalidAttemptFields.join(', ')}). Inspecione com: ${memoryStatusCommand(vaultBase)}.`);
       continue;
     }
     const causalMismatches = [];
@@ -330,14 +336,14 @@ function checkMemoryAttempts(registry, {
       if (fields.length) causalMismatches.push(`${eventId}: ${fields.join(', ')}`);
     }
     if (causalMismatches.length) {
-      failures.push(`Attempt v2 da sessão ${sessionId} referencia evento(s) com identidade causal divergente (${causalMismatches.join('; ')}). Inspecione com: ${MEMORY_STATUS_COMMAND}.`);
+      failures.push(`Attempt v2 da sessão ${sessionId} referencia evento(s) com identidade causal divergente (${causalMismatches.join('; ')}). Inspecione com: ${memoryStatusCommand(vaultBase)}.`);
       continue;
     }
 
     if (state === 'enqueued' || state === 'degraded') {
       const missing = eventIds.filter((eventId) => !ledgerEventIds.has(eventId) && !outboxEventIds.has(eventId));
       if (missing.length) {
-        failures.push(`Attempt v2 perdeu ${missing.length} evento(s): ausentes do ledger e da outbox. Inspecione com: ${MEMORY_STATUS_COMMAND}.`);
+        failures.push(`Attempt v2 perdeu ${missing.length} evento(s): ausentes do ledger e da outbox. Inspecione com: ${memoryStatusCommand(vaultBase)}.`);
       } else if (
         state === 'enqueued'
         && eventIds.every((eventId) => ledgerEventIds.has(eventId))
@@ -353,14 +359,14 @@ function checkMemoryAttempts(registry, {
     if (state === 'projected') {
       const outsideLedger = eventIds.filter((eventId) => !ledgerEventIds.has(eventId));
       if (outsideLedger.length) {
-        failures.push(`Attempt projetado perdeu ${outsideLedger.length} evento(s) no ledger. Inspecione com: ${MEMORY_STATUS_COMMAND}.`);
+        failures.push(`Attempt projetado perdeu ${outsideLedger.length} evento(s) no ledger. Inspecione com: ${memoryStatusCommand(vaultBase)}.`);
       } else if (!checkpointMatchesLedgerPrefix(attempt.checkpoint, eventIds, ledgerEvents, vaultBase)) {
-        failures.push(`Checkpoint do attempt projetado diverge do prefixo rederivado do ledger. Inspecione com: ${MEMORY_STATUS_COMMAND}.`);
+        failures.push(`Checkpoint do attempt projetado diverge do prefixo rederivado do ledger. Inspecione com: ${memoryStatusCommand(vaultBase)}.`);
       }
       continue;
     }
 
-    failures.push(`Attempt de memória v2 possui state inválido. Inspecione com: ${MEMORY_STATUS_COMMAND}.`);
+    failures.push(`Attempt de memória v2 possui state inválido. Inspecione com: ${memoryStatusCommand(vaultBase)}.`);
   }
 
   return { failures, warnings };
@@ -410,26 +416,26 @@ export function checkMemoryBundle(vaultBase, { registry } = {}) {
   const ledgerCorrupt = (bundle.ledger?.errors || []).length > 0;
   if (ledgerCorrupt) {
     for (const error of bundle.ledger.errors) {
-      failures.push(`${error} Execute com segurança: ${MEMORY_REPAIR_COMMAND}.`);
+      failures.push(`${error} Execute com segurança: ${memoryRepairCommand(vaultBase)}.`);
     }
   }
   for (const error of bundle.errors || []) {
     if (error.startsWith('ledger:')) continue;
-    failures.push(`${error} Inspecione com: ${MEMORY_STATUS_COMMAND}.`);
+    failures.push(`${error} Inspecione com: ${memoryStatusCommand(vaultBase)}.`);
   }
 
   if (outbox.errors.length) {
-    failures.push(`Outbox corrompida (${outbox.errors.join('; ')}). Inspecione com: ${MEMORY_STATUS_COMMAND}.`);
+    failures.push(`Outbox corrompida (${outbox.errors.join('; ')}). Inspecione com: ${memoryStatusCommand(vaultBase)}.`);
   }
   if (candidates.errors.length) {
-    failures.push(`${candidates.errors.join('; ')} Execute com segurança: ${MEMORY_REPAIR_COMMAND}.`);
+    failures.push(`${candidates.errors.join('; ')} Execute com segurança: ${memoryRepairCommand(vaultBase)}.`);
   }
 
   let replay = null;
   if (bundle.ledger?.ok) {
     try { replay = deriveMemoryProjection(vaultBase, bundle.ledger.events); }
     catch (error) {
-      failures.push(`Ledger não pode ser reduzido: ${error.message}. Execute com segurança: ${MEMORY_REPAIR_COMMAND}.`);
+      failures.push(`Ledger não pode ser reduzido: ${error.message}. Execute com segurança: ${memoryRepairCommand(vaultBase)}.`);
     }
   }
   if (replay && bundle.shared?.ok) {
@@ -438,7 +444,7 @@ export function checkMemoryBundle(vaultBase, { registry } = {}) {
     if (metadata.event_cursor !== replay.ledgerCursor) divergences.push(`event_cursor ${metadata.event_cursor} != ${replay.ledgerCursor}`);
     if (metadata.state_hash !== replay.stateHash) divergences.push(`state_hash ${metadata.state_hash} != ${replay.stateHash}`);
     if (divergences.length) {
-      failures.push(`Projeção SHARED stale/lag (${divergences.join('; ')}). Inspecione com: ${MEMORY_STATUS_COMMAND}.`);
+      failures.push(`Projeção SHARED stale/lag (${divergences.join('; ')}). Inspecione com: ${memoryStatusCommand(vaultBase)}.`);
     }
   }
 
@@ -460,7 +466,7 @@ export function checkMemoryBundle(vaultBase, { registry } = {}) {
   const activeConflicts = unresolved.filter((item) => item?.reason === 'conflict');
   const ordinaryCandidates = unresolved.filter((item) => item?.reason !== 'conflict');
   if (activeConflicts.length) {
-    failures.push(`${activeConflicts.length} conflito ativo em chave operacional (${activeConflicts.map((item) => item.memory_key || item.candidate_id).join(', ')}). Inspecione com: ${MEMORY_STATUS_COMMAND}.`);
+    failures.push(`${activeConflicts.length} conflito ativo em chave operacional (${activeConflicts.map((item) => item.memory_key || item.candidate_id).join(', ')}). Inspecione com: ${memoryStatusCommand(vaultBase)}.`);
   }
   if (outbox.count) warnings.push(`${outbox.count} evento(s) pendente(s) na outbox; execute o projector quando seguro.`);
   if (ordinaryCandidates.length) warnings.push(`${ordinaryCandidates.length} candidate(s) aguardando curadoria humana.`);
@@ -585,7 +591,7 @@ export function runVaultHealth({ vaultBase, session = '' }) {
     failures.push(...memory.failures.map((item) => `Memória: ${item}`));
     warnings.push(...memory.warnings.map((item) => `Memória: ${item}`));
   } else {
-    warnings.push(`Bundle de memória v2 ausente (vault legado); inspecione com: ${MEMORY_STATUS_COMMAND}.`);
+    warnings.push(`Bundle de memória v2 ausente (vault legado); inspecione com: ${memoryStatusCommand(vaultBase)}.`);
   }
 
   return {

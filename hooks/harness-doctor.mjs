@@ -8,7 +8,12 @@ import { buildEffectiveRequirementPackage, checkSpecsState, evaluateVerdict, tas
 import { getLocale } from './locale.mjs';
 import { priceForModel } from './token-usage.mjs';
 import { countMissing, indexDerivedBySession, listSessionNotes, missingDerivedLinks } from './derived-sections.mjs';
-import { readControl, readSessionRegistry } from './obsidian-common.mjs';
+import {
+  quoteCommandArgument,
+  readControl,
+  readSessionRegistry,
+  WENDKEEP_COMMAND,
+} from './obsidian-common.mjs';
 import { parseObservabilityCheckpoint } from './session-observability-state.mjs';
 import { readObservabilityStore } from './session-observability-store.mjs';
 import { assessObservabilityFreshness } from './session-observability-lifecycle.mjs';
@@ -20,6 +25,7 @@ export function checkSessionObservability(vaultBase, deps = {}) {
   const statSource = deps.statSource || statSync;
   const registry = readRegistry(vaultBase);
   const result = { ok: true, scanned: 0, healthy: 0, issues: [] };
+  const commandPrefix = `${WENDKEEP_COMMAND} cost rebuild`;
   const entries = Object.entries(registry?.sessions || {})
     .map(([sessionId, entry]) => ({ sessionId, ...entry }))
     .filter((entry) => entry.session_file)
@@ -32,7 +38,7 @@ export function checkSessionObservability(vaultBase, deps = {}) {
     try { content = readNote(notePath, 'utf8'); } catch { continue; }
     if (!entry.provider && /^provider:\s*["']?claude/m.test(content)) continue;
     result.scanned += 1;
-    const command = `wendkeep cost rebuild --session ${entry.sessionId} --json`;
+    const command = `${commandPrefix} --session ${quoteCommandArgument(entry.sessionId)} --json --vault ${quoteCommandArgument(vaultBase)}`;
     const checkpoint = parseObservabilityCheckpoint(content);
     if (!checkpoint) {
       result.issues.push({

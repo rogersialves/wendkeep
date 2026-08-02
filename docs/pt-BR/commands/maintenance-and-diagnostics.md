@@ -23,11 +23,11 @@ Execute na raiz do projeto ou informe `--project`/`--vault` explicitamente.
 ## Sintaxe
 
 ```bash
-npx wendkeep doctor [--vault <cofre>]
-npx wendkeep sync-defs [--check|--reseed] --vault <cofre> --project <raiz>
-npx wendkeep theme sync --vault <cofre>
-npx wendkeep --version
-npx wendkeep --help
+npx --no-install wendkeep doctor [--vault <cofre>]
+npx --no-install wendkeep sync-defs [--check|--reseed] --vault <cofre> --project <raiz>
+npx --no-install wendkeep theme sync --vault <cofre>
+npx --no-install wendkeep --version
+npx --no-install wendkeep --help
 ```
 
 ## Opções e códigos de saída
@@ -53,12 +53,12 @@ npx wendkeep --help
 Checklist pós-atualização:
 
 ```bash
-npx wendkeep --version
-npx wendkeep sync-defs --check --vault .MeuApp-vault --project .
-npx wendkeep doctor --vault .MeuApp-vault
-npx wendkeep memory status --gate --vault .MeuApp-vault
-npx wendkeep cost rebuild --session <id> --json
-npx wendkeep cost rebuild --session <id> --apply
+npx --no-install wendkeep --version
+npx --no-install wendkeep sync-defs --check --vault .MeuApp-vault --project .
+npx --no-install wendkeep doctor --vault .MeuApp-vault
+npx --no-install wendkeep memory status --gate --vault .MeuApp-vault
+npx --no-install wendkeep cost rebuild --session <id> --json --vault .MeuApp-vault
+npx --no-install wendkeep cost rebuild --session <id> --json --vault .MeuApp-vault --apply
 ```
 
 ## Resultado esperado
@@ -80,7 +80,8 @@ ou sem manifest comprovado e oferece um caminho dry-run antes de qualquer escrit
   outbox e SHARED para correlacionar `last_memory_attempt` antes de reparar.
 - Bundle corrompido: preserve a evidência e use `memory status --gate` antes de `memory repair`.
 - Observabilidade `legacy`/`degraded`/`stale`/`manifest-unproven`: rode
-  `wendkeep cost rebuild --session <id> --json`, revise diagnostics e só então autorize `--apply`.
+  `npx --no-install wendkeep cost rebuild --session <id> --json --vault <cofre>`, revise diagnostics
+  e só então autorize a segunda variante com `--apply`.
 
 ## Próximos passos
 

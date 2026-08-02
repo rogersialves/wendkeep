@@ -23,11 +23,11 @@ Run from the project root or provide `--project` and `--vault` explicitly.
 ## Syntax
 
 ```bash
-npx wendkeep doctor [--vault <vault>]
-npx wendkeep sync-defs [--check|--reseed] --vault <vault> --project <root>
-npx wendkeep theme sync --vault <vault>
-npx wendkeep --version
-npx wendkeep --help
+npx --no-install wendkeep doctor [--vault <vault>]
+npx --no-install wendkeep sync-defs [--check|--reseed] --vault <vault> --project <root>
+npx --no-install wendkeep theme sync --vault <vault>
+npx --no-install wendkeep --version
+npx --no-install wendkeep --help
 ```
 
 ## Options and exit codes
@@ -53,12 +53,12 @@ npx wendkeep --help
 Post-update checklist:
 
 ```bash
-npx wendkeep --version
-npx wendkeep sync-defs --check --vault .MyApp-vault --project .
-npx wendkeep doctor --vault .MyApp-vault
-npx wendkeep memory status --gate --vault .MyApp-vault
-npx wendkeep cost rebuild --session <id> --json
-npx wendkeep cost rebuild --session <id> --apply
+npx --no-install wendkeep --version
+npx --no-install wendkeep sync-defs --check --vault .MyApp-vault --project .
+npx --no-install wendkeep doctor --vault .MyApp-vault
+npx --no-install wendkeep memory status --gate --vault .MyApp-vault
+npx --no-install wendkeep cost rebuild --session <id> --json --vault .MyApp-vault
+npx --no-install wendkeep cost rebuild --session <id> --json --vault .MyApp-vault --apply
 ```
 
 ## Expected result
@@ -80,8 +80,8 @@ dry-run path before any write.
   outbox, and SHARED so `last_memory_attempt` can be correlated before repair.
 - Corrupt bundle: preserve evidence and run `memory status --gate` before `memory repair`.
 - `legacy`/`degraded`/`stale`/`manifest-unproven` observability: run
-  `wendkeep cost rebuild --session <id> --json`, review diagnostics, and only then authorize
-  `--apply`.
+  `npx --no-install wendkeep cost rebuild --session <id> --json --vault <vault>`, review diagnostics,
+  and only then authorize the second variant with `--apply`.
 
 ## Next steps
 

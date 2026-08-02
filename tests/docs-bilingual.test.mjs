@@ -420,7 +420,7 @@ test('[req:DIAG-9] DOC-12: doctor distingue frescor e recomenda dry-run antes de
       assert.match(text, new RegExp(`\\b${state}\\b`), `${locale}: doctor sem estado ${state}`);
     }
     assert.match(text, /(?:`none`|`complete`)[\s\S]*(?:fresc|fresh)/i, `${locale}: estado saudável sem frescor`);
-    assert.match(text, /wendkeep cost rebuild --session <[^>]+> --json[\s\S]*wendkeep cost rebuild --session <[^>]+> --apply/i,
+    assert.match(text, /npx --no-install wendkeep cost rebuild --session <id> --json --vault \S+[\s\S]*npx --no-install wendkeep cost rebuild --session <id> --json --vault \S+ --apply/i,
       `${locale}: doctor não recomenda dry-run antes de apply`);
     assert.match(text, /doctor[\s\S]*(?:read-only|somente leitura)/i, `${locale}: doctor não é read-only`);
   }

@@ -346,20 +346,20 @@ Codex uses `session_id`/`turn_id` plus transcript order, with no artificial caus
 `DIGEST.md` is no longer the operational handoff: it remains the `/brain-recall` bridge and legacy-vault fallback. A vault without SHARED receives CORE+DIGEST with a deprecation warning; migrate during the compatibility window:
 
 ```bash
-wendkeep memory status --gate --vault .MyApp-vault
-wendkeep memory migrate --vault .MyApp-vault          # preview, zero writes
-wendkeep memory migrate --apply --vault .MyApp-vault  # backup + candidates + v2 bundle
+npx --no-install wendkeep memory status --gate --vault .MyApp-vault
+npx --no-install wendkeep memory migrate --vault .MyApp-vault          # preview, zero writes
+npx --no-install wendkeep memory migrate --apply --vault .MyApp-vault  # backup + candidates + v2 bundle
 ```
 
 ### Health and recovery
 
-Use `wendkeep memory status --gate --vault <vault>` in CI and before `verify`/`archive`. Revision 0
+Use `npx --no-install wendkeep memory status --gate --vault <vault>` in CI and before `verify`/`archive`. Revision 0
 immediately after valid migration is healthy. The gate correlates `last_memory_attempt`, outbox,
 ledger, SHARED, and checkpoint: `degraded` with a durable outbox is a warning; an ambiguous attempt,
 lost publication, or mismatched checkpoint blocks. See [migration](docs/en/commands/memory-migration.md)
 and [diagnostics](docs/en/commands/maintenance-and-diagnostics.md).
 
-If status blocks, preserve the evidence and run `wendkeep memory repair --vault <vault>` to back up
+If status blocks, preserve the evidence and run `npx --no-install wendkeep memory repair --vault <vault>` to back up
 the corrupt ledger, retain valid lines, and re-project. Repair remains structural: its only narrow
 acknowledgement exception covers attempts entirely represented by the outbox consumed by that same
 run; it does not scan or reclassify historical attempts. Valid pre-0.59 causal checkpoints and

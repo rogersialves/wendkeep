@@ -144,7 +144,11 @@ test('[req:DIAG-9] every repairable state is distinguished without changing any 
       const result = check(fx);
       assert.equal(result.ok, false, expected);
       assert.equal(result.issues[0].status, expected);
-      assert.match(result.issues[0].command, /cost rebuild --session synthetic-session --json$/);
+      assert.match(
+        result.issues[0].command,
+        /^npx --no-install wendkeep cost rebuild --session "synthetic-session" --json --vault ".+"$/,
+      );
+      assert.ok(result.issues[0].command.endsWith(`--vault "${fx.vault}"`));
       assertSnapshotUnchanged(before);
     }
     assert.deepEqual(fixtures[1][0] && check(fixtures[1][0]).issues[0].diagnostics, [
@@ -185,6 +189,8 @@ test('[req:DIAG-9] renderer recommends dry-run before apply', () => {
     const lines = renderSessionObservabilityLines(check(fx));
     const text = lines.join('\n');
     assert.ok(text.indexOf('--json') < text.indexOf('--apply'));
+    assert.match(text, /npx --no-install wendkeep cost rebuild --session "synthetic-session" --json --vault ".+"/);
+    assert.match(text, /--vault ".+" --apply/);
     assert.match(text, /^\[observabilidade\]/);
   } finally {
     rmSync(fx.vault, { recursive: true, force: true });

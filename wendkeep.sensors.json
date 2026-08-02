@@ -82,6 +82,14 @@
       "command": "node bin/wendkeep.mjs memory status --gate"
     },
     {
+      "id": "doctor-copyable-repair-commands",
+      "name": "Doctor copyable repair commands",
+      "description": "Validates local executable prefix, resolved Vault quoting and dry-run/apply ordering in doctor output",
+      "severity": "critical",
+      "type": "command",
+      "command": "node --test --test-concurrency=1 tests/doctor-session-observability.test.mjs tests/vault-health-memory.test.mjs"
+    },
+    {
       "id": "docs-bilingual",
       "name": "Bilingual command documentation",
       "description": "Checks mirrored PT-BR/EN guides, public command coverage, navigation, governance and tarball contents",

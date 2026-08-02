@@ -24,9 +24,9 @@ A consistent registry, complete price table, and transcript access for rebuilt s
 ## Syntax
 
 ```bash
-npx wendkeep stats [--vault <vault>] [--json]
-npx wendkeep cost [--since <date>] [--top [N]] [--trend day|week|month] [--write] [--json]
-npx wendkeep cost rebuild [--session <id|file>] [--limit N] [--max-graph-nodes N] [--max-fallback-days N] [--max-fallback-candidates N] [--apply] [--json]
+npx --no-install wendkeep stats [--vault <vault>] [--json]
+npx --no-install wendkeep cost [--since <date>] [--top [N]] [--trend day|week|month] [--write] [--json]
+npx --no-install wendkeep cost rebuild [--session <id|file>] [--vault <vault>] [--limit N] [--max-graph-nodes N] [--max-fallback-days N] [--max-fallback-candidates N] [--apply] [--json]
 ```
 
 ## Options and exit codes
@@ -50,11 +50,11 @@ npx wendkeep cost rebuild [--session <id|file>] [--limit N] [--max-graph-nodes N
 ## Examples
 
 ```bash
-npx wendkeep stats --vault .MyApp-vault
-npx wendkeep cost --since 2026-07-01 --top 10 --trend week
-npx wendkeep cost rebuild --session 019abc --json
-npx wendkeep cost rebuild --session 019abc --max-graph-nodes 8192 --json
-npx wendkeep cost rebuild --session 019abc --apply
+npx --no-install wendkeep stats --vault .MyApp-vault
+npx --no-install wendkeep cost --since 2026-07-01 --top 10 --trend week
+npx --no-install wendkeep cost rebuild --session 019abc --json --vault .MyApp-vault
+npx --no-install wendkeep cost rebuild --session 019abc --max-graph-nodes 8192 --json --vault .MyApp-vault
+npx --no-install wendkeep cost rebuild --session 019abc --json --vault .MyApp-vault --apply
 ```
 
 ## Expected result

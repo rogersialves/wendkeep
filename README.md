@@ -343,20 +343,20 @@ Lifecycle resumido: cada `SessionStart` abre um epoch que atravessa vários `Sto
 `DIGEST.md` não é mais o handoff operacional: permanece como ponte para `/brain-recall` e fallback de vault legado. Um vault sem SHARED recebe CORE+DIGEST com aviso de depreciação; migre durante a janela de compatibilidade:
 
 ```bash
-wendkeep memory status --gate --vault .MeuApp-vault
-wendkeep memory migrate --vault .MeuApp-vault          # prévia, zero writes
-wendkeep memory migrate --apply --vault .MeuApp-vault  # backup + candidates + bundle v2
+npx --no-install wendkeep memory status --gate --vault .MeuApp-vault
+npx --no-install wendkeep memory migrate --vault .MeuApp-vault          # prévia, zero writes
+npx --no-install wendkeep memory migrate --apply --vault .MeuApp-vault  # backup + candidates + bundle v2
 ```
 
 ### Saúde e recuperação
 
-Use `wendkeep memory status --gate --vault <cofre>` no CI e antes de `verify`/`archive`. Revision 0
+Use `npx --no-install wendkeep memory status --gate --vault <cofre>` no CI e antes de `verify`/`archive`. Revision 0
 logo após migração válida é saudável. O gate correlaciona `last_memory_attempt`, outbox, ledger,
 SHARED e checkpoint: `degraded` com outbox durável é warning; attempt ambíguo, publicação perdida
 ou checkpoint divergente bloqueiam. Veja [migração](docs/pt-BR/commands/memory-migration.md) e
 [diagnóstico](docs/pt-BR/commands/maintenance-and-diagnostics.md).
 
-Se o status bloquear, preserve a evidência e rode `wendkeep memory repair --vault <cofre>` para
+Se o status bloquear, preserve a evidência e rode `npx --no-install wendkeep memory repair --vault <cofre>` para
 salvar backup do ledger corrompido, reter linhas válidas e reprojetar. Repair continua estrutural:
 só reconhece a exceção estreita dos attempts integralmente cobertos pela outbox que a própria
 execução consumiu; não varre nem reclassifica attempts históricos. Checkpoints causais válidos

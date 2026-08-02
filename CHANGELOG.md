@@ -4,6 +4,17 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.67.2] — 2026-08-02
+
+### Fixed
+
+- **O doctor agora exibe comandos de reparo executáveis no projeto.** Os diagnósticos de memória
+  e observabilidade usam `npx --no-install wendkeep`, informam o Vault absoluto resolvido em
+  `--vault` e
+  mantêm a sequência segura de inspeção (dry-run) antes da variante explícita com `--apply`.
+- **O doctor continua somente leitura.** A correção altera apenas as recomendações exibidas; o
+  reparo continua exigindo execução humana do comando `--apply`.
+
 ## [0.67.1] — 2026-08-02
 
 ### Fixed

@@ -591,7 +591,9 @@ test('[req:DIAG-8] ledger/projection lag and hash divergence are blocking', () =
     const lag = checkMemoryBundle(vault);
     assert.equal(lag.ok, false);
     assert.match(lag.failures.join('\n'), /proje[cç][aã]o|cursor|revision|hash/i);
-    assert.match(lag.failures.join('\n'), /wendkeep memory status --gate/);
+    assert.ok(lag.failures.some((failure) => (
+      failure.includes(`npx --no-install wendkeep memory status --gate --vault "${vault}"`)
+    )));
 
     const sharedPath = join(vault, '.brain', 'SHARED_MEMORY.md');
     const reduced = reduceMemoryEvents([event(), second]);
@@ -620,7 +622,9 @@ test('[req:DIAG-8] an unresolved conflict candidate for an active key is blockin
     assert.equal(result.ok, false);
     assert.equal(result.metrics.activeConflicts, 1);
     assert.match(result.failures.join('\n'), /conflito ativo/i);
-    assert.match(result.failures.join('\n'), /wendkeep memory status --gate/);
+    assert.ok(result.failures.some((failure) => (
+      failure.includes(`npx --no-install wendkeep memory status --gate --vault "${vault}"`)
+    )));
     assert.equal(existsSync(join(vault, '.brain', 'MEMORY.lock')), false, 'doctor does not acquire a mutation lock');
   } finally { rmSync(vault, { recursive: true, force: true }); }
 });
