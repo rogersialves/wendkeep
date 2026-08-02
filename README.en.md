@@ -369,8 +369,10 @@ backup/audit; divergent mirrors fail closed. A demonstrably superseded
 ambiguity uses `memory reconcile <session> --by-session <successor>
 --reason <reason>` as a dry run and requires `--apply`; the decision is backed up and audited
 without rewriting ledger, CORE, or notes. Run `status --gate` again afterwards. Conflicts require
-explicit, durable curation: `memory promote <id> --event <event-id>` selects one event from the
-candidate, while `memory reject <id>` keeps the current value. The decision is idempotent, and a
+explicit, durable curation: `memory candidates --active --vault <vault>` lists only safe IDs and
+metadata in read-only mode — it does not expose memory values or content. After human review,
+`memory promote <id> --event <event-id>` selects one event from the candidate, while
+`memory reject <id>` keeps the current value. `memory repair` does not choose a winner. The decision is idempotent, and a
 new promotion accepts a later Stop from the same session/activation without recreating a conflict.
 A promotion written by 0.66.1 remains historical: if the next Stop forms a new candidate, update
 to 0.66.3 and run `memory repair`. During replay, a transient candidate is re-evaluated against the

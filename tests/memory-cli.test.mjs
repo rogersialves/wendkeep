@@ -886,6 +886,226 @@ test('[req:MEM-CUR-2] promoção de conflito exige event_id pertencente ao candi
   } finally { rmSync(vault, { recursive: true, force: true }); }
 });
 
+test('[req:MEM-CUR-4] CLI candidates --active lista somente metadados sanitizados sem mutação', () => {
+  const vault = fixture();
+  const brain = join(vault, '.brain');
+  const candidatesPath = join(brain, 'MEMORY_CANDIDATES.jsonl');
+  try {
+    const candidates = [
+      {
+        candidate_id: 'memcand-handoff',
+        reason: 'conflict',
+        memory_key: 'handoff.latest',
+        event_ids: ['mem-z', 'mem-a'],
+        values: ['private-winner', 'private-loser'],
+        events: [{ event_id: 'mem-z', value: 'private-event' }],
+        provenance: { source: 'private-source' },
+      },
+      {
+        candidate_id: 'memcand-git',
+        reason: 'conflict',
+        status: 'active',
+        memory_key: 'git.local-head',
+        event_ids: ['mem-git'],
+        proposed_value: 'private-proposal',
+      },
+      {
+        candidate_id: 'memcand-resolved',
+        reason: 'conflict',
+        status: 'resolved',
+        memory_key: 'next.ui',
+        event_ids: ['mem-resolved'],
+        core_value: 'private-core',
+      },
+      {
+        candidate_id: 'memcand-rejected',
+        reason: 'conflict',
+        status: 'rejected',
+        memory_key: 'queue.rejected',
+        event_ids: ['mem-rejected'],
+        value: 'private-rejected',
+      },
+      {
+        candidate_id: 'memcand-superseded',
+        reason: 'conflict',
+        status: 'superseded',
+        memory_key: 'queue.superseded',
+        event_ids: ['mem-superseded'],
+        value: 'private-superseded',
+      },
+    ];
+    writeFileSync(candidatesPath, `${candidates.map((item) => JSON.stringify(item)).join('\n')}\n`);
+    const snapshot = readdirSync(brain).sort().map((name) => [name, readFileSync(join(brain, name))]);
+
+    const result = spawnSync(process.execPath, [
+      BIN, 'memory', 'candidates', '--active', '--vault', vault,
+    ], { encoding: 'utf8' });
+
+    assert.equal(result.status, 0, result.stderr);
+    const payload = JSON.parse(result.stdout);
+    assert.equal(payload.status, 'ok');
+    assert.deepEqual(payload.candidates, [
+      {
+        candidate_id: 'memcand-git',
+        reason: 'conflict',
+        status: 'active',
+        memory_key: 'git.local-head',
+        event_ids: ['mem-git'],
+      },
+      {
+        candidate_id: 'memcand-handoff',
+        reason: 'conflict',
+        status: 'active',
+        memory_key: 'handoff.latest',
+        event_ids: ['mem-a', 'mem-z'],
+      },
+    ]);
+    for (const candidate of payload.candidates) {
+      assert.deepEqual(
+        Object.keys(candidate).sort(),
+        ['candidate_id', 'event_ids', 'memory_key', 'reason', 'status'],
+      );
+    }
+    assert.doesNotMatch(
+      result.stdout,
+      /private-winner|private-loser|private-event|private-source|private-proposal|private-core|private-rejected|private-superseded/,
+    );
+
+    const allResult = spawnSync(process.execPath, [
+      BIN, 'memory', 'candidates', '--vault', vault,
+    ], { encoding: 'utf8' });
+    assert.equal(allResult.status, 0, allResult.stderr);
+    assert.deepEqual(
+      JSON.parse(allResult.stdout).candidates.map((candidate) => [candidate.candidate_id, candidate.status]),
+      [
+        ['memcand-git', 'active'],
+        ['memcand-handoff', 'active'],
+        ['memcand-resolved', 'resolved'],
+        ['memcand-rejected', 'rejected'],
+        ['memcand-superseded', 'superseded'],
+      ],
+    );
+    assert.doesNotMatch(
+      allResult.stdout,
+      /private-winner|private-loser|private-event|private-source|private-proposal|private-core|private-rejected|private-superseded/,
+    );
+    assert.deepEqual(
+      readdirSync(brain).sort().map((name) => [name, readFileSync(join(brain, name))]),
+      snapshot,
+    );
+    assert.equal(existsSync(join(brain, 'MEMORY.lock')), false);
+  } finally { rmSync(vault, { recursive: true, force: true }); }
+});
+
+test('[req:MEM-CUR-4] CLI candidates rejeita opções e posicionais não declarados sem tocar o bundle', () => {
+  const vault = fixture();
+  const brain = join(vault, '.brain');
+  try {
+    const snapshot = readdirSync(brain).sort().map((name) => [name, readFileSync(join(brain, name))]);
+    const invalidArgs = [
+      ['--active=false'],
+      ['--active', 'extra'],
+      ['--active', '--active'],
+      ['--unknown'],
+    ];
+
+    for (const args of invalidArgs) {
+      const result = spawnSync(process.execPath, [
+        BIN, 'memory', 'candidates', ...args, '--vault', vault,
+      ], { encoding: 'utf8' });
+      assert.equal(result.status, 2, `${args.join(' ')}\n${result.stderr}`);
+      assert.equal(result.stdout, '');
+      assert.match(result.stderr, /opção|argumento|duplicad|valor/i);
+    }
+
+    assert.deepEqual(
+      readdirSync(brain).sort().map((name) => [name, readFileSync(join(brain, name))]),
+      snapshot,
+    );
+    assert.equal(existsSync(join(brain, 'MEMORY.lock')), false);
+  } finally { rmSync(vault, { recursive: true, force: true }); }
+});
+
+test('[req:MEM-CUR-4] CLI candidates usa ordem lexical explícita independente de locale', () => {
+  const vault = fixture();
+  const candidatesPath = join(vault, '.brain', 'MEMORY_CANDIDATES.jsonl');
+  try {
+    const candidates = [
+      { candidate_id: 'memcand-accent', reason: 'conflict', memory_key: 'á.key', event_ids: ['mem-3'] },
+      { candidate_id: 'memcand-lower', reason: 'conflict', memory_key: 'a.key', event_ids: ['mem-2'] },
+      { candidate_id: 'memcand-upper', reason: 'conflict', memory_key: 'Z.key', event_ids: ['mem-1'] },
+    ];
+    writeFileSync(candidatesPath, `${candidates.map((item) => JSON.stringify(item)).join('\n')}\n`);
+
+    const result = spawnSync(process.execPath, [
+      BIN, 'memory', 'candidates', '--vault', vault,
+    ], { encoding: 'utf8' });
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.deepEqual(
+      JSON.parse(result.stdout).candidates.map((item) => item.candidate_id),
+      ['memcand-upper', 'memcand-lower', 'memcand-accent'],
+    );
+  } finally { rmSync(vault, { recursive: true, force: true }); }
+});
+
+test('[req:MEM-CUR-4] CLI candidates falha fechado para metadata inválida sem ecoar conteúdo', () => {
+  const vault = fixture();
+  const brain = join(vault, '.brain');
+  const candidatesPath = join(brain, 'MEMORY_CANDIDATES.jsonl');
+  try {
+    writeFileSync(candidatesPath, `${JSON.stringify({
+      reason: 'conflict',
+      memory_key: 'handoff.latest',
+      event_ids: ['mem-private'],
+      value: 'private-invalid-value',
+    })}\n`);
+    const snapshot = readdirSync(brain).sort().map((name) => [name, readFileSync(join(brain, name))]);
+
+    const result = spawnSync(process.execPath, [
+      BIN, 'memory', 'candidates', '--active', '--vault', vault,
+    ], { encoding: 'utf8' });
+
+    assert.equal(result.status, 1);
+    assert.equal(result.stdout, '');
+    assert.match(result.stderr, /candidate|inválid|invalid/i);
+    assert.doesNotMatch(result.stderr, /private-invalid-value|mem-private/);
+    assert.deepEqual(
+      readdirSync(brain).sort().map((name) => [name, readFileSync(join(brain, name))]),
+      snapshot,
+    );
+    assert.equal(existsSync(join(brain, 'MEMORY.lock')), false);
+  } finally { rmSync(vault, { recursive: true, force: true }); }
+});
+
+test('[req:MEM-CUR-4] CLI candidates rejeita sidecar por hardlink antes da leitura', (t) => {
+  const vault = fixture();
+  const outside = mkdtempSync(join(tmpdir(), 'wk-memory-candidates-hardlink-outside-'));
+  const brain = join(vault, '.brain');
+  const candidatesPath = join(brain, 'MEMORY_CANDIDATES.jsonl');
+  const outsidePath = join(outside, 'candidates.jsonl');
+  try {
+    const outsideBytes = `${JSON.stringify({
+      candidate_id: 'memcand-outside', reason: 'conflict', memory_key: 'outside.key', event_ids: ['mem-outside'],
+    })}\n`;
+    writeFileSync(outsidePath, outsideBytes);
+    if (!createAlias(t, outsidePath, candidatesPath)) return;
+
+    const result = spawnSync(process.execPath, [
+      BIN, 'memory', 'candidates', '--active', '--vault', vault,
+    ], { encoding: 'utf8' });
+
+    assert.equal(result.status, 1);
+    assert.equal(result.stdout, '');
+    assert.match(result.stderr, /hardlink|nlink|Vault/i);
+    assert.equal(readFileSync(outsidePath, 'utf8'), outsideBytes);
+    assert.equal(existsSync(join(brain, 'MEMORY.lock')), false);
+  } finally {
+    rmSync(vault, { recursive: true, force: true });
+    rmSync(outside, { recursive: true, force: true });
+  }
+});
+
 test('[req:MEM-CUR-2] CLI promote encaminha --event e falha fechado sem a escolha', () => {
   const vault = fixture();
   try {

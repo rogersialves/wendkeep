@@ -24,6 +24,7 @@ Informe o vault explicitamente em automações. Preserve backups e evidências a
 
 ```bash
 npx wendkeep memory status [--gate] --vault <cofre>
+npx wendkeep memory candidates [--active] --vault <cofre>
 npx wendkeep memory repair --vault <cofre>
 npx wendkeep memory recover-attempt <sessão> [--apply] --vault <cofre>
 npx wendkeep memory reconcile <sessão-ambígua> --by-session <sessão-sucessora> --reason <motivo> [--apply] --vault <cofre>
@@ -36,6 +37,13 @@ npx wendkeep validate-memory --vault <cofre-v2>
 ## Opções e códigos de saída
 
 - `memory status` é read-only; `--gate` retorna exit `1` apenas para estado bloqueante.
+- `memory candidates` é read-only e imprime JSON determinístico com somente `candidate_id`,
+  `reason`, `status`, `memory_key` e `event_ids`; não expõe valores nem conteúdo da memória e não
+  cria lock nem altera o bundle. `--active` omite candidates terminais (`resolved`, `rejected` e
+  `superseded`). Status ausente é normalizado para `active`.
+- Em `memory candidates`, exit `0` indica inventário válido (inclusive vazio ou com conflitos),
+  exit `1` indica sidecar inválido/topologia insegura e exit `2` indica `--vault` ausente, opção
+  desconhecida/duplicada, argumento extra ou valor indevido em `--active`.
 - O `Stop` grava os eventos na outbox antes de reconhecer `last_memory_attempt: enqueued`; depois o
   projector roda fora do lock do registry. Retry do mesmo attempt reutiliza os event IDs congelados
   e pode projetá-los no máximo uma vez.
@@ -103,6 +111,7 @@ npx wendkeep validate-memory --vault <cofre-v2>
 
 ```bash
 npx wendkeep memory status --gate --vault .MeuApp-vault
+npx wendkeep memory candidates --active --vault .MeuApp-vault
 npx wendkeep memory recover-attempt sessao-123 --vault .MeuApp-vault
 npx wendkeep memory recover-attempt sessao-123 --apply --vault .MeuApp-vault
 npx wendkeep memory reconcile antiga --by-session atual --reason "entrega continuada" --vault .MeuApp-vault
@@ -118,6 +127,9 @@ O status imprime schema, revision, cursor, hash, eventos, outbox, candidates, co
 causal do último attempt. CORE permanece canônico e curado à mão; SHARED permanece projeção
 operacional verificável. Depois de uma projeção bem-sucedida, o checkpoint do attempt pode ser um
 prefixo válido de uma projeção global que já avançou com eventos concorrentes.
+
+`memory candidates` retorna `status: "ok"` e a lista sanitizada de candidates em ordem estável;
+com `--active`, a lista contém somente decisões ainda abertas para curadoria humana.
 
 ## Erros comuns e diagnóstico
 

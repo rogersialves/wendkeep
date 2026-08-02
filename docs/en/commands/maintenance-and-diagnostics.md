@@ -57,6 +57,7 @@ npx --no-install wendkeep --version
 npx --no-install wendkeep sync-defs --check --vault .MyApp-vault --project .
 npx --no-install wendkeep doctor --vault .MyApp-vault
 npx --no-install wendkeep memory status --gate --vault .MyApp-vault
+npx --no-install wendkeep memory candidates --active --vault .MyApp-vault
 npx --no-install wendkeep cost rebuild --session <id> --json --vault .MyApp-vault
 npx --no-install wendkeep cost rebuild --session <id> --json --vault .MyApp-vault --apply
 ```
@@ -74,11 +75,17 @@ dry-run path before any write.
 
 - `no vault`: run from the bound root or pass `--vault`.
 - `defs stale`: confirm the version and run `sync-defs --reseed`.
-- Legacy vault: this is a non-blocking warning; plan `memory migrate --apply` separately.
+- Legacy vault: this is a non-blocking warning; doctor shows
+  `npx --no-install wendkeep memory migrate --apply --vault <vault>` with the resolved Vault, but
+  migration remains opt-in and must be planned separately.
 - `degraded` plus an intact outbox: warning; preserve the outbox and allow idempotent replay.
 - `ambiguous`, lost publication, or a mismatched checkpoint: blocking; preserve registry, ledger,
   outbox, and SHARED so `last_memory_attempt` can be correlated before repair.
 - Corrupt bundle: preserve evidence and run `memory status --gate` before `memory repair`.
+- An active semantic conflict requires a human decision: `memory repair` does not choose a winner.
+  List safe IDs with `memory candidates --active --vault <vault>`, review the evidence, and then use
+  `memory promote <candidate-id> --event <event-id> --vault <vault>` to select an event or
+  `memory reject <candidate-id> --vault <vault>` to keep the current operational value.
 - `legacy`/`degraded`/`stale`/`manifest-unproven` observability: run
   `npx --no-install wendkeep cost rebuild --session <id> --json --vault <vault>`, review diagnostics,
   and only then authorize the second variant with `--apply`.

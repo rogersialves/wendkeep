@@ -57,6 +57,7 @@ npx --no-install wendkeep --version
 npx --no-install wendkeep sync-defs --check --vault .MeuApp-vault --project .
 npx --no-install wendkeep doctor --vault .MeuApp-vault
 npx --no-install wendkeep memory status --gate --vault .MeuApp-vault
+npx --no-install wendkeep memory candidates --active --vault .MeuApp-vault
 npx --no-install wendkeep cost rebuild --session <id> --json --vault .MeuApp-vault
 npx --no-install wendkeep cost rebuild --session <id> --json --vault .MeuApp-vault --apply
 ```
@@ -74,11 +75,17 @@ ou sem manifest comprovado e oferece um caminho dry-run antes de qualquer escrit
 
 - `no vault`: execute da raiz vinculada ou passe `--vault`.
 - `defs stale`: confirme a versão e rode `sync-defs --reseed`.
-- Vault legado: é warning não bloqueante; planeje `memory migrate --apply` separadamente.
+- Vault legado: é warning não bloqueante; o doctor mostra
+  `npx --no-install wendkeep memory migrate --apply --vault <cofre>` com o Vault resolvido, mas a
+  migração continua sendo opt-in e deve ser planejada separadamente.
 - `degraded` + outbox íntegra: warning; preserve a outbox e permita replay idempotente.
 - `ambiguous`, publicação perdida ou checkpoint divergente: bloqueante; preserve registry, ledger,
   outbox e SHARED para correlacionar `last_memory_attempt` antes de reparar.
 - Bundle corrompido: preserve a evidência e use `memory status --gate` antes de `memory repair`.
+- Conflito semântico ativo exige decisão humana: `memory repair` não escolhe vencedor. Liste os IDs
+  seguros com `memory candidates --active --vault <cofre>`, revise a evidência e então use
+  `memory promote <candidate-id> --event <event-id> --vault <cofre>` para selecionar um evento ou
+  `memory reject <candidate-id> --vault <cofre>` para manter o valor operacional atual.
 - Observabilidade `legacy`/`degraded`/`stale`/`manifest-unproven`: rode
   `npx --no-install wendkeep cost rebuild --session <id> --json --vault <cofre>`, revise diagnostics
   e só então autorize a segunda variante com `--apply`.

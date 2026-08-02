@@ -467,13 +467,13 @@ test('[req:MEM-STOP-5] [req:MEM-STOP-6] [sensor:memory-health] rejected stale at
   } finally { rmSync(vault, { recursive: true, force: true }); }
 });
 
-test('[req:MEM-HYB-9] legacy SHARED plus empty v2 artifacts remains a non-blocking compatibility state', () => {
+test('[req:DIAG-8] [req:MEM-HYB-9] legacy SHARED points to resolved migration and remains read-only', () => {
   const vault = mkdtempSync(join(tmpdir(), 'wk-health-legacy-'));
   const brain = join(vault, '.brain');
   mkdirSync(brain, { recursive: true });
   writeFileSync(join(brain, 'PROJECT.json'), `${JSON.stringify({ schemaVersion: 1, projectId: PROJECT_ID })}\n`);
   writeFileSync(join(brain, 'CORE.md'), renderCoreSkeleton());
-  writeFileSync(join(brain, 'SHARED_MEMORY.md'), '# SHARED legado\n\n## Estado\n- preservar sem migrar\n');
+  writeFileSync(join(brain, 'SHARED_MEMORY.md'), '# SHARED legado\n\n## Estado\n- private-legacy-content\n');
   writeFileSync(join(brain, 'MEMORY_EVENTS.jsonl'), '');
   writeFileSync(join(brain, 'MEMORY_CANDIDATES.jsonl'), '');
   try {
@@ -482,7 +482,10 @@ test('[req:MEM-HYB-9] legacy SHARED plus empty v2 artifacts remains a non-blocki
     assert.equal(result.ok, true, result.failures.join('; '));
     assert.equal(result.status, 'legacy');
     assert.deepEqual(result.failures, []);
-    assert.match(result.warnings.join('\n'), /legado|migra/i);
+    const warning = result.warnings.join('\n');
+    assert.match(warning, /legado|migra/i);
+    assert.ok(warning.includes(`npx --no-install wendkeep memory migrate --apply --vault "${vault}"`));
+    assert.doesNotMatch(warning, /<vault>|<cofre>|private-legacy-content/i);
     assert.deepEqual(byteSnapshot(vault), before, 'compatibility diagnosis is read-only');
   } finally { rmSync(vault, { recursive: true, force: true }); }
 });
@@ -559,41 +562,63 @@ test('[req:DIAG-8] pending outbox and an ordinary candidate are warnings, not fa
     writeFileSync(join(outbox, 'mem-pending.json'), `${JSON.stringify(event('mem-pending'))}\n`);
     writeFileSync(join(vault, '.brain', 'MEMORY_CANDIDATES.jsonl'), `${JSON.stringify({
       candidate_id: 'candidate-review', reason: 'reported', memory_key: 'next.ui', status: 'pending',
+      value: 'private-candidate-value',
+      events: [{ event_id: 'private-candidate-event', value: 'private-candidate-event-value' }],
     })}\n`);
 
+    const before = byteSnapshot(vault);
     const result = checkMemoryBundle(vault);
     assert.equal(result.ok, true, result.failures.join('; '));
     assert.equal(result.status, 'warning');
     assert.equal(result.metrics.pendingOutbox, 1);
     assert.equal(result.metrics.candidates, 1);
-    assert.match(result.warnings.join('\n'), /outbox/i);
-    assert.match(result.warnings.join('\n'), /candidate/i);
+    const warnings = result.warnings.join('\n');
+    assert.match(warnings, /outbox/i);
+    assert.match(warnings, /candidate/i);
+    assert.doesNotMatch(
+      warnings,
+      /<vault>|<cofre>|private-candidate-value|private-candidate-event|private-candidate-event-value/i,
+    );
+    assert.deepEqual(byteSnapshot(vault), before);
   } finally { rmSync(vault, { recursive: true, force: true }); }
 });
 
 test('[req:DIAG-8] corrupt/partial ledger is blocking and points to safe repair', () => {
   const vault = createBundle();
   try {
-    writeFileSync(join(vault, '.brain', 'MEMORY_EVENTS.jsonl'), `${JSON.stringify(event())}\n{"v":1`);
+    writeFileSync(
+      join(vault, '.brain', 'MEMORY_EVENTS.jsonl'),
+      `${JSON.stringify(event())}\n{"v":1,"value":"private-corrupt-payload"`,
+    );
+    const before = byteSnapshot(vault);
     const result = checkMemoryBundle(vault);
     assert.equal(result.ok, false);
     assert.equal(result.status, 'blocked');
-    assert.match(result.failures.join('\n'), /linha 2|partial|parcial/i);
-    assert.match(result.failures.join('\n'), /wendkeep memory repair/);
+    const failures = result.failures.join('\n');
+    assert.match(failures, /linha 2|partial|parcial/i);
+    assert.ok(failures.includes(`npx --no-install wendkeep memory repair --vault "${vault}"`));
+    assert.doesNotMatch(failures, /<vault>|<cofre>|private-corrupt-payload/i);
+    assert.deepEqual(byteSnapshot(vault), before);
   } finally { rmSync(vault, { recursive: true, force: true }); }
 });
 
 test('[req:DIAG-8] ledger/projection lag and hash divergence are blocking', () => {
   const vault = createBundle();
   try {
-    const second = event('mem-health-2', { memory_key: 'blocker.e2e', value: 'worker-down', turn_sequence: 2 });
+    const second = event('mem-health-2', {
+      memory_key: 'blocker.e2e', value: 'private-lag-payload', turn_sequence: 2,
+    });
     writeFileSync(join(vault, '.brain', 'MEMORY_EVENTS.jsonl'), `${JSON.stringify(event())}\n${JSON.stringify(second)}\n`);
+    const lagBefore = byteSnapshot(vault);
     const lag = checkMemoryBundle(vault);
     assert.equal(lag.ok, false);
-    assert.match(lag.failures.join('\n'), /proje[cç][aã]o|cursor|revision|hash/i);
+    const lagFailures = lag.failures.join('\n');
+    assert.match(lagFailures, /proje[cç][aã]o|cursor|revision|hash/i);
     assert.ok(lag.failures.some((failure) => (
       failure.includes(`npx --no-install wendkeep memory status --gate --vault "${vault}"`)
     )));
+    assert.doesNotMatch(lagFailures, /<vault>|<cofre>|private-lag-payload/i);
+    assert.deepEqual(byteSnapshot(vault), lagBefore);
 
     const sharedPath = join(vault, '.brain', 'SHARED_MEMORY.md');
     const reduced = reduceMemoryEvents([event(), second]);
@@ -605,26 +630,50 @@ test('[req:DIAG-8] ledger/projection lag and hash divergence are blocking', () =
       updatedAt: '2026-07-26T04:00:00Z',
       reviewAfter: '2026-08-02T04:00:00Z',
     }));
+    const hashBefore = byteSnapshot(vault);
     const hash = checkMemoryBundle(vault);
     assert.equal(hash.ok, false);
-    assert.match(hash.failures.join('\n'), /state_hash|hash/i);
+    const hashFailures = hash.failures.join('\n');
+    assert.match(hashFailures, /state_hash|hash/i);
+    assert.ok(hash.failures.some((failure) => (
+      failure.includes(`npx --no-install wendkeep memory status --gate --vault "${vault}"`)
+    )));
+    assert.doesNotMatch(hashFailures, /<vault>|<cofre>|private-lag-payload/i);
+    assert.deepEqual(byteSnapshot(vault), hashBefore);
   } finally { rmSync(vault, { recursive: true, force: true }); }
 });
 
-test('[req:DIAG-8] an unresolved conflict candidate for an active key is blocking', () => {
+test('[req:DIAG-8] active semantic conflicts explain safe human curation without leaking or mutating', () => {
   const vault = createBundle();
   try {
-    writeFileSync(join(vault, '.brain', 'MEMORY_CANDIDATES.jsonl'), `${JSON.stringify({
-      candidate_id: 'conflict-next-ui', reason: 'conflict', memory_key: 'next.ui', status: 'active',
-      event_ids: ['mem-health-1', 'mem-competing'], values: ['review', 'discard'],
-    })}\n`);
+    writeFileSync(join(vault, '.brain', 'MEMORY_CANDIDATES.jsonl'), [
+      {
+        candidate_id: 'conflict-next-ui', reason: 'conflict', memory_key: 'next.ui', status: 'active',
+        event_ids: ['mem-health-1', 'mem-competing'], values: ['private-review', 'private-discard'],
+        events: [{ event_id: 'private-full-event', value: 'private-event-payload' }],
+      },
+      {
+        candidate_id: 'conflict-next-ui-later', reason: 'conflict', memory_key: 'next.ui',
+        event_ids: ['mem-later', 'mem-competing'], values: ['private-later', 'private-discard'],
+      },
+    ].map((item) => JSON.stringify(item)).join('\n') + '\n');
+    const before = byteSnapshot(vault);
     const result = checkMemoryBundle(vault);
     assert.equal(result.ok, false);
-    assert.equal(result.metrics.activeConflicts, 1);
-    assert.match(result.failures.join('\n'), /conflito ativo/i);
-    assert.ok(result.failures.some((failure) => (
-      failure.includes(`npx --no-install wendkeep memory status --gate --vault "${vault}"`)
-    )));
+    assert.equal(result.metrics.activeConflicts, 2);
+    const failure = result.failures.find((item) => /conflitos? ativos?/i.test(item));
+    assert.ok(failure);
+    assert.match(failure, /conflito semântico.*curadoria humana/i);
+    assert.match(failure, /memory repair.*não escolhe vencedor/i);
+    assert.match(failure, /memory promote <candidate-id> --event <event-id>/i);
+    assert.match(failure, /memory reject <candidate-id>/i);
+    assert.ok(failure.includes(`npx --no-install wendkeep memory candidates --active --vault "${vault}"`));
+    assert.equal((failure.match(/next\.ui/g) || []).length, 1, 'doctor deduplicates repeated keys');
+    assert.doesNotMatch(
+      failure,
+      /<vault>|<cofre>|private-review|private-discard|private-later|private-full-event|private-event-payload/,
+    );
+    assert.deepEqual(byteSnapshot(vault), before);
     assert.equal(existsSync(join(vault, '.brain', 'MEMORY.lock')), false, 'doctor does not acquire a mutation lock');
   } finally { rmSync(vault, { recursive: true, force: true }); }
 });

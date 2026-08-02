@@ -366,8 +366,10 @@ a fronteira física correta; espelhos divergentes falham fechados. Uma
 ambiguidade comprovadamente substituída usa `memory reconcile <sessão>
 --by-session <sucessora> --reason <motivo>` como dry-run e exige `--apply`; a decisão faz backup e
 auditoria sem reescrever ledger, CORE ou notas. Depois rode `status --gate` novamente. Conflitos
-exigem curadoria explícita e durável: `memory promote <id> --event <event-id>` escolhe um dos
-eventos do candidate; `memory reject <id>` mantém o valor atual. A decisão é idempotente, e uma
+exigem curadoria explícita e durável: `memory candidates --active --vault <cofre>` lista, em modo
+read-only, apenas IDs e metadados seguros — nunca valores ou conteúdo da memória. Depois da revisão
+humana, `memory promote <id> --event <event-id>` escolhe um dos eventos do candidate;
+`memory reject <id>` mantém o valor atual. `memory repair` não escolhe vencedor. A decisão é idempotente, e uma
 promoção nova aceita um Stop posterior da mesma sessão/activation sem recriar conflito. Uma
 promoção gravada pela 0.66.1 permanece histórica: se o próximo Stop formar novo candidate,
 atualize para a 0.66.3 e rode `memory repair`. Durante o replay, um candidate transitório é

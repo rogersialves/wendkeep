@@ -106,6 +106,18 @@ const memoryStatusCommand = (vaultBase) => (
 const memoryRepairCommand = (vaultBase) => (
   `${WENDKEEP_COMMAND} memory repair --vault ${quoteCommandArgument(vaultBase)}`
 );
+const memoryMigrateCommand = (vaultBase) => (
+  `${WENDKEEP_COMMAND} memory migrate --apply --vault ${quoteCommandArgument(vaultBase)}`
+);
+const memoryCandidatesCommand = (vaultBase) => (
+  `${WENDKEEP_COMMAND} memory candidates --active --vault ${quoteCommandArgument(vaultBase)}`
+);
+const memoryPromoteCommand = (vaultBase) => (
+  `${WENDKEEP_COMMAND} memory promote <candidate-id> --event <event-id> --vault ${quoteCommandArgument(vaultBase)}`
+);
+const memoryRejectCommand = (vaultBase) => (
+  `${WENDKEEP_COMMAND} memory reject <candidate-id> --vault ${quoteCommandArgument(vaultBase)}`
+);
 
 function readJsonLines(vaultBase, path, label) {
   let checked;
@@ -397,7 +409,7 @@ export function checkMemoryBundle(vaultBase, { registry } = {}) {
       ok: true,
       status: 'legacy',
       failures: [],
-      warnings: [LEGACY_MEMORY_WARNING],
+      warnings: [`${LEGACY_MEMORY_WARNING} Comando com Vault resolvido: ${memoryMigrateCommand(vaultBase)}.`],
       metrics: memoryMetrics(),
     };
   }
@@ -466,7 +478,12 @@ export function checkMemoryBundle(vaultBase, { registry } = {}) {
   const activeConflicts = unresolved.filter((item) => item?.reason === 'conflict');
   const ordinaryCandidates = unresolved.filter((item) => item?.reason !== 'conflict');
   if (activeConflicts.length) {
-    failures.push(`${activeConflicts.length} conflito ativo em chave operacional (${activeConflicts.map((item) => item.memory_key || item.candidate_id).join(', ')}). Inspecione com: ${memoryStatusCommand(vaultBase)}.`);
+    const keys = [...new Set(activeConflicts.map((item) => item.memory_key || item.candidate_id))]
+      .sort((left, right) => String(left).localeCompare(String(right)));
+    const label = activeConflicts.length === 1
+      ? '1 conflito ativo'
+      : `${activeConflicts.length} conflitos ativos`;
+    failures.push(`${label} em chave operacional (${keys.join(', ')}). Conflito semântico exige curadoria humana; memory repair não escolhe vencedor. Liste IDs seguros com: ${memoryCandidatesCommand(vaultBase)}. Depois da revisão, use ${memoryPromoteCommand(vaultBase)} ou ${memoryRejectCommand(vaultBase)}.`);
   }
   if (outbox.count) warnings.push(`${outbox.count} evento(s) pendente(s) na outbox; execute o projector quando seguro.`);
   if (ordinaryCandidates.length) warnings.push(`${ordinaryCandidates.length} candidate(s) aguardando curadoria humana.`);

@@ -68,13 +68,14 @@ test('extractReleaseNotes: throws when the version is absent', () => {
   assert.throws(() => extractReleaseNotes(FIXTURE, '9.9.9'), /9\.9\.9/);
 });
 
-test('[sensor:release-tests] 0.67.2 notes are extractable and match the package', () => {
-  const release = extractReleaseNotes(CHANGELOG, '0.67.2');
-  assert.equal(PACKAGE.version, '0.67.2');
+test('[sensor:release-tests] 0.67.3 notes are extractable and match the package', () => {
+  const release = extractReleaseNotes(CHANGELOG, '0.67.3');
+  assert.equal(PACKAGE.version, '0.67.3');
   assert.equal(release.date, '2026-08-02');
-  assert.match(release.notes, /npx --no-install wendkeep/i);
+  assert.match(release.notes, /memory candidates \[--active\]/i);
+  assert.match(release.notes, /memory repair/i);
   assert.match(release.notes, /--vault/i);
-  assert.match(release.notes, /--apply/i);
+  assert.match(release.notes, /candidate_id/i);
   assert.doesNotMatch(release.notes, /019f[0-9a-f-]+/i);
 });
 

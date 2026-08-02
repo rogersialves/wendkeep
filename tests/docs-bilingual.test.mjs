@@ -447,3 +447,40 @@ test('[req:OBS-11] [req:OBS-12] DOC-13: READMEs resumem observabilidade e delega
     assert.match(contract.text, contract.doctor, `${locale}: resumo de doctor/frescor`);
   }
 });
+
+test('[req:MEM-CUR-4] [req:DIAG-8] DOC-14: inventário e orientação de conflitos são públicos e bilíngues', () => {
+  const help = spawnSync(process.execPath, [join(ROOT, 'bin', 'wendkeep.mjs'), '--help'], {
+    cwd: ROOT, encoding: 'utf8',
+  });
+  assert.equal(help.status, 0, help.stderr);
+  assert.match(help.stdout, /memory <sub>[\s\S]*candidates \[--active\]/i);
+
+  const cases = {
+    pt: {
+      memory: readFileSync(join(GUIDE_DIR.pt, 'memory.md'), 'utf8'),
+      doctor: readFileSync(join(GUIDE_DIR.pt, 'maintenance-and-diagnostics.md'), 'utf8'),
+      readme: readFileSync(join(ROOT, 'README.md'), 'utf8'),
+      repairBoundary: /memory repair[\s\S]*não escolhe vencedor/i,
+      noValues: /não (?:expõe|inclui)[^\n]*(?:valores|conteúdo)/i,
+    },
+    en: {
+      memory: readFileSync(join(GUIDE_DIR.en, 'memory.md'), 'utf8'),
+      doctor: readFileSync(join(GUIDE_DIR.en, 'maintenance-and-diagnostics.md'), 'utf8'),
+      readme: readFileSync(join(ROOT, 'README.en.md'), 'utf8'),
+      repairBoundary: /memory repair[\s\S]*(?:does not|never) choose[^\n]*winner/i,
+      noValues: /does not (?:expose|include)[^\n]*(?:values|content)/i,
+    },
+  };
+  for (const [locale, docs] of Object.entries(cases)) {
+    for (const text of [docs.memory, docs.doctor, docs.readme]) {
+      assert.match(text, /memory candidates --active/i, `${locale}: superfície candidates ausente`);
+    }
+    for (const field of ['candidate_id', 'reason', 'status', 'memory_key', 'event_ids']) {
+      assert.match(docs.memory, new RegExp(field), `${locale}: campo seguro ausente ${field}`);
+    }
+    assert.match(docs.memory, docs.noValues, `${locale}: limite de privacidade ausente`);
+    assert.match(docs.doctor, docs.repairBoundary, `${locale}: fronteira repair/curadoria ausente`);
+    assert.match(docs.doctor, /memory promote <candidate-id> --event <event-id>/i);
+    assert.match(docs.doctor, /memory reject <candidate-id>/i);
+  }
+});

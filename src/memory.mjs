@@ -237,6 +237,48 @@ function readCandidates(vault) {
     .split('\n').filter(Boolean).map((line) => JSON.parse(line));
 }
 
+const TERMINAL_CANDIDATE_STATUSES = new Set(['resolved', 'rejected', 'superseded']);
+
+function lexicalCompare(left, right) {
+  if (left < right) return -1;
+  if (left > right) return 1;
+  return 0;
+}
+
+function sanitizedCandidate(candidate, index) {
+  if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) {
+    throw new Error(`MEMORY_CANDIDATES.jsonl: candidate ${index + 1} inválido.`);
+  }
+  const required = ['candidate_id', 'reason', 'memory_key'];
+  const missing = required.filter((field) => typeof candidate[field] !== 'string' || !candidate[field]);
+  if (missing.length) {
+    throw new Error(`MEMORY_CANDIDATES.jsonl: candidate ${index + 1} sem ${missing.join(', ')}.`);
+  }
+  if (candidate.status !== undefined && (typeof candidate.status !== 'string' || !candidate.status)) {
+    throw new Error(`MEMORY_CANDIDATES.jsonl: candidate ${index + 1} possui status inválido.`);
+  }
+  const eventIds = candidate.event_ids ?? [];
+  if (!Array.isArray(eventIds) || eventIds.some((eventId) => typeof eventId !== 'string' || !eventId)) {
+    throw new Error(`MEMORY_CANDIDATES.jsonl: candidate ${index + 1} possui event_ids inválidos.`);
+  }
+  return {
+    candidate_id: candidate.candidate_id,
+    reason: candidate.reason,
+    status: candidate.status || 'active',
+    memory_key: candidate.memory_key,
+    event_ids: [...eventIds].sort(lexicalCompare),
+  };
+}
+
+export function listMemoryCandidates(vault, { activeOnly = false } = {}) {
+  const candidates = readCandidates(vault)
+    .map(sanitizedCandidate)
+    .filter((candidate) => !activeOnly || !TERMINAL_CANDIDATE_STATUSES.has(candidate.status))
+    .sort((left, right) => lexicalCompare(left.memory_key, right.memory_key)
+      || lexicalCompare(left.candidate_id, right.candidate_id));
+  return { status: 'ok', candidates };
+}
+
 function priorCandidateDecision(vault, candidateId) {
   return readMemoryLedger(vault).events.find(
     (event) => event.candidate_decision?.candidate_id === candidateId,
@@ -1897,10 +1939,49 @@ function parseRecoverAttemptArgs(argv) {
   };
 }
 
+function parseCandidatesArgs(argv) {
+  const seen = new Set();
+  let activeOnly = false;
+  let vault = '';
+
+  for (let index = 1; index < argv.length; index += 1) {
+    const token = argv[index];
+    if (!token.startsWith('--')) {
+      throw memoryUsageError(`memory candidates recebeu argumento posicional extra: ${token}.`);
+    }
+
+    const equalAt = token.indexOf('=');
+    const name = equalAt >= 0 ? token.slice(0, equalAt) : token;
+    if (name !== '--active' && name !== '--vault') {
+      throw memoryUsageError(`memory candidates recebeu opção desconhecida: ${name}.`);
+    }
+    if (seen.has(name)) {
+      throw memoryUsageError(`memory candidates recebeu opção duplicada: ${name}.`);
+    }
+    seen.add(name);
+
+    if (name === '--active') {
+      if (equalAt >= 0) throw memoryUsageError('--active não aceita valor.');
+      activeOnly = true;
+      continue;
+    }
+
+    const value = equalAt >= 0 ? token.slice(equalAt + 1) : argv[index + 1];
+    if (!value || !value.trim() || value.startsWith('--')) {
+      throw memoryUsageError('--vault requer valor não vazio que não comece com --.');
+    }
+    vault = value;
+    if (equalAt < 0) index += 1;
+  }
+
+  return { activeOnly, vault };
+}
+
 export function runMemory(argv) {
   const [sub, positional] = argv;
   let reconcileArgs = null;
   let recoverAttemptArgs = null;
+  let candidatesArgs = null;
   if (sub === 'reconcile') {
     try {
       reconcileArgs = parseReconcileArgs(argv);
@@ -1919,14 +2000,26 @@ export function runMemory(argv) {
       return;
     }
   }
+  if (sub === 'candidates') {
+    try {
+      candidatesArgs = parseCandidatesArgs(argv);
+    } catch (error) {
+      process.stderr.write(`wendkeep memory: ${error.message}\n`);
+      process.exitCode = error.code === 'WENDKEEP_MEMORY_USAGE' ? 2 : 1;
+      return;
+    }
+  }
   const vault = (
-    recoverAttemptArgs?.vault || reconcileArgs?.vault || option(argv, '--vault')
+    recoverAttemptArgs?.vault || reconcileArgs?.vault || candidatesArgs?.vault || option(argv, '--vault')
   ) || process.env.OBSIDIAN_VAULT_PATH;
   if (!vault) { process.stderr.write('wendkeep memory: passe --vault <path>.\n'); process.exitCode = 2; return; }
   if (!existsSync(vault)) { process.stderr.write(`wendkeep memory: not found: ${vault}\n`); process.exitCode = 2; return; }
   try {
     let result;
     if (sub === 'status') result = memoryStatus(vault);
+    else if (sub === 'candidates') {
+      result = listMemoryCandidates(vault, { activeOnly: candidatesArgs.activeOnly });
+    }
     else if (sub === 'migrate') result = migrateMemory(vault, { apply: argv.includes('--apply') });
     else if (sub === 'repair') result = repairMemory(vault);
     else if (sub === 'reconcile') {
@@ -1950,7 +2043,7 @@ export function runMemory(argv) {
         action: sub, candidateId: positional, ...(eventId ? { eventId } : {}),
       });
     }
-    else { process.stderr.write('wendkeep memory: use status | migrate [--apply] | repair | recover-attempt <session> [--apply] | reconcile <session> --by-session <session> --reason <text> [--apply] | promote <candidate> [--event <event-id>] | reject <candidate>.\n'); process.exitCode = 2; return; }
+    else { process.stderr.write('wendkeep memory: use status | candidates [--active] | migrate [--apply] | repair | recover-attempt <session> [--apply] | reconcile <session> --by-session <session> --reason <text> [--apply] | promote <candidate> [--event <event-id>] | reject <candidate>.\n'); process.exitCode = 2; return; }
     process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
     if (sub === 'status' && argv.includes('--gate')) process.exitCode = result.status === 'blocked' ? 1 : 0;
     else if (sub === 'reconcile' && reconcileArgs.apply) process.exitCode = result.health?.status === 'blocked' ? 1 : 0;

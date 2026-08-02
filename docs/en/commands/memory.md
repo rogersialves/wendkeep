@@ -24,6 +24,7 @@ Pass the vault explicitly in automation. Preserve backups and evidence before re
 
 ```bash
 npx wendkeep memory status [--gate] --vault <vault>
+npx wendkeep memory candidates [--active] --vault <vault>
 npx wendkeep memory repair --vault <vault>
 npx wendkeep memory recover-attempt <session> [--apply] --vault <vault>
 npx wendkeep memory reconcile <ambiguous-session> --by-session <successor-session> --reason <reason> [--apply] --vault <vault>
@@ -36,6 +37,13 @@ npx wendkeep validate-memory --vault <v2-vault>
 ## Options and exit codes
 
 - `memory status` is read-only; `--gate` exits `1` only for blocking state.
+- `memory candidates` is read-only and prints deterministic JSON containing only `candidate_id`,
+  `reason`, `status`, `memory_key`, and `event_ids`; it does not expose memory values or content and
+  does not create a lock or mutate the bundle. `--active` omits terminal candidates (`resolved`,
+  `rejected`, and `superseded`). A missing status is normalized to `active`.
+- For `memory candidates`, exit `0` means a valid inventory (including empty or conflicted), exit
+  `1` means an invalid sidecar/unsafe topology, and exit `2` means a missing `--vault`, unknown or
+  duplicate option, extra argument, or an invalid value passed to `--active`.
 - `Stop` writes events to the outbox before acknowledging `last_memory_attempt: enqueued`, then the
   projector runs outside the registry lock. Retrying the same attempt reuses its frozen event IDs
   and can project them at most once.
@@ -105,6 +113,7 @@ npx wendkeep validate-memory --vault <v2-vault>
 
 ```bash
 npx wendkeep memory status --gate --vault .MyApp-vault
+npx wendkeep memory candidates --active --vault .MyApp-vault
 npx wendkeep memory recover-attempt session-123 --vault .MyApp-vault
 npx wendkeep memory recover-attempt session-123 --apply --vault .MyApp-vault
 npx wendkeep memory reconcile old --by-session current --reason "delivery continued" --vault .MyApp-vault
@@ -120,6 +129,9 @@ Status prints schema, revision, cursor, hash, events, outbox, candidates, confli
 state of the last attempt. CORE stays hand-curated and canonical; SHARED stays a verifiable
 operational projection. After successful projection, an attempt checkpoint may be a valid prefix
 of a global projection that has already advanced with concurrent events.
+
+`memory candidates` returns `status: "ok"` and the sanitized candidate list in stable order; with
+`--active`, the list contains only decisions still open for human curation.
 
 ## Common errors and diagnosis
 
