@@ -337,6 +337,61 @@ test('[req:MEM-STOP-6] unverifiable v2 Stop is durably observable as ambiguous',
   }
 });
 
+test('[req:MEM-STOP-2] Stop principal usa turn_sequences quando filhos intercalam a ordem global', () => {
+  const { project, vault, brain, transcript } = seedLegacyFixture();
+  try {
+    const start = runHook(join(ROOT, 'hooks', 'session-start.mjs'), project, vault, {
+      hook_event_name: 'SessionStart',
+      session_id: SESSION_ID,
+      transcript_path: transcript,
+      source: 'startup',
+    });
+    assertHookSucceeded(start, 'SessionStart before mapped Stop');
+
+    for (let index = 1; index <= 5; index += 1) {
+      writeTurn(
+        transcript,
+        `wk-parent-turn-${index}`,
+        `Synthetic parent prompt ${index}.`,
+        `Synthetic parent answer ${index}.`,
+      );
+    }
+
+    const polluted = readRegistry(brain);
+    const pollutedEntry = polluted.sessions[SESSION_ID];
+    const activationId = pollutedEntry.active_activation_id;
+    pollutedEntry.last_turn_sequence = 17;
+    pollutedEntry.activations[activationId].last_turn_sequence = 17;
+    writeFileSync(join(brain, 'SESSION_REGISTRY.json'), `${JSON.stringify(polluted, null, 2)}\n`);
+
+    const ensure = runHook(join(ROOT, 'hooks', 'session-ensure.mjs'), project, vault, {
+      hook_event_name: 'UserPromptSubmit',
+      session_id: SESSION_ID,
+      transcript_path: transcript,
+      turn_id: 'wk-parent-turn-5',
+      prompt: '[wk-fixture] Synthetic parent prompt 5.',
+    });
+    assertHookSucceeded(ensure, 'mapped UserPromptSubmit');
+    assert.equal(readRegistry(brain).sessions[SESSION_ID].turn_sequences['wk-parent-turn-5'], 18);
+
+    const stop = runHook(join(ROOT, 'hooks', 'session-stop.mjs'), project, vault, {
+      hook_event_name: 'Stop',
+      session_id: SESSION_ID,
+      transcript_path: transcript,
+      turn_id: 'wk-parent-turn-5',
+    });
+    assertHookSucceeded(stop, 'mapped Stop');
+
+    const after = readRegistry(brain).sessions[SESSION_ID];
+    const active = after.activations[after.active_activation_id];
+    const note = readFileSync(join(vault, after.session_file), 'utf8');
+    assert.equal(active.last_stop_turn_sequence, 18);
+    assert.match(note, /<!-- wk-turn: wk-parent-turn-5 -->/);
+  } finally {
+    rmSync(project, { recursive: true, force: true });
+  }
+});
+
 test('[req:MEM-STOP-4] v2 staging revalidation aborts an older Stop before finalization', () => {
   const stopAcceptedBeforeConcurrentStart = {
     stopDisposition: 'applied',

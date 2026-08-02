@@ -64,10 +64,20 @@ This project uses the [wendkeep](https://github.com/rogersialves/wendkeep) harne
 in every profile: Vault, session, identity, memory, lessons, and persistence integrations.
 The persistent profile is selected explicitly; missing or invalid configuration uses **GOVERN as the default**.
 
-Before an implementation, the native LLM harness classifies the current request and may create a
-task-scoped lease with \`wendkeep profile route <FLOW|GUIDE|GOVERN|ASSURE> --session <id> --reason <text>\`.
-The lease expires when that request ends and the persistent session/project profile becomes
-effective again. **OFF is never selected adaptively**; only a human can persist \`profile use OFF\`.
+Before every implementation, the native LLM harness **MUST run the routing gate**:
+1. Inspect \`wendkeep profile status\`.
+2. Classify the request and choose FLOW, GUIDE, GOVERN, or ASSURE from its scope and risk.
+3. Register the choice with
+   \`wendkeep profile route <FLOW|GUIDE|GOVERN|ASSURE> --session <id> --reason <text>\`.
+4. Re-check \`wendkeep profile status\` and follow the effective profile before editing.
+
+The persistent profile is only the base restored after the task lease; it is not an immutable
+decision for the current task. A base OFF does not block a temporary FLOW/GUIDE/GOVERN/ASSURE
+lease, while a base GOVERN does not prevent choosing FLOW or GUIDE for bounded work. An explicit
+user choice for the request takes precedence. If no causal session is available or routing fails,
+do not invent lease state: follow the effective profile and use GOVERN only as the conservative
+fallback when configuration is missing or invalid. The lease expires when the request ends.
+**OFF is never selected adaptively**; only a human can persist \`profile use OFF\`.
 
 Route work by the effective profile:
 - **OFF** — Wend Runtime is disabled and governance belongs to the native LLM harness; Keep Core stays active.

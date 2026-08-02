@@ -55,7 +55,7 @@ function resolved(input, entry) {
     identity: {
       state: 'resolved',
       provider: 'codex',
-      canonicalConversationId: 'session-alpha',
+      canonicalConversationId: 'wk-fixture-session-alpha',
       transcriptPath: input.transcript_path,
       transcriptId: basename(input.transcript_path, '.jsonl'),
     },
@@ -64,17 +64,24 @@ function resolved(input, entry) {
 }
 
 function registryMutation(entry) {
-  const registry = { version: 2, sessions: { 'session-alpha': entry } };
+  const registry = { version: 2, sessions: { 'wk-fixture-session-alpha': entry } };
   return (_vault, mutator) => mutator(registry);
 }
 
 function childMeta(path) {
   const id = basename(path, '.jsonl');
+  if (id.startsWith('root-')) {
+    return {
+      ok: true,
+      meta: { id, session_id: 'wk-fixture-session-alpha' },
+      lineBytes: 96,
+    };
+  }
   return {
     ok: true,
     meta: {
       id,
-      session_id: 'session-alpha',
+      session_id: 'wk-fixture-session-alpha',
       source: {
         subagent: {
           thread_spawn: { parent_thread_id: 'root-a', depth: 1 },
@@ -84,6 +91,93 @@ function childMeta(path) {
     lineBytes: 128,
   };
 }
+
+test('[req:OBS-11] alias agentTranscriptPath resolve o filho sem substituir o root principal', async () => {
+  const fx = fixture();
+  try {
+    const entry = registryEntry(fx);
+    const childPath = join(fx.vaultBase, 'child-alias.jsonl');
+    let signals = 0;
+
+    const result = await refreshSubagents(fx.vaultBase, {
+      provider: 'codex',
+      transcript_path: fx.rootA,
+      agentTranscriptPath: childPath,
+    }, {
+      resolveEntry: (_vault, input) => {
+        assert.equal(input.transcript_path, childPath);
+        return resolved(input, entry);
+      },
+      readMeta: childMeta,
+      mutateRegistry: registryMutation(entry),
+      resolveRoots: () => ({ state: 'complete', rootPaths: [fx.rootA], descendantPaths: [] }),
+      recordSignal: (_vault, _sessionId, signal) => {
+        signals += 1;
+        assert.equal(signal.rollout_id, 'child-alias');
+        assert.equal(signal.transcript_path, childPath);
+        return {
+          recorded: true,
+          sequence: 1,
+          state: { observability_dirty: false, observability_signal_sequence: 1 },
+        };
+      },
+    });
+
+    assert.equal(result, true);
+    assert.equal(signals, 1);
+    assert.equal(entry.transcript_path, fx.rootA);
+  } finally {
+    rmSync(fx.vaultBase, { recursive: true, force: true });
+  }
+});
+
+test('[req:OBS-11] metadado filho inválido ou pai alheio é rejeitado sem escrita', async () => {
+  const fx = fixture();
+  try {
+    const entry = registryEntry(fx);
+    const cases = [
+      ['source.subagent ausente', (meta) => { delete meta.source; }],
+      ['id divergente', (meta) => { meta.id = 'outro-filho'; }],
+      ['sessão canônica divergente', (meta) => { meta.session_id = 'wk-fixture-session-other'; }],
+      ['parent_thread_id alheio', (meta) => {
+        meta.source.subagent.thread_spawn.parent_thread_id = 'root-alheio';
+      }],
+    ];
+
+    for (const [label, corrupt] of cases) {
+      const childPath = join(fx.vaultBase, `child-${label.replace(/\W+/g, '-')}.jsonl`);
+      let registryMutations = 0;
+      let signals = 0;
+      const result = await refreshSubagents(fx.vaultBase, {
+        provider: 'codex',
+        transcript_path: fx.rootA,
+        agent_transcript_path: childPath,
+      }, {
+        resolveEntry: (_vault, input) => resolved(input, entry),
+        readMeta: (path) => {
+          const resultMeta = childMeta(path);
+          if (path === childPath) corrupt(resultMeta.meta);
+          return resultMeta;
+        },
+        resolveRoots: () => ({ state: 'complete', rootPaths: [fx.rootA], descendantPaths: [] }),
+        mutateRegistry: (_vault, mutator) => {
+          registryMutations += 1;
+          return registryMutation(entry)(_vault, mutator);
+        },
+        recordSignal: () => {
+          signals += 1;
+          return { state: { observability_dirty: false }, sequence: 1 };
+        },
+      });
+
+      assert.equal(result, false, label);
+      assert.equal(registryMutations, 0, `${label}: registry permanece intocado`);
+      assert.equal(signals, 0, `${label}: nenhum sinal é persistido`);
+    }
+  } finally {
+    rmSync(fx.vaultBase, { recursive: true, force: true });
+  }
+});
 
 test('[req:OBS-11] rajada de SubagentStop publica uma vez pela maior sequence após 250 ms', async () => {
   const fx = fixture();
@@ -168,7 +262,8 @@ test('[req:OBS-11] rajada de SubagentStop publica uma vez pela maior sequence ap
     const pending = ['child-a', 'child-b', 'child-c'].map((id) => (
       refreshSubagents(fx.vaultBase, {
         provider: 'codex',
-        transcript_path: join(fx.vaultBase, `${id}.jsonl`),
+        transcript_path: fx.rootA,
+        agent_transcript_path: join(fx.vaultBase, `${id}.jsonl`),
       }, deps)
     ));
     await Promise.resolve();
@@ -283,7 +378,7 @@ test('[req:OBS-12] SessionStop usa gate causal, todos os roots e deadline entry 
       vaultBase: fx.vaultBase,
       input: { provider: 'codex', transcript_path: fx.rootA },
       sessionPath: fx.sessionPath,
-      sessionId: 'session-alpha',
+      sessionId: 'wk-fixture-session-alpha',
       entry,
       causalStop: {
         canPromoteMemory: true,
@@ -338,7 +433,7 @@ test('[req:OBS-12] SessionStop stale ou no limite do deadline não publica', asy
       vaultBase: fx.vaultBase,
       input: { provider: 'codex', transcript_path: fx.rootA },
       sessionPath: fx.sessionPath,
-      sessionId: 'session-alpha',
+      sessionId: 'wk-fixture-session-alpha',
       entry: original,
       causalStop: {
         canPromoteMemory: true,

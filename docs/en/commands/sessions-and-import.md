@@ -30,6 +30,7 @@ npx wendkeep hook <name>
 npx wendkeep session list
 npx wendkeep session show <id>
 npx wendkeep session use <id>
+npx wendkeep hook session-backfill --session <id> [--write]
 npx wendkeep import [options]
 ```
 
@@ -38,19 +39,27 @@ npx wendkeep import [options]
 - `wendkeep hook <name>` reads the agent payload from stdin; valid names are listed by `--help`.
 - `SessionStart` opens an activation: an epoch that remains active across multiple `Stop` events;
   only a new `SessionStart` supersedes the previous epoch.
-- `UserPromptSubmit` advances the active activation's native turn. If it finds a legacy registry
-  with a closed epoch, it opens exactly one recovery activation; replaying the same prompt does
-  not open another one.
-- On Codex, `session_id`, the native `turn_id`, and observed transcript order are enough to resolve
-  the turn. Hook payloads do not need invented `activation_id` or `turn_sequence` fields.
+- Main-agent `UserPromptSubmit` advances the active activation's native turn. A Codex rollout
+  prompt with `source.subagent` only registers its path for observability: it does not advance the
+  sequence, enter `turn_sequences`, or replace the main transcript. If a main prompt finds a
+  legacy registry with a closed epoch, it opens exactly one recovery activation; replaying the
+  same prompt does not open another one.
+- On Codex, `session_id` and the native `turn_id` are enough to resolve the turn. Stop proves the
+  ID in the transcript and prefers `SESSION_REGISTRY.turn_sequences[turn_id]`; local transcript
+  order is the legacy-registry fallback. Interleaved subagent turns therefore cannot make the
+  parent's Stop artificially `stale_turn`. Hook payloads need no invented `activation_id` or
+  `turn_sequence` fields.
 - `Stop` accepts only a transcript-proven turn from the compatible active activation. Duplicates
   are no-ops; stale/superseded Stops neither publish memory nor overwrite a newer epoch's
   checkpoint.
 - `Stop` receives an absolute **45 s** deadline from hook entry. Reads check the clock between
   rollouts and on every chunk; reaching the limit returns `degraded` before the host timeout.
-- `SubagentStop` receives an absolute **15 s** deadline. Signals arriving within the **250 ms**
-  window are coalesced: only the highest sequence recomposes/publishes, without losing the last
-  child.
+- `SubagentStop` receives an absolute **15 s** deadline and resolves the child rollout from Codex's
+  official `agent_transcript_path` field (`agentTranscriptPath` is also accepted);
+  `transcript_path` continues to identify the parent session. Before any write, `source.subagent`,
+  ID, canonical session, and `parent_thread_id` are validated; the parent must match a proven
+  session root. Signals arriving within the **250 ms** window are coalesced: only the highest
+  sequence recomposes/publishes, without losing the last child.
 - Observability is tri-state: `complete` publishes the full snapshot; `none` means zero proven by
   a causal Stop or stable offline scan; `degraded` preserves the previous snapshot and allowlisted
   diagnostics. An isolated `SubagentStop` never publishes `none`.
@@ -64,6 +73,10 @@ npx wendkeep import [options]
 - `import` reconciles observability even when no `wk-turn` is missing: a legacy schema, stale
   frontier, or unproven manifest triggers recomposition without duplicating iterations. A fresh
   checkpoint remains byte-identical; `degraded` is reported and does not change the note.
+- `hook session-backfill` recovers missing `wk-turn` markers for the selected session. Without
+  `--write`, it only reports. On Codex, `missingTurns` contains only turns with `task_complete`;
+  open turns appear under `incompleteTurns` and are never written. `--write` applies only completed
+  candidates, and a second run is idempotent.
 - Exit `0` means consistent processing; non-zero reports invalid source/config/write instead of
   presenting silent partial success.
 
@@ -72,6 +85,8 @@ npx wendkeep import [options]
 ```bash
 npx wendkeep session list
 npx wendkeep session show 019abc-session-id
+npx wendkeep hook session-backfill --session 019abc-session-id
+npx wendkeep hook session-backfill --session 019abc-session-id --write
 npx wendkeep import --source codex --since 2026-07-01 --dry-run --json
 ```
 
@@ -98,6 +113,10 @@ without creating a new turn block.
   was found; the attempt remains observable but does not publish memory.
 - A late Stop reports `stale_turn`/`superseded`: the newer epoch and checkpoint are preserved; do
   not force the old payload to apply.
+- `session-backfill` lists `incompleteTurns`: wait for that turn's `task_complete`/Stop and retry;
+  do not edit the note or force the partial turn. Once that turn receives `task_complete`, the next
+  run may treat it as eligible. Claude transcripts preserve their historical contract and do not
+  require this Codex event.
 - Fork duplicates: bound source/date and inspect `forked_from_id`/`source.subagent`.
 - Codex does not capture: approve hooks and start a new session after `sync`.
 - Contaminated cost: validate `session_id → session_file → transcript_path → provider`.

@@ -170,6 +170,16 @@ function jsonLines(content) {
   }).filter(Boolean);
 }
 
+export function completedCodexTurnIdsContent(content = '') {
+  const completed = new Set();
+  for (const event of jsonLines(content)) {
+    if (event.type !== 'event_msg' || event.payload?.type !== 'task_complete') continue;
+    const turnId = String(event.payload?.turn_id || event.turn_id || '').trim();
+    if (turnId) completed.add(turnId);
+  }
+  return completed;
+}
+
 export function parseCodexTranscriptContent(content, options = {}) {
   const result = createResult('codex');
   const eventUserPrompts = [];

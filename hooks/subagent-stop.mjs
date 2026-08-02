@@ -82,6 +82,32 @@ function claudeRoots(entry) {
   return { state: 'complete', rootPaths: [...paths], descendantPaths: [], diagnostics: [] };
 }
 
+export function subagentIdentityInput(input = {}) {
+  const agentTranscriptPath = input.agent_transcript_path || input.agentTranscriptPath || '';
+  if (!agentTranscriptPath) return input;
+  return {
+    ...input,
+    transcript_path: agentTranscriptPath,
+    transcriptPath: agentTranscriptPath,
+  };
+}
+
+function validatedCodexRootIds(entry, canonicalConversationId, { resolveRoots, readMeta }) {
+  const roots = resolveRoots(entry, { readMeta });
+  if (roots?.state !== 'complete' || !roots.rootPaths?.length) return null;
+
+  const ids = new Set();
+  for (const rootPath of roots.rootPaths) {
+    const result = readMeta(rootPath);
+    const meta = result?.meta;
+    const rootId = String(meta?.id || '');
+    if (!result?.ok || !rootId || meta?.source?.subagent) return null;
+    if (meta.session_id && meta.session_id !== canonicalConversationId) return null;
+    ids.add(rootId);
+  }
+  return ids;
+}
+
 export async function refreshSubagents(vaultBase, input, {
   now = Date.now,
   hookStartedAt = now(),
@@ -100,7 +126,8 @@ export async function refreshSubagents(vaultBase, input, {
 } = {}) {
   const deadlineAt = hookStartedAt + deadlineMs;
   const provider = providerMeta(input.provider).id;
-  const { identity, entry } = resolveEntry(vaultBase, input, provider);
+  const identityInput = subagentIdentityInput(input);
+  const { identity, entry } = resolveEntry(vaultBase, identityInput, provider);
   if (identity.state !== 'resolved') return false;
   const childTranscriptPath = identity.transcriptPath;
   const sessionRel = entry?.session_file || '';
@@ -118,6 +145,11 @@ export async function refreshSubagents(vaultBase, input, {
       || childMeta.meta.source?.subagent?.thread_spawn?.parent_thread_id
       || '',
     );
+    const rootIds = validatedCodexRootIds(entry, identity.canonicalConversationId, {
+      resolveRoots,
+      readMeta,
+    });
+    if (!childParentThreadId || !rootIds?.has(childParentThreadId)) return false;
   }
 
   const observed = causalSnapshot(entry);
@@ -168,7 +200,7 @@ export async function refreshSubagents(vaultBase, input, {
 
   try {
     if (now() >= deadlineAt) return true;
-    const fresh = resolveEntry(vaultBase, input, provider);
+    const fresh = resolveEntry(vaultBase, identityInput, provider);
     if (fresh.identity?.state !== 'resolved'
       || fresh.identity.canonicalConversationId !== identity.canonicalConversationId
       || !fresh.entry?.session_file
@@ -197,7 +229,7 @@ export async function refreshSubagents(vaultBase, input, {
       const currentEntry = guardContext?.entry;
       const currentResolved = currentEntry
         ? { identity: { state: 'resolved', canonicalConversationId: identity.canonicalConversationId }, entry: currentEntry }
-        : resolveEntry(vaultBase, input, provider);
+        : resolveEntry(vaultBase, identityInput, provider);
       if (currentResolved.identity?.state !== 'resolved'
         || currentResolved.identity.canonicalConversationId !== identity.canonicalConversationId
         || !currentResolved.entry) {

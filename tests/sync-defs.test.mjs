@@ -42,6 +42,21 @@ test('syncDefs: writes the managed AGENTS.md section, idempotent, user content p
       '[req:OP-13] managed block forbids automatic OFF');
     assert.match(md, /request|task-scoped|temporary/i,
       '[req:OP-13] managed block explains lease scope');
+    assert.match(md, /MUST run the routing gate/i,
+      '[req:OP-13] every implementation performs explicit adaptive routing');
+    assert.match(md, /persistent profile is only the base/i,
+      '[req:OP-13] persistent profile is not the immutable task decision');
+    assert.match(md, /base OFF does not block[^.]+FLOW\/GUIDE\/GOVERN\/ASSURE/i,
+      '[req:OP-13] OFF base still allows a temporary route');
+    assert.match(md, /base GOVERN does not prevent[^.]+FLOW or GUIDE/i,
+      '[req:OP-13] GOVERN base may adapt to lower-ceremony bounded work');
+    assert.match(md, /re-check[^.]+before editing/i,
+      '[req:OP-13] effective route is confirmed before files change');
+    assert.match(md, /explicit\s+user choice[\s\S]{0,100}takes precedence/i,
+      '[req:OP-13] an explicit user route overrides automatic classification');
+    assert.match(md,
+      /no causal session[\s\S]{0,180}do not invent lease state[\s\S]{0,220}GOVERN only[\s\S]{0,120}missing or invalid/i,
+      '[req:OP-13] failed routing preserves effective state and conservative fallback');
     assert.doesNotMatch(md, /Work\s+through its change loop/i,
       '[req:OP-5] the managed block must not impose GOVERN on every profile');
     // idempotente: re-run = 1 seção só

@@ -385,7 +385,7 @@ acknowledgement pending on 0.66.4 or later, first run the targeted dry run
 registry/checkpoint. See syntax, preconditions, and fail-closed behavior in
 [memory and curation](docs/en/commands/memory.md).
 
-Session notes use one live `## Agentes, tokens e custos` snapshot. Main-agent and subagent hooks recompose it atomically, with costs, token dimensions, reasoning tokens and effort per model/source. Every hook that rewrites a session note takes a per-file lock and writes through a temp file + rename, so the `SubagentStop` fan-out (one hook run per subagent) can never leave a note half-written; a note whose frontmatter reads back damaged is left untouched rather than patched.
+Session notes use one live `## Agentes, tokens e custos` snapshot. Main-agent and subagent hooks recompose it atomically, with costs, token dimensions, reasoning tokens and effort per model/source. On Codex, subagent prompts register their rollout for observability without advancing the main agent's sequence; `SubagentStop` reads the child from `agent_transcript_path` and persists its signal only when `parent_thread_id` matches a validated session root. The main Stop uses the registry's causal `turn_id` mapping before falling back to local transcript order. To recover missing markers while a conversation is open, `hook session-backfill` is a dry-run by default and never writes a Codex turn without `task_complete`. Every hook that rewrites a session note takes a per-file lock and writes through a temp file + rename, so the `SubagentStop` fan-out (one hook run per subagent) can never leave a note half-written; a note whose frontmatter reads back damaged is left untouched rather than patched.
 
 ## Retroactive memory (`import`) — install today, remember yesterday
 

@@ -112,6 +112,46 @@
       "severity": "critical",
       "type": "command",
       "command": "node --test tests/memory-cli.test.mjs tests/memory-attempt-recovery.test.mjs tests/memory-attempt-recovery-topology.test.mjs tests/vault-health-memory.test.mjs"
+    },
+    {
+      "id": "session-causality",
+      "name": "session-causality",
+      "description": "node --test tests/memory-activation.test.mjs tests/session-stop-migration-lifecycle.test.mjs",
+      "severity": "critical",
+      "type": "command",
+      "command": "node --test tests/memory-activation.test.mjs tests/session-stop-migration-lifecycle.test.mjs"
+    },
+    {
+      "id": "subagent-stop-input",
+      "name": "subagent-stop-input",
+      "description": "node --test tests/subagent-observability-lifecycle.test.mjs",
+      "severity": "critical",
+      "type": "command",
+      "command": "node --test tests/subagent-observability-lifecycle.test.mjs"
+    },
+    {
+      "id": "session-backfill-complete",
+      "name": "session-backfill-complete",
+      "description": "node --test tests/integrations-transcripts.test.mjs tests/session-backfill.test.mjs",
+      "severity": "critical",
+      "type": "command",
+      "command": "node --test tests/integrations-transcripts.test.mjs tests/session-backfill.test.mjs"
+    },
+    {
+      "id": "profile-routing-guidance",
+      "name": "Profile routing guidance",
+      "description": "Proves the managed AGENTS routing gate and profile skill projections",
+      "severity": "critical",
+      "type": "command",
+      "command": "node --test tests/sync-defs.test.mjs tests/skills-seed.test.mjs tests/operating-profile-boundaries.test.mjs"
+    },
+    {
+      "id": "tests-serial",
+      "name": "tests-serial",
+      "description": "node --test --test-concurrency=1",
+      "severity": "critical",
+      "type": "command",
+      "command": "node --test --test-concurrency=1"
     }
   ]
 }

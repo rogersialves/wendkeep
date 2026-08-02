@@ -7,6 +7,7 @@ import {
   insertIteration,
   parseTranscript,
 } from './session-stop.mjs';
+import { completedCodexTurnIdsContent } from '../packages/integrations/src/transcripts.mjs';
 import {
   getVaultBase,
   readControl,
@@ -63,6 +64,7 @@ export function backfillSessions({ vaultBase, write = false, limit = 0, session 
     scanned: 0,
     candidates: 0,
     inserted: 0,
+    incomplete: 0,
     skipped: 0,
     missing: [],
     sessions: [],
@@ -85,13 +87,35 @@ export function backfillSessions({ vaultBase, write = false, limit = 0, session 
       continue;
     }
 
+    const transcriptContent = readFileSync(entry.transcript_path, 'utf-8');
     const tx = parseTranscript(entry.transcript_path);
-    const turns = tx.turns.filter((turn) => turn.turnId && turn.userPrompts.length);
+    const allTurns = tx.turns.filter((turn) => turn.turnId && turn.userPrompts.length);
+    const completedCodexTurns = tx.provider === 'codex'
+      ? completedCodexTurnIdsContent(transcriptContent)
+      : null;
+    const turns = completedCodexTurns
+      ? allTurns.filter((turn) => completedCodexTurns.has(turn.turnId))
+      : allTurns;
     const content = readFileSync(sessionPath, 'utf-8');
     const missingTurns = turns.filter((turn) => !hasTurnMarker(content, turn.turnId));
+    const incompleteTurns = completedCodexTurns
+      ? allTurns.filter((turn) => (
+        !completedCodexTurns.has(turn.turnId) && !hasTurnMarker(content, turn.turnId)
+      ))
+      : [];
+    report.incomplete += incompleteTurns.length;
 
     if (!missingTurns.length) {
       report.skipped += 1;
+      if (incompleteTurns.length) {
+        report.sessions.push({
+          session: entry.session_file,
+          transcript: entry.transcript_path,
+          missingTurns: [],
+          incompleteTurns: incompleteTurns.map((turn) => turn.turnId),
+          inserted: 0,
+        });
+      }
       continue;
     }
 
@@ -100,6 +124,7 @@ export function backfillSessions({ vaultBase, write = false, limit = 0, session 
       session: entry.session_file,
       transcript: entry.transcript_path,
       missingTurns: missingTurns.map((turn) => turn.turnId),
+      incompleteTurns: incompleteTurns.map((turn) => turn.turnId),
       inserted: 0,
     };
 

@@ -4,6 +4,30 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.67.1] — 2026-08-02
+
+### Fixed
+
+- **Turnos de subagents não bloqueiam mais a captura da sessão-mãe.** `UserPromptSubmit` de rollout
+  filho registra o path para observabilidade sem avançar a sequência principal, e `SessionStop`
+  prefere o mapeamento causal `turn_sequences[turn_id]` antes da ordem local do transcript. Isso
+  preserva os marcadores `wk-turn`, o encerramento e a memória mesmo com filhos intercalados.
+- **`SubagentStop` consome o transcript correto do payload Codex.** O hook resolve o filho por
+  `agent_transcript_path`/`agentTranscriptPath`, valida identidade, sessão e `parent_thread_id`
+  contra um root comprovado e mantém `transcript_path` como contexto da sessão-mãe, permitindo
+  preencher `Subagents e workflows` no último filho sem aceitar sinais de outra cadeia.
+- **O backfill não grava o turno Codex ainda em execução.** `hook session-backfill` exige
+  `task_complete`, separa `missingTurns` de `incompleteTurns`, permanece dry-run por padrão e aplica
+  somente turnos concluídos de forma idempotente. A CLI agora encaminha `--session`, `--vault`,
+  `--write` e demais argumentos ao hook executado. README e guias PT-BR/EN documentam o reparo.
+- **O bloco gerenciado do `AGENTS.md` exige roteamento adaptativo antes de editar.** O harness
+  inspeciona o perfil-base, classifica a solicitação, registra uma lease temporária entre `FLOW`,
+  `GUIDE`, `GOVERN` e `ASSURE` e confirma o perfil efetivo; `OFF` nunca é escolhido pela LLM e a
+  escolha explícita do usuário prevalece.
+- **O scanner de privacidade distingue configuração pública de identificadores privados.** Comandos
+  longos legítimos em `wendkeep.sensors.json` deixam de gerar falso positivo, sem permitir que UUID,
+  hash, token compacto, campo desconhecido ou path absoluto sejam ocultados pela exceção.
+
 ## [0.67.0] — 2026-08-01
 
 ### Added

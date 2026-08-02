@@ -61,6 +61,7 @@ import {
   hasTurnMarker,
   normalizeTurnMarkers,
   mutateSessionRegistry,
+  resolveRegisteredTurnSequence,
   resolveStopActivation,
   applyStopActivation,
 } from './obsidian-common.mjs';
@@ -1180,9 +1181,13 @@ export async function main({
   const turnId = turnIdentity.id;
   const now = finalizing ? new Date() : null;
   const endedAt = finalizing ? formatLocalIso(now) : '';
-  const stopTurnSequence = turnIdentity.order;
   const causalStop = finalizing
     ? mutateSessionRegistry(vaultBase, (registry) => {
+      const stopTurnSequence = resolveRegisteredTurnSequence(
+        registry.sessions?.[sessionId],
+        turnId,
+        turnIdentity.order,
+      );
       const activationId = resolveStopActivation(registry, {
         session_id: sessionId,
         activation_id: input.activation_id || input.activationId || '',
@@ -1214,9 +1219,11 @@ export async function main({
         activation,
         stopDisposition: cas.stopDisposition,
         canPromoteMemory: cas.canPromoteMemory,
+        turnSequence: stopTurnSequence,
       };
     })
     : null;
+  const stopTurnSequence = causalStop?.turnSequence ?? turnIdentity.order;
   let memoryHandoff = null;
   let memoryAttempt = null;
   if (finalizing) {
