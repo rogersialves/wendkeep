@@ -54,6 +54,46 @@ test('[req:MEM-STOP-7] privacy scanner accepts only the synthetic fixture namesp
   assert.deepEqual(inspectFixtureSource('virtual.test.mjs', source), []);
 });
 
+test('[req:OBS-14] sensor schema fields are public config without bypassing unknown fields', () => {
+  const sample = runtimeSamples();
+  const longCommand = [
+    'node --test tests/memory-activation.test.mjs',
+    ' tests/session-stop-',
+    'migration-lifecycle.test.mjs',
+  ].join('');
+  const sensor = {
+    id: 'session-causality',
+    name: 'Session causality',
+    description: longCommand,
+    severity: 'critical',
+    type: 'command',
+    command: longCommand,
+  };
+
+  assert.deepEqual(inspectFixtureSource(
+    'wendkeep.sensors.json',
+    JSON.stringify(sensor, null, 2),
+  ), []);
+  assert.deepEqual(inspectFixtureSource(
+    'wendkeep.sensors.json',
+    JSON.stringify({
+      ...sensor,
+      description: `Session causality ${sample.opaqueId}`,
+      command: `node --test --session ${sample.opaqueId}`,
+    }, null, 2),
+  ), [
+    'wendkeep.sensors.json:4:opaque-identifier',
+    'wendkeep.sensors.json:7:opaque-identifier',
+  ]);
+  assert.deepEqual(inspectFixtureSource(
+    'wendkeep.sensors.json',
+    JSON.stringify({ ...sensor, session_id: sample.opaqueId }, null, 2),
+  ), [
+    'wendkeep.sensors.json:8:opaque-identifier',
+    'wendkeep.sensors.json:8:unapproved-fixture-value',
+  ]);
+});
+
 test('[req:MEM-STOP-7] privacy diagnostics never disclose rejected values', () => {
   const sample = runtimeSamples();
   const source = `const projectId = ${JSON.stringify(sample.consumerLabel)};`;

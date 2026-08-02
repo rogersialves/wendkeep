@@ -32,6 +32,7 @@ import {
   yamlQuote,
 } from './obsidian-common.mjs';
 import { resolveSessionIdentity } from './session-identity.mjs';
+import { readCodexRolloutMeta } from './codex-rollout-meta.mjs';
 import { mutateSessionNote } from './session-note-io.mjs';
 
 function sessionIdFromInput(input) {
@@ -52,6 +53,12 @@ function causalTurnPatch(input, now) {
     recovery_activation_id: randomUUID(),
     recovery_started_at: formatLocalIso(now),
   };
+}
+
+function isCodexSubagentTranscript(identity) {
+  if (identity?.provider !== 'codex' || !identity.transcriptPath) return false;
+  const inspected = readCodexRolloutMeta(identity.transcriptPath);
+  return Boolean(inspected?.ok && inspected.meta?.source?.subagent);
 }
 
 function buildSessionContent({ relPath, now, summary = 'session', sessionId = '', reason = 'Sessão criada automaticamente pelo hook UserPromptSubmit.' }) {
@@ -340,6 +347,21 @@ function main() {
     return;
   }
   const sessionId = identity.canonicalConversationId;
+
+  // UserPromptSubmit also fires inside Codex subagents. The child belongs to the parent's
+  // observability graph, but it is not a new main turn: registering it through causalTurnPatch
+  // permanently inflated the parent's sequence and made every later main Stop stale.
+  if (isCodexSubagentTranscript(identity)) {
+    const registered = readSessionRegistry(vaultBase).sessions?.[sessionId];
+    if (registered) {
+      upsertSessionRegistry(vaultBase, sessionId, {
+        transcript_paths: [identity.transcriptPath],
+        provider: identity.provider,
+      });
+    }
+    writeHookOutput({});
+    return;
+  }
 
   // Fast path: skip all writes if control file touched < 5 min ago and session matches
   try {

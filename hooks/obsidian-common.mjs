@@ -321,6 +321,13 @@ function nonNegativeSequence(value, fallback = null) {
   return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : fallback;
 }
 
+export function resolveRegisteredTurnSequence(entry = {}, turnId = '', fallback = 0) {
+  const registered = turnId
+    ? nonNegativeSequence(entry?.turn_sequences?.[String(turnId)])
+    : null;
+  return registered === null ? nonNegativeSequence(fallback, 0) : registered;
+}
+
 function cloneRegistry(registry = {}) {
   const sessions = Object.fromEntries(Object.entries(registry.sessions || {}).map(([id, entry]) => [
     id,

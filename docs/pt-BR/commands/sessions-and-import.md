@@ -30,6 +30,7 @@ npx wendkeep hook <nome>
 npx wendkeep session list
 npx wendkeep session show <id>
 npx wendkeep session use <id>
+npx wendkeep hook session-backfill --session <id> [--write]
 npx wendkeep import [opções]
 ```
 
@@ -38,18 +39,26 @@ npx wendkeep import [opções]
 - `wendkeep hook <name>` lê o payload do agente em stdin; nomes válidos aparecem em `--help`.
 - `SessionStart` abre uma activation, isto é, um epoch que continua ativo por vários `Stop`; só um
   novo `SessionStart` torna o epoch anterior superseded.
-- `UserPromptSubmit` avança o turno nativo da activation ativa. Se encontrar um registry legado
-  com o epoch fechado, abre exatamente uma activation de recuperação; repetir o mesmo prompt não
-  abre outra.
-- No Codex, `session_id`, o `turn_id` nativo e a ordem observada no transcript bastam para resolver
-  o turno. O payload do hook não precisa inventar `activation_id` nem `turn_sequence`.
+- `UserPromptSubmit` do agente principal avança o turno nativo da activation ativa. Um prompt de
+  rollout Codex com `source.subagent` apenas registra o path para observabilidade: não avança a
+  sequência, não entra em `turn_sequences` e não substitui o transcript principal. Se o prompt
+  principal encontra um registry legado com o epoch fechado, abre exatamente uma activation de
+  recuperação; repetir o mesmo prompt não abre outra.
+- No Codex, `session_id` e o `turn_id` nativo bastam para resolver o turno. O Stop prova o ID no
+  transcript e prefere `SESSION_REGISTRY.turn_sequences[turn_id]`; a ordem local do transcript é
+  fallback para registry legado. Assim, turnos intercalados de subagents não tornam o Stop da mãe
+  artificialmente `stale_turn`. O payload não precisa inventar `activation_id` ou `turn_sequence`.
 - `Stop` aceita somente o turno comprovado pelo transcript e pela activation ativa compatível.
   Duplicatas são no-op; Stops stale/superseded não publicam memória nem sobrescrevem o checkpoint
   de um epoch mais novo.
 - `Stop` recebe deadline absoluto de **45 s** desde a entrada do hook. A leitura verifica o relógio
   entre rollouts e a cada chunk; ao atingir o limite, devolve `degraded` antes do timeout do host.
-- `SubagentStop` recebe deadline absoluto de **15 s**. Sinais que chegam na janela de **250 ms**
-  são coalescidos: somente a maior sequência recompõe/publica, sem perder o último filho.
+- `SubagentStop` recebe deadline absoluto de **15 s** e resolve o rollout filho pelo campo oficial
+  Codex `agent_transcript_path` (também aceita `agentTranscriptPath`); `transcript_path` continua
+  identificando a sessão-mãe. Antes de qualquer escrita, `source.subagent`, ID, sessão canônica e
+  `parent_thread_id` são validados; o pai deve corresponder a um root comprovado da sessão. Sinais
+  que chegam na janela de **250 ms** são coalescidos: somente a maior sequência
+  recompõe/publica, sem perder o último filho.
 - A observabilidade usa tri-state: `complete` publica o snapshot integral; `none` representa zero
   comprovado por Stop causal ou scan offline estável; `degraded` preserva o snapshot anterior e
   diagnostics allowlisted. `SubagentStop` isolado nunca publica `none`.
@@ -63,6 +72,10 @@ npx wendkeep import [opções]
 - `import` reconcilia a observabilidade mesmo quando nenhum `wk-turn` está ausente: schema legado,
   frontier stale ou manifest não comprovado disparam recomposição sem duplicar iterações. Um
   checkpoint fresco permanece byte-idêntico; `degraded` é reportado e não altera a nota.
+- `hook session-backfill` recupera `wk-turn` ausente da sessão selecionada. Sem `--write`, apenas
+  relata. Em Codex, `missingTurns` contém somente turnos com `task_complete`; turnos ainda abertos
+  aparecem em `incompleteTurns` e nunca são gravados. `--write` aplica apenas os candidatos
+  concluídos e uma segunda execução é idempotente.
 - Exit `0` indica processamento consistente; exit não zero indica configuração, fonte ou escrita
   inválida sem transformar isso em sucesso parcial silencioso.
 
@@ -71,6 +84,8 @@ npx wendkeep import [opções]
 ```bash
 npx wendkeep session list
 npx wendkeep session show 019abc-session-id
+npx wendkeep hook session-backfill --session 019abc-session-id
+npx wendkeep hook session-backfill --session 019abc-session-id --write
 npx wendkeep import --source codex --since 2026-07-01 --dry-run --json
 ```
 
@@ -97,6 +112,10 @@ sem criar um novo bloco de turno.
   compatível foi encontrada; o attempt fica observável, mas não publica memória.
 - Stop atrasado aparece como `stale_turn`/`superseded`: o epoch mais novo e seu checkpoint são
   preservados; não force a reaplicação do payload antigo.
+- `session-backfill` lista `incompleteTurns`: aguarde o `task_complete`/Stop desse turno e repita;
+  não edite a nota nem force o turno parcial. Quando o mesmo turno recebe `task_complete`, a
+  próxima execução passa a considerá-lo elegível. Transcripts Claude preservam o contrato
+  histórico e não exigem esse evento Codex.
 - Duplicatas de forks: limite por fonte/data e revise `forked_from_id`/`source.subagent`.
 - Codex não captura: aprove os hooks e reinicie a sessão após `sync`.
 - Custo contaminado: valide `session_id → session_file → transcript_path → provider`.

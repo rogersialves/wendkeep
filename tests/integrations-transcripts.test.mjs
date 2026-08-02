@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  completedCodexTurnIdsContent,
   parseClaudeTranscriptContent,
   parseCodexTranscriptContent,
   parseTranscriptContent,
@@ -418,6 +419,15 @@ test('[req:MOD-21] resolveTurnIdentity usa id solicitado, latest e ordem observa
   });
   assert.equal(resolveTurnIdentity(EXPECTED_CODEX, 'turno-ausente'), null);
   assert.equal(resolveTurnIdentity({ turns: [] }), null);
+});
+
+test('[req:IMPORT-7] completude Codex vem somente de task_complete do mesmo turn_id', () => {
+  const content = jsonl([
+    { type: 'event_msg', payload: { type: 'task_started', turn_id: 'turn-completo' } },
+    { type: 'event_msg', payload: { type: 'task_complete', turn_id: 'turn-completo' } },
+    { type: 'event_msg', payload: { type: 'task_started', turn_id: 'turn-em-execucao' } },
+  ]);
+  assert.deepEqual([...completedCodexTurnIdsContent(content)], ['turn-completo']);
 });
 
 test('[req:MOD-20] [req:MOD-21] parsers por conteúdo são determinísticos e não mutam opções', () => {

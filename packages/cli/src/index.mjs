@@ -117,7 +117,7 @@ Usage:
   wendkeep --help              Show this help.
 `;
 
-function runHook(name) {
+function runHook(name, args = []) {
   if (!name) {
     process.stderr.write('wendkeep hook: missing hook name\n');
     process.exit(2);
@@ -133,7 +133,7 @@ function runHook(name) {
   }
   // Spawn exactly as the agent would run `node <hook>.mjs`: stdio inherited so the
   // hook's stdin (agent JSON) and stdout (hookSpecificOutput) pass through untouched.
-  const r = spawnSync(process.execPath, [file], { stdio: 'inherit' });
+  const r = spawnSync(process.execPath, [file, ...args], { stdio: 'inherit' });
   process.exit(r.status ?? 0);
 }
 
@@ -207,7 +207,7 @@ async function main(argv) {
       break;
     }
     case 'hook':
-      runHook(rest[0]);
+      runHook(rest[0], rest.slice(1));
       break;
     case 'doctor': {
       const { runDoctor } = await import('../../../src/doctor.mjs');

@@ -68,16 +68,16 @@ test('extractReleaseNotes: throws when the version is absent', () => {
   assert.throws(() => extractReleaseNotes(FIXTURE, '9.9.9'), /9\.9\.9/);
 });
 
-test('[sensor:release-tests] 0.67.0 notes are extractable and match the package', () => {
-  const release = extractReleaseNotes(CHANGELOG, '0.67.0');
-  assert.equal(PACKAGE.version, '0.67.0');
-  assert.equal(release.date, '2026-08-01');
-  assert.match(release.notes, /profile route/i);
-  assert.match(release.notes, /FLOW.*GUIDE.*GOVERN.*ASSURE/is);
-  assert.match(release.notes, /OFF.*humano|humano.*OFF/i);
-  assert.match(release.notes, /Obsidian/i);
-  assert.match(release.notes, /P\/R\/E\/V\/C/i);
-  assert.doesNotMatch(release.notes, /observabilidade Codex/i);
+test('[sensor:release-tests] 0.67.1 notes are extractable and match the package', () => {
+  const release = extractReleaseNotes(CHANGELOG, '0.67.1');
+  assert.equal(PACKAGE.version, '0.67.1');
+  assert.equal(release.date, '2026-08-02');
+  assert.match(release.notes, /turn_sequences\[turn_id\]/i);
+  assert.match(release.notes, /agent_transcript_path/i);
+  assert.match(release.notes, /session-backfill/i);
+  assert.match(release.notes, /task_complete/i);
+  assert.match(release.notes, /incompleteTurns/i);
+  assert.doesNotMatch(release.notes, /019f[0-9a-f-]+/i);
 });
 
 test('auto-tag: existing tag still refreshes the GitHub Release from CHANGELOG', () => {

@@ -382,7 +382,7 @@ dirigido `memory recover-attempt <sessão> --vault <cofre>` e só então autoriz
 altera apenas registry/checkpoint. O doctor apenas diagnostica. Veja sintaxe, pré-condições e
 falhas fechadas em [memória e curadoria](docs/pt-BR/commands/memory.md).
 
-As notas de sessão usam um único snapshot vivo `## Agentes, tokens e custos`. Os hooks do agente principal e dos subagents recompõem o bloco atomicamente, incluindo custo, dimensões de tokens, reasoning e effort por modelo/origem.
+As notas de sessão usam um único snapshot vivo `## Agentes, tokens e custos`. Os hooks do agente principal e dos subagents recompõem o bloco atomicamente, incluindo custo, dimensões de tokens, reasoning e effort por modelo/origem. No Codex, prompts de subagents registram o rollout para observabilidade sem avançar a sequência do agente principal; `SubagentStop` lê o filho em `agent_transcript_path` e só persiste o sinal quando seu `parent_thread_id` corresponde a um root validado da sessão. O Stop principal usa o mapeamento causal de `turn_id` do registry antes da ordem local do transcript. Para recuperar marcadores ausentes com a conversa aberta, `hook session-backfill` é dry-run por padrão e nunca grava um turno Codex sem `task_complete`.
 
 ## Memória retroativa (`import`) — instale hoje, lembre de ontem
 

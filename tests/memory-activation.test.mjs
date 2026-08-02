@@ -329,3 +329,64 @@ test('[req:HOOK-MEM-1] SessionStart opens epochs and UserPromptSubmit only advan
     rmSync(vault, { recursive: true, force: true });
   }
 });
+
+test('[req:MEM-STOP-2] UserPromptSubmit de subagent registra o path sem avançar o turno principal', () => {
+  const vault = mkdtempSync(join(tmpdir(), 'wk-subagent-prompt-causality-'));
+  const sessionId = 'wk-fixture-session-subagent-causality';
+  const parentTranscript = join(vault, 'wk-fixture-parent-rollout.jsonl');
+  const childTranscript = join(vault, 'wk-fixture-child-rollout.jsonl');
+  try {
+    writeFileSync(parentTranscript, `${JSON.stringify({
+      type: 'session_meta',
+      payload: {
+        id: 'wk-fixture-parent-rollout', session_id: sessionId, model_provider: 'openai',
+      },
+    })}\n`);
+    writeFileSync(childTranscript, `${JSON.stringify({
+      type: 'session_meta',
+      payload: {
+        id: 'wk-fixture-child-rollout',
+        session_id: sessionId,
+        parent_thread_id: 'wk-fixture-parent-rollout',
+        model_provider: 'openai',
+        source: {
+          subagent: {
+            thread_spawn: { parent_thread_id: 'wk-fixture-parent-rollout', depth: 1 },
+          },
+        },
+      },
+    })}\n`);
+
+    const start = runHook('hooks/session-start.mjs', vault, {
+      session_id: sessionId,
+      transcript_path: parentTranscript,
+      activation_id: 'parent-activation',
+    });
+    assert.equal(start.status, 0, start.stderr);
+
+    const parentPrompt = runHook('hooks/session-ensure.mjs', vault, {
+      session_id: sessionId,
+      transcript_path: parentTranscript,
+      turn_id: 'parent-turn-1',
+      prompt: '[wk-fixture] Prompt principal sintético.',
+    });
+    assert.equal(parentPrompt.status, 0, parentPrompt.stderr);
+
+    const childPrompt = runHook('hooks/session-ensure.mjs', vault, {
+      session_id: sessionId,
+      transcript_path: childTranscript,
+      turn_id: 'child-turn-1',
+      prompt: '[wk-fixture] Prompt filho sintético.',
+    });
+    assert.equal(childPrompt.status, 0, childPrompt.stderr);
+
+    const entry = readSessionRegistry(vault).sessions[sessionId];
+    assert.equal(entry.last_turn_sequence, 1);
+    assert.equal(entry.turn_sequences['parent-turn-1'], 1);
+    assert.equal(entry.turn_sequences['child-turn-1'], undefined);
+    assert.equal(entry.transcript_path, parentTranscript);
+    assert.deepEqual(new Set(entry.transcript_paths), new Set([parentTranscript, childTranscript]));
+  } finally {
+    rmSync(vault, { recursive: true, force: true });
+  }
+});

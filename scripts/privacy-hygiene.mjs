@@ -82,6 +82,18 @@ const GENERATED_INTEGRITY_FIELDS = new Map([
   ['tasksHash', 12],
   ['effectiveSpecHash', 64],
 ]);
+const SENSOR_CONFIG_FIELDS = new Set([
+  '$schema',
+  'command',
+  'description',
+  'id',
+  'name',
+  'report',
+  'severity',
+  'source',
+  'type',
+  'version',
+]);
 
 function normalizeRelativePath(path) {
   return String(path).split(sep).join('/').replace(/^\.\//, '');
@@ -154,6 +166,16 @@ function allowedGeneratedEvidence(relativePath, field, value) {
   ));
 }
 
+function allowedStaticSensorIdentifier(relativePath, field, value) {
+  if (normalizeRelativePath(relativePath) !== 'wendkeep.sensors.json'
+    || !SENSOR_CONFIG_FIELDS.has(field)) return false;
+
+  const opaqueTokens = String(value ?? '').match(/\b[A-Za-z0-9_-]{32,}\b/g) ?? [];
+  return opaqueTokens.length > 0 && opaqueTokens.every((token) => (
+    /^[A-Za-z]+(?:-[A-Za-z]+){2,}$/.test(token)
+  ));
+}
+
 function allowedSyntheticLifecyclePath(relativePath, value) {
   if (!MEMORY_FIXTURE_SOURCES.has(normalizeRelativePath(relativePath))) return false;
   const expanded = String(value).replaceAll(
@@ -184,7 +206,8 @@ function structuralCategories(value) {
 function categoriesForLiteral(value, field, relativePath) {
   const categories = structuralCategories(value).filter((category) => (
     category !== 'opaque-identifier'
-    || (!allowedGeneratedIntegrityHash(relativePath, field, value)
+    || (!allowedStaticSensorIdentifier(relativePath, field, value)
+      && !allowedGeneratedIntegrityHash(relativePath, field, value)
       && !allowedGeneratedEvidence(relativePath, field, value))
   ));
   const approvedFixtureValue = allowedFixtureValue(value)
