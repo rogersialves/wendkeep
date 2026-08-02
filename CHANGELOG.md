@@ -20,6 +20,13 @@ All notable changes to **wendkeep** are documented here. Format based on
   `task_complete`, separa `missingTurns` de `incompleteTurns`, permanece dry-run por padrão e aplica
   somente turnos concluídos de forma idempotente. A CLI agora encaminha `--session`, `--vault`,
   `--write` e demais argumentos ao hook executado. README e guias PT-BR/EN documentam o reparo.
+- **O bloco gerenciado do `AGENTS.md` exige roteamento adaptativo antes de editar.** O harness
+  inspeciona o perfil-base, classifica a solicitação, registra uma lease temporária entre `FLOW`,
+  `GUIDE`, `GOVERN` e `ASSURE` e confirma o perfil efetivo; `OFF` nunca é escolhido pela LLM e a
+  escolha explícita do usuário prevalece.
+- **O scanner de privacidade distingue configuração pública de identificadores privados.** Comandos
+  longos legítimos em `wendkeep.sensors.json` deixam de gerar falso positivo, sem permitir que UUID,
+  hash, token compacto, campo desconhecido ou path absoluto sejam ocultados pela exceção.
 
 ## [0.67.0] — 2026-08-01
 
