@@ -1,12 +1,30 @@
 ---
 name: wk-workflow
-description: Use quando o usuário pedir para implementar, criar, corrigir, refatorar, adicionar ou alterar código: leia o perfil efetivo e roteie OFF/FLOW/GUIDE/GOVERN/ASSURE ANTES de editar. Keep Core permanece ativo; GOVERN é o padrão compatível.
+description: Use quando o usuário pedir para implementar, criar, corrigir, refatorar, adicionar ou alterar código: classifique e registre a rota temporária FLOW/GUIDE/GOVERN/ASSURE ANTES de editar, então siga o perfil efetivo. Keep Core permanece ativo; OFF nunca é automático.
 ---
 # Perfis de Operação — roteador de trabalho do wendkeep
 
 Use ao começar implementação, correção ou refatoração. **Keep Core permanece sempre ativo**
 em todos os perfis: Vault, sessão, identidade, memória, lessons e persistência. Na ausência de
 configuração válida, **GOVERN é o padrão** compatível.
+
+## Seleção temporária por solicitação
+
+Antes de editar, classifique a implementação atual e registre a escolha auditável com
+`wendkeep profile route <FLOW|GUIDE|GOVERN|ASSURE> --session <id> --reason <texto>`.
+A lease vale somente para a solicitação atual; ao encerrá-la, o perfil persistente da
+sessão/projeto volta a valer. **OFF nunca é uma escolha automática da LLM**: somente uma pessoa
+pode persistir `profile use OFF` explicitamente.
+
+- **FLOW:** ajuste local, reversível e de escopo fechado, sem contrato/spec, segurança,
+  dependência, CI/release ou policy.
+- **GUIDE:** mudança compacta de comportamento que precisa de change/spec, sem revisão formal.
+- **GOVERN:** escolha conservadora em caso de dúvida ou risco e para superfícies sensíveis.
+- **ASSURE:** GOVERN quando confirmação explícita e handoff fazem parte do contrato.
+
+O harness da LLM faz essa classificação semântica; o Wend Runtime valida e aplica a lease.
+Se não houver uma sessão causal identificada ou o comando falhar, não fabrique estado: use o
+perfil efetivo já injetado e trate `GOVERN` como fallback conservador quando ele for o padrão.
 
 <HARD-GATE>
 Antes de editar, leia o **perfil efetivo** injetado pelo WendKeep e siga somente sua rota:

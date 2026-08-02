@@ -4,6 +4,34 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.67.0] — 2026-08-01
+
+### Added
+
+- **O harness da LLM pode selecionar uma rota Wend temporária por solicitação.**
+  `profile route <FLOW|GUIDE|GOVERN|ASSURE> --session <id> --reason <texto>` grava uma lease
+  auditável ligada ao prompt atual, sem alterar o perfil persistente do projeto ou da sessão.
+  `OFF` permanece exclusivamente humano e é rejeitado na seleção adaptativa. Contexto sem prompt
+  causal completo e coincidente no registry falha antes de mutar, e `profile status --session`
+  mostra perfil-base e estado da lease também na saída humana.
+- **A lease expira causalmente sem interromper implementações longas.** Um Stop aceito a consome
+  por CAS; bloqueio/retry a preserva, e o próximo prompt restaura o perfil-base mesmo depois de
+  crash ou hook ausente. Skills e AGENTS gerados ensinam a matriz FLOW/GUIDE/GOVERN/ASSURE.
+
+### Fixed
+
+- **Sessões Obsidian não renderizam envelopes internos do assistente como HTML.** A captura remove
+  metadata completa ou truncada de citação somente das respostas do assistente e escapa tags
+  XML-like nas linhas geradas, preservando relatos do usuário e autolinks HTTP(S). Reimport e
+  `SessionStop` convergem no mesmo normalizador idempotente, e o encerramento migra somente campos
+  gerados reconhecíveis de notas antigas sem reescrever prosa autoral.
+- **README e guias bilíngues explicam as letras `P/R/E/V/C` e a duração das escolhas.** A
+  documentação distingue `profile use` persistente de `profile route` por solicitação e deixa
+  explícito que a classificação semântica pertence ao harness, não a heurísticas do runtime.
+- **Sensores vermelhos deixam diagnóstico acionável sem persistir logs verdes.** O runner captura
+  stdout/stderr com limite, redige segredos e grava no máximo 2.000 caracteres apenas na entrada
+  vermelha de `evidencia.json`, em vez de descartar a causa da falha.
+
 ## [0.66.5] — 2026-08-01
 
 ### Fixed

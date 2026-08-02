@@ -1,4 +1,8 @@
-import { isBootstrapPrompt, redactSecrets } from './prompt-content.mjs';
+import {
+  isBootstrapPrompt,
+  redactSecrets,
+  sanitizeAssistantMessage,
+} from './prompt-content.mjs';
 import {
   addUsage,
   emptyTokenUsage,
@@ -71,6 +75,14 @@ function addConversation(turn, role, value) {
   if (!turn.conversation.some((item) => item.role === role && item.text === text)) {
     turn.conversation.push({ role, text });
   }
+}
+
+function addAssistantMessage(result, turn, value) {
+  const text = sanitizeAssistantMessage(value);
+  if (!text) return;
+  addUnique(result.assistantMessages, text);
+  addUnique(turn.assistantMessages, text);
+  addConversation(turn, 'Assistente', text);
 }
 
 function normalizeRoot(value) {
@@ -207,9 +219,7 @@ export function parseCodexTranscriptContent(content, options = {}) {
       const text = event.payload.message || event.payload.text || '';
       if (text) {
         const turn = ensureTurn(event.payload.turn_id || result.latestTurnId, event.timestamp);
-        addUnique(result.assistantMessages, text);
-        addUnique(turn.assistantMessages, text);
-        addConversation(turn, 'Assistente', text);
+        addAssistantMessage(result, turn, text);
       }
       continue;
     }
@@ -234,9 +244,7 @@ export function parseCodexTranscriptContent(content, options = {}) {
         addConversation(turn, 'Usuário', text);
       }
       if (payload.role === 'assistant') {
-        addUnique(result.assistantMessages, text);
-        addUnique(turn.assistantMessages, text);
-        addConversation(turn, 'Assistente', text);
+        addAssistantMessage(result, turn, text);
       }
       continue;
     }
@@ -356,9 +364,7 @@ export function parseClaudeTranscriptContent(content, options = {}) {
       const blocks = Array.isArray(event.message?.content) ? event.message.content : [];
       for (const block of blocks) {
         if (block?.type === 'text' && block.text && block.text.trim()) {
-          addUnique(result.assistantMessages, block.text);
-          addUnique(turn.assistantMessages, block.text);
-          addConversation(turn, 'Assistente', block.text);
+          addAssistantMessage(result, turn, block.text);
         } else if (block?.type === 'tool_use') {
           const name = block.name || 'tool_use';
           addUnique(result.tools, name);

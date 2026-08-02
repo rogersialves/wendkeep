@@ -36,6 +36,12 @@ test('syncDefs: writes the managed AGENTS.md section, idempotent, user content p
     for (const profile of ['FLOW', 'GUIDE', 'GOVERN', 'ASSURE']) {
       assert.match(md, new RegExp(`\\b${profile}\\b`), `[req:OP-5] ${profile} route is declared`);
     }
+    assert.match(md, /profile route <FLOW\|GUIDE\|GOVERN\|ASSURE>/,
+      '[req:OP-13] managed block exposes task-scoped routing');
+    assert.match(md, /OFF[\s\S]{0,180}(?:never|human)/i,
+      '[req:OP-13] managed block forbids automatic OFF');
+    assert.match(md, /request|task-scoped|temporary/i,
+      '[req:OP-13] managed block explains lease scope');
     assert.doesNotMatch(md, /Work\s+through its change loop/i,
       '[req:OP-5] the managed block must not impose GOVERN on every profile');
     // idempotente: re-run = 1 seção só

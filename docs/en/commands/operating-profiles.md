@@ -14,9 +14,9 @@ opt-in and runs that command's own validations and gates.
 
 ## When to use
 
-Use `profile` to inspect or explicitly select an Operating Profile. Use `FLOW` for local,
-reversible `spec_impact:none` maintenance that fits an Execute → Validate microcontract without a
-change.
+Use `profile use` for a persistent human selection and `profile route` for the harness to record
+the temporary route for the current implementation. Use `FLOW` for local, reversible
+`spec_impact:none` maintenance that fits an Execute → Validate microcontract without a change.
 
 ## When not to use
 
@@ -28,7 +28,8 @@ change.
 ## Prerequisites
 
 - An initialized project whose `.wendkeep.json` is bound to the correct Vault.
-- For a session override, one unambiguous session in `SESSION_REGISTRY.json`.
+- For an override or temporary route, one unambiguous session in `SESSION_REGISTRY.json`; `route`
+  also requires the current prompt to have a recorded causal frontier.
 - For FLOW, a Git repository, a path allowlist, a reason, and at least one existing sensor in
   `wendkeep.sensors.json`.
 
@@ -37,6 +38,7 @@ change.
 ```bash
 npx wendkeep profile status [--project <path>] [--vault <path>] [--session <id>] [--json]
 npx wendkeep profile use <profile> [--project <path>] [--vault <path>] [--session <id>] [--json]
+npx wendkeep profile route <FLOW|GUIDE|GOVERN|ASSURE> --session <id> --reason <text> [--project <path>] [--vault <path>] [--json]
 npx wendkeep flow start <slug> --allow <path> [--allow <path>...] --sensor <id> [--sensor <id>...] --reason <text> [--session <id>]
 npx wendkeep flow status [<id>]
 npx wendkeep flow show <id> [--session <id>]
@@ -75,15 +77,42 @@ Harness. The workspaces remain private and are not published as independent npm 
 | `GOVERN` | P → R → E → V | Current a2 loop and conservative fallback. |
 | `ASSURE` | P → R → E → V → C | Governance plus confirmation and handoff. |
 
-- Resolution is explicit session override → project `harness.profile` → `GOVERN`. Heuristics,
-  diff size, prompt text, environment variables, or read failures never select `OFF`.
-- `profile status` prints the effective profile and source; `--json` emits structured output. When
-  an explicit Vault preserves the selection despite a corrupt binding, output includes
+### Route legend
+
+The letters are work stages, not individual commands:
+
+- `P` = **Plan/Propose** — understand the request, bound the scope, and record the approach.
+- `R` = **Review** — inspect the proposal/design before execution; this is the formal a2-loop review.
+- `E` = **Execute** — edit the permitted paths and artifacts.
+- `V` = **Validate** — run tests, sensors, and checks and record evidence.
+- `C` = **Confirm/hand off** — obtain explicit confirmation and complete the handoff.
+
+So, `P → R → E → V` means “plan/propose, review, execute, and validate”. `FLOW` starts at the
+execution/validation microcontract; `OFF` imposes no automatic Wend route and returns process
+ownership to the native LLM harness.
+
+- The LLM harness semantically classifies the request and records `profile route`; Wend Runtime
+  does not classify text, diff size, heuristics, or environment variables. It validates and applies
+  the deterministic lease.
+- For a local, reversible fix with no contract/spec change, choose `FLOW`. For a compact behavior
+  change that needs a change but no formal review, choose `GUIDE`. For uncertainty, risk, security,
+  public contracts, dependencies, CI/release, or policy, choose `GOVERN`. Use `ASSURE` when
+  confirmation and handoff are part of the contract.
+- `OFF` can never be an adaptive route; only a human persists it explicitly through
+  `profile use OFF`. An `OFF` base may still receive a temporary elevation to a Wend route.
+
+- Resolution is active prompt lease → persistent session override → project
+  `harness.profile` → `GOVERN`. Invalid/expired leases and read failures never select `OFF`.
+- `profile status` prints the effective profile and source. With `--session`, human output adds
+  `base=<profile>/<source>` and `lease=<state>`; `--json` emits the same data structurally. When an
+  explicit Vault preserves the selection despite a corrupt binding, output includes
   `binding_error` and the diagnostic is also written to stderr.
 - `profile use` validates names and flags strictly; a duplicate/incomplete singleton option or a
   value beginning with `--` fails before I/O. Without `--session`, it atomically changes the
   project binding; with `--session`, it records override, source, and timestamp without changing
   session identity.
+- `profile route` requires `--session` and `--reason`, accepts only the four adaptive profiles,
+  and records lease id, reason, turn/sequence, and timestamp without touching persistent profiles.
 - `.wendkeep.json` stays on `schemaVersion: 1`; the additive field is, for example,
   `"harness": { "profile": "GOVERN" }`. A legacy binding without it also resolves to `GOVERN`.
 - A corrupt binding never means `OFF`. When the payload or legacy integration identifies one
@@ -127,13 +156,39 @@ Harness. The workspaces remain private and are not published as independent npm 
 - Exit `0` means a successful query or transition; exit `1` means a policy/red-sensor block; exit
   `2` means invalid profile, session, flow, or arguments, with no partial mutation.
 
+### Selection scope
+
+Without `--session`, `profile use` writes `harness.profile` to `.wendkeep.json` and changes the
+project default for conversations/hooks that have no session override. With `--session <id>`, it
+writes an override only to that session's `SESSION_REGISTRY.json` and leaves the project default
+unchanged. Therefore, `profile use OFF` without `--session` is not an isolated test; if
+`.wendkeep.json` is committed, that choice is shared with other checkouts as well.
+
+`profile route` creates a lease only for the current request. An accepted `Stop` consumes it by
+CAS; if cleanup does not run, the next `UserPromptSubmit` advances the sequence and the lease is no
+longer effective. A blocked Stop preserves it for a retry of the same request. There is no
+wall-clock TTL that can interrupt long work. A session with no causal prompt recorded yet (missing
+turn, zero sequence, or missing/mismatched causal map entry) is rejected before any mutation.
+`status --session` includes the base profile and lease state in both human and `--json` output; in
+JSON the fields are `base_profile`, `base_source`, and `task_lease.state` (`active`, `consumed`,
+`expired`, `invalid`, or `absent`).
+
+```bash
+npx wendkeep profile status                       # project default
+npx wendkeep profile use GUIDE                   # change the project default
+npx wendkeep profile use FLOW --session <id>     # one session only
+npx wendkeep profile route FLOW --session <id> --reason "local adjustment"  # current request
+npx wendkeep profile status --session <id>       # session-effective profile
+```
+
 ## Examples
 
-Inspect the effective default and apply an override only to the current session:
+Inspect the effective default and route only the current implementation:
 
 ```bash
 npx wendkeep profile status
-npx wendkeep profile use OFF --session 019abc-session-id --json
+npx wendkeep profile route FLOW --session 019abc-session-id --reason "fix local typo" --json
+npx wendkeep profile status --session 019abc-session-id --json
 ```
 
 Run FLOW maintenance while capturing the `flow_id` returned by `start`:

@@ -14,9 +14,9 @@ deliberado e executa as validações e gates próprios daquele comando.
 
 ## Quando usar
 
-Use `profile` para consultar ou selecionar explicitamente um Perfil de Operação. Use `FLOW` para
-manutenção local, reversível e com `spec_impact:none` que caiba num microcontrato Executar →
-Validar, sem change.
+Use `profile use` para uma seleção humana persistente e `profile route` para o harness registrar a
+rota temporária da implementação atual. Use `FLOW` para manutenção local, reversível e com
+`spec_impact:none` que caiba num microcontrato Executar → Validar, sem change.
 
 ## Quando não usar
 
@@ -28,7 +28,8 @@ gates/policies do WendKeep; promova o trabalho para uma change.
 ## Pré-requisitos
 
 - Projeto inicializado, com `.wendkeep.json` vinculado ao Vault correto.
-- Para override de sessão, uma sessão inequívoca no `SESSION_REGISTRY.json`.
+- Para override ou rota temporária, uma sessão inequívoca no `SESSION_REGISTRY.json`; `route`
+  também exige que o prompt atual já tenha fronteira causal registrada.
 - Para FLOW, repositório Git, allowlist de paths, motivo e ao menos um sensor existente em
   `wendkeep.sensors.json`.
 
@@ -37,6 +38,7 @@ gates/policies do WendKeep; promova o trabalho para uma change.
 ```bash
 npx wendkeep profile status [--project <path>] [--vault <path>] [--session <id>] [--json]
 npx wendkeep profile use <perfil> [--project <path>] [--vault <path>] [--session <id>] [--json]
+npx wendkeep profile route <FLOW|GUIDE|GOVERN|ASSURE> --session <id> --reason <texto> [--project <path>] [--vault <path>] [--json]
 npx wendkeep flow start <slug> --allow <path> [--allow <path>...] --sensor <id> [--sensor <id>...] --reason <texto> [--session <id>]
 npx wendkeep flow status [<id>]
 npx wendkeep flow show <id> [--session <id>]
@@ -76,15 +78,42 @@ independentes.
 | `GOVERN` | P → R → E → V | Loop a2 atual e fallback conservador. |
 | `ASSURE` | P → R → E → V → C | Governança acrescida de confirmação e handoff. |
 
-- A resolução segue override explícito da sessão → `harness.profile` do projeto → `GOVERN`.
-  Heurística, tamanho do diff, texto do prompt, variável de ambiente ou erro de leitura nunca
+### Legenda da rota
+
+As letras são etapas do trabalho, não comandos individuais:
+
+- `P` = **Planejar/Propor** — entender o pedido, delimitar o escopo e registrar a abordagem.
+- `R` = **Revisar** — revisar proposta/design antes da execução; é a revisão formal do loop a2.
+- `E` = **Executar** — editar os paths e artefatos permitidos.
+- `V` = **Validar** — rodar testes, sensores e verificações e registrar evidência.
+- `C` = **Confirmar/entregar** — obter confirmação explícita e fazer handoff.
+
+Logo, `P → R → E → V` é “planejar/propor, revisar, executar e validar”. `FLOW` começa no
+microcontrato de execução/validação; `OFF` não impõe rota Wend automática e entrega o processo ao
+harness nativo da LLM.
+
+- O harness da LLM classifica semanticamente o pedido e registra `profile route`; o Wend Runtime
+  não classifica texto, tamanho do diff, heurística ou variável de ambiente. Ele valida e aplica a
+  lease determinística.
+- Para correção local, reversível e sem contrato/spec, escolha `FLOW`. Para mudança compacta de
+  comportamento que precisa de change sem revisão formal, escolha `GUIDE`. Em dúvida, risco,
+  segurança, contrato público, dependências, CI/release ou policy, escolha `GOVERN`. Use `ASSURE`
+  quando confirmação e handoff forem parte do contrato.
+- `OFF` nunca pode ser uma rota adaptativa; somente uma pessoa o persiste explicitamente por
+  `profile use OFF`. Uma base `OFF` ainda pode receber uma elevação temporária para rota Wend.
+
+- A resolução segue lease ativa do prompt → override persistente da sessão →
+  `harness.profile` do projeto → `GOVERN`. Lease inválida/expirada e erro de leitura nunca
   selecionam `OFF`.
-- `profile status` mostra perfil efetivo e origem; `--json` produz saída estruturada. Quando um
-  Vault explícito preserva a escolha apesar de binding corrompido, a saída inclui `binding_error`
-  e o diagnóstico também vai para stderr.
+- `profile status` mostra perfil efetivo e origem. Com `--session`, a saída humana acrescenta
+  `base=<perfil>/<origem>` e `lease=<estado>`; `--json` produz os mesmos dados estruturados. Quando
+  um Vault explícito preserva a escolha apesar de binding corrompido, a saída inclui
+  `binding_error` e o diagnóstico também vai para stderr.
 - `profile use` valida nome e flags estritamente; opção singleton duplicada, incompleta ou com
   valor iniciado por `--` falha antes de I/O. Sem `--session`, altera atomicamente o binding do
   projeto; com `--session`, grava override, origem e timestamp sem trocar a identidade da sessão.
+- `profile route` exige `--session` e `--reason`, aceita somente os quatro perfis adaptativos e
+  grava `lease_id`, motivo, turno/sequência e timestamp sem tocar no perfil persistente.
 - `.wendkeep.json` continua em `schemaVersion: 1`; o campo aditivo usa, por exemplo,
   `"harness": { "profile": "GOVERN" }`. Binding legado sem o campo também resolve `GOVERN`.
 - Binding corrompido nunca equivale a `OFF`. Quando o payload ou a integração legada identifica
@@ -126,13 +155,39 @@ independentes.
 - Exit `0` indica consulta ou transição concluída; exit `1` indica política/sensor vermelho; exit
   `2` indica perfil, sessão, flow ou argumentos inválidos, sem mutação parcial.
 
+### Escopo da escolha
+
+Sem `--session`, `profile use` grava `harness.profile` no `.wendkeep.json` e muda o padrão do
+projeto para as conversas/hooks que não tenham override de sessão. Com `--session <id>`, grava o
+override somente no `SESSION_REGISTRY.json` daquela sessão e preserva o padrão do projeto. Por
+isso, `profile use OFF` sem `--session` não é um teste isolado; se o `.wendkeep.json` for commitado,
+essa escolha também será compartilhada com outros checkouts.
+
+`profile route` cria uma lease apenas para a solicitação atual. Um `Stop` aceito a consome por
+CAS; se o cleanup não rodar, o próximo `UserPromptSubmit` avança a sequência e a lease deixa de ser
+efetiva. Stop bloqueado preserva a lease para o retry do mesmo pedido. Não há TTL de relógio que
+interrompa trabalho longo. Sessão ainda sem prompt causal registrado (turno ausente, sequência
+zero, mapa causal ausente ou divergente) é rejeitada antes de qualquer mutação. `status --session`
+inclui o perfil-base e o estado da lease tanto na saída humana quanto em `--json`; neste, os campos
+são `base_profile`, `base_source` e `task_lease.state` (`active`, `consumed`, `expired`, `invalid` ou
+`absent`).
+
+```bash
+npx wendkeep profile status                       # padrão do projeto
+npx wendkeep profile use GUIDE                   # altera o padrão do projeto
+npx wendkeep profile use FLOW --session <id>     # altera somente uma sessão
+npx wendkeep profile route FLOW --session <id> --reason "ajuste local"  # pedido atual
+npx wendkeep profile status --session <id>       # consulta a sessão efetiva
+```
+
 ## Exemplos
 
-Consultar o padrão efetivo e aplicar override somente à sessão atual:
+Consultar o padrão efetivo e rotear somente a implementação atual:
 
 ```bash
 npx wendkeep profile status
-npx wendkeep profile use OFF --session 019abc-session-id --json
+npx wendkeep profile route FLOW --session 019abc-session-id --reason "corrige typo local" --json
+npx wendkeep profile status --session 019abc-session-id --json
 ```
 
 Executar uma manutenção FLOW capturando o `flow_id` retornado por `start`:

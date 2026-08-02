@@ -230,6 +230,7 @@ test('[req:OP-9] DOC-8: perfis, Keep Core e FLOW têm contrato público bilíngu
       sessions: readFileSync(join(GUIDE_DIR.pt, 'sessions-and-import.md'), 'utf8'),
       keepCore: /Keep Core[\s\S]*(?:sempre ativo|permanece ativo)/i,
       explicitOff: /OFF[\s\S]*(?:explicitamente|seleção explícita)/i,
+      taskLease: /profile route[\s\S]*(?:solicitação atual|temporária|lease)/i,
       flowNoChange: /FLOW[\s\S]*(?:sem change|não cria[^\n]*change)/i,
       simpleCompat: /--simple[\s\S]*(?:não é|não equivale)[\s\S]*FLOW/i,
       vaultAlways: /OFF[\s\S]*(?:Vault|cofre)[\s\S]*(?:continua|permanece|ativo)/i,
@@ -242,6 +243,7 @@ test('[req:OP-9] DOC-8: perfis, Keep Core e FLOW têm contrato público bilíngu
       sessions: readFileSync(join(GUIDE_DIR.en, 'sessions-and-import.md'), 'utf8'),
       keepCore: /Keep Core[\s\S]*(?:always active|remains active)/i,
       explicitOff: /OFF[\s\S]*(?:explicitly|explicit selection)/i,
+      taskLease: /profile route[\s\S]*(?:current request|temporary|lease)/i,
       flowNoChange: /FLOW[\s\S]*(?:without a change|does not create[^\n]*change)/i,
       simpleCompat: /--simple[\s\S]*(?:is not|does not equal)[\s\S]*FLOW/i,
       vaultAlways: /OFF[\s\S]*Vault[\s\S]*(?:continues|remains|active)/i,
@@ -254,10 +256,12 @@ test('[req:OP-9] DOC-8: perfis, Keep Core e FLOW têm contrato público bilíngu
       assert.match(docs.guide, new RegExp(`\\b${profile}\\b`), `${locale}: guia sem ${profile}`);
     }
     for (const command of [
-      'wendkeep profile status', 'wendkeep profile use',
+      'wendkeep profile status', 'wendkeep profile use', 'wendkeep profile route',
       'wendkeep flow start', 'wendkeep flow status', 'wendkeep flow show',
       'wendkeep flow finish', 'wendkeep flow promote',
     ]) assert.match(docs.guide, new RegExp(command), `${locale}: guia sem ${command}`);
+    assert.match(docs.readme, docs.taskLease, `${locale}: README sem lease por solicitação`);
+    assert.match(docs.guide, docs.taskLease, `${locale}: guia sem lease por solicitação`);
 
     assert.match(
       docs.guide,

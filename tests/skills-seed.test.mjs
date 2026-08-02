@@ -63,6 +63,20 @@ test('[req:OP-4] [req:OP-5] wk-workflow routes by profile without a universal ch
   }
 });
 
+test('[req:OP-13] wk-workflow ensina seleção adaptativa temporária sem permitir OFF', () => {
+  for (const locale of ['pt-BR', 'en']) {
+    const body = wkSkills(locale).find((skill) => skill.name === 'wk-workflow').body;
+    assert.match(body, /wendkeep profile route <FLOW\|GUIDE\|GOVERN\|ASSURE>/);
+    assert.match(body, /--session <id>.*--reason/s);
+    assert.match(body, /tempor|request|solicita/i);
+    assert.match(body, /OFF[\s\S]{0,180}(?:nunca|never|human|humana)/i);
+    assert.match(body, /FLOW[\s\S]{0,240}(?:local|revers)/i);
+    assert.match(body, /GUIDE[\s\S]{0,240}(?:compact|compacta)/i);
+    assert.match(body, /GOVERN[\s\S]{0,240}(?:dúvida|uncertain|risk|risco)/i);
+    assert.match(body, /ASSURE[\s\S]{0,240}(?:confirm|handoff)/i);
+  }
+});
+
 // REQ-4 — o template do workflow documenta o formato de heading de requisito e
 // o suporte a múltiplos [req:] por tarefa (pt e en).
 test('wk-workflow teaches the requirement heading format and multi-[req:] support', () => {

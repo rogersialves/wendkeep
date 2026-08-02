@@ -129,6 +129,35 @@ test('runSensors: green/red by exit code; carries severity (undefined sensor = c
   assert.equal(ev[0].ts, '2026-07-05T00:00:00Z');
 });
 
+test('runSensors: sensor vermelho guarda diagnóstico limitado e sanitizado', () => {
+  let receivedOptions;
+  const spawn = (command, _args, options) => {
+    receivedOptions = options;
+    if (command === 'ok') return { status: 0, stdout: 'saída verde privada', stderr: '' };
+    return {
+      status: 1,
+      signal: null,
+      stdout: '✖ teste discriminante\n',
+      stderr: `AssertionError: falhou\nwhsec_abcdefghijk\nAPI_TOKEN=${'segredo-'.repeat(500)}`,
+    };
+  };
+
+  const evidence = runSensors([
+    { id: 'ok', command: 'ok' },
+    { id: 'bad', command: 'bad' },
+  ], ['ok', 'bad'], { spawn });
+
+  assert.deepEqual(receivedOptions.stdio, ['ignore', 'pipe', 'pipe']);
+  assert.equal(receivedOptions.encoding, 'utf8');
+  assert.equal(receivedOptions.maxBuffer, 8 * 1024 * 1024, 'captura do processo permanece limitada a 8 MiB');
+  assert.equal(evidence[0].note, undefined, 'saída verde não é persistida');
+  assert.match(evidence[1].note, /exit=1/);
+  assert.match(evidence[1].note, /AssertionError/);
+  assert.doesNotMatch(evidence[1].note, /segredo-/);
+  assert.doesNotMatch(evidence[1].note, /whsec_/);
+  assert.ok(evidence[1].note.length <= 2000, 'diagnóstico permanece limitado');
+});
+
 test('[req:OP-10] runSensors forwards the selected Vault environment to the sensor process', () => {
   let options;
   const env = { PATH: 'synthetic', OBSIDIAN_VAULT_PATH: 'C:\\synthetic-vault' };

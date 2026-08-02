@@ -116,6 +116,7 @@ test('[req:OP-9] npm pack leva módulos de profile/FLOW, docs bilíngues e resta
       'src/profile.mjs',
       'src/flow.mjs',
       'hooks/flow-core.mjs',
+      'hooks/operating-profile-task-store.mjs',
       'hooks/vault-path-safety.mjs',
     ]) {
       assert.ok(
@@ -131,7 +132,7 @@ test('[req:OP-9] npm pack leva módulos de profile/FLOW, docs bilíngues e resta
       const profiles = readFileSync(join(pkg, 'docs', locale, 'commands', 'operating-profiles.md'), 'utf8');
       for (const token of [
         'OFF', 'FLOW', 'GUIDE', 'GOVERN', 'ASSURE', 'Keep Core',
-        'wendkeep profile status', 'wendkeep flow finish', 'wendkeep flow promote',
+        'wendkeep profile status', 'wendkeep profile route', 'wendkeep flow finish', 'wendkeep flow promote',
       ]) assert.match(profiles, new RegExp(token), `guia empacotado ${locale} sem ${token}`);
     }
     const expectedDocs = ['pt-BR', 'en']

@@ -80,7 +80,13 @@ Cada sessão canônica aponta para provider, transcript, arquivo de nota e custo
 O registry mantém um epoch de `SessionStart` por activation e o turno nativo mais recente; vários
 `Stop` podem confirmar turnos do mesmo epoch sem fechá-lo. Importações repetidas do mesmo
 `session_id` são deduplicadas; o foco humano não encerra nem altera a identidade dos hooks. Cada
-iteração automática permanece Markdown válido mesmo quando uma fala precisa ser truncada. Hooks
+iteração automática permanece Markdown válido mesmo quando uma fala precisa ser truncada.
+Metadados internos terminais completos ou truncados são removidos somente das mensagens do
+assistente; uma reprodução escrita pelo usuário permanece no transcript. Na nota, tags XML-like
+são codificadas como texto visível — inclusive placeholders como `<session>` — sem alterar
+autolinks `<https://...>`. Reimport e `SessionStop` compartilham o mesmo normalizador idempotente;
+ao finalizar uma nota antiga, somente campos gerados reconhecíveis em `Iterações` e
+`Encerramento` são migrados, sem reescrever a prosa autoral. Hooks
 duplicados/stale convergem no mesmo frontier, e importações podem atualizar só a observabilidade
 sem criar um novo bloco de turno.
 

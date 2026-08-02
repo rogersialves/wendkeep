@@ -24,6 +24,7 @@ import { capturePlan } from '../hooks/plan-capture.mjs';
 import { setActiveChange } from '../hooks/change-core.mjs';
 import { upsertSessionRegistry } from '../hooks/obsidian-common.mjs';
 import { resolveHookOperatingProfile } from '../hooks/operating-profile-runtime.mjs';
+import { setSessionTaskOperatingProfile } from '../hooks/operating-profile-task-store.mjs';
 import { readMemoryLedger } from '../hooks/memory-store.mjs';
 import { seedMemoryV2 } from '../src/memory.mjs';
 import { bindProjectVault } from '../src/project-vault.mjs';
@@ -259,6 +260,99 @@ test('[req:OP-2] hook runtime resolves session override before project binding a
     assert.equal(invalid.profile, 'GOVERN');
     assert.equal(invalid.source, 'session-override-invalid');
     assert.equal(invalid.valid, false);
+  } finally {
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test('[req:OP-2] [req:OP-12] hook aplica lease somente no prompt ligado e restaura a base no seguinte', () => {
+  const fixture = makeBoundProject('OFF');
+  try {
+    upsertSessionRegistry(fixture.vault, 'task-runtime', {
+      status: 'active',
+      provider: 'claude',
+      operating_profile: 'OFF',
+      advance_turn_sequence: true,
+      turn_id: 'turn-1',
+      turn_sequence: 1,
+    });
+    setSessionTaskOperatingProfile(fixture.vault, 'task-runtime', 'GOVERN', {
+      reason: 'mudança de policy', leaseId: 'lease-govern', now: '2026-08-01T17:00:00.000Z',
+    });
+
+    const active = resolveHookOperatingProfile({
+      input: {
+        cwd: fixture.project, session_id: 'task-runtime',
+        turn_id: 'turn-1', turn_sequence: 1,
+      },
+      provider: 'claude',
+    });
+    assert.equal(active.profile, 'GOVERN');
+    assert.equal(active.source, 'task-lease');
+    assert.equal(active.baseProfile, 'OFF');
+    assert.equal(active.taskLease.state, 'active');
+
+    const nextPrompt = resolveHookOperatingProfile({
+      input: {
+        cwd: fixture.project, session_id: 'task-runtime',
+        turn_id: 'turn-2', turn_sequence: 2,
+      },
+      provider: 'claude',
+    });
+    assert.equal(nextPrompt.profile, 'OFF');
+    assert.equal(nextPrompt.source, 'session-override');
+    assert.equal(nextPrompt.taskLease.state, 'expired');
+
+    upsertSessionRegistry(fixture.vault, 'task-runtime', {
+      advance_turn_sequence: true, turn_id: 'turn-2', turn_sequence: 2,
+    });
+    const advancedRegistry = resolveHookOperatingProfile({
+      input: { cwd: fixture.project, session_id: 'task-runtime' },
+      provider: 'claude',
+    });
+    assert.equal(advancedRegistry.profile, 'OFF');
+    assert.equal(advancedRegistry.taskLease.state, 'expired');
+  } finally {
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test('[req:OP-12] change-nag consome lease no Stop aceito e preserva durante bloqueio/retry', () => {
+  const fixture = makeBoundProject('OFF');
+  const sessionId = 'task-stop';
+  const input = {
+    cwd: fixture.project,
+    session_id: sessionId,
+    turn_id: 'turn-stop',
+    turn_sequence: 1,
+  };
+  try {
+    upsertSessionRegistry(fixture.vault, sessionId, {
+      status: 'active', provider: 'claude',
+      advance_turn_sequence: true, turn_id: 'turn-stop', turn_sequence: 1,
+    });
+    setSessionTaskOperatingProfile(fixture.vault, sessionId, 'FLOW', {
+      reason: 'ajuste local', leaseId: 'lease-stop-ok', now: '2026-08-01T17:00:00.000Z',
+    });
+    const accepted = runHookMain('change-nag', input, { cwd: fixture.project });
+    assert.equal(accepted.status, 0, accepted.stderr);
+    assert.deepEqual(JSON.parse(accepted.stdout), {});
+    let registry = JSON.parse(readFileSync(join(fixture.vault, '.brain', 'SESSION_REGISTRY.json'), 'utf8'));
+    assert.equal(registry.sessions[sessionId].operating_profile_task.state, 'consumed');
+
+    addOpenChange(fixture.vault, 'task-stop-open');
+    setSessionTaskOperatingProfile(fixture.vault, sessionId, 'GOVERN', {
+      reason: 'change governada', leaseId: 'lease-stop-block', now: '2026-08-01T17:01:00.000Z',
+    });
+    const blocked = runHookMain('change-nag', input, { cwd: fixture.project });
+    assert.equal(JSON.parse(blocked.stdout).decision, 'block');
+    registry = JSON.parse(readFileSync(join(fixture.vault, '.brain', 'SESSION_REGISTRY.json'), 'utf8'));
+    assert.equal(registry.sessions[sessionId].operating_profile_task.state, 'active');
+
+    const retry = runHookMain('change-nag', { ...input, stop_hook_active: true }, { cwd: fixture.project });
+    assert.deepEqual(JSON.parse(retry.stdout), {});
+    registry = JSON.parse(readFileSync(join(fixture.vault, '.brain', 'SESSION_REGISTRY.json'), 'utf8'));
+    assert.equal(registry.sessions[sessionId].operating_profile_task.state, 'consumed');
   } finally {
     rmSync(fixture.root, { recursive: true, force: true });
   }

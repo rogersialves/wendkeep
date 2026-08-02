@@ -427,3 +427,144 @@ test('[req:MOD-20] [req:MOD-21] parsers por conteúdo são determinísticos e n�
   assert.deepEqual(second, first);
   assert.equal(JSON.stringify(PARSE_OPTIONS), before);
 });
+
+test('[req:IMPORT-6] metadados internos são removidos apenas das mensagens do assistente no transcript Codex', () => {
+  const userMention = [
+    'Também encontrei este texto em outra sessão:',
+    '</session>',
+    '<oai-mem-citation> <citation_entries>',
+    '</citation_entries> <rollout_ids> exemplo </rollout_ids> </oai-mem-citation>',
+  ].join('\n');
+  const completeAssistant = [
+    'A correção foi validada.',
+    '</session>',
+    '<oai-mem-citation>',
+    '<citation_entries>',
+    'MEMORY.md:1-2|note=[internal]',
+    '</citation_entries>',
+    '<rollout_ids>019f-example</rollout_ids>',
+    '</oai-mem-citation>',
+  ].join('\n');
+  const truncatedAssistant = [
+    'O próximo passo está pronto.',
+    '<oai-mem-citation>',
+    '<citation_entries>',
+    'MEMORY.md:3-4|note=[truncated]',
+  ].join('\n');
+  const inlineMarkerMention = 'Os nomes <oai-mem-citation>, <citation_entries> e <rollout_ids> permanecem como exemplo.';
+  const adjacentInlineMention = 'A documentação usa <oai-mem-citation> <citation_entries> como exemplo.';
+  const attachedInlineMention = 'Docs:<oai-mem-citation> <citation_entries> são tags.';
+  const lineStartInlineMention = 'Marcadores:\n<oai-mem-citation> <citation_entries> são tags.';
+  const content = jsonl([
+    { type: 'turn_context', timestamp: '2026-08-01T13:00:00.000Z', payload: { turn_id: 'meta-1' } },
+    { type: 'event_msg', payload: { type: 'user_message', turn_id: 'meta-1', message: userMention } },
+    { type: 'event_msg', payload: { type: 'agent_message', turn_id: 'meta-1', message: completeAssistant } },
+    { type: 'turn_context', timestamp: '2026-08-01T13:01:00.000Z', payload: { turn_id: 'meta-2' } },
+    { type: 'event_msg', payload: { type: 'user_message', turn_id: 'meta-2', message: 'Continue.' } },
+    {
+      type: 'response_item',
+      payload: {
+        type: 'message',
+        role: 'assistant',
+        turn_id: 'meta-2',
+        content: [{ type: 'output_text', text: truncatedAssistant }],
+      },
+    },
+    { type: 'event_msg', payload: { type: 'agent_message', turn_id: 'meta-2', message: 'Use </session> apenas como exemplo.' } },
+    { type: 'event_msg', payload: { type: 'agent_message', turn_id: 'meta-2', message: 'Terceira resposta.\n<oai-mem-citation>' } },
+    { type: 'event_msg', payload: { type: 'agent_message', turn_id: 'meta-2', message: 'Quarta resposta.\n<citation_entries>' } },
+    { type: 'event_msg', payload: { type: 'agent_message', turn_id: 'meta-2', message: 'Quinta resposta.\n<citation_entries>\nMEMORY.md:5-6|note=[standalone]\n</citation_entries>' } },
+    { type: 'event_msg', payload: { type: 'agent_message', turn_id: 'meta-2', message: 'Sexta resposta.\n<citation_entries>\nMEMORY.md:7-8|note=[standalone-truncated]' } },
+    { type: 'event_msg', payload: { type: 'agent_message', turn_id: 'meta-2', message: 'Sétima resposta.\n<rollout_ids>019f-complete</rollout_ids>' } },
+    { type: 'event_msg', payload: { type: 'agent_message', turn_id: 'meta-2', message: 'Oitava resposta.\n<rollout_ids>\n019f-truncated' } },
+    { type: 'event_msg', payload: { type: 'agent_message', turn_id: 'meta-2', message: 'Nona resposta.\n<rollout_ids>' } },
+    { type: 'event_msg', payload: { type: 'agent_message', turn_id: 'meta-2', message: 'Décima resposta.\n<citation_entries>x' } },
+    { type: 'event_msg', payload: { type: 'agent_message', turn_id: 'meta-2', message: 'Décima primeira resposta.\n<rollout_ids>x' } },
+    { type: 'event_msg', payload: { type: 'agent_message', turn_id: 'meta-2', message: 'Décima segunda resposta.\n</session><oai-mem-citation><citation_entries>x' } },
+    { type: 'event_msg', payload: { type: 'agent_message', turn_id: 'meta-2', message: 'Décima terceira resposta.</session><oai-mem-citation><rollout_ids>x' } },
+    { type: 'event_msg', payload: { type: 'agent_message', turn_id: 'meta-2', message: 'Décima quarta resposta.<oai-mem-citation> <citation_entries>x' } },
+    { type: 'event_msg', payload: { type: 'agent_message', turn_id: 'meta-2', message: 'Décima quinta resposta.\n<citation_entries>\ntexto comum depois' } },
+    { type: 'event_msg', payload: { type: 'agent_message', turn_id: 'meta-2', message: 'Décima sexta resposta.\n<rollout_ids>x</rollout_ids>\ntexto comum depois' } },
+    { type: 'event_msg', payload: { type: 'agent_message', turn_id: 'meta-2', message: 'Décima sétima resposta.\n<oai-mem-citation><citation_entries>x</citation_entries></oai-mem-citation>\ntexto comum depois' } },
+    { type: 'event_msg', payload: { type: 'agent_message', turn_id: 'meta-2', message: 'A tag <oai-mem-citation> citada sem payload permanece.' } },
+    { type: 'event_msg', payload: { type: 'agent_message', turn_id: 'meta-2', message: inlineMarkerMention } },
+    { type: 'event_msg', payload: { type: 'agent_message', turn_id: 'meta-2', message: adjacentInlineMention } },
+    { type: 'event_msg', payload: { type: 'agent_message', turn_id: 'meta-2', message: attachedInlineMention } },
+    { type: 'event_msg', payload: { type: 'agent_message', turn_id: 'meta-2', message: lineStartInlineMention } },
+  ]);
+
+  const parsed = parseCodexTranscriptContent(content, PARSE_OPTIONS);
+
+  assert.ok(parsed.userPrompts.includes(userMention), 'a citação escrita pelo usuário deve permanecer intacta');
+  assert.deepEqual(parsed.assistantMessages, [
+    'A correção foi validada.',
+    'O próximo passo está pronto.',
+    'Use </session> apenas como exemplo.',
+    'Terceira resposta.',
+    'Quarta resposta.',
+    'Quinta resposta.',
+    'Sexta resposta.',
+    'Sétima resposta.',
+    'Oitava resposta.',
+    'Nona resposta.',
+    'Décima resposta.',
+    'Décima primeira resposta.',
+    'Décima segunda resposta.',
+    'Décima terceira resposta.',
+    'Décima quarta resposta.',
+    'Décima quinta resposta.\ntexto comum depois',
+    'Décima sexta resposta.\ntexto comum depois',
+    'Décima sétima resposta.\ntexto comum depois',
+    'A tag <oai-mem-citation> citada sem payload permanece.',
+    inlineMarkerMention,
+    adjacentInlineMention,
+    attachedInlineMention,
+    lineStartInlineMention,
+  ]);
+  const sanitizedMetadata = parsed.assistantMessages.filter((message) => (
+    message !== inlineMarkerMention
+      && message !== adjacentInlineMention
+      && message !== attachedInlineMention
+      && message !== lineStartInlineMention
+      && message !== 'A tag <oai-mem-citation> citada sem payload permanece.'
+  ));
+  assert.doesNotMatch(sanitizedMetadata.join('\n'), /oai-mem-citation|citation_entries|rollout_ids/);
+  assert.equal(parsed.latestAssistantMessage, lineStartInlineMention);
+});
+
+test('[req:IMPORT-6] metadados internos completos e truncados são removidos das mensagens Claude', () => {
+  const completeAssistant = [
+    'Resposta Claude preservada.',
+    '<oai-mem-citation>',
+    '<citation_entries></citation_entries>',
+    '<rollout_ids>019f-example</rollout_ids>',
+    '</oai-mem-citation>',
+  ].join('\n');
+  const truncatedAssistant = 'Segunda resposta.\n<oai-mem-citation> <citation_entries>';
+  const content = jsonl([
+    {
+      type: 'user',
+      uuid: 'claude-meta-turn',
+      timestamp: '2026-08-01T13:00:00.000Z',
+      message: { role: 'user', content: 'Valide a captura.' },
+    },
+    {
+      type: 'assistant',
+      uuid: 'claude-meta-answer',
+      timestamp: '2026-08-01T13:00:01.000Z',
+      message: {
+        role: 'assistant',
+        content: [
+          { type: 'text', text: completeAssistant },
+          { type: 'text', text: truncatedAssistant },
+        ],
+      },
+    },
+  ]);
+
+  const parsed = parseClaudeTranscriptContent(content, PARSE_OPTIONS);
+
+  assert.deepEqual(parsed.assistantMessages, ['Resposta Claude preservada.', 'Segunda resposta.']);
+  assert.equal(parsed.latestAssistantMessage, 'Segunda resposta.');
+  assert.doesNotMatch(parsed.rawTextForDetection, /oai-mem-citation|citation_entries|rollout_ids/);
+});

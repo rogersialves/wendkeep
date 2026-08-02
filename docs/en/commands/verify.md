@@ -73,15 +73,17 @@ npx wendkeep memory status --gate --vault .MyApp-vault
 ## Expected result
 
 `evidencia.json` contains sensor results and a seal binds proof to the current `tarefas.md` hash.
-Deep mode packages requirements, tasks, and evidence for read-only review; the verdict covers every
-`[req:]` before archive.
+When a sensor is red, its entry receives only a local, sanitized diagnostic bounded to 2,000
+characters; stdout/stderr from green sensors is not persisted. Deep mode packages requirements,
+tasks, and evidence for read-only review; the verdict covers every `[req:]` before archive.
 
 ## Common errors and diagnosis
 
 - `no change`: this is exit 2 and a valid idle state; create/use a change or skip verify.
 - Zero/missing sensors: inspect every same-line tag and `sensors list`; multiple tags on one task
   are valid and all of them enter the gate.
-- Red gate: fix the cause and rerun; never choose `archive --force` on your own.
+- Red gate: inspect the bounded `note` field on the `evidencia.json` entry, fix the cause, and
+  rerun; never choose `archive --force` on your own.
 - Missing/stale verdict: regenerate `--deep` and request a fresh independent pass.
 - Surviving mutants: strengthen the discriminating test; after three rounds, review manually.
 

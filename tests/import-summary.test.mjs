@@ -175,3 +175,142 @@ test('buildIterationBlock: truncamento mantém backticks confinados à própria 
   }
   assert.match(block, /\n\*\*Ferramentas usadas:\*\*/, 'a próxima seção continua fora de code span');
 });
+
+test('[req:IMPORT-6] buildIterationBlock limpa metadados internos sem apagar a menção do usuário', async () => {
+  const { buildIterationBlock } = await import('../hooks/session-stop.mjs');
+  const userMention = 'O erro exibiu <oai-mem-citation> <citation_entries> no Obsidian.';
+  const assistantWithMetadata = [
+    'A causa foi isolada.',
+    '</session>',
+    '<oai-mem-citation>',
+    '<citation_entries>',
+    'MEMORY.md:1-2|note=[internal]',
+    '</citation_entries>',
+    '<rollout_ids>019f-example</rollout_ids>',
+    '</oai-mem-citation>',
+  ].join('\n');
+  const tx = {
+    latestTurnId: 'metadata-turn',
+    latestUserPrompt: userMention,
+    latestAssistantMessage: assistantWithMetadata,
+    model: '',
+    tools: [],
+    turns: [{
+      turnId: 'metadata-turn',
+      timestamp: '2026-08-01T13:00:00.000Z',
+      userPrompts: [userMention],
+      assistantMessages: [assistantWithMetadata],
+      conversation: [
+        { role: 'Usuário', text: userMention },
+        { role: 'Assistente', text: assistantWithMetadata },
+      ],
+      tools: [],
+      consultedFiles: [],
+      changedFiles: [],
+      usage: {},
+      model: '',
+    }],
+  };
+
+  const block = buildIterationBlock(tx, { turn_id: 'metadata-turn' });
+  const userLine = block.split('\n').find((line) => line.startsWith('- **Usuário:**'));
+  const assistantLine = block.split('\n').find((line) => line.startsWith('- **Assistente:**'));
+  const stateLine = block.split('\n').find((line) => line.startsWith('**Estado ao final do turno:**'));
+
+  assert.match(userLine, /&lt;oai-mem-citation&gt; &lt;citation_entries&gt;/, 'a reprodução do usuário permanece visível');
+  assert.equal(assistantLine, '- **Assistente:** A causa foi isolada.');
+  assert.equal(stateLine, '**Estado ao final do turno:** A causa foi isolada.');
+});
+
+test('buildIterationBlock: placeholders XML-like ficam visíveis sem quebrar o Markdown', async () => {
+  const { buildIterationBlock } = await import('../hooks/session-stop.mjs');
+  const prompt = 'Valide <session>, </session> e o autolink <https://example.com>.';
+  const assistant = 'Use <sessão> como placeholder; </sessão> também deve aparecer.';
+  const tx = {
+    latestTurnId: 'xml-placeholder-turn',
+    latestUserPrompt: prompt,
+    latestAssistantMessage: assistant,
+    model: '',
+    tools: [],
+    turns: [{
+      turnId: 'xml-placeholder-turn',
+      timestamp: '2026-08-01T13:00:00.000Z',
+      userPrompts: [prompt],
+      assistantMessages: [assistant],
+      conversation: [
+        { role: 'Usuário', text: prompt },
+        { role: 'Assistente', text: assistant },
+      ],
+      tools: [],
+      consultedFiles: [],
+      changedFiles: [],
+      usage: {},
+      model: '',
+    }],
+  };
+
+  const block = buildIterationBlock(tx, { turn_id: 'xml-placeholder-turn' });
+
+  assert.match(block, /&lt;session&gt;/);
+  assert.match(block, /&lt;\/session&gt;/);
+  assert.match(block, /&lt;sessão&gt;/u);
+  assert.match(block, /&lt;\/sessão&gt;/u);
+  assert.match(block, /<https:\/\/example\.com>/, 'autolinks Markdown não devem ser codificados');
+});
+
+test('[req:IMPORT-6] sessionFinalSummary remove envelopes e escapa XML-like sem quebrar autolinks', async () => {
+  const { sessionFinalSummary } = await import('../hooks/session-stop.mjs');
+  const summary = sessionFinalSummary({
+    latestAssistantMessage: [
+      'Concluído com <session>estado</session> e <https://example.com/prova>.',
+      '<oai-mem-citation>',
+      '<citation_entries>MEMORY.md:1-2|note=[internal]</citation_entries>',
+      '<rollout_ids>019f-example</rollout_ids>',
+      '</oai-mem-citation>',
+    ].join('\n'),
+    userPrompts: [],
+    tools: [],
+  });
+
+  assert.equal(
+    summary,
+    'Concluído com &lt;session&gt;estado&lt;/session&gt; e <https://example.com/prova>.',
+  );
+  assert.doesNotMatch(summary, /oai-mem-citation|citation_entries|rollout_ids/);
+});
+
+test('[req:IMPORT-6] reimport e SessionStop convergem para sanitização idempotente', async () => {
+  const { parseCodexTranscriptContent } = await import('../packages/integrations/src/transcripts.mjs');
+  const { sanitizeAssistantMessage } = await import('../packages/integrations/src/prompt-content.mjs');
+  const { sessionFinalSummary } = await import('../hooks/session-stop.mjs');
+  const cases = [
+    'Resposta citation.\n<citation_entries>x',
+    'Resposta rollout.\n<rollout_ids>x',
+    'Resposta adjacente.\n</session><oai-mem-citation><citation_entries>x',
+    `Resposta múltipla.\n${Array.from({ length: 5 }, (_, index) => (
+      `<oai-mem-citation><citation_entries>${index}</citation_entries></oai-mem-citation>`
+    )).join('\n')}`,
+  ];
+
+  for (const [index, raw] of cases.entries()) {
+    const expected = raw.slice(0, raw.indexOf('\n'));
+    const turnId = `import-6-${index}`;
+    const transcript = [
+      { type: 'turn_context', timestamp: '2026-08-01T13:00:00.000Z', payload: { turn_id: turnId } },
+      { type: 'event_msg', payload: { type: 'agent_message', turn_id: turnId, message: raw } },
+    ].map((event) => JSON.stringify(event)).join('\n');
+    const reimported = parseCodexTranscriptContent(transcript, {
+      repoRoot: 'C:\\work\\demo',
+      vaultRoot: 'C:\\work\\demo\\.WendKeep-vault',
+    });
+    const stopSummary = sessionFinalSummary({
+      latestAssistantMessage: raw,
+      userPrompts: [],
+      tools: [],
+    });
+
+    assert.equal(reimported.latestAssistantMessage, expected);
+    assert.equal(stopSummary, expected);
+    assert.equal(sanitizeAssistantMessage(sanitizeAssistantMessage(raw)), expected);
+  }
+});

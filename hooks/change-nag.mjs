@@ -13,6 +13,7 @@ import {
   profileSentinelId,
   resolveHookOperatingProfile,
 } from './operating-profile-runtime.mjs';
+import { consumeSessionTaskOperatingProfile } from './operating-profile-task-store.mjs';
 
 export function nagDecision(input, vaultBase, { profile = 'GOVERN' } = {}) {
   if (input && input.stop_hook_active) return null; // anti-loop: sempre primeiro
@@ -39,6 +40,13 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       : runtime.bindingError
         ? { decision: 'block', reason: profileRuntimeError(runtime.bindingError) }
         : nagDecision(input, runtime.vaultBase, { profile: runtime.profile });
+    if (!decision && runtime.taskLease?.state === 'active') {
+      consumeSessionTaskOperatingProfile(
+        runtime.vaultBase,
+        runtime.identity?.canonicalConversationId || input?.session_id || input?.sessionId || '',
+        runtime.taskLease.lease_id,
+      );
+    }
     writeHookOutput(decision || {});
   } catch {
     writeHookOutput({});

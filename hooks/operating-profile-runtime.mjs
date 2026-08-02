@@ -3,6 +3,7 @@ import { resolve } from 'node:path';
 
 import {
   DEFAULT_OPERATING_PROFILE,
+  evaluateTaskOperatingProfileLease,
   normalizeOperatingProfile,
   operatingProfilePolicy,
   resolveOperatingProfile,
@@ -68,6 +69,22 @@ function sessionOverride(entry) {
   }
 }
 
+function nonNegativeSequence(value, fallback = null) {
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : fallback;
+}
+
+function taskLeaseContext(entry, input, sessionId) {
+  return {
+    sessionId,
+    turnId: input?.turn_id || input?.turnId || entry?.last_prompt_turn_id || '',
+    turnSequence: nonNegativeSequence(
+      input?.turn_sequence ?? input?.turnSequence,
+      nonNegativeSequence(entry?.last_turn_sequence),
+    ),
+  };
+}
+
 function canonicalPath(value) {
   const path = resolve(value).replaceAll('\\', '/');
   return process.platform === 'win32' ? path.toLowerCase() : path;
@@ -105,7 +122,8 @@ function matchingProjectBinding(vaultResolution, input) {
   }
 }
 
-// Resolution precedence for hooks: explicit session override -> project binding -> GOVERN.
+// Resolution precedence for hooks: active request lease -> explicit session override
+// -> project binding -> GOVERN.
 // Binding corruption is never interpreted as OFF: an authoritative Vault keeps the Keep Core
 // alive under GOVERN and carries a visible diagnostic to each entrypoint.
 export function resolveHookOperatingProfile({
@@ -134,7 +152,20 @@ export function resolveHookOperatingProfile({
   const entry = identity.state === 'resolved'
     ? readSessionRegistry(vaultResolution.base).sessions?.[identity.canonicalConversationId] || null
     : null;
-  const selected = sessionOverride(entry) || project;
+  const base = sessionOverride(entry) || project;
+  const taskLease = evaluateTaskOperatingProfileLease(
+    entry?.operating_profile_task,
+    taskLeaseContext(entry, input, identity.canonicalConversationId || ''),
+  );
+  const selected = taskLease.state === 'active'
+    ? {
+      profile: taskLease.profile,
+      source: 'task-lease',
+      valid: true,
+      configured: true,
+      raw: taskLease.profile,
+    }
+    : base;
   return {
     ...selected,
     policy: operatingProfilePolicy(selected.profile),
@@ -142,6 +173,9 @@ export function resolveHookOperatingProfile({
     projectRoot: vaultResolution.projectRoot,
     identity,
     entry,
+    baseProfile: base.profile,
+    baseSource: base.source,
+    taskLease,
     resolution: vaultResolution,
     ...(bindingError ? { bindingError } : {}),
   };

@@ -17,6 +17,24 @@ Use ao começar implementação, correção ou refatoração. **Keep Core perman
 em todos os perfis: Vault, sessão, identidade, memória, lessons e persistência. Na ausência de
 configuração válida, **GOVERN é o padrão** compatível.
 
+## Seleção temporária por solicitação
+
+Antes de editar, classifique a implementação atual e registre a escolha auditável com
+\`wendkeep profile route <FLOW|GUIDE|GOVERN|ASSURE> --session <id> --reason <texto>\`.
+A lease vale somente para a solicitação atual; ao encerrá-la, o perfil persistente da
+sessão/projeto volta a valer. **OFF nunca é uma escolha automática da LLM**: somente uma pessoa
+pode persistir \`profile use OFF\` explicitamente.
+
+- **FLOW:** ajuste local, reversível e de escopo fechado, sem contrato/spec, segurança,
+  dependência, CI/release ou policy.
+- **GUIDE:** mudança compacta de comportamento que precisa de change/spec, sem revisão formal.
+- **GOVERN:** escolha conservadora em caso de dúvida ou risco e para superfícies sensíveis.
+- **ASSURE:** GOVERN quando confirmação explícita e handoff fazem parte do contrato.
+
+O harness da LLM faz essa classificação semântica; o Wend Runtime valida e aplica a lease.
+Se não houver uma sessão causal identificada ou o comando falhar, não fabrique estado: use o
+perfil efetivo já injetado e trate \`GOVERN\` como fallback conservador quando ele for o padrão.
+
 <HARD-GATE>
 Antes de editar, leia o **perfil efetivo** injetado pelo WendKeep e siga somente sua rota:
 - \`OFF\`: não imponha processo Wend; a governança pertence ao **harness nativo da LLM**.
@@ -267,6 +285,24 @@ const WORKFLOW_EN = `# Operating Profiles — wendkeep work router
 Use this when starting an implementation, fix, or refactor. **Keep Core is always active**
 in every profile: Vault, session, identity, memory, lessons, and persistence. With no valid
 configuration, **GOVERN is the default** for compatibility.
+
+## Temporary selection per request
+
+Before editing, classify the current implementation and record the auditable choice with
+\`wendkeep profile route <FLOW|GUIDE|GOVERN|ASSURE> --session <id> --reason <text>\`.
+The lease applies only to the current request; after it ends, the persistent session/project
+profile becomes effective again. **OFF is never an automatic LLM choice**: only a human can
+persist it explicitly through \`profile use OFF\`.
+
+- **FLOW:** a local, reversible, bounded adjustment with no contract/spec, security, dependency,
+  CI/release, or policy impact.
+- **GUIDE:** a compact behavior change that needs a change/spec but no formal review.
+- **GOVERN:** the conservative choice when uncertain or risky, and for sensitive surfaces.
+- **ASSURE:** GOVERN when explicit confirmation and handoff are part of the contract.
+
+The LLM harness owns semantic classification; Wend Runtime validates and applies the lease. If
+there is no causally identified session or the command fails, do not fabricate state: use the
+already injected effective profile, with \`GOVERN\` as the conservative configured fallback.
 
 <HARD-GATE>
 Before editing, read the injected **effective profile** and follow only its route:
@@ -619,7 +655,7 @@ size of the problem>
 // usuário ("implementa X", "corrige Y"), não com abstrações ("mudança não-trivial"). Gatilhos
 // concretos + instrução imperativa = a skill dispara sozinha (paridade Superpowers).
 const WK_SKILLS_PT = [
-  skill('wk-workflow', 'Use quando o usuário pedir para implementar, criar, corrigir, refatorar, adicionar ou alterar código: leia o perfil efetivo e roteie OFF/FLOW/GUIDE/GOVERN/ASSURE ANTES de editar. Keep Core permanece ativo; GOVERN é o padrão compatível.', WORKFLOW),
+  skill('wk-workflow', 'Use quando o usuário pedir para implementar, criar, corrigir, refatorar, adicionar ou alterar código: classifique e registre a rota temporária FLOW/GUIDE/GOVERN/ASSURE ANTES de editar, então siga o perfil efetivo. Keep Core permanece ativo; OFF nunca é automático.', WORKFLOW),
   skill('wk-tdd', 'Use ao implementar qualquer comportamento — Red/Green/Refactor com testes que discriminam (derivados do spec, litmus não-raso, adequação).', TDD),
   skill('wk-debugging', 'Use quando algo falha, quebra, dá erro ou regride — depuração sistemática por hipótese antes de corrigir.', DEBUGGING),
   skill('wk-brainstorming', 'Use quando a ideia ainda é vaga ou o usuário quer discutir/planejar uma feature (inclusive em plan mode) — vira design aprovado, com closure gate e tabela out-of-scope, antes de código.', BRAINSTORMING, [{ name: 'design-template.md', content: DESIGN_TEMPLATE_PT }]),
@@ -628,7 +664,7 @@ const WK_SKILLS_PT = [
 ];
 
 const WK_SKILLS_EN = [
-  skill('wk-workflow', 'Use when the user asks to implement, create, fix, refactor, add, or change code: read the effective profile and route OFF/FLOW/GUIDE/GOVERN/ASSURE BEFORE editing. Keep Core stays active; GOVERN is the compatible default.', WORKFLOW_EN),
+  skill('wk-workflow', 'Use when the user asks to implement, create, fix, refactor, add, or change code: classify and record the temporary FLOW/GUIDE/GOVERN/ASSURE route BEFORE editing, then follow the effective profile. Keep Core stays active; OFF is never automatic.', WORKFLOW_EN),
   skill('wk-tdd', 'Use when implementing any behaviour — Red/Green/Refactor with tests that discriminate (spec-derived, non-shallow litmus, adequacy).', TDD_EN),
   skill('wk-debugging', 'Use when something fails, breaks, errors or regresses — systematic hypothesis-driven debugging before fixing.', DEBUGGING_EN),
   skill('wk-brainstorming', 'Use when the idea is still vague or the user wants to discuss/plan a feature (plan mode included) — turns it into an approved design, with a closure gate and out-of-scope table, before code.', BRAINSTORMING_EN, [{ name: 'design-template.md', content: DESIGN_TEMPLATE_EN }]),
