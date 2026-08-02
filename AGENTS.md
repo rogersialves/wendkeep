@@ -1,10 +1,15 @@
 <!-- wendkeep:skills:start -->
-<!-- wendkeep-version: 0.66.5; skills-sha256: 36ebe0728fe02c48230802722405c3179cb460f289429505e341db582542b82d -->
+<!-- wendkeep-version: 0.67.0; skills-sha256: d170f56e18f94318178d4062b722c40275d07c10e76021f95d16f441d498328d -->
 ## wendkeep — Keep Core & operating profiles
 
 This project uses the [wendkeep](https://github.com/rogersialves/wendkeep) harness. **Keep Core is always active**
 in every profile: Vault, session, identity, memory, lessons, and persistence integrations.
-The effective profile is selected explicitly; missing or invalid configuration uses **GOVERN as the default**.
+The persistent profile is selected explicitly; missing or invalid configuration uses **GOVERN as the default**.
+
+Before an implementation, the native LLM harness classifies the current request and may create a
+task-scoped lease with `wendkeep profile route <FLOW|GUIDE|GOVERN|ASSURE> --session <id> --reason <text>`.
+The lease expires when that request ends and the persistent session/project profile becomes
+effective again. **OFF is never selected adaptively**; only a human can persist `profile use OFF`.
 
 Route work by the effective profile:
 - **OFF** — Wend Runtime is disabled and governance belongs to the native LLM harness; Keep Core stays active.
@@ -26,7 +31,7 @@ Process skills (full text in `.claude/skills/`, `.agents/skills/`, and the vault
 - **wk-planning** — Use após um design aprovado ou um plano aceito (inclusive plan mode) — decompõe em plano de tarefas TDD bite-sized e registra na change ativa.
 - **wk-tdd** — Use ao implementar qualquer comportamento — Red/Green/Refactor com testes que discriminam (derivados do spec, litmus não-raso, adequação).
 - **wk-verify** — Use no verify deep — passe independente read-only (autor≠verificador) que re-deriva a cobertura do spec e grava verdict.json.
-- **wk-workflow** — Use quando o usuário pedir para implementar, criar, corrigir, refatorar, adicionar ou alterar código: leia o perfil efetivo e roteie OFF/FLOW/GUIDE/GOVERN/ASSURE ANTES de editar. Keep Core permanece ativo; GOVERN é o padrão compatível.
+- **wk-workflow** — Use quando o usuário pedir para implementar, criar, corrigir, refatorar, adicionar ou alterar código: classifique e registre a rota temporária FLOW/GUIDE/GOVERN/ASSURE ANTES de editar, então siga o perfil efetivo. Keep Core permanece ativo; OFF nunca é automático.
 <!-- wendkeep:skills:end -->
 
 ## Contribuição — PR por implementação (regra do projeto)

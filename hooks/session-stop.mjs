@@ -33,6 +33,7 @@ import {
   parseTranscriptContent,
   resolveTurnIdentity,
 } from '../packages/integrations/src/transcripts.mjs';
+import { sanitizeAssistantMessage } from '../packages/integrations/src/prompt-content.mjs';
 export { resolveTurnIdentity };
 import {
   ensureDir,
@@ -213,6 +214,13 @@ function escapeMarkdownBackticks(text) {
   return escaped;
 }
 
+function escapeMarkdownHtmlTags(text) {
+  return String(text || '').replace(
+    /<(\/?[\p{L}][\p{L}\p{N}_.-]*)(?=[\s/>])([^<>\n]*)>/gu,
+    '&lt;$1$2&gt;',
+  );
+}
+
 function compactText(text, max = 600) {
   const clean = redactSecrets(String(text || ''))
     .replace(/\r/g, '\n')
@@ -223,7 +231,8 @@ function compactText(text, max = 600) {
   const clipped = truncate(source, max);
   // Um corte no meio de código inline/fence pode casar com backticks da próxima
   // entrada gerada. Só snippets realmente truncados perdem a formatação incompleta.
-  return compact.length > max ? escapeMarkdownBackticks(clipped) : clipped;
+  const markdownSafe = compact.length > max ? escapeMarkdownBackticks(clipped) : clipped;
+  return escapeMarkdownHtmlTags(markdownSafe);
 }
 
 function selectTurn(tx, turnId) {
@@ -235,6 +244,11 @@ function selectTurn(tx, turnId) {
 
 function formatConversation(turn) {
   const entries = (turn.conversation || [])
+    .map((entry) => (
+      entry.role === 'Assistente'
+        ? { ...entry, text: sanitizeAssistantMessage(entry.text) }
+        : entry
+    ))
     .filter((entry) => entry.text && !shouldIgnoreUserText(entry.text));
   if (!entries.length) return '- Nenhuma mensagem útil capturada no transcript.';
 
@@ -304,7 +318,9 @@ export function buildIterationBlock(tx, input) {
   const now = Number.isFinite(parsedDate.getTime()) ? parsedDate : new Date();
   const promptText = turn.userPrompts.at(-1) || tx.latestUserPrompt || '';
   const latestAssistant = turn.assistantMessages.at(-1) || tx.latestAssistantMessage || '';
-  const heading = truncate(promptText.replace(/[\r\n#]+/g, ' ').replace(/\s+/g, ' ').trim() || 'Iteração', 80);
+  const heading = escapeMarkdownHtmlTags(
+    truncate(promptText.replace(/[\r\n#]+/g, ' ').replace(/\s+/g, ' ').trim() || 'Iteração', 80),
+  );
   const files = [...new Set([...(turn.consultedFiles || []), ...(turn.changedFiles || [])])];
   const model = turn.model || tx.model || '';
 
@@ -325,7 +341,7 @@ ${formatConversation(turn)}
 
 **Arquivos detectados no turno:** ${formatInlineList(files, 'Nenhum arquivo detectado automaticamente.')}
 
-**Estado ao final do turno:** ${compactText(latestAssistant || 'Checkpoint registrado automaticamente ao final do turno.', 900)}
+**Estado ao final do turno:** ${compactText(sanitizeAssistantMessage(latestAssistant) || 'Checkpoint registrado automaticamente ao final do turno.', 900)}
 `;
 }
 
@@ -649,6 +665,104 @@ function replaceClosingSection(content, closing) {
   return `${content.slice(0, index).trimEnd()}\n\n${closing}\n`;
 }
 
+const GENERATED_ITERATION_LINE_RULES = [
+  { pattern: /^(### \d{2}:\d{2} - )(.*)$/u, assistant: false },
+  { pattern: /^(\*\*Pedido:\*\* )(.*)$/u, assistant: false },
+  { pattern: /^(- \*\*Usuário:\*\* )(.*)$/u, assistant: false },
+  { pattern: /^(- \*\*Assistente:\*\* )(.*)$/u, assistant: true },
+  { pattern: /^(- \*\*Resumo:\*\* )(.*)$/u, assistant: true },
+  { pattern: /^(\*\*Estado ao final do turno:\*\* )(.*)$/u, assistant: true },
+];
+const GENERATED_CLOSING_LINE_RULES = [
+  { pattern: /^(- \*\*Resumo final:\*\* )(.*)$/u, assistant: true },
+];
+
+function generatedSessionLine(line, rules) {
+  for (const rule of rules) {
+    const match = rule.pattern.exec(line);
+    if (match) return { ...rule, prefix: match[1], value: match[2] };
+  }
+  return null;
+}
+
+function splitSessionMarkdownLines(source) {
+  const lines = [];
+  let cursor = 0;
+  while (cursor < source.length) {
+    const newline = source.indexOf('\n', cursor);
+    if (newline === -1) {
+      lines.push({ text: source.slice(cursor), eol: '' });
+      break;
+    }
+    const textEnd = source[newline - 1] === '\r' ? newline - 1 : newline;
+    lines.push({ text: source.slice(cursor, textEnd), eol: source.slice(textEnd, newline + 1) });
+    cursor = newline + 1;
+  }
+  return lines;
+}
+
+function generatedMetadataContinuation(line, mode = '') {
+  const clean = line.trim();
+  if (!clean) return null;
+  if (/^<\/?session\s*>/i.test(clean)) return mode;
+  if (/^<\/?(?:oai-mem-citation|citation_entries|rollout_ids)\b/i.test(clean)) {
+    const nested = [...clean.matchAll(/<(citation_entries|rollout_ids)\b[^>]*>/gi)].at(-1);
+    return nested ? nested[1].toLowerCase() : mode;
+  }
+  if (mode === 'citation_entries' && (
+    /\|note=\[[^\]]*\]\s*$/i.test(clean)
+      || /^[^\s<>]+:\d+(?:-\d+)?(?:\|[^\s].*)?$/i.test(clean)
+  )) return mode;
+  if (mode === 'rollout_ids' && /^(?:[0-9a-f]{8,}(?:-[0-9a-f-]+)*|019f-[A-Za-z0-9_-]+)$/i.test(clean)) {
+    return mode;
+  }
+  return null;
+}
+
+export function sanitizeGeneratedSessionMarkdown(content) {
+  const lines = splitSessionMarkdownLines(String(content || ''));
+  let section = '';
+  let output = '';
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (/^## /u.test(line.text)) {
+      section = line.text === '## Iterações'
+        ? 'iterations'
+        : (line.text === '## Encerramento' ? 'closing' : '');
+      output += `${line.text}${line.eol}`;
+      continue;
+    }
+
+    const rules = section === 'iterations'
+      ? GENERATED_ITERATION_LINE_RULES
+      : (section === 'closing' ? GENERATED_CLOSING_LINE_RULES : []);
+    const generated = generatedSessionLine(line.text, rules);
+    if (!generated) {
+      output += `${line.text}${line.eol}`;
+      continue;
+    }
+
+    let value = generated.value;
+    let last = index;
+    let mode = '';
+    if (generated.assistant) {
+      for (let next = index + 1; next < lines.length; next += 1) {
+        const nextMode = generatedMetadataContinuation(lines[next].text, mode);
+        if (nextMode === null) break;
+        value += `${lines[last].eol}${lines[next].text}`;
+        last = next;
+        mode = nextMode;
+      }
+      value = sanitizeAssistantMessage(value);
+    }
+
+    output += `${generated.prefix}${escapeMarkdownHtmlTags(value)}${lines[last].eol}`;
+    index = last;
+  }
+  return output;
+}
+
 export function finalizeSessionFile(sessionPath, tx, created, endedAt, vaultBase = '') {
   const pending = extractPending(tx.rawTextForDetection);
   const links = (items) => items.length ? items.map((rel) => `  - ${wikilinkFromRel(rel)}`).join('\n') : '  - Nenhuma';
@@ -673,7 +787,7 @@ ${formatPendingClosing(pending)}
     // As três seções derivadas saem do MESMO `created` que monta o Encerramento — antes
     // elas ficavam de fora deste write e a nota mentia no corpo (ver hooks/derived-sections.mjs).
     applyDerivedSections(
-      replacePendingSection(updateFrontmatter(content, endedAt), pending),
+      replacePendingSection(updateFrontmatter(sanitizeGeneratedSessionMarkdown(content), endedAt), pending),
       created,
     ),
     closing,
@@ -681,8 +795,9 @@ ${formatPendingClosing(pending)}
 }
 
 export function sessionFinalSummary(tx) {
-  return tx.latestAssistantMessage
-    ? truncate(tx.latestAssistantMessage, 500)
+  const assistantSummary = sanitizeAssistantMessage(tx.latestAssistantMessage);
+  return assistantSummary
+    ? compactText(assistantSummary, 500)
     : `Sessão encerrada com ${tx.userPrompts.length} prompts e ${tx.tools.length} ferramentas registradas.`;
 }
 

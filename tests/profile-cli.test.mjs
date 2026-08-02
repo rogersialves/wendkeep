@@ -41,6 +41,9 @@ function fixture() {
         status: 'active',
         provider: 'codex',
         session_file: sessionRel,
+        last_prompt_turn_id: 'turn-1',
+        last_turn_sequence: 1,
+        turn_sequences: { 'turn-1': 1 },
       },
     },
   }, null, 2)}\n`);
@@ -113,6 +116,146 @@ test('[req:OP-3] session override is audited without replacing project default, 
   } finally { rmSync(f.root, { recursive: true, force: true }); }
 });
 
+test('[req:OP-3] [req:OP-11] profile route cria lease temporária sem reescrever bases persistentes', () => {
+  const f = fixture();
+  try {
+    assert.equal(run(f.project, 'use', 'OFF').status, 0);
+    assert.equal(run(f.project, 'use', 'GOVERN', '--session', 'session-1').status, 0);
+    const absentStatus = run(f.project, 'status', '--session', 'session-1');
+    assert.equal(absentStatus.status, 0, absentStatus.stderr);
+    assert.equal(
+      absentStatus.stdout.trim(),
+      'GOVERN (session session-1; session-registry; base=GOVERN/session-registry; lease=absent)',
+    );
+    const configBefore = readFileSync(join(f.project, '.wendkeep.json'), 'utf8');
+    const noteBefore = readFileSync(f.sessionPath);
+
+    const routed = run(
+      f.project, 'route', 'FLOW', '--session', 'session-1',
+      '--reason', 'correção local e reversível', '--json',
+    );
+    assert.equal(routed.status, 0, routed.stderr);
+    const payload = JSON.parse(routed.stdout);
+    assert.equal(payload.profile, 'FLOW');
+    assert.equal(payload.source, 'task-lease');
+    assert.equal(payload.scope, 'task');
+    assert.equal(payload.base_profile, 'GOVERN');
+    assert.equal(payload.base_source, 'session-registry');
+    assert.equal(payload.task_lease.state, 'active');
+    assert.equal(payload.task_lease.request_turn_id, 'turn-1');
+    assert.equal(payload.task_lease.request_turn_sequence, 1);
+    assert.match(payload.task_lease.lease_id, /^[0-9a-f-]{36}$/i);
+    assert.equal(payload.task_lease.reason, 'correção local e reversível');
+    assert.equal(payload.task_lease.requested_by, 'llm-harness');
+    assert.match(payload.task_lease.issued_at, /^\d{4}-\d{2}-\d{2}T/);
+    assert.equal(payload.task_lease.expires_on, 'request-stop');
+
+    const registry = JSON.parse(readFileSync(join(f.vault, '.brain', 'SESSION_REGISTRY.json'), 'utf8'));
+    assert.equal(registry.sessions['session-1'].operating_profile, 'GOVERN');
+    const auditedLease = registry.sessions['session-1'].operating_profile_task;
+    assert.equal(auditedLease.profile, 'FLOW');
+    assert.equal(auditedLease.reason, 'correção local e reversível');
+    assert.equal(auditedLease.requested_by, 'llm-harness');
+    assert.match(auditedLease.issued_at, /^\d{4}-\d{2}-\d{2}T/);
+    assert.equal(auditedLease.expires_on, 'request-stop');
+    assert.equal(readFileSync(join(f.project, '.wendkeep.json'), 'utf8'), configBefore);
+    assert.deepEqual(readFileSync(f.sessionPath), noteBefore);
+
+    const status = run(f.project, 'status', '--session', 'session-1', '--json');
+    const current = JSON.parse(status.stdout);
+    assert.equal(current.profile, 'FLOW');
+    assert.equal(current.source, 'task-lease');
+    assert.equal(current.scope, 'task');
+    const humanStatus = run(f.project, 'status', '--session', 'session-1');
+    assert.equal(humanStatus.status, 0, humanStatus.stderr);
+    assert.equal(
+      humanStatus.stdout.trim(),
+      'FLOW (task session-1; task-lease; base=GOVERN/session-registry; lease=active)',
+    );
+  } finally { rmSync(f.root, { recursive: true, force: true }); }
+});
+
+test('[req:OP-3] profile route rejeita sessão sem prompt causal registrado sem mutação parcial', () => {
+  const f = fixture();
+  try {
+    const registryPath = join(f.vault, '.brain', 'SESSION_REGISTRY.json');
+    const original = JSON.parse(readFileSync(registryPath, 'utf8'));
+    const invalidContexts = [
+      { last_prompt_turn_id: '', last_turn_sequence: 1, turn_sequences: { 'turn-1': 1 } },
+      { last_prompt_turn_id: 'turn-1', last_turn_sequence: 0, turn_sequences: { 'turn-1': 0 } },
+      { last_prompt_turn_id: 'turn-1', last_turn_sequence: 1, turn_sequences: undefined },
+      { last_prompt_turn_id: 'turn-1', last_turn_sequence: 1, turn_sequences: {} },
+      { last_prompt_turn_id: 'turn-1', last_turn_sequence: 1, turn_sequences: { 'turn-1': 2 } },
+    ];
+
+    for (const context of invalidContexts) {
+      const registry = structuredClone(original);
+      Object.assign(registry.sessions['session-1'], context);
+      writeFileSync(registryPath, `${JSON.stringify(registry, null, 2)}\n`, 'utf8');
+      const before = readFileSync(registryPath, 'utf8');
+      const result = run(
+        f.project, 'route', 'FLOW', '--session', 'session-1', '--reason', 'contexto causal incompleto',
+      );
+
+      assert.equal(result.status, 2, JSON.stringify(context));
+      assert.match(result.stderr, /prompt causal|contexto|Rota temporária exige/i);
+      assert.equal(readFileSync(registryPath, 'utf8'), before);
+    }
+  } finally { rmSync(f.root, { recursive: true, force: true }); }
+});
+
+test('[req:OP-12] profile status restaura a base quando a sequência causal avança', () => {
+  const f = fixture();
+  try {
+    assert.equal(run(f.project, 'use', 'GUIDE', '--session', 'session-1').status, 0);
+    assert.equal(run(
+      f.project, 'route', 'FLOW', '--session', 'session-1', '--reason', 'pedido um',
+    ).status, 0);
+    const path = join(f.vault, '.brain', 'SESSION_REGISTRY.json');
+    const registry = JSON.parse(readFileSync(path, 'utf8'));
+    Object.assign(registry.sessions['session-1'], {
+      last_prompt_turn_id: 'turn-2',
+      last_turn_sequence: 2,
+      turn_sequences: { 'turn-1': 1, 'turn-2': 2 },
+    });
+    writeFileSync(path, `${JSON.stringify(registry, null, 2)}\n`, 'utf8');
+
+    const status = run(f.project, 'status', '--session', 'session-1', '--json');
+    assert.equal(status.status, 0, status.stderr);
+    const payload = JSON.parse(status.stdout);
+    assert.equal(payload.profile, 'GUIDE');
+    assert.equal(payload.source, 'session-registry');
+    assert.equal(payload.scope, 'session');
+    assert.equal(payload.base_profile, 'GUIDE');
+    assert.equal(payload.task_lease.state, 'expired');
+    const humanStatus = run(f.project, 'status', '--session', 'session-1');
+    assert.equal(humanStatus.status, 0, humanStatus.stderr);
+    assert.equal(
+      humanStatus.stdout.trim(),
+      'GUIDE (session session-1; session-registry; base=GUIDE/session-registry; lease=expired)',
+    );
+  } finally { rmSync(f.root, { recursive: true, force: true }); }
+});
+
+test('[req:OP-11] profile route rejeita OFF, motivo/sessão ausentes e flags inválidas sem mutar', () => {
+  const f = fixture();
+  try {
+    const registryPath = join(f.vault, '.brain', 'SESSION_REGISTRY.json');
+    const before = readFileSync(registryPath, 'utf8');
+    for (const args of [
+      ['route', 'OFF', '--session', 'session-1', '--reason', 'não pode'],
+      ['route', 'FLOW', '--reason', 'sem sessão'],
+      ['route', 'FLOW', '--session', 'session-1'],
+      ['route', 'FLOW', '--session', 'session-1', '--reason', ''],
+      ['route', 'FLOW', '--session', 'session-1', '--reason', 'a', '--reason', 'b'],
+    ]) {
+      const result = run(f.project, ...args);
+      assert.equal(result.status, 2, `${args.join(' ')}\n${result.stderr}`);
+      assert.equal(readFileSync(registryPath, 'utf8'), before);
+    }
+  } finally { rmSync(f.root, { recursive: true, force: true }); }
+});
+
 test('invalid profile or unknown session exits 2 without partial mutation', () => {
   const f = fixture();
   try {
@@ -143,6 +286,8 @@ test('unknown or incomplete flags fail closed instead of mutating project scope'
     assert.equal(run(f.project, 'use', 'OFF', '--json', '--json').status, 2);
     assert.equal(run(f.project, 'use', 'OFF', '--session=--project', '--json').status, 2);
     assert.equal(run(f.project, 'use', 'OFF', 'extra').status, 2);
+    assert.equal(run(f.project, 'use', 'OFF', '--reason', 'somente route').status, 2);
+    assert.equal(run(f.project, 'status', '--reason', 'somente route').status, 2);
     assert.equal(readFileSync(join(f.project, '.wendkeep.json'), 'utf8'), before);
     assert.equal(readFileSync(registryPath, 'utf8'), beforeRegistry);
   } finally { rmSync(f.root, { recursive: true, force: true }); }
@@ -251,5 +396,7 @@ test('[req:OP-9] ajuda pública de profile documenta resolução explícita de p
   });
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /--project <path> --vault <path> --session <id> --json/);
+  assert.match(result.stdout, /route <FLOW\|GUIDE\|GOVERN\|ASSURE>.*--reason <text>/s);
+  assert.match(result.stdout, /task|request/i);
   assert.match(result.stdout, /Keep Core.*remains active/i);
 });

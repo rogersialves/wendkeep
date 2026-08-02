@@ -62,7 +62,12 @@ function renderAgentsSection(skills, sourceHash = '') {
 
 This project uses the [wendkeep](https://github.com/rogersialves/wendkeep) harness. **Keep Core is always active**
 in every profile: Vault, session, identity, memory, lessons, and persistence integrations.
-The effective profile is selected explicitly; missing or invalid configuration uses **GOVERN as the default**.
+The persistent profile is selected explicitly; missing or invalid configuration uses **GOVERN as the default**.
+
+Before an implementation, the native LLM harness classifies the current request and may create a
+task-scoped lease with \`wendkeep profile route <FLOW|GUIDE|GOVERN|ASSURE> --session <id> --reason <text>\`.
+The lease expires when that request ends and the persistent session/project profile becomes
+effective again. **OFF is never selected adaptively**; only a human can persist \`profile use OFF\`.
 
 Route work by the effective profile:
 - **OFF** — Wend Runtime is disabled and governance belongs to the native LLM harness; Keep Core stays active.

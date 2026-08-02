@@ -29,7 +29,7 @@ const OWNED_BINDINGS = new Map([
     'salvageTruncatedJson', 'parseHookInput', 'stringifyHookOutput',
     'detectProvider', 'providerMeta', 'extractHookPrompt',
   ]],
-  ['src/prompt-content.mjs', ['isBootstrapPrompt', 'redactSecrets']],
+  ['src/prompt-content.mjs', ['isBootstrapPrompt', 'redactSecrets', 'sanitizeAssistantMessage']],
   ['src/transcript-usage.mjs', [
     'emptyTokenUsage', 'normalizeCodexUsage', 'normalizeClaudeUsage', 'addUsage',
   ]],

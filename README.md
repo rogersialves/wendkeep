@@ -15,6 +15,10 @@
 
 **Memória persistente para agentes de código, construída sobre o seu cofre Obsidian.** Cada sessão do Claude Code e do Codex é capturada turno a turno em Markdown local — o `init` wira os hooks dos dois agentes (no Codex, valendo depois que você aprovar o prompt de confiança dele); o `import` recupera as sessões passadas — com rastreio de tokens/custo, decisões, bugs e aprendizados extraídos automaticamente. Esse plano sempre ativo é o **Keep Core**. Sobre ele, o **Wend Runtime** oferece um ciclo nativo e sem dependências (spec → change → TDD → archive com gate por sensor), selecionável pelos Perfis de Operação `OFF`, `FLOW`, `GUIDE`, `GOVERN` e `ASSURE`. 100% local, open‑core.
 
+Na projeção das sessões, metadados internos terminais são removidos somente das respostas do
+assistente; relatos do usuário permanecem. Tags XML-like são gravadas como texto escapado para não
+serem interpretadas como HTML no modo de leitura do Obsidian.
+
 O runtime está sendo separado em seis fronteiras físicas — `cli`, `harness`, `vault`, `mcp`,
 `integrations` e `pi` — sem fragmentar a instalação. Os workspaces privados `cli`, `harness`,
 `vault`, `mcp` e `integrations` agora são donos canônicos do runtime do executável, dos Perfis de
@@ -231,13 +235,83 @@ invocá-los é uma escolha deliberada e executa as validações próprias do com
 | `GOVERN` | P → R → E → V | Loop a2 atual e fallback compatível. |
 | `ASSURE` | P → R → E → V → C | Governança com confirmação e handoff. |
 
+### Como ler a rota
+
+As letras da coluna **Rota** são etapas do trabalho, não nomes de comandos:
+
+- `P` = **Planejar/Propor** — entender o pedido, delimitar o escopo e registrar a abordagem quando houver change.
+- `R` = **Revisar** — conferir a proposta/design antes de executar; é a revisão formal do loop a2.
+- `E` = **Executar** — editar o código ou os artefatos permitidos.
+- `V` = **Validar** — rodar testes, sensores e verificações e registrar a evidência.
+- `C` = **Confirmar/entregar** — obter confirmação explícita e fazer o handoff final.
+
+Assim, `P → R → E → V` significa “planejar/propor, revisar, executar e validar”. `FLOW` começa
+direto no microcontrato de execução e validação; `OFF` não aplica uma rota Wend automática e
+devolve o processo ao harness nativo da LLM.
+
+### Quem escolhe o perfil e por quanto tempo
+
+O harness da LLM (Codex, Claude ou outro agente) **classifica a implementação atual** e pode
+registrar uma escolha temporária com `wendkeep profile route`. O Wend Runtime não interpreta o
+texto do prompt nem usa tamanho do diff, heurísticas ou variáveis de ambiente: ele valida a escolha,
+aplica a rota nos hooks e expira a lease ao encerrar a solicitação. Se nenhum roteamento for
+registrado, continua valendo o perfil-base configurado.
+
+A resolução segue esta ordem:
+
+1. lease válida da solicitação atual em `SESSION_REGISTRY.json`;
+2. override persistente da sessão no mesmo registry;
+3. `harness.profile` no `.wendkeep.json` do projeto;
+4. `GOVERN`, quando não há configuração válida.
+
+Sem `--session`, `profile use` altera o **padrão do projeto** e vale para as conversas/hooks que
+não tenham override de sessão. Com `--session <id>`, altera somente aquela sessão e não troca o
+padrão do projeto. Portanto, `profile use OFF` sem `--session` não é um teste isolado: ele grava
+o binding do projeto e pode ser compartilhado se `.wendkeep.json` for commitado.
+
+`profile route` é diferente: exige `--session` e `--reason`, aceita somente `FLOW`, `GUIDE`,
+`GOVERN` ou `ASSURE`, não reescreve o projeto/override persistente e vale apenas para o prompt
+causal atual. O `Stop` aceito consome a lease; se o processo morrer antes disso, o próximo prompt
+avança a sequência e torna a lease antiga inefetiva. `OFF` nunca é escolhido automaticamente.
+
+```bash
+npx wendkeep profile status
+npx wendkeep profile use GUIDE                 # padrão do projeto
+npx wendkeep profile use FLOW --session <id>   # somente uma sessão
+npx wendkeep profile route FLOW --session <id> --reason "correção local"  # pedido atual
+npx wendkeep profile status --session <id>     # perfil efetivo da sessão
+```
+
+Na saída humana de `status --session`, `base=<perfil>/<origem>` e `lease=<estado>` acompanham o
+perfil efetivo; `--json` expõe os mesmos dados como `base_profile`, `base_source` e `task_lease`.
+`profile route` só aceita uma sessão depois que `UserPromptSubmit` registrou turno e sequência
+causais positivos e coincidentes no registry.
+
+### Qual perfil usar numa solicitação simples?
+
+“Pequena” descreve o tamanho, não o risco. O harness usa a matriz abaixo para escolher e registrar
+a rota temporária; a inferência semântica continua no agente, não no Wend Runtime:
+
+| Situação | Perfil indicado |
+|---|---|
+| Pergunta, inspeção ou diagnóstico sem alteração | Nenhuma transição de perfil |
+| Correção local, reversível, com allowlist e sem mudança de contrato/spec | `FLOW` (`E → V`) |
+| Pequena mudança de comportamento que precisa de change, mas não de revisão formal do Wend Runtime | `GUIDE` (`P → E → V`) |
+| Mudança normal, ambígua, de contrato público, segurança, dependência, CI/release ou policy | `GOVERN` (`P → R → E → V`) |
+| Trabalho que exige confirmação e handoff explícitos | `ASSURE` (`P → R → E → V → C`) |
+
+Se o harness não registrar a lease, uma correção pequena continua sob o perfil configurado — por
+padrão, `GOVERN`. `OFF` não significa “tarefa simples”: é uma escolha humana persistente que entrega
+a governança ao harness nativo; a LLM pode elevar temporariamente uma base `OFF` para uma rota Wend,
+mas nunca selecionar `OFF` por conta própria.
+
 Binding corrompido nunca seleciona `OFF`: com um Vault explícito ou legado inequívoco, o Keep Core
 continua ativo sob `GOVERN`, o erro fica visível e guards mutáveis falham fechados. Raízes
 adicionais que FLOW deve proteger podem ser declaradas como caminhos relativos ao projeto em
 `harness.flow.protectedRoots` no `.wendkeep.json`; qualquer alteração sob elas exige promoção.
 Config, marcador ou identidade local inválidos nunca caem silenciosamente no Vault pai/global.
 
-`wendkeep profile status/use` torna a escolha observável; `wendkeep flow
+`wendkeep profile status/use/route` torna a escolha observável; `wendkeep flow
 start/finish/promote` resolve ajustes locais sem fabricar ADR e falha fechado em escapes físicos,
 metadata/flags ocultas do Git, sensores mutantes, superfícies protegidas ou projeção de sessão
 incompleta. Uma descoberta no-follow limitada enxerga aliases protegidos vazios/ignorados; escritas
@@ -373,7 +447,7 @@ explore → propose → apply (TDD) → verify → archive
 
 - **Propose** — `wendkeep change new <slug>` faz o scaffold de `08-Mudanças/<slug>/` (`proposta.md`, `design.md`, `tarefas.md`; o `--simple` pula o design). A change vira a *atual* global; `change use <slug>` troca o foco e `change continue <arquivada> <nova>` cria uma continuação auditável. Várias changes podem ficar abertas: hooks e `change list/status` mostram todas as pendências, enquanto comandos sem `--change` usam somente a atual. Quando a change declara `spec_impact: required`, você mesmo escreve o delta em `specs/<capability>/spec.md` — não há placeholder pra apagar.
 - **Apply** — implemente cada tarefa de `tarefas.md`. Marque a prova de máquina com uma ou mais tags `[sensor:<id>]` na mesma tarefa: todos os IDs distintos entram no gate uma vez, na ordem declarada. Marque também os requisitos satisfeitos com uma ou mais tags `[req:<ID>]`.
-- **Verify** — `wendkeep verify` roda os sensores que suas tarefas declararam (do `wendkeep.sensors.json` na raiz do projeto) e grava `evidencia.json`. Um vermelho crítico falha o gate; um vermelho `warning` é aviso. O `verify --deep` monta o pacote autocontido de verificação (contrato vivo + delta desta change). Toda change precisa de um `verdict.json` pra arquivar; quando ela não declara `[req:]`, o próprio `verify --deep` grava um verdict trivial.
+- **Verify** — `wendkeep verify` roda os sensores que suas tarefas declararam (do `wendkeep.sensors.json` na raiz do projeto) e grava `evidencia.json`. Um vermelho crítico falha o gate; um vermelho `warning` é aviso. Falhas guardam somente um diagnóstico limitado e sanitizado; saída verde não é persistida. O `verify --deep` monta o pacote autocontido de verificação (contrato vivo + delta desta change). Toda change precisa de um `verdict.json` pra arquivar; quando ela não declara `[req:]`, o próprio `verify --deep` grava um verdict trivial.
 - **Archive** — `wendkeep change archive <slug>` faz **gate** na evidência (bloqueia a não ser que todo sensor crítico declarado esteja verde), promove o delta de cada capability (`ADDED`/`MODIFIED`/`REMOVED`) pro `07-Specs/<capability>.md` vivo, move a change pro `_arquivo/` e cunha um ADR em `04-Decisões/`.
 
 > O gate bloqueia a não ser que o scaffold esteja preenchido, nenhuma tarefa aberta, evidência fresca e todo requisito declarado coberto. **O `--force` dispensa exatamente uma dessas — a checagem de tarefa aberta — e é decisão do humano, nunca do agente.** Scaffold não preenchido, sensor crítico vermelho, evidência stale, requisito órfão ou verdict ausente bloqueiam de qualquer jeito.

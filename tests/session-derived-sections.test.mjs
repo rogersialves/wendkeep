@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { finalizeSessionFile } from '../hooks/session-stop.mjs';
+import { finalizeSessionFile, sanitizeGeneratedSessionMarkdown } from '../hooks/session-stop.mjs';
 import { repairDerivedSections } from '../hooks/derived-sections.mjs';
 import { checkStaleDerivedSections, renderStaleDerivedSectionLines } from '../hooks/harness-doctor.mjs';
 
@@ -78,6 +78,105 @@ test('finalize escreve as três seções com o mesmo created do Encerramento', (
     assert.equal(linksIn(out, 'Aprendizados gerados nesta sessão').length, 2);
     assert.doesNotMatch(sectionOf(out, 'Aprendizados gerados nesta sessão'), /Nenhum aprendizado/,
       'placeholder sai quando há itens');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('[req:IMPORT-6] finalize grava Resumo final sanitizado no Markdown', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'wk-derived-'));
+  try {
+    const note = join(dir, 'note.md');
+    writeFileSync(note, NOTE);
+    const tx = {
+      ...TX,
+      latestAssistantMessage: [
+        'Fechado com </session> e <https://example.com/prova>.',
+        '<oai-mem-citation><citation_entries>interno</citation_entries></oai-mem-citation>',
+      ].join('\n'),
+    };
+
+    finalizeSessionFile(note, tx, { decisions: [], bugs: [], learnings: [] }, '2026-08-01T18:00:00');
+    const closing = sectionOf(readFileSync(note, 'utf8'), 'Encerramento');
+
+    assert.match(closing, /Resumo final:.*&lt;\/session&gt;.*<https:\/\/example\.com\/prova>/);
+    assert.doesNotMatch(closing, /oai-mem-citation|citation_entries/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('[req:IMPORT-6] migração no finalize toca somente linhas geradas e é idempotente', () => {
+  const authoredIteration = 'Parágrafo autoral com <oai-mem-citation> permanece byte a byte.';
+  const authoredClosing = '- Observação autoral com <citation_entries> permanece byte a byte.';
+  const contaminated = `---
+type: session
+date: 2026-08-01
+ended_at:
+status: active
+---
+
+# sessão
+
+## Iterações
+
+### 13:02 - Pedido com <session>
+
+**Pedido:** Relatei <oai-mem-citation> no Obsidian.
+
+**Contexto conversado:**
+- **Usuário:** Vi <citation_entries> como texto.
+- **Assistente:** Corrigido.
+<oai-mem-citation>
+<citation_entries>x
+
+**Estado ao final do turno:** Corrigido. </session><oai-mem-citation><rollout_ids>x
+
+${authoredIteration}
+
+## Decisões geradas nesta sessão
+
+Nenhuma decisão registrada ainda.
+
+## Bugs gerados nesta sessão
+
+Nenhum bug registrado ainda.
+
+## Aprendizados gerados nesta sessão
+
+Nenhum aprendizado registrado ainda.
+
+## Pendências
+
+Nenhuma.
+
+## Encerramento
+
+- **Resumo final:** Antigo. </session><oai-mem-citation><citation_entries>x
+${authoredClosing}
+`;
+
+  const migrated = sanitizeGeneratedSessionMarkdown(contaminated);
+  assert.equal(sanitizeGeneratedSessionMarkdown(migrated), migrated, 'a migração deve convergir em uma passada');
+  assert.match(migrated, /### 13:02 - Pedido com &lt;session&gt;/);
+  assert.match(migrated, /\*\*Pedido:\*\* Relatei &lt;oai-mem-citation&gt; no Obsidian\./);
+  assert.match(migrated, /- \*\*Usuário:\*\* Vi &lt;citation_entries&gt; como texto\./);
+  assert.match(migrated, /- \*\*Assistente:\*\* Corrigido\./);
+  assert.doesNotMatch(migrated, /^<oai-mem-citation>|^<citation_entries>x$/m);
+  assert.match(migrated, /\*\*Estado ao final do turno:\*\* Corrigido\./);
+  assert.match(migrated, /- \*\*Resumo final:\*\* Antigo\./);
+  assert.ok(migrated.includes(authoredIteration));
+  assert.ok(migrated.includes(authoredClosing));
+
+  const dir = mkdtempSync(join(tmpdir(), 'wk-generated-migration-'));
+  try {
+    const note = join(dir, 'note.md');
+    writeFileSync(note, contaminated);
+    finalizeSessionFile(note, TX, { decisions: [], bugs: [], learnings: [] }, '2026-08-01T18:00:00');
+    const finalized = readFileSync(note, 'utf8');
+    assert.match(finalized, /- \*\*Assistente:\*\* Corrigido\./);
+    assert.doesNotMatch(finalized, /- \*\*Assistente:\*\*.*(?:oai-mem-citation|citation_entries)/);
+    assert.ok(finalized.includes(authoredIteration));
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

@@ -3,10 +3,12 @@
 import { mutateSessionRegistry, readSessionRegistry } from '../hooks/obsidian-common.mjs';
 import {
   DEFAULT_OPERATING_PROFILE,
+  evaluateTaskOperatingProfileLease,
   normalizeOperatingProfile,
   resolveOperatingProfile,
   setOperatingProfile,
 } from './operating-profile.mjs';
+import { setSessionTaskOperatingProfile } from '../hooks/operating-profile-task-store.mjs';
 import { resolve } from 'node:path';
 import { findProjectBinding, resolveProjectVault, updateProjectBinding } from './project-vault.mjs';
 
@@ -14,12 +16,14 @@ export const PROFILE_HELP = `wendkeep profile <subcommand>
 
   status [--session <id>]
   use <OFF|FLOW|GUIDE|GOVERN|ASSURE> [--session <id>]
+  route <FLOW|GUIDE|GOVERN|ASSURE> --session <id> --reason <text>
 
-Common options: --project <path> --vault <path> --session <id> --json
+Common options: --project <path> --vault <path> --session <id> --json --reason <text>
+route creates a task-scoped choice for the current request; it never selects OFF.
 The Keep Core (Vault, session, and memory) remains active under every profile.
 `;
 
-const VALUE_OPTIONS = new Set(['--project', '--vault', '--session']);
+const VALUE_OPTIONS = new Set(['--project', '--vault', '--session', '--reason']);
 const FLAG_OPTIONS = new Set(['--json']);
 
 function optionValue(argv, name) {
@@ -32,8 +36,8 @@ function commandArgs(argv) {
   const values = [];
   for (let index = 0; index < argv.length; index += 1) {
     const value = argv[index];
-    if (['--project', '--vault', '--session'].includes(value)) { index += 1; continue; }
-    if (value.startsWith('--project=') || value.startsWith('--vault=') || value.startsWith('--session=')) continue;
+    if (['--project', '--vault', '--session', '--reason'].includes(value)) { index += 1; continue; }
+    if (value.startsWith('--project=') || value.startsWith('--vault=') || value.startsWith('--session=') || value.startsWith('--reason=')) continue;
     if (value === '--json') continue;
     values.push(value);
   }
@@ -76,8 +80,15 @@ function canonicalPath(value) {
 function output(payload, json) {
   if (json) process.stdout.write(`${JSON.stringify(payload)}\n`);
   else {
-    const scope = payload.scope === 'session' ? `session ${payload.session_id}` : 'project';
-    process.stdout.write(`${payload.profile} (${scope}; ${payload.source})\n`);
+    const scope = payload.scope === 'task'
+      ? `task ${payload.session_id}`
+      : payload.scope === 'session' ? `session ${payload.session_id}` : 'project';
+    const details = [scope, payload.source];
+    if (payload.session_id && payload.base_profile && payload.task_lease?.state) {
+      details.push(`base=${payload.base_profile}/${payload.base_source}`);
+      details.push(`lease=${payload.task_lease.state}`);
+    }
+    process.stdout.write(`${payload.profile} (${details.join('; ')})\n`);
   }
   if (payload.binding_error) {
     const code = payload.binding_error.code || 'WENDKEEP_VAULT_CONFIG_INVALID';
@@ -129,10 +140,7 @@ export function setSessionOperatingProfile(vaultBase, sessionId, profile, { now 
   });
 }
 
-function sessionProfile(vaultBase, sessionId, projectResolved) {
-  const sessions = readSessionRegistry(vaultBase).sessions || {};
-  if (!Object.hasOwn(sessions, sessionId)) throw new Error(`sessão não encontrada: ${sessionId}`);
-  const entry = sessions[sessionId];
+function sessionBaseProfile(entry, projectResolved) {
   if (Object.hasOwn(entry, 'operating_profile')) {
     try {
       return {
@@ -149,6 +157,44 @@ function sessionProfile(vaultBase, sessionId, projectResolved) {
   return { profile: projectResolved.profile, source: projectResolved.source };
 }
 
+function sessionProfile(vaultBase, sessionId, projectResolved) {
+  const sessions = readSessionRegistry(vaultBase).sessions || {};
+  if (!Object.hasOwn(sessions, sessionId)) throw new Error(`sessão não encontrada: ${sessionId}`);
+  return sessionBaseProfile(sessions[sessionId], projectResolved);
+}
+
+function sessionProfileStatus(vaultBase, sessionId, projectResolved) {
+  const sessions = readSessionRegistry(vaultBase).sessions || {};
+  if (!Object.hasOwn(sessions, sessionId)) throw new Error(`sessão não encontrada: ${sessionId}`);
+  const entry = sessions[sessionId];
+  const base = sessionBaseProfile(entry, projectResolved);
+  const taskLease = evaluateTaskOperatingProfileLease(entry.operating_profile_task, {
+    sessionId,
+    turnId: entry.last_prompt_turn_id || '',
+    turnSequence: entry.last_turn_sequence,
+  });
+  return {
+    profile: taskLease.state === 'active' ? taskLease.profile : base.profile,
+    source: taskLease.state === 'active' ? 'task-lease' : base.source,
+    scope: taskLease.state === 'active' ? 'task' : 'session',
+    baseProfile: base.profile,
+    baseSource: base.source,
+    taskLease,
+  };
+}
+
+function sessionOutputPayload(effective, sessionId) {
+  return {
+    profile: effective.profile,
+    source: effective.source,
+    scope: effective.scope,
+    session_id: sessionId,
+    base_profile: effective.baseProfile,
+    base_source: effective.baseSource,
+    task_lease: effective.taskLease,
+  };
+}
+
 export function runProfile(argv = []) {
   try { validateArgv(argv); }
   catch (error) { return fail(error.message); }
@@ -156,6 +202,8 @@ export function runProfile(argv = []) {
   const sub = args[0] || 'status';
   const json = argv.includes('--json');
   const sessionId = optionValue(argv, '--session') || '';
+  const reason = optionValue(argv, '--reason');
+  if (sub !== 'route' && reason) return fail('--reason só é aceito por profile route');
 
   let state;
   try { state = context(argv); }
@@ -166,20 +214,50 @@ export function runProfile(argv = []) {
     if (args.length > 1) return fail(`${sub} não aceita argumentos posicionais adicionais`);
     try {
       const effective = sessionId
-        ? sessionProfile(state.vaultBase, sessionId, projectResolved)
-        : { profile: projectResolved.profile, source: projectResolved.source };
+        ? sessionProfileStatus(state.vaultBase, sessionId, projectResolved)
+        : { profile: projectResolved.profile, source: projectResolved.source, scope: 'project' };
       output({
-        profile: effective.profile,
-        source: effective.source,
-        scope: sessionId ? 'session' : 'project',
-        session_id: sessionId || null,
+        ...(sessionId ? sessionOutputPayload(effective, sessionId) : {
+          profile: effective.profile,
+          source: effective.source,
+          scope: 'project',
+          session_id: null,
+        }),
         ...(state.resolved.bindingError ? { binding_error: state.resolved.bindingError } : {}),
       }, json);
       return 0;
     } catch (error) { return fail(error.message); }
   }
 
-  if (sub !== 'use' && sub !== 'set') return fail('use status | use <OFF|FLOW|GUIDE|GOVERN|ASSURE>');
+  if (sub === 'route') {
+    if (args.length !== 2) return fail('route requer exatamente um perfil');
+    if (!sessionId) return fail('route requer --session <id>');
+    if (!reason) return fail('route requer --reason <text>');
+    try {
+      const base = sessionProfile(state.vaultBase, sessionId, projectResolved);
+      const lease = setSessionTaskOperatingProfile(
+        state.vaultBase,
+        sessionId,
+        args[1],
+        { reason },
+      );
+      output({
+        profile: lease.profile,
+        source: 'task-lease',
+        scope: 'task',
+        session_id: sessionId,
+        base_profile: base.profile,
+        base_source: base.source,
+        task_lease: lease,
+        ...(state.resolved.bindingError ? { binding_error: state.resolved.bindingError } : {}),
+      }, json);
+      return 0;
+    } catch (error) { return fail(error.message); }
+  }
+
+  if (sub !== 'use' && sub !== 'set') {
+    return fail('use status | use <OFF|FLOW|GUIDE|GOVERN|ASSURE> | route <FLOW|GUIDE|GOVERN|ASSURE>');
+  }
   if (args.length !== 2) return fail(`${sub} requer exatamente um perfil`);
   let profile;
   try { profile = normalizeOperatingProfile(args[1], { strict: true }); }

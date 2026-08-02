@@ -74,15 +74,18 @@ npx wendkeep memory status --gate --vault .MeuApp-vault
 ## Resultado esperado
 
 `evidencia.json` contém resultados dos sensores e um selo liga a prova ao hash atual de
-`tarefas.md`. No deep, o pacote contém requisitos, tarefas e evidência suficientes para revisão
-read-only; o verdict cobre cada `[req:]` antes do archive.
+`tarefas.md`. Quando um sensor fica vermelho, sua entrada recebe somente um diagnóstico local
+sanitizado e limitado a 2.000 caracteres; stdout/stderr de sensores verdes não é persistido. No
+deep, o pacote contém requisitos, tarefas e evidência suficientes para revisão read-only; o
+verdict cobre cada `[req:]` antes do archive.
 
 ## Erros comuns e diagnóstico
 
 - `no change`: isso é exit 2 e estado ocioso válido; crie/use uma change ou não rode verify.
 - Zero/sensores ausentes: confira todas as tags na mesma linha e `sensors list`; várias tags na
   mesma tarefa são válidas e todas entram no gate.
-- Gate vermelho: corrija a causa e repita; não use `archive --force` por conta própria.
+- Gate vermelho: consulte o campo `note` limitado da entrada em `evidencia.json`, corrija a causa
+  e repita; não use `archive --force` por conta própria.
 - Verdict stale/ausente: regenere `--deep` e peça novo passe independente.
 - Mutantes sobreviventes: fortaleça o teste discriminante; após três rodadas, revise manualmente.
 

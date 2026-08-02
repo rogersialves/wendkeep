@@ -15,6 +15,10 @@
 
 **Persistent memory for AI coding agents, built on your Obsidian vault.** Every Claude Code **and Codex** session is captured turn by turn into local Markdown — `init` wires both (Codex asks you to approve its hooks once; `import` backfills past sessions either way) — with token/cost tracking and automatically extracted decisions, bugs, and learnings. That always-on plane is **Keep Core**. On top of it, **Wend Runtime** provides a native, zero-dependency lifecycle (spec → change → TDD → sensor-gated archive), selected through the `OFF`, `FLOW`, `GUIDE`, `GOVERN`, and `ASSURE` Operating Profiles. 100% local, open-core.
 
+When projecting sessions, trailing internal metadata is removed only from assistant responses;
+user reports remain intact. XML-like tags are written as escaped text so Obsidian Reading view
+does not interpret them as HTML.
+
 The runtime is being separated into six physical boundaries — `cli`, `harness`, `vault`, `mcp`,
 `integrations`, and `pi` — without fragmenting installation. The private `cli`, `harness`,
 `vault`, `mcp`, and `integrations` workspaces now canonically own the executable runtime,
@@ -235,13 +239,82 @@ deliberate opt-in and runs that command's own validations:
 | `GOVERN` | P → R → E → V | Current a2 loop and compatible fallback. |
 | `ASSURE` | P → R → E → V → C | Governance with confirmation and handoff. |
 
+A route is a sequence of work stages, not a list of command names:
+
+- `P` = **Plan/Propose** — understand the request, bound the scope, and record the approach when a change is needed.
+- `R` = **Review** — inspect the proposal/design before execution; this is the formal a2-loop review.
+- `E` = **Execute** — edit the permitted code or artifacts.
+- `V` = **Validate** — run tests, sensors, and checks and record evidence.
+- `C` = **Confirm/hand off** — obtain explicit confirmation and complete the handoff.
+
+Thus, `P → R → E → V` means “plan/propose, review, execute, and validate”. `FLOW` starts at the
+execution/validation microcontract; `OFF` applies no automatic Wend route and returns process
+ownership to the native LLM harness.
+
+### Who selects the profile, and for how long?
+
+The LLM harness (Codex, Claude, or another agent) **classifies the current implementation** and can
+record a temporary choice with `wendkeep profile route`. Wend Runtime does not interpret prompt
+text or use diff size, heuristics, or environment variables: it validates the choice, applies the
+route in hooks, and expires the lease when the request ends. With no recorded route, the configured
+base profile remains effective.
+
+Resolution follows this order:
+
+1. a valid lease for the current request in `SESSION_REGISTRY.json`;
+2. a persistent session override in that registry;
+3. `harness.profile` in the project's `.wendkeep.json`;
+4. `GOVERN` when no valid setting exists.
+
+Without `--session`, `profile use` changes the **project default** for conversations/hooks that do
+not have a session override. With `--session <id>`, it changes only that session and leaves the
+project default untouched. Therefore, `profile use OFF` without `--session` is not an isolated
+test: it writes the project binding and can be shared if `.wendkeep.json` is committed.
+
+`profile route` is different: it requires `--session` and `--reason`, accepts only `FLOW`, `GUIDE`,
+`GOVERN`, or `ASSURE`, does not rewrite the project/persistent override, and applies only to the
+current causal prompt. An accepted `Stop` consumes the lease; if the process dies first, the next
+prompt advances the sequence and makes the old lease ineffective. `OFF` is never selected
+automatically.
+
+```bash
+npx wendkeep profile status
+npx wendkeep profile use GUIDE                 # project default
+npx wendkeep profile use FLOW --session <id>   # one session only
+npx wendkeep profile route FLOW --session <id> --reason "local fix"  # current request
+npx wendkeep profile status --session <id>     # session-effective profile
+```
+
+In human `status --session` output, `base=<profile>/<source>` and `lease=<state>` accompany the
+effective profile; `--json` exposes the same data as `base_profile`, `base_source`, and
+`task_lease`. `profile route` only accepts a session after `UserPromptSubmit` has recorded a
+positive causal turn and sequence that agree in the registry.
+
+### Which profile fits a simple request?
+
+“Small” describes size, not risk. The harness uses this matrix to choose and record a temporary
+route; semantic inference remains in the agent, not Wend Runtime:
+
+| Situation | Suggested profile |
+|---|---|
+| Question, inspection, or diagnosis with no mutation | No profile transition |
+| Local, reversible fix with an allowlist and no contract/spec change | `FLOW` (`E → V`) |
+| Small behavior change that needs a change but not formal Wend Runtime review | `GUIDE` (`P → E → V`) |
+| Normal, ambiguous, public-contract, security, dependency, CI/release, or policy change | `GOVERN` (`P → R → E → V`) |
+| Work requiring explicit confirmation and handoff | `ASSURE` (`P → R → E → V → C`) |
+
+If the harness does not record a lease, a small fix remains under the configured profile —
+`GOVERN` by default. `OFF` does not mean “simple task”: it is a persistent human choice that hands
+governance to the native harness. The LLM may temporarily elevate an `OFF` base to a Wend route,
+but it can never select `OFF` on its own.
+
 A corrupt binding never selects `OFF`: with one unambiguous explicit or legacy Vault, Keep Core
 remains active under `GOVERN`, the error stays visible, and mutation guards fail closed. Additional
 roots that FLOW must protect can be declared as project-relative paths under
 `harness.flow.protectedRoots` in `.wendkeep.json`; any change below them requires promotion.
 Invalid local config, marker, or identity never silently falls back to a parent/global Vault.
 
-`wendkeep profile status/use` makes the choice observable; `wendkeep flow
+`wendkeep profile status/use/route` makes the choice observable; `wendkeep flow
 start/finish/promote` handles local adjustments without manufacturing an ADR and fails closed on
 physical escapes, Git metadata/hidden flags, mutating sensors, protected surfaces, or incomplete
 session projection. Bounded no-follow discovery sees empty/ignored protected aliases; Vault writes
@@ -379,7 +452,7 @@ explore → propose → apply (TDD) → verify → archive
 
 - **Propose** — `wendkeep change new <slug>` scaffolds `08-Mudanças/<slug>/` (`proposta.md`, `design.md`, `tarefas.md`; `--simple` skips the design). It becomes the global *current* change. When the change declares `spec_impact: required`, you author the delta yourself at `specs/<capability>/spec.md` — there is no placeholder to delete. Multiple changes may remain open: `change list`/`status` and the hooks show every pending one, while commands without `--change` act on the current one alone. `change use <slug>` changes focus and `change continue <archived> <new>` creates an auditable continuation.
 - **Apply** — implement each `tarefas.md` task. Mark machine proof with one or more `[sensor:<id>]` tags on the same task: every distinct ID enters the gate once, in declaration order. Also mark satisfied requirements with one or more `[req:<ID>]` tags.
-- **Verify** — `wendkeep verify` runs the sensors your tasks declared (from `wendkeep.sensors.json` at the project root) and writes `evidencia.json`. A red `critical` fails the gate; a red `warning` is advisory. `verify --deep` builds a self-contained package with complete effective requirements (living contract + this change's delta), so the independent verifier never needs to reconstruct unarchived requirements from `07-Specs`. Every change needs a `verdict.json` to archive; `verify --deep` writes a trivial one automatically when the change declares no `[req:]`.
+- **Verify** — `wendkeep verify` runs the sensors your tasks declared (from `wendkeep.sensors.json` at the project root) and writes `evidencia.json`. A red `critical` fails the gate; a red `warning` is advisory. Failures retain only a bounded, sanitized diagnostic; green output is not persisted. `verify --deep` builds a self-contained package with complete effective requirements (living contract + this change's delta), so the independent verifier never needs to reconstruct unarchived requirements from `07-Specs`. Every change needs a `verdict.json` to archive; `verify --deep` writes a trivial one automatically when the change declares no `[req:]`.
 - **Archive** — `wendkeep change archive <slug>` **gates** on the evidence (blocks unless every declared critical sensor is green), promotes each capability's spec delta (`ADDED`/`MODIFIED`/`REMOVED`) into the living `07-Specs/<capability>.md`, moves the change to `_arquivo/`, and mints an ADR in `04-Decisões/`.
 
 > The gate blocks unless the scaffold is filled, no task is open, evidence is fresh, and every declared requirement is covered. **`--force` waives exactly one of those — the open-task check — and is the human's call, never the agent's.** An unfilled scaffold, a red critical sensor, stale evidence, an orphan requirement or a missing verdict block regardless.

@@ -6,6 +6,38 @@ import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 
 export const SENSOR_VAULT_ENV = 'WENDKEEP_SENSOR_VAULT';
+const SENSOR_OUTPUT_MAX_BUFFER = 8 * 1024 * 1024;
+const SENSOR_DIAGNOSTIC_MAX_LENGTH = 2000;
+
+function sanitizeSensorDiagnostic(value) {
+  return String(value || '')
+    .replace(/\x1B\[[0-?]*[ -/]*[@-~]/g, '')
+    .replace(/\b(gh[pousr]_[A-Za-z0-9_]{12,})\b/g, '[REDACTED_SECRET]')
+    .replace(/\b(sk-[A-Za-z0-9_-]{12,})\b/g, '[REDACTED_SECRET]')
+    .replace(/\b(whsec_[A-Za-z0-9_/-]{8,})\b/g, '[REDACTED_SECRET]')
+    .replace(/\b(xox[baprs]-[A-Za-z0-9-]{12,})\b/g, '[REDACTED_SECRET]')
+    .replace(/\b([A-Z0-9_]*(?:TOKEN|SECRET|PASSWORD|API_KEY)[A-Z0-9_]*)\s*[:=]\s*["']?[^"'\s]+/gi, '$1=[REDACTED_SECRET]')
+    .replace(/:\/\/([^:\s/@]+):([^@\s/]+)@/g, '://[REDACTED_SECRET]@')
+    .replace(/\r/g, '')
+    .trim();
+}
+
+function sensorFailureNote(result = {}) {
+  const status = result.status ?? 'null';
+  const header = [
+    `exit=${status}`,
+    ...(result.signal ? [`signal=${result.signal}`] : []),
+  ].join(' ');
+  const detail = sanitizeSensorDiagnostic([
+    result.error?.message,
+    result.stdout,
+    result.stderr,
+  ].filter(Boolean).join('\n'));
+  if (!detail) return header;
+  const room = SENSOR_DIAGNOSTIC_MAX_LENGTH - header.length - 1;
+  const bounded = detail.length > room ? `…${detail.slice(-(room - 1))}` : detail;
+  return `${header}\n${bounded}`;
+}
 
 export function sensorProcessEnv(vaultBase, inherited = process.env) {
   return {
@@ -59,8 +91,16 @@ export function runSensors(sensors, ids, { spawn = spawnSync, cwd, env, now } = 
   for (const id of ids) {
     const s = byId[id];
     if (!s) { evidence.push({ id, status: 'red', ts, severity: 'critical', note: 'sensor não definido' }); continue; }
-    const r = spawn(s.command, [], { cwd, shell: true, stdio: 'ignore', ...(env ? { env } : {}) });
+    const r = spawn(s.command, [], {
+      cwd,
+      shell: true,
+      encoding: 'utf8',
+      maxBuffer: SENSOR_OUTPUT_MAX_BUFFER,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      ...(env ? { env } : {}),
+    });
     const entry = { id, status: (r.status ?? 1) === 0 ? 'green' : 'red', ts, severity: s.severity || 'critical' };
+    if (entry.status === 'red') entry.note = sensorFailureNote(r);
     if (s.type === 'mutation' && s.report) {
       // Delegated mutation (Wave B): read the tool's mutation-testing-elements report and
       // attach surviving mutants so verify can turn them into fix tasks.

@@ -81,7 +81,13 @@ Each canonical session points to the matching provider, transcript, note file, a
 registry keeps one `SessionStart` epoch per activation plus the latest native turn; multiple
 `Stop` events may acknowledge turns in that epoch without closing it. Repeated imports of the
 same `session_id` deduplicate; human focus does not close or re-identify live hooks. Every
-automatic iteration remains valid Markdown even when a message must be truncated.
+automatic iteration remains valid Markdown even when a message must be truncated. Complete or
+truncated trailing internal metadata is removed only from assistant messages; a reproduction
+written by the user remains in the transcript. In the note, XML-like tags are encoded as visible
+text — including placeholders such as `<session>` — without changing `<https://...>` autolinks.
+Reimport and `SessionStop` share the same idempotent normalizer; when an older note is finalized,
+only recognized generated fields under `Iterações` and `Encerramento` are migrated, without rewriting
+authored prose.
 Duplicate/stale hooks converge on the same frontier, and imports may refresh only observability
 without creating a new turn block.
 
