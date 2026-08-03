@@ -139,6 +139,31 @@ function createAlias(t, source, target, type = 'hardlink') {
   }
 }
 
+function assertEveryFailureHasSafeMemoryCommand(result, vault) {
+  assert.ok(result.failures.length > 0, 'expected at least one memory failure');
+  for (const failure of result.failures) {
+    assert.match(
+      failure,
+      /npx --no-install wendkeep memory (?:status --gate|migrate --apply|repair|curate) --vault /,
+    );
+    assert.ok(failure.includes(`--vault "${vault}"`), 'command uses the resolved Vault path');
+  }
+}
+
+test('[req:DIAG-8] missing Vault blocks with a safe resolved status command', () => {
+  const parent = mkdtempSync(join(tmpdir(), 'wk-health-memory-missing-'));
+  const vault = join(parent, 'vault-does-not-exist');
+  try {
+    const result = checkMemoryBundle(vault);
+
+    assert.equal(result.ok, false);
+    assert.equal(result.status, 'blocked');
+    assert.match(result.failures.join('\n'), /Vault not found/i);
+    assertEveryFailureHasSafeMemoryCommand(result, vault);
+    assert.equal(existsSync(vault), false, 'status check does not create the missing Vault');
+  } finally { rmSync(parent, { recursive: true, force: true }); }
+});
+
 test('[req:DIAG-8] doctor names a healthy bundle and reports schema/revision/cursor/hash', () => {
   const vault = createBundle();
   try {
@@ -171,6 +196,7 @@ test('[req:OP-10] memory health bloqueia .brain junction antes de diagnosticar c
     assert.equal(result.ok, false);
     assert.equal(result.status, 'blocked');
     assert.match(result.failures.join('\n'), /link simbólico|junction|reparse|Vault/i);
+    assertEveryFailureHasSafeMemoryCommand(result, vault);
     assert.deepEqual(byteSnapshot(sourceVault), before);
     assert.equal(lstatSync(brain).isSymbolicLink(), true);
   } finally {
@@ -203,12 +229,35 @@ test('[req:OP-10] memory health bloqueia hardlinks de candidates e outbox sem oc
         assert.equal(result.ok, false);
         assert.equal(result.status, 'blocked');
         assert.match(result.failures.join('\n'), /hardlink|nlink|Vault/i);
+        assertEveryFailureHasSafeMemoryCommand(result, vault);
         assert.deepEqual(readFileSync(source), before);
       } finally {
         rmSync(vault, { recursive: true, force: true });
         rmSync(outside, { recursive: true, force: true });
       }
     });
+  }
+});
+
+test('[req:DIAG-8] unsafe session registry blocks with a safe resolved status command', (t) => {
+  const vault = createBundle();
+  const outside = mkdtempSync(join(tmpdir(), 'wk-health-memory-registry-outside-'));
+  try {
+    const source = join(outside, 'SESSION_REGISTRY.json');
+    const target = join(vault, '.brain', 'SESSION_REGISTRY.json');
+    writeFileSync(source, '{"private":"registry-content"}\n');
+    if (!createAlias(t, source, target)) return;
+
+    const result = checkMemoryBundle(vault);
+
+    assert.equal(result.ok, false);
+    assert.equal(result.status, 'blocked');
+    assert.match(result.failures.join('\n'), /SESSION_REGISTRY\.json.*inseguro|hardlink|nlink/i);
+    assertEveryFailureHasSafeMemoryCommand(result, vault);
+    assert.doesNotMatch(result.failures.join('\n'), /registry-content/);
+  } finally {
+    rmSync(vault, { recursive: true, force: true });
+    rmSync(outside, { recursive: true, force: true });
   }
 });
 
@@ -665,9 +714,9 @@ test('[req:DIAG-8] active semantic conflicts explain safe human curation without
     assert.ok(failure);
     assert.match(failure, /conflito semântico.*curadoria humana/i);
     assert.match(failure, /memory repair.*não escolhe vencedor/i);
-    assert.match(failure, /memory promote <candidate-id> --event <event-id>/i);
-    assert.match(failure, /memory reject <candidate-id>/i);
-    assert.ok(failure.includes(`npx --no-install wendkeep memory candidates --active --vault "${vault}"`));
+    assert.ok(failure.includes(`npx --no-install wendkeep memory curate --vault "${vault}"`));
+    assert.match(failure, /próximo passo/i);
+    assert.match(failure, /outras memórias \(next\.ui\): 2/i);
     assert.equal((failure.match(/next\.ui/g) || []).length, 1, 'doctor deduplicates repeated keys');
     assert.doesNotMatch(
       failure,

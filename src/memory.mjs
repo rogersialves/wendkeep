@@ -279,6 +279,62 @@ export function listMemoryCandidates(vault, { activeOnly = false } = {}) {
   return { status: 'ok', candidates };
 }
 
+const CURATION_PREVIEW_CHARS = 160;
+
+function curationPreview(value) {
+  const normalized = sanitizeMemoryText(value).replace(/\s+/g, ' ').trim();
+  const visible = normalized || '(sem conteúdo)';
+  return visible.length <= CURATION_PREVIEW_CHARS
+    ? visible
+    : `${visible.slice(0, CURATION_PREVIEW_CHARS - 1).trimEnd()}…`;
+}
+
+function sanitizedCurationEvent(candidate, eventId, candidateIndex) {
+  const events = Array.isArray(candidate.events) ? candidate.events : [];
+  const event = events.find((item) => item?.event_id === eventId);
+  if (!event || typeof event !== 'object' || Array.isArray(event)) {
+    throw new Error(
+      `MEMORY_CANDIDATES.jsonl: candidate ${candidateIndex + 1} sem evento elegível.`,
+    );
+  }
+  const source = event.canonical_session_id
+    ? 'session'
+    : event.source_turn_id
+      ? 'turn'
+      : event.activation_id
+        ? 'activation'
+        : 'unknown';
+  return {
+    event_id: eventId,
+    observed_at: sanitizeMemoryText(event.observed_at || event.effective_at || ''),
+    source: sanitizeMemoryText(source),
+    preview: curationPreview(event.value),
+  };
+}
+
+export function listMemoryCandidatesForCuration(vault) {
+  return readCandidates(vault)
+    .map((candidate, index) => ({ candidate, index, safe: sanitizedCandidate(candidate, index) }))
+    .filter(({ safe }) => safe.reason === 'conflict'
+      && !TERMINAL_CANDIDATE_STATUSES.has(safe.status))
+    .map(({ candidate, index, safe }) => {
+      if (!safe.event_ids.length) {
+        throw new Error(
+          `MEMORY_CANDIDATES.jsonl: candidate ${index + 1} sem eventos elegíveis.`,
+        );
+      }
+      return {
+        candidate_id: safe.candidate_id,
+        reason: safe.reason,
+        status: safe.status,
+        memory_key: safe.memory_key,
+        events: safe.event_ids.map((eventId) => sanitizedCurationEvent(candidate, eventId, index)),
+      };
+    })
+    .sort((left, right) => lexicalCompare(left.memory_key, right.memory_key)
+      || lexicalCompare(left.candidate_id, right.candidate_id));
+}
+
 function priorCandidateDecision(vault, candidateId) {
   return readMemoryLedger(vault).events.find(
     (event) => event.candidate_decision?.candidate_id === candidateId,

@@ -24,12 +24,13 @@ Pass the vault explicitly in automation. Preserve backups and evidence before re
 
 ```bash
 npx wendkeep memory status [--gate] --vault <vault>
+npx wendkeep memory curate --vault <vault>
 npx wendkeep memory candidates [--active] --vault <vault>
 npx wendkeep memory repair --vault <vault>
 npx wendkeep memory recover-attempt <session> [--apply] --vault <vault>
 npx wendkeep memory reconcile <ambiguous-session> --by-session <successor-session> --reason <reason> [--apply] --vault <vault>
-npx wendkeep memory promote <candidate> [--event <event-id>] --vault <vault>
-npx wendkeep memory reject <candidate> --vault <vault>
+npx wendkeep memory promote <candidate-id> [--event <event-id>] --vault <vault>
+npx wendkeep memory reject <candidate-id> --vault <vault>
 npx wendkeep validate-memory [CORE-path]
 npx wendkeep validate-memory --vault <v2-vault>
 ```
@@ -37,6 +38,14 @@ npx wendkeep validate-memory --vault <v2-vault>
 ## Options and exit codes
 
 - `memory status` is read-only; `--gate` exits `1` only for blocking state.
+- `memory curate` is the recommended human path: in an interactive terminal it groups each
+  conflict under a friendly name, shows sanitized previews only, and offers numbered choices,
+  `P` to skip, `R` to reject, `D` for technical details, and `Q` to quit. Every promotion or
+  rejection asks for confirmation with default `no`: Enter or `N` does not write. Skip or quit
+  leaves the remaining work pending; running the command again resumes the active conflicts.
+- The assistant accepts only `--vault`: there is no `--yes`, `--apply`, or batch mode. In a
+  non-TTY environment it exits `2` without changing bytes and recommends the advanced fallback
+  `memory candidates --active`.
 - `memory candidates` is read-only and prints deterministic JSON containing only `candidate_id`,
   `reason`, `status`, `memory_key`, and `event_ids`; it does not expose memory values or content and
   does not create a lock or mutate the bundle. `--active` omits terminal candidates (`resolved`,
@@ -89,8 +98,9 @@ npx wendkeep validate-memory --vault <v2-vault>
   the lease they acquired.
 - `promote`/`reject` append an auditable, idempotent decision to the ledger. Replay and repair
   preserve that decision and do not recreate the resolved candidate. For a `conflict` candidate,
-  `promote` requires an `--event <event-id>` that belongs to the candidate; date or random ID
-  never picks an implicit winner. `reject` preserves the current operational value. A
+  use `memory promote <candidate-id> --event <event-id>` with an event that belongs to the
+  candidate; date or random ID never picks an implicit winner. `reject` preserves the current
+  operational value. A
   `blocked_by_core` candidate can only be rejected: promotion first requires canonical CORE
   curation. If the selected event still belongs to the matching latest `projected` attempt,
   promotion also refreshes its checkpoint and mirror causally; JSON reports
@@ -113,6 +123,7 @@ npx wendkeep validate-memory --vault <v2-vault>
 
 ```bash
 npx wendkeep memory status --gate --vault .MyApp-vault
+npx wendkeep memory curate --vault .MyApp-vault
 npx wendkeep memory candidates --active --vault .MyApp-vault
 npx wendkeep memory recover-attempt session-123 --vault .MyApp-vault
 npx wendkeep memory recover-attempt session-123 --apply --vault .MyApp-vault

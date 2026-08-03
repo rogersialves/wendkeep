@@ -99,7 +99,9 @@ Usage:
                            in session notes from the linked derived notes — the body used to lag
                            behind the closing block. Dry-run by default · --apply · --json.
   wendkeep lesson add "t" "l"   Record a project-local lesson (injected at SessionStart).
-  wendkeep memory <sub>          Shared memory v2: status | candidates [--active] | migrate [--apply] | repair |
+  wendkeep memory curate         Guide one semantic conflict at a time in an interactive terminal.
+                           Every promote/reject requires confirmation; --vault P.
+  wendkeep memory <sub>          Shared memory v2: status | candidates [--active] | curate | migrate [--apply] | repair |
                            recover-attempt <session> [--apply] |
                            reconcile <session> --by-session <session> --reason <text> [--apply] |
                            promote <candidate> [--event <event-id>] | reject <candidate>. --vault P.
@@ -230,8 +232,13 @@ async function main(argv) {
       break;
     }
     case 'memory': {
-      const { runMemory } = await import('../../../src/memory.mjs');
-      runMemory(rest);
+      if (rest[0] === 'curate') {
+        const { runMemoryCurateCli } = await import('../../../src/memory-curate.mjs');
+        process.exitCode = await runMemoryCurateCli(rest.slice(1));
+      } else {
+        const { runMemory } = await import('../../../src/memory.mjs');
+        runMemory(rest);
+      }
       break;
     }
     case 'sync-defs': {

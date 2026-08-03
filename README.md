@@ -366,9 +366,12 @@ a fronteira física correta; espelhos divergentes falham fechados. Uma
 ambiguidade comprovadamente substituída usa `memory reconcile <sessão>
 --by-session <sucessora> --reason <motivo>` como dry-run e exige `--apply`; a decisão faz backup e
 auditoria sem reescrever ledger, CORE ou notas. Depois rode `status --gate` novamente. Conflitos
-exigem curadoria explícita e durável: `memory candidates --active --vault <cofre>` lista, em modo
-read-only, apenas IDs e metadados seguros — nunca valores ou conteúdo da memória. Depois da revisão
-humana, `memory promote <id> --event <event-id>` escolhe um dos eventos do candidate;
+exigem curadoria explícita e durável. Comece por `memory curate --vault <cofre>`: o menu agrupa os
+conflitos com nomes amigáveis, mostra previews sanitizados e confirma cada escrita com padrão
+negativo. Pular ou sair permite retomar depois. Em terminal não interativo, use
+`memory candidates --active --vault <cofre>` para listar, em modo read-only, apenas IDs e metadados
+seguros — nunca valores ou conteúdo da memória. Depois da revisão humana,
+`memory promote <id> --event <event-id>` escolhe um dos eventos do candidate;
 `memory reject <id>` mantém o valor atual. `memory repair` não escolhe vencedor. A decisão é idempotente, e uma
 promoção nova aceita um Stop posterior da mesma sessão/activation sem recriar conflito. Uma
 promoção gravada pela 0.66.1 permanece histórica: se o próximo Stop formar novo candidate,
@@ -381,7 +384,10 @@ Não publique nem instale a 0.66.2; use a 0.66.3 ou mais recente. Decisões sobr
 `blocked_by_core` não pode sobrescrever CORE.
 Desde a 0.66.4, quando status/doctor indicar acknowledgement projetado pendente, use o dry-run
 dirigido `memory recover-attempt <sessão> --vault <cofre>` e só então autorize `--apply`; ele
-altera apenas registry/checkpoint. O doctor apenas diagnostica. Veja sintaxe, pré-condições e
+altera apenas registry/checkpoint. O doctor apenas diagnostica, agora em saída de formato humano
+com a ação guiada recomendada; seu hook de health preserva o JSON para automações. Vault ausente ou
+boundary/registry inseguro também resulta em memória bloqueada, comando seguro com caminho resolvido
+e JSON estruturado, nunca em um falso “bundle íntegro” ou stack trace. Veja sintaxe, pré-condições e
 falhas fechadas em [memória e curadoria](docs/pt-BR/commands/memory.md).
 
 As notas de sessão usam um único snapshot vivo `## Agentes, tokens e custos`. Os hooks do agente principal e dos subagents recompõem o bloco atomicamente, incluindo custo, dimensões de tokens, reasoning e effort por modelo/origem. No Codex, prompts de subagents registram o rollout para observabilidade sem avançar a sequência do agente principal; `SubagentStop` lê o filho em `agent_transcript_path` e só persiste o sinal quando seu `parent_thread_id` corresponde a um root validado da sessão. O Stop principal usa o mapeamento causal de `turn_id` do registry antes da ordem local do transcript. Para recuperar marcadores ausentes com a conversa aberta, `hook session-backfill` é dry-run por padrão e nunca grava um turno Codex sem `task_complete`.

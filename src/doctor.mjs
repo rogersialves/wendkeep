@@ -1,27 +1,64 @@
 // `wendkeep doctor` — vault/session integrity (hooks/vault-health.mjs) PLUS the a2
 // harness integrity check (hooks/harness-doctor.mjs). Exits 1 on any error.
-import { spawnSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { resolve } from 'node:path';
 import { checkHarness, checkVaultLinks, checkSessionActivity, checkStackedFrontmatter, renderStackedFrontmatterLines, checkUnpricedModels, renderUnpricedModelLines, checkStaleDerivedSections, renderStaleDerivedSectionLines, checkSessionObservability, renderSessionObservabilityLines } from '../hooks/harness-doctor.mjs';
+import { runVaultHealth } from '../hooks/vault-health.mjs';
 import { checkSyncDefs } from './sync-defs.mjs';
 import { resolveProjectVault } from './project-vault.mjs';
 
-export function runDoctor(argv) {
-  const here = dirname(fileURLToPath(import.meta.url));
-  const hookFile = join(here, '..', 'hooks', 'vault-health.mjs');
+const healthStatusLabel = (status) => ({
+  healthy: 'saudável', warning: 'atenção', blocked: 'bloqueada', legacy: 'legado',
+}[status] || status || 'desconhecido');
 
+const metricValue = (value) => value === null || value === undefined || value === '' ? 'n/a' : value;
+
+export function renderVaultHealthLines(result) {
+  const memoryFailures = [];
+  const memoryWarnings = [];
+  const integrityFailures = [];
+  const integrityWarnings = [];
+  for (const failure of result.failures || []) {
+    const match = String(failure).match(/^Memória:\s*(.*)$/s);
+    (match ? memoryFailures : integrityFailures).push(match ? match[1] : failure);
+  }
+  for (const warning of result.warnings || []) {
+    const match = String(warning).match(/^Memória:\s*(.*)$/s);
+    (match ? memoryWarnings : integrityWarnings).push(match ? match[1] : warning);
+  }
+
+  const lines = [
+    `[integridade] ${integrityFailures.length ? 'bloqueada' : integrityWarnings.length ? 'atenção' : 'saudável'} — ${integrityFailures.length} falha(s), ${integrityWarnings.length} aviso(s)`,
+  ];
+  for (const failure of integrityFailures) lines.push(`  ✗ ${failure}`);
+  for (const warning of integrityWarnings) lines.push(`  ! ${warning}`);
+  if (!integrityFailures.length && !integrityWarnings.length) lines.push('  ✓ sessão e artefatos íntegros');
+  lines.push(`  sessão: ${result.session || 'nenhuma'} · registros: ${metricValue(result.metrics?.registrySessions)} · notas derivadas: ${metricValue(result.metrics?.derivedNotes)}`);
+
+  const memory = result.metrics?.memory || {};
+  lines.push(
+    `[memória] ${healthStatusLabel(result.memoryStatus)} — schema: ${metricValue(memory.schemaVersion)} · revisão: ${metricValue(memory.revision)} · cursor: ${metricValue(memory.eventCursor)} · hash: ${metricValue(memory.stateHash)}`,
+  );
+  lines.push(`  ledger: ${metricValue(memory.ledgerEvents)} evento(s) · outbox: ${metricValue(memory.pendingOutbox)} · candidates: ${metricValue(memory.candidates)} · conflitos: ${metricValue(memory.activeConflicts)}`);
+  for (const failure of memoryFailures) lines.push(`  ✗ ${failure}`);
+  for (const warning of memoryWarnings) lines.push(`  ! ${warning}`);
+  if (result.memoryStatus === 'healthy' && !memoryFailures.length && !memoryWarnings.length) {
+    lines.push('  ✓ bundle de memória íntegro');
+  }
+  return lines;
+}
+
+export function runDoctor(argv) {
   let vault;
   let project;
-  const passthrough = [];
+  let session = '';
   for (let i = 0; i < argv.length; i += 1) {
     const a = argv[i];
     if (a === '--vault') vault = argv[++i];
     else if (a.startsWith('--vault=')) vault = a.slice(8);
     else if (a === '--project') project = argv[++i];
     else if (a.startsWith('--project=')) project = a.slice(10);
-    else passthrough.push(a);
+    else if (a === '--session') session = argv[++i] || '';
+    else if (a.startsWith('--session=')) session = a.slice(10);
   }
 
   const projectRoot = resolve(project || process.cwd());
@@ -42,12 +79,22 @@ export function runDoctor(argv) {
     process.stdout.write('  ! migração pendente: rode `wendkeep init --project . --vault "<vault>" --yes` para criar .wendkeep.json\n');
   }
 
-  // 1. Session/vault integrity (existing check).
-  let healthStatus = 0;
-  if (existsSync(hookFile)) {
-    const r = spawnSync(process.execPath, [hookFile, ...passthrough, '--vault', vaultBase], { stdio: 'inherit' });
-    healthStatus = r.status ?? 0;
+  // 1. Session/vault integrity. The standalone hook remains JSON; doctor renders it for humans.
+  let health;
+  try {
+    health = runVaultHealth({ vaultBase, session });
+  } catch (error) {
+    health = {
+      ok: false,
+      session,
+      failures: [`Vault health falhou: ${error?.message || error}`],
+      warnings: [],
+      metrics: { memory: {} },
+      memoryStatus: 'blocked',
+    };
   }
+  process.stdout.write(`${renderVaultHealthLines(health).join('\n')}\n`);
+  const healthStatus = health.ok ? 0 : 1;
 
   // 2. Harness integrity (Wave B).
   const { errors, warnings } = checkHarness(vaultBase, projectRoot);
