@@ -17,7 +17,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { extractReleaseNotes } from '../src/release-changelog.mjs';
 import {
-  npmHasVersion, releaseSteps, resolveReleasePlan,
+  npmExecutorSpec, npmHasVersion, releaseCommands, resolveReleasePlan,
 } from './release-plan.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -66,44 +66,41 @@ function tagCommit(ref) {
   }
 }
 
+// Todo acesso ao npm passa pelo executor resolvido: no Windows, `npm` não é executável por
+// execFileSync e a consulta falharia silenciosamente, desligando o guard.
+function runNpm(args) {
+  const spec = npmExecutorSpec(args);
+  return out(spec.command, spec.args);
+}
+
 const plan = resolveReleasePlan({
   name: pkg.name,
   version,
   tag,
   tagCommit: tagCommit(tag),
   headCommit: out('git', ['rev-parse', 'HEAD']),
-  publishedOnNpm: npmHasVersion(pkg.name, version, (args) => out('npm', args)),
+  publishedOnNpm: npmHasVersion(pkg.name, version, runNpm),
 });
 if (plan.action === 'abort') die(plan.reason);
 
 const branch = out('git', ['rev-parse', '--abbrev-ref', 'HEAD']);
-const steps = releaseSteps(plan);
+const commands = releaseCommands(plan, { tag, branch });
 
 console.log(`\nRelease ${pkg.name}@${version} (${tag}) na branch ${branch}\n`);
-if (plan.action === 'publish-only') console.log(`  ${plan.reason}\n`);
-
-const RUNNERS = {
-  publish: {
-    label: 'npm publish',
-    run: () => sh('npm', ['publish']),
-  },
-  tag: {
-    label: `git tag -a ${tag}`,
-    run: () => sh('git', ['tag', '-a', tag, '-m', tag]),
-  },
-  push: {
-    label: `git push origin ${branch} --follow-tags`,
-    run: () => sh('git', ['push', 'origin', branch, '--follow-tags']),
-  },
-};
-
-if (!steps.includes('tag')) {
+if (plan.action === 'publish-only') {
+  console.log(`  ${plan.reason}\n`);
   console.log(`· tag ${tag} preservada — já existe no commit corrente\n`);
 }
-for (const name of steps) {
-  const runner = RUNNERS[name];
-  step(runner.label);
-  if (!DRY) runner.run();
+
+const LABELS = {
+  publish: 'npm publish',
+  tag: `git tag -a ${tag}`,
+  push: `git push origin ${branch} --follow-tags`,
+};
+
+for (const { step: name, command, args } of commands) {
+  step(LABELS[name]);
+  if (!DRY) sh(command, args);
 }
 
 console.log(

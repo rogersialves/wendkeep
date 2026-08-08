@@ -69,6 +69,28 @@ export function releaseSteps({ action }) {
 }
 
 /**
+ * Comandos concretos de um plano, na ordem de execução. O script apenas itera e executa, então
+ * o que ele faz fica ancorado aqui e verificável sem publicar nem tocar no repositório.
+ *
+ * @param {{action: string}} plan
+ * @param {{tag: string, branch: string}} ctx
+ * @returns {Array<{step: string, command: string, args: string[]}>}
+ */
+export function releaseCommands(plan, { tag, branch }) {
+  const byStep = {
+    publish: () => {
+      const spec = npmExecutorSpec(['publish']);
+      return { step: 'publish', command: spec.command, args: spec.args };
+    },
+    tag: () => ({ step: 'tag', command: 'git', args: ['tag', '-a', tag, '-m', tag] }),
+    push: () => ({
+      step: 'push', command: 'git', args: ['push', 'origin', branch, '--follow-tags'],
+    }),
+  };
+  return releaseSteps(plan).map((step) => byStep[step]());
+}
+
+/**
  * Argumentos da consulta de versão ao registry.
  *
  * `--prefer-online` é obrigatório: sem ele o npm responde de metadata em cache e pode negar uma
@@ -76,6 +98,24 @@ export function releaseSteps({ action }) {
  */
 export function npmVersionQueryArgs(name, version) {
   return ['view', `${name}@${version}`, 'version', '--prefer-online'];
+}
+
+/**
+ * Como invocar o npm sem depender de resolvê-lo pelo PATH.
+ *
+ * No Windows `npm` é um `.cmd`: `execFileSync('npm', …)` dá ENOENT, e apontar direto para
+ * `npm.cmd` dá EINVAL no Node 24, que recusa executar `.cmd` sem shell (CVE-2024-27980). O npm
+ * exporta `npm_execpath` ao rodar `npm run`, apontando para o `npm-cli.js`; invocá-lo com o
+ * próprio node resolve em qualquer plataforma e dispensa `shell: true`.
+ *
+ * @returns {{command: string, args: string[]}}
+ */
+export function npmExecutorSpec(args, {
+  execPath = process.execPath,
+  npmExecPath = process.env.npm_execpath,
+} = {}) {
+  if (npmExecPath) return { command: execPath, args: [npmExecPath, ...args] };
+  return { command: 'npm', args };
 }
 
 /**

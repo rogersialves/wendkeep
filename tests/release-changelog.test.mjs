@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { extractReleaseNotes } from '../src/release-changelog.mjs';
 import {
-  npmHasVersion, npmVersionQueryArgs, releaseSteps, resolveReleasePlan,
+  npmExecutorSpec, npmHasVersion, npmVersionQueryArgs, releaseCommands, releaseSteps,
+  resolveReleasePlan,
 } from '../scripts/release-plan.mjs';
 
 const AUTO_TAG_WORKFLOW = readFileSync(new URL('../.github/workflows/auto-tag.yml', import.meta.url), 'utf8');
@@ -156,10 +157,64 @@ test('[sensor:release-tests] [req:CLI-PKG-2] abort não executa passo algum', ()
 
 test('[sensor:release-tests] [req:CLI-PKG-2] a consulta ao registry ignora cache de metadata', () => {
   // Sem --prefer-online o npm responde de cache e pode negar uma versão recém-publicada,
-  // o que levaria o guard a liberar uma republicação.
-  const args = npmVersionQueryArgs('wendkeep', '1.2.3');
-  assert.ok(args.includes('--prefer-online'), `faltou --prefer-online em ${args.join(' ')}`);
-  assert.ok(args.includes('wendkeep@1.2.3'));
+  // o que levaria o guard a liberar uma republicação. A asserção é sobre os args que chegam ao
+  // executor, não sobre o helper isolado — montar a consulta inline sem a flag tem de quebrar.
+  const seen = [];
+  npmHasVersion('wendkeep', '1.2.3', (args) => {
+    seen.push(args);
+    return '1.2.3';
+  });
+  assert.equal(seen.length, 1);
+  assert.ok(seen[0].includes('--prefer-online'), `faltou --prefer-online em ${seen[0].join(' ')}`);
+  assert.ok(seen[0].includes('wendkeep@1.2.3'));
+  assert.deepEqual(seen[0], npmVersionQueryArgs('wendkeep', '1.2.3'));
+});
+
+test('[sensor:release-tests] [req:CLI-PKG-2] o npm é invocado pelo npm-cli.js, não pelo PATH', () => {
+  // No Windows `npm` é um .cmd: execFileSync dá ENOENT, e apontar para npm.cmd dá EINVAL no
+  // Node 24. Sem isto a consulta ao registry falha sempre e o guard fica inoperante — o
+  // fail-open transformaria "versão já publicada" em release liberado.
+  const spec = npmExecutorSpec(['view', 'wendkeep@1.2.3', 'version'], {
+    execPath: '/usr/bin/node',
+    npmExecPath: '/npm/bin/npm-cli.js',
+  });
+  assert.equal(spec.command, '/usr/bin/node');
+  assert.deepEqual(spec.args, ['/npm/bin/npm-cli.js', 'view', 'wendkeep@1.2.3', 'version']);
+});
+
+test('[sensor:release-tests] [req:CLI-PKG-2] sem npm_execpath o executor cai para o npm do PATH', () => {
+  const spec = npmExecutorSpec(['publish'], { execPath: '/usr/bin/node', npmExecPath: undefined });
+  assert.equal(spec.command, 'npm');
+  assert.deepEqual(spec.args, ['publish']);
+});
+
+test('[sensor:release-tests] [req:CLI-PKG-2] o publish também passa pelo executor resolvido', () => {
+  // Mesma armadilha do guard: `sh('npm', ['publish'])` direto é irresolúvel no Windows.
+  const [publish] = releaseCommands({ action: 'publish-only' }, { tag: 'v1.2.3', branch: 'main' });
+  assert.equal(publish.step, 'publish');
+  assert.notEqual(publish.command, 'npm.cmd');
+  assert.ok(
+    publish.command === 'npm' || publish.args.some((a) => a.includes('npm-cli.js')),
+    `executor de publish inesperado: ${publish.command} ${publish.args.join(' ')}`,
+  );
+});
+
+test('[sensor:release-tests] [req:CLI-PKG-2] releaseCommands ancora o que o script executa', () => {
+  const ctx = { tag: 'v1.2.3', branch: 'main' };
+  const andTag = releaseCommands({ action: 'publish-and-tag' }, ctx);
+  assert.deepEqual(andTag.map((c) => c.step), ['publish', 'tag', 'push']);
+  assert.deepEqual(andTag[1], {
+    step: 'tag', command: 'git', args: ['tag', '-a', 'v1.2.3', '-m', 'v1.2.3'],
+  });
+  assert.deepEqual(andTag[2], {
+    step: 'push', command: 'git', args: ['push', 'origin', 'main', '--follow-tags'],
+  });
+
+  const only = releaseCommands({ action: 'publish-only' }, ctx);
+  assert.deepEqual(only.map((c) => c.step), ['publish', 'push']);
+  assert.ok(!only.some((c) => c.args.includes('tag')), 'publish-only não pode recriar a tag');
+
+  assert.deepEqual(releaseCommands({ action: 'abort' }, ctx), []);
 });
 
 test('[sensor:release-tests] [req:CLI-PKG-2] versão presente no registry é reconhecida', () => {
