@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { extractReleaseNotes } from '../src/release-changelog.mjs';
+import { resolveReleasePlan } from '../scripts/release-plan.mjs';
 
 const AUTO_TAG_WORKFLOW = readFileSync(new URL('../.github/workflows/auto-tag.yml', import.meta.url), 'utf8');
 const AGENT_RULES = readFileSync(new URL('../AGENTS.md', import.meta.url), 'utf8');
@@ -79,6 +80,51 @@ test('[sensor:release-tests] 0.68.1 notes are extractable and match the package'
   assert.match(release.notes, /FLOW_VAULT_BOUNDARY/);
   assert.match(release.notes, /orçamento de retry permanece único/i);
   assert.doesNotMatch(release.notes, /019f[0-9a-f-]+/i);
+});
+
+const releaseFacts = (overrides = {}) => ({
+  name: 'wendkeep',
+  version: '1.2.3',
+  tag: 'v1.2.3',
+  tagCommit: null,
+  headCommit: 'a'.repeat(40),
+  publishedOnNpm: false,
+  ...overrides,
+});
+
+test('[sensor:release-tests] [req:CLI-PKG-2] sem tag, o release publica e cria a tag', () => {
+  const plan = resolveReleasePlan(releaseFacts());
+  assert.equal(plan.action, 'publish-and-tag');
+});
+
+test('[sensor:release-tests] [req:CLI-PKG-2] tag do auto-tag no commit corrente publica e preserva a tag', () => {
+  // auto-tag.yml cria a tag no merge em main, antes de qualquer publish. A tag existir não
+  // significa que a versão foi lançada — só o registry responde isso.
+  const plan = resolveReleasePlan(releaseFacts({
+    tagCommit: 'a'.repeat(40),
+    publishedOnNpm: false,
+  }));
+  assert.equal(plan.action, 'publish-only');
+});
+
+test('[sensor:release-tests] [req:CLI-PKG-2] versão já publicada aborta mesmo com a tag no commit corrente', () => {
+  const plan = resolveReleasePlan(releaseFacts({
+    tagCommit: 'a'.repeat(40),
+    publishedOnNpm: true,
+  }));
+  assert.equal(plan.action, 'abort');
+  assert.match(plan.reason, /já está publicad/i);
+});
+
+test('[sensor:release-tests] [req:CLI-PKG-2] tag apontando para outro commit aborta', () => {
+  // Publicar aqui entregaria conteúdo diferente do que foi tagueado. Precede a consulta ao
+  // registry: é uma checagem local e o estado é ambíguo demais para prosseguir.
+  const plan = resolveReleasePlan(releaseFacts({
+    tagCommit: 'b'.repeat(40),
+    publishedOnNpm: false,
+  }));
+  assert.equal(plan.action, 'abort');
+  assert.match(plan.reason, /outro commit|diverge/i);
 });
 
 test('auto-tag: existing tag still refreshes the GitHub Release from CHANGELOG', () => {
