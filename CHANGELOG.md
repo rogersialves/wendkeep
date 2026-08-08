@@ -4,6 +4,35 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.68.0] — 2026-08-02
+
+### Added
+
+- **Curadoria de memória agora tem um assistente interativo para pessoas.** O novo
+  `memory curate --vault <vault>` agrupa conflitos por nomes amigáveis, exibe somente previews
+  sanitizados e guia promoção, rejeição, pulo ou saída com confirmação negativa por padrão. O
+  trabalho restante pode ser retomado em outra execução; ambientes não-TTY recebem o fallback
+  seguro `memory candidates --active` e nenhuma escrita implícita.
+
+### Changed
+
+- **O `doctor` apresenta integridade e conflitos de memória em formato humano.** A saída principal
+  usa seções e categorias amigáveis e recomenda primeiro o assistente guiado, enquanto o hook de
+  health preserva seu contrato JSON para automações. O diagnóstico continua somente leitura e
+  `memory repair` continua estritamente estrutural, sem escolher vencedores semânticos.
+
+## [0.67.3] — 2026-08-02
+
+### Fixed
+
+- **Conflitos semânticos agora levam a uma curadoria humana executável.** O doctor diferencia
+  candidates em conflito de corrupção estrutural, explica que `memory repair` não escolhe um
+  vencedor e mostra `memory candidates --active --vault <vault>` com o Vault resolvido, seguido
+  pelos modelos explícitos para promover ou rejeitar a decisão.
+- **A inspeção de candidates deixa de exigir leitura direta do sidecar.** O novo comando read-only
+  `memory candidates [--active]` devolve somente `candidate_id`, `reason`, `status`, `memory_key` e
+  `event_ids`, sem valores ou conteúdo, em ordem determinística e sem alterar o bundle de memória.
+
 ## [0.67.2] — 2026-08-02
 
 ### Fixed

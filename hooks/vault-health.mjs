@@ -106,6 +106,34 @@ const memoryStatusCommand = (vaultBase) => (
 const memoryRepairCommand = (vaultBase) => (
   `${WENDKEEP_COMMAND} memory repair --vault ${quoteCommandArgument(vaultBase)}`
 );
+const memoryMigrateCommand = (vaultBase) => (
+  `${WENDKEEP_COMMAND} memory migrate --apply --vault ${quoteCommandArgument(vaultBase)}`
+);
+const memoryCandidatesCommand = (vaultBase) => (
+  `${WENDKEEP_COMMAND} memory candidates --active --vault ${quoteCommandArgument(vaultBase)}`
+);
+const memoryCurateCommand = (vaultBase) => (
+  `${WENDKEEP_COMMAND} memory curate --vault ${quoteCommandArgument(vaultBase)}`
+);
+
+const MEMORY_KEY_PURPOSES = new Map([
+  ['handoff.latest', 'próximo handoff'],
+  ['quality.latest-sensors', 'sensores de qualidade'],
+  ['quality.latest-verdict', 'veredito de qualidade'],
+  ['git.local-head', 'commit local conhecido'],
+]);
+
+function groupConflictPurposes(conflicts) {
+  const counts = new Map();
+  for (const conflict of conflicts) {
+    const key = String(conflict?.memory_key || '').trim();
+    const label = MEMORY_KEY_PURPOSES.get(key) || (key ? `outras memórias (${key})` : 'outras memórias');
+    counts.set(label, (counts.get(label) || 0) + 1);
+  }
+  return [...counts.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([label, count]) => `${label}: ${count}`);
+}
 
 function readJsonLines(vaultBase, path, label) {
   let checked;
@@ -206,11 +234,11 @@ function memoryMetrics() {
   };
 }
 
-function blockedMemoryBoundary(error) {
+function blockedMemoryBoundary(error, vaultBase) {
   return {
     ok: false,
     status: 'blocked',
-    failures: [`Boundary física da memória insegura: ${error?.message || error}`],
+    failures: [`Boundary física da memória insegura: ${error?.message || error}. Inspecione com: ${memoryStatusCommand(vaultBase)}.`],
     warnings: [],
     metrics: memoryMetrics(),
   };
@@ -381,23 +409,23 @@ export function checkMemoryBundle(vaultBase, { registry } = {}) {
     return {
       ok: false,
       status: 'blocked',
-      failures: [`Vault not found: ${vaultBase}`],
+      failures: [`Vault not found: ${vaultBase}. Inspecione com: ${memoryStatusCommand(vaultBase)}.`],
       warnings: [],
       metrics: memoryMetrics(),
     };
   }
   try { preflightMemoryBundle(vaultBase); }
-  catch (error) { return blockedMemoryBoundary(error); }
+  catch (error) { return blockedMemoryBoundary(error, vaultBase); }
   const brain = join(vaultBase, '.brain');
   let mode;
   try { mode = detectMemoryMode(vaultBase); }
-  catch (error) { return blockedMemoryBoundary(error); }
+  catch (error) { return blockedMemoryBoundary(error, vaultBase); }
   if (mode.mode === 'legacy') {
     return {
       ok: true,
       status: 'legacy',
       failures: [],
-      warnings: [LEGACY_MEMORY_WARNING],
+      warnings: [`${LEGACY_MEMORY_WARNING} Comando com Vault resolvido: ${memoryMigrateCommand(vaultBase)}.`],
       metrics: memoryMetrics(),
     };
   }
@@ -451,7 +479,7 @@ export function checkMemoryBundle(vaultBase, { registry } = {}) {
   let effectiveRegistry = registry;
   if (!effectiveRegistry) {
     try { effectiveRegistry = readSessionRegistry(vaultBase); }
-    catch (error) { failures.push(`SESSION_REGISTRY.json inseguro ou ilegível: ${error?.message || error}.`); }
+    catch (error) { failures.push(`SESSION_REGISTRY.json inseguro ou ilegível: ${error?.message || error}. Inspecione com: ${memoryStatusCommand(vaultBase)}.`); }
   }
   const lifecycle = checkMemoryAttempts(effectiveRegistry || { version: 2, sessions: {} }, {
     vaultBase,
@@ -466,7 +494,11 @@ export function checkMemoryBundle(vaultBase, { registry } = {}) {
   const activeConflicts = unresolved.filter((item) => item?.reason === 'conflict');
   const ordinaryCandidates = unresolved.filter((item) => item?.reason !== 'conflict');
   if (activeConflicts.length) {
-    failures.push(`${activeConflicts.length} conflito ativo em chave operacional (${activeConflicts.map((item) => item.memory_key || item.candidate_id).join(', ')}). Inspecione com: ${memoryStatusCommand(vaultBase)}.`);
+    const label = activeConflicts.length === 1
+      ? '1 conflito ativo'
+      : `${activeConflicts.length} conflitos ativos`;
+    const purposes = groupConflictPurposes(activeConflicts).join('; ');
+    failures.push(`${label} (${purposes}). Existem versões concorrentes e nenhum dado foi escolhido automaticamente. Conflito semântico exige curadoria humana; memory repair não escolhe vencedor. Próximo passo: ${memoryCurateCommand(vaultBase)}. Inventário avançado: ${memoryCandidatesCommand(vaultBase)}.`);
   }
   if (outbox.count) warnings.push(`${outbox.count} evento(s) pendente(s) na outbox; execute o projector quando seguro.`);
   if (ordinaryCandidates.length) warnings.push(`${ordinaryCandidates.length} candidate(s) aguardando curadoria humana.`);
@@ -545,8 +577,49 @@ function checkSession({ vaultBase, sessionRel, control, registry }) {
 }
 
 export function runVaultHealth({ vaultBase, session = '' }) {
-  const control = readControl(vaultBase);
-  const registry = readSessionRegistry(vaultBase);
+  const memoryMarkers = [
+    join(vaultBase, '.brain', 'SHARED_MEMORY.md'),
+    join(vaultBase, '.brain', 'MEMORY_EVENTS.jsonl'),
+    join(vaultBase, '.brain', 'MEMORY_CANDIDATES.jsonl'),
+    join(vaultBase, '.brain', 'memory-outbox'),
+  ];
+  const memory = !existsSync(vaultBase) || memoryMarkers.some((path) => existsSync(path))
+    ? checkMemoryBundle(vaultBase)
+    : {
+      ok: true,
+      status: 'legacy',
+      failures: [],
+      warnings: [`Bundle de memória v2 ausente (vault legado); inspecione com: ${memoryStatusCommand(vaultBase)}.`],
+      metrics: {},
+    };
+
+  let control = {};
+  let registry = { version: 2, sessions: {} };
+  const contextErrors = [];
+  try { control = readControl(vaultBase); }
+  catch (error) { contextErrors.push(error?.message || String(error)); }
+  try { registry = readSessionRegistry(vaultBase); }
+  catch (error) { contextErrors.push(error?.message || String(error)); }
+
+  if (contextErrors.length) {
+    const failures = [
+      `Validação de sessão e artefatos indisponível com segurança: ${contextErrors.join('; ')}. Inspecione com: ${memoryStatusCommand(vaultBase)}.`,
+      ...memory.failures.map((item) => `Memória: ${item}`),
+    ];
+    return {
+      ok: false,
+      session,
+      failures,
+      warnings: memory.warnings.map((item) => `Memória: ${item}`),
+      metrics: {
+        registrySessions: 0,
+        derivedNotes: 0,
+        memory: memory.metrics,
+      },
+      memoryStatus: memory.status,
+    };
+  }
+
   const sessionRel = session || control.session_file || control.last_session_file || '';
   const failures = [];
   const warnings = [];
@@ -579,20 +652,8 @@ export function runVaultHealth({ vaultBase, session = '' }) {
     return total + (existsSync(dir) ? listMarkdownFiles(dir).length : 0);
   }, 0);
 
-  const memoryMarkers = [
-    join(vaultBase, '.brain', 'SHARED_MEMORY.md'),
-    join(vaultBase, '.brain', 'MEMORY_EVENTS.jsonl'),
-    join(vaultBase, '.brain', 'MEMORY_CANDIDATES.jsonl'),
-    join(vaultBase, '.brain', 'memory-outbox'),
-  ];
-  let memory = { status: 'legacy', metrics: {} };
-  if (memoryMarkers.some((path) => existsSync(path))) {
-    memory = checkMemoryBundle(vaultBase, { registry });
-    failures.push(...memory.failures.map((item) => `Memória: ${item}`));
-    warnings.push(...memory.warnings.map((item) => `Memória: ${item}`));
-  } else {
-    warnings.push(`Bundle de memória v2 ausente (vault legado); inspecione com: ${memoryStatusCommand(vaultBase)}.`);
-  }
+  failures.push(...memory.failures.map((item) => `Memória: ${item}`));
+  warnings.push(...memory.warnings.map((item) => `Memória: ${item}`));
 
   return {
     ok: failures.length === 0,

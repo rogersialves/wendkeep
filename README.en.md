@@ -369,8 +369,13 @@ backup/audit; divergent mirrors fail closed. A demonstrably superseded
 ambiguity uses `memory reconcile <session> --by-session <successor>
 --reason <reason>` as a dry run and requires `--apply`; the decision is backed up and audited
 without rewriting ledger, CORE, or notes. Run `status --gate` again afterwards. Conflicts require
-explicit, durable curation: `memory promote <id> --event <event-id>` selects one event from the
-candidate, while `memory reject <id>` keeps the current value. The decision is idempotent, and a
+explicit, durable curation. Start with `memory curate --vault <vault>`: the menu groups conflicts
+under friendly names, shows sanitized previews, and confirms every write with default `no`. Skip
+or quit and run it again to resume. In a non-TTY environment, use
+`memory candidates --active --vault <vault>` to list only safe IDs and metadata in read-only mode —
+it does not expose memory values or content. After human review,
+`memory promote <id> --event <event-id>` selects one event from the candidate, while
+`memory reject <id>` keeps the current value. `memory repair` does not choose a winner. The decision is idempotent, and a
 new promotion accepts a later Stop from the same session/activation without recreating a conflict.
 A promotion written by 0.66.1 remains historical: if the next Stop forms a new candidate, update
 to 0.66.3 and run `memory repair`. During replay, a transient candidate is re-evaluated against the
@@ -379,7 +384,10 @@ superseded. Repair migrates the checkpoint and mirror only when it proves the ex
 replay, attempt identity, and absence of a real conflict; it creates a backup and audit without
 appending or rewriting events. Ambiguity stays queued for explicit curation. Do not publish or
 install 0.66.2; use 0.66.3 or later. Decisions survive repair/replay;
-`blocked_by_core` cannot override CORE. Doctor only diagnoses. When status/doctor reports projected
+`blocked_by_core` cannot override CORE. Doctor only diagnoses, now with human-readable output and
+the guided next action; its health hook preserves JSON for automation. A missing Vault or unsafe
+boundary/registry also yields blocked memory, a safe command with the resolved path, and structured
+JSON—never a false “intact bundle” or a stack trace. When status/doctor reports projected
 acknowledgement pending on 0.66.4 or later, first run the targeted dry run
 `memory recover-attempt <session> --vault <vault>`, then authorize `--apply`; it changes only
 registry/checkpoint. See syntax, preconditions, and fail-closed behavior in

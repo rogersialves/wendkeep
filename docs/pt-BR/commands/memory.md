@@ -24,11 +24,13 @@ Informe o vault explicitamente em automações. Preserve backups e evidências a
 
 ```bash
 npx wendkeep memory status [--gate] --vault <cofre>
+npx wendkeep memory curate --vault <cofre>
+npx wendkeep memory candidates [--active] --vault <cofre>
 npx wendkeep memory repair --vault <cofre>
 npx wendkeep memory recover-attempt <sessão> [--apply] --vault <cofre>
 npx wendkeep memory reconcile <sessão-ambígua> --by-session <sessão-sucessora> --reason <motivo> [--apply] --vault <cofre>
-npx wendkeep memory promote <candidate> [--event <event-id>] --vault <cofre>
-npx wendkeep memory reject <candidate> --vault <cofre>
+npx wendkeep memory promote <candidate-id> [--event <event-id>] --vault <cofre>
+npx wendkeep memory reject <candidate-id> --vault <cofre>
 npx wendkeep validate-memory [caminho-do-CORE]
 npx wendkeep validate-memory --vault <cofre-v2>
 ```
@@ -36,6 +38,21 @@ npx wendkeep validate-memory --vault <cofre-v2>
 ## Opções e códigos de saída
 
 - `memory status` é read-only; `--gate` retorna exit `1` apenas para estado bloqueante.
+- `memory curate` é o caminho recomendado para pessoas: em um terminal interativo, agrupa cada
+  conflito por nome amigável, mostra somente previews sanitizados e oferece escolhas numeradas,
+  `P` para pular, `R` para rejeitar, `D` para detalhes técnicos e `Q` para sair. Cada promoção ou
+  rejeição pede confirmação com padrão negativo: Enter ou `N` não grava. Pular ou sair deixa o
+  restante pendente; uma nova execução retoma os conflitos ainda ativos.
+- O assistente aceita somente `--vault`: não há `--yes`, `--apply` ou modo em lote. Em ambiente
+  não-TTY/terminal não interativo, ele retorna exit `2` sem alterar bytes e orienta usar o fallback
+  avançado `memory candidates --active`.
+- `memory candidates` é read-only e imprime JSON determinístico com somente `candidate_id`,
+  `reason`, `status`, `memory_key` e `event_ids`; não expõe valores nem conteúdo da memória e não
+  cria lock nem altera o bundle. `--active` omite candidates terminais (`resolved`, `rejected` e
+  `superseded`). Status ausente é normalizado para `active`.
+- Em `memory candidates`, exit `0` indica inventário válido (inclusive vazio ou com conflitos),
+  exit `1` indica sidecar inválido/topologia insegura e exit `2` indica `--vault` ausente, opção
+  desconhecida/duplicada, argumento extra ou valor indevido em `--active`.
 - O `Stop` grava os eventos na outbox antes de reconhecer `last_memory_attempt: enqueued`; depois o
   projector roda fora do lock do registry. Retry do mesmo attempt reutiliza os event IDs congelados
   e pode projetá-los no máximo uma vez.
@@ -79,8 +96,9 @@ npx wendkeep validate-memory --vault <cofre-v2>
   symlink, reparse point ou hardlink falham fechados sem tocar bytes externos. Locks publicam owner
   e lease atomicamente, não colhem PID vivo apenas por idade e só liberam a lease adquirida.
 - `promote`/`reject` acrescentam uma decisão auditável e idempotente ao ledger. Replay e repair
-  preservam a decisão e não recriam o candidate resolvido. Para candidate `conflict`, `promote`
-  exige `--event <event-id>` pertencente ao candidate; não há vencedor implícito por data ou ID.
+  preservam a decisão e não recriam o candidate resolvido. Para candidate `conflict`, use
+  `memory promote <candidate-id> --event <event-id>` com um evento pertencente ao candidate; não há
+  vencedor implícito por data ou ID.
   `reject` preserva o valor operacional atual. Candidate `blocked_by_core` só pode ser rejeitado:
   promover exige antes alterar CORE pela curadoria canônica. Se o evento escolhido ainda pertence
   ao último attempt `projected` correspondente, a promoção também atualiza causalmente checkpoint
@@ -103,6 +121,8 @@ npx wendkeep validate-memory --vault <cofre-v2>
 
 ```bash
 npx wendkeep memory status --gate --vault .MeuApp-vault
+npx wendkeep memory curate --vault .MeuApp-vault
+npx wendkeep memory candidates --active --vault .MeuApp-vault
 npx wendkeep memory recover-attempt sessao-123 --vault .MeuApp-vault
 npx wendkeep memory recover-attempt sessao-123 --apply --vault .MeuApp-vault
 npx wendkeep memory reconcile antiga --by-session atual --reason "entrega continuada" --vault .MeuApp-vault
@@ -118,6 +138,9 @@ O status imprime schema, revision, cursor, hash, eventos, outbox, candidates, co
 causal do último attempt. CORE permanece canônico e curado à mão; SHARED permanece projeção
 operacional verificável. Depois de uma projeção bem-sucedida, o checkpoint do attempt pode ser um
 prefixo válido de uma projeção global que já avançou com eventos concorrentes.
+
+`memory candidates` retorna `status: "ok"` e a lista sanitizada de candidates em ordem estável;
+com `--active`, a lista contém somente decisões ainda abertas para curadoria humana.
 
 ## Erros comuns e diagnóstico
 

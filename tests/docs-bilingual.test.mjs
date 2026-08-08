@@ -61,7 +61,8 @@ const GUIDE_FOR_FAMILY = new Map([
   ['wendkeep note new', 'notes-and-knowledge.md'], ['wendkeep note relink', 'notes-and-knowledge.md'],
   ['wendkeep note repair-frontmatter', 'notes-and-knowledge.md'],
   ['wendkeep note repair-sections', 'notes-and-knowledge.md'], ['wendkeep lesson add', 'notes-and-knowledge.md'],
-  ['wendkeep memory', 'memory.md'], ['wendkeep validate-memory', 'memory.md'],
+  ['wendkeep memory', 'memory.md'], ['wendkeep memory curate', 'memory.md'],
+  ['wendkeep validate-memory', 'memory.md'],
   ['wendkeep sync-defs', 'maintenance-and-diagnostics.md'], ['wendkeep --version', 'maintenance-and-diagnostics.md'],
   ['wendkeep --help', 'maintenance-and-diagnostics.md'],
 ]);
@@ -445,5 +446,60 @@ test('[req:OBS-11] [req:OBS-12] DOC-13: READMEs resumem observabilidade e delega
     assert.match(contract.text, contract.summary, `${locale}: resumo de rebuild/tri-state`);
     assert.match(contract.text, contract.sessions, `${locale}: resumo de hooks/import`);
     assert.match(contract.text, contract.doctor, `${locale}: resumo de doctor/frescor`);
+  }
+});
+
+test('[req:MEM-CUR-4] [req:MEM-CUR-5] [req:MEM-CUR-6] [req:DIAG-8] [req:DIAG-11] DOC-14: curadoria guiada e doctor humano são públicos e bilíngues', () => {
+  const help = spawnSync(process.execPath, [join(ROOT, 'bin', 'wendkeep.mjs'), '--help'], {
+    cwd: ROOT, encoding: 'utf8',
+  });
+  assert.equal(help.status, 0, help.stderr);
+  assert.match(help.stdout, /memory <sub>[\s\S]*candidates \[--active\]/i);
+  assert.match(help.stdout, /memory curate/i);
+
+  const cases = {
+    pt: {
+      memory: readFileSync(join(GUIDE_DIR.pt, 'memory.md'), 'utf8'),
+      doctor: readFileSync(join(GUIDE_DIR.pt, 'maintenance-and-diagnostics.md'), 'utf8'),
+      readme: readFileSync(join(ROOT, 'README.md'), 'utf8'),
+      repairBoundary: /memory repair[\s\S]*não escolhe vencedor/i,
+      noValues: /não (?:expõe|inclui)[^\n]*(?:valores|conteúdo)/i,
+      confirmation: /confirmação[\s\S]*(?:padrão|default)[^\n]*(?:não|negativ)/i,
+      resume: /(?:pular|sair)[\s\S]*(?:retom|restant)/i,
+      humanDoctor: /doctor[\s\S]*(?:formato|saída)[^\n]*human/i,
+      ttyFallback: /(?:não-TTY|sem TTY|terminal não interativo)[\s\S]*memory candidates --active/i,
+      exceptionalHealth: /Vault ausente[\s\S]*(?:boundary|registry)[\s\S]*JSON\s+estruturado/i,
+    },
+    en: {
+      memory: readFileSync(join(GUIDE_DIR.en, 'memory.md'), 'utf8'),
+      doctor: readFileSync(join(GUIDE_DIR.en, 'maintenance-and-diagnostics.md'), 'utf8'),
+      readme: readFileSync(join(ROOT, 'README.en.md'), 'utf8'),
+      repairBoundary: /memory repair[\s\S]*(?:does not|never) choose[^\n]*winner/i,
+      noValues: /does not (?:expose|include)[^\n]*(?:values|content)/i,
+      confirmation: /confirmation[\s\S]*default[^\n]*no/i,
+      resume: /(?:skip|quit)[\s\S]*resum/i,
+      humanDoctor: /doctor[\s\S]*human[^\n]*(?:format|output)/i,
+      ttyFallback: /non-TTY[\s\S]*memory candidates --active/i,
+      exceptionalHealth: /missing Vault[\s\S]*(?:boundary|registry)[\s\S]*structured\s+JSON/i,
+    },
+  };
+  for (const [locale, docs] of Object.entries(cases)) {
+    for (const text of [docs.memory, docs.doctor, docs.readme]) {
+      assert.match(text, /memory candidates --active/i, `${locale}: superfície candidates ausente`);
+      assert.match(text, /memory curate/i, `${locale}: assistente de curadoria ausente`);
+    }
+    for (const field of ['candidate_id', 'reason', 'status', 'memory_key', 'event_ids']) {
+      assert.match(docs.memory, new RegExp(field), `${locale}: campo seguro ausente ${field}`);
+    }
+    assert.match(docs.memory, docs.noValues, `${locale}: limite de privacidade ausente`);
+    assert.match(docs.memory, docs.confirmation, `${locale}: confirmação default-no ausente`);
+    assert.match(docs.memory, docs.resume, `${locale}: retomada após pular/sair ausente`);
+    assert.match(docs.memory, docs.ttyFallback, `${locale}: fallback não-TTY ausente`);
+    assert.match(docs.doctor, docs.repairBoundary, `${locale}: fronteira repair/curadoria ausente`);
+    assert.match(docs.doctor, docs.humanDoctor, `${locale}: saída humana do doctor ausente`);
+    assert.match(docs.doctor, docs.exceptionalHealth, `${locale}: exceções não preservam o contrato do doctor/hook`);
+    assert.match(docs.readme, docs.exceptionalHealth, `${locale}: README omite o contrato excepcional do doctor/hook`);
+    assert.match(docs.memory, /memory promote <candidate-id> --event <event-id>/i);
+    assert.match(docs.memory, /memory reject <candidate-id>/i);
   }
 });

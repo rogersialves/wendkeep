@@ -24,6 +24,7 @@ Execute na raiz do projeto ou informe `--project`/`--vault` explicitamente.
 
 ```bash
 npx --no-install wendkeep doctor [--vault <cofre>]
+npx --no-install wendkeep memory curate --vault <cofre>
 npx --no-install wendkeep sync-defs [--check|--reseed] --vault <cofre> --project <raiz>
 npx --no-install wendkeep theme sync --vault <cofre>
 npx --no-install wendkeep --version
@@ -33,6 +34,12 @@ npx --no-install wendkeep --help
 ## Opções e códigos de saída
 
 - `doctor` é read-only; exit `0` aceita warnings recuperáveis e exit não zero indica falha.
+- O `doctor` usa saída em formato humano, com blocos `[integridade]` e `[memória]`, categorias
+  amigáveis e uma próxima ação copiável. O hook `vault-health.mjs` continua sendo a superfície JSON
+  para automações; nenhum dos dois aplica curadoria.
+- Mesmo com Vault ausente, boundary física insegura ou registry inseguro, o `doctor` marca a memória
+  como bloqueada e mostra `memory status --gate` com o caminho resolvido; o hook preserva JSON
+  estruturado em vez de substituir o resultado por stderr ou stack trace.
 - Em v2, `doctor`/`memory status --gate` correlacionam `last_memory_attempt` (mode, disposition,
   event IDs e checkpoint) com outbox, ledger e SHARED; não inferem saúde só pela revision atual.
 - `revision: 0` após migração válida, sem attempt v2, é saudável. Attempt `degraded` cujos eventos
@@ -57,6 +64,8 @@ npx --no-install wendkeep --version
 npx --no-install wendkeep sync-defs --check --vault .MeuApp-vault --project .
 npx --no-install wendkeep doctor --vault .MeuApp-vault
 npx --no-install wendkeep memory status --gate --vault .MeuApp-vault
+npx --no-install wendkeep memory curate --vault .MeuApp-vault
+npx --no-install wendkeep memory candidates --active --vault .MeuApp-vault
 npx --no-install wendkeep cost rebuild --session <id> --json --vault .MeuApp-vault
 npx --no-install wendkeep cost rebuild --session <id> --json --vault .MeuApp-vault --apply
 ```
@@ -74,11 +83,18 @@ ou sem manifest comprovado e oferece um caminho dry-run antes de qualquer escrit
 
 - `no vault`: execute da raiz vinculada ou passe `--vault`.
 - `defs stale`: confirme a versão e rode `sync-defs --reseed`.
-- Vault legado: é warning não bloqueante; planeje `memory migrate --apply` separadamente.
+- Vault legado: é warning não bloqueante; o doctor mostra
+  `npx --no-install wendkeep memory migrate --apply --vault <cofre>` com o Vault resolvido, mas a
+  migração continua sendo opt-in e deve ser planejada separadamente.
 - `degraded` + outbox íntegra: warning; preserve a outbox e permita replay idempotente.
 - `ambiguous`, publicação perdida ou checkpoint divergente: bloqueante; preserve registry, ledger,
   outbox e SHARED para correlacionar `last_memory_attempt` antes de reparar.
 - Bundle corrompido: preserve a evidência e use `memory status --gate` antes de `memory repair`.
+- Conflito semântico ativo exige decisão humana: `memory repair` não escolhe vencedor. Comece pelo
+  menu guiado `memory curate --vault <cofre>`. Para inspeção avançada ou terminal não interativo,
+  liste os IDs seguros com `memory candidates --active --vault <cofre>`, revise a evidência e use
+  `memory promote <candidate-id> --event <event-id> --vault <cofre>` para selecionar um evento ou
+  `memory reject <candidate-id> --vault <cofre>` para manter o valor operacional atual.
 - Observabilidade `legacy`/`degraded`/`stale`/`manifest-unproven`: rode
   `npx --no-install wendkeep cost rebuild --session <id> --json --vault <cofre>`, revise diagnostics
   e só então autorize a segunda variante com `--apply`.

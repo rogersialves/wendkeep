@@ -177,7 +177,7 @@ test('[req:MEM-HYB-9] sync de SHARED legado com sidecars vazios conclui com doct
 
     const second = spawnWk(['sync', '--project', project, '--yes'], { cwd: project });
     assert.ok(second.status === 0 || second.status === 1, second.stderr || second.stdout);
-    assert.match(second.stdout, /"memoryStatus": "legacy"/);
+    assert.match(second.stdout, /\[memória\].*legado/i);
     assert.doesNotMatch(second.stdout, /schema_version deve ser 2|event_cursor .*n[aã]o existe no ledger/i);
     assert.equal(readFileSync(join(brain, 'SHARED_MEMORY.md'), 'utf8'), legacy);
 
