@@ -452,7 +452,12 @@ test('[req:OP-7] lock de promoção rejeita raiz redirecionada antes de executar
 
     assert.throws(
       () => withFlowPromotionLock(vault, 'safe-slug', () => { called = true; }),
-      /Vault|link simbólico|junction|reparse|redirecion/i,
+      {
+        // Falha de fronteira no lock de promoção reporta o código do domínio, nunca o default
+        // físico: sem a propagação de `code`, isto seria VAULT_PATH_UNSAFE.
+        code: 'FLOW_VAULT_BOUNDARY',
+        message: /Vault|link simbólico|junction|reparse|redirecion/i,
+      },
     );
     assert.equal(called, false);
     assert.deepEqual(readdirSync(outside), ['sentinel.txt']);
@@ -493,12 +498,14 @@ test('[req:OP-7] store rejeita contract.json preexistente por hardlink', (t) => 
 });
 
 test('[req:OP-7] store valida fisicamente as raízes de sessão, FLOW e lock de estado', async (t) => {
+  // O código esperado separa as duas fronteiras: validação de raiz compartilhada reporta o
+  // default físico, enquanto a falha do lock do store de sessão reporta o código do domínio.
   const cases = [
-    ['session-root', (vault) => join(vault, '.brain', 'runtime', 'flows', 'session-1')],
-    ['flow-root', (vault) => join(vault, '.brain', 'runtime', 'flows', 'session-1', 'flow-1')],
-    ['state-lock', (vault) => join(vault, '.brain', 'runtime', 'flows', 'session-1', '.state.lock')],
+    ['session-root', (vault) => join(vault, '.brain', 'runtime', 'flows', 'session-1'), 'VAULT_PATH_UNSAFE'],
+    ['flow-root', (vault) => join(vault, '.brain', 'runtime', 'flows', 'session-1', 'flow-1'), 'VAULT_PATH_UNSAFE'],
+    ['state-lock', (vault) => join(vault, '.brain', 'runtime', 'flows', 'session-1', '.state.lock'), 'FLOW_VAULT_BOUNDARY'],
   ];
-  for (const [label, targetOf] of cases) {
+  for (const [label, targetOf, expectedCode] of cases) {
     await t.test(label, (subtest) => {
       const vault = mkdtempSync(join(tmpdir(), 'wk-flow-store-safe-layer-'));
       const outside = mkdtempSync(join(tmpdir(), 'wk-flow-store-layer-outside-'));
@@ -517,7 +524,10 @@ test('[req:OP-7] store valida fisicamente as raízes de sessão, FLOW e lock de 
         }
         assert.throws(
           () => createFlowContract(vault, contract('flow-1')),
-          /Vault|link simbólico|junction|reparse|redirecion/i,
+          {
+            code: expectedCode,
+            message: /Vault|link simbólico|junction|reparse|redirecion/i,
+          },
         );
         assert.deepEqual(readdirSync(outside), ['sentinel.txt']);
         assert.equal(readFileSync(join(outside, 'sentinel.txt'), 'utf8'), 'preservado\n');
@@ -554,7 +564,12 @@ test('[req:OP-7] lock de promoção rejeita owner preexistente por hardlink', (t
       () => withFlowPromotionLock(vault, 'safe-slug', () => { called = true; }, {
         timeoutMs: 50, ownerGraceMs: 0,
       }),
-      /hardlink|nlink|Vault/i,
+      {
+        // Esta falha nasce dentro de withVaultPathLock, na inspeção do owner — o caminho que
+        // aceitava o código de fronteira física default antes da propagação de `code`.
+        code: 'FLOW_VAULT_BOUNDARY',
+        message: /hardlink|nlink|Vault/i,
+      },
     );
     assert.equal(called, false);
     assert.equal(readFileSync(source, 'utf8'), original);

@@ -78,8 +78,63 @@ async function ownerRead(code) {
   }
 }
 
+// Orçamento único: a operação falha de forma transiente e o walk fresco de reclassificação
+// sempre observa o componente estabilizado, então cada falha consome uma unidade do orçamento
+// até esgotá-lo. Chamadas ímpares são da operação; pares, da reclassificação.
 async function retryBudget() {
   const fx = fixture('wk-vault-lock-budget-');
+  deadOwner(fx, { lease: true });
+  const originalRealpath = fs.realpathSync.native;
+  const originalWait = Atomics.wait;
+  let injected = 0;
+  let waits = 0;
+  let calls = 0;
+  fs.realpathSync.native = function alternatingOwnerRealpath(path, ...args) {
+    if (resolve(path) === resolve(fx.owner)) {
+      calls += 1;
+      if (calls % 2 === 1) {
+        injected += 1;
+        const error = new Error('owner transitoriamente irresolvível');
+        error.code = 'ENOENT';
+        throw error;
+      }
+    }
+    return originalRealpath.call(this, path, ...args);
+  };
+  Atomics.wait = () => {
+    waits += 1;
+    return 'timed-out';
+  };
+  syncBuiltinESMExports();
+  const started = Date.now();
+  try {
+    const { withVaultPathLock } = await load('budget');
+    let errorCode = null;
+    let causeCode = null;
+    try {
+      withVaultPathLock(fx.vault, fx.target, () => 'não deve entrar', {
+        timeoutMs: 1000, staleMs: 0,
+      });
+    } catch (error) {
+      errorCode = error?.code || null;
+      causeCode = error?.cause?.code || null;
+    }
+    return {
+      injected, waits, errorCode, causeCode, elapsedMs: Date.now() - started,
+    };
+  } finally {
+    fs.realpathSync.native = originalRealpath;
+    Atomics.wait = originalWait;
+    syncBuiltinESMExports();
+    fs.rmSync(fx.vault, { recursive: true, force: true });
+  }
+}
+
+// Contraponto de retryBudget: quando o componente continua irresolvível no walk fresco, o estado
+// não estabilizou e a aquisição falha fechado já na primeira reclassificação, sem consumir o
+// orçamento inteiro.
+async function retryPersistent() {
+  const fx = fixture('wk-vault-lock-persistent-');
   deadOwner(fx, { lease: true });
   const originalRealpath = fs.realpathSync.native;
   const originalWait = Atomics.wait;
@@ -101,7 +156,7 @@ async function retryBudget() {
   syncBuiltinESMExports();
   const started = Date.now();
   try {
-    const { withVaultPathLock } = await load('budget');
+    const { withVaultPathLock } = await load('persistent');
     let errorCode = null;
     let causeCode = null;
     try {
@@ -156,6 +211,72 @@ async function releaseRace() {
     Atomics.wait = originalWait;
     syncBuiltinESMExports();
     fs.rmSync(fx.vault, { recursive: true, force: true });
+  }
+}
+
+// A remoção concorrente do lock público não reporta o mesmo errno em toda plataforma: o Windows
+// devolve UNKNOWN, EBADF ou EPERM onde o Linux devolve ENOENT. A reclassificação precisa derivar
+// de um walk fresco do componente, nunca do código de erro — e continuar recusando topologia
+// hostil observada nesse mesmo walk.
+async function acquirePlatformErrno(code, { hostileTopology = false } = {}) {
+  const fx = fixture(`wk-vault-lock-errno-${code.toLowerCase()}-`);
+  const outside = fs.mkdtempSync(join(tmpdir(), 'wk-vault-lock-errno-outside-'));
+  fs.mkdirSync(fx.lock, { recursive: true });
+  const originalRealpath = fs.realpathSync.native;
+  const originalWait = Atomics.wait;
+  let injected = 0;
+  let waits = 0;
+  let entered = false;
+  let linkSupported = true;
+  fs.realpathSync.native = function platformErrnoRealpath(path, ...args) {
+    if (resolve(String(path)) === resolve(fx.lock) && waits === 0) {
+      injected += 1;
+      const error = new Error(`resolução transiente ${code} simulada`);
+      error.code = code;
+      throw error;
+    }
+    return originalRealpath.call(this, path, ...args);
+  };
+  Atomics.wait = () => {
+    waits += 1;
+    // O owner concorrente libera o lock durante o backoff.
+    fs.rmSync(fx.lock, { recursive: true, force: true });
+    if (hostileTopology) {
+      // ...e o path reaparece como junction/symlink: o walk fresco deve recusar mesmo tendo
+      // sido disparado pelo mesmo errno transiente que autoriza o retry no caso benigno.
+      try {
+        fs.symlinkSync(outside, fx.lock, process.platform === 'win32' ? 'junction' : 'dir');
+      } catch (error) {
+        if (['EPERM', 'EACCES', 'ENOTSUP'].includes(error?.code)) linkSupported = false;
+        else throw error;
+      }
+    }
+    return 'timed-out';
+  };
+  syncBuiltinESMExports();
+  try {
+    const { withVaultPathLock } = await load(`errno-${code}-${hostileTopology ? 'hostile' : 'benign'}`);
+    let value = null;
+    let errorCode = null;
+    let message = '';
+    try {
+      value = withVaultPathLock(fx.vault, fx.target, () => {
+        entered = true;
+        return 'acquired';
+      }, { timeoutMs: 250, staleMs: 50 });
+    } catch (error) {
+      errorCode = error?.code || null;
+      message = error?.message || '';
+    }
+    return {
+      value, errorCode, message, entered, injected, waits, linkSupported,
+    };
+  } finally {
+    fs.realpathSync.native = originalRealpath;
+    Atomics.wait = originalWait;
+    syncBuiltinESMExports();
+    fs.rmSync(fx.vault, { recursive: true, force: true });
+    fs.rmSync(outside, { recursive: true, force: true });
   }
 }
 
@@ -401,18 +522,28 @@ async function sharedRetryBudget() {
   let ownerInjected = 0;
   let waits = 0;
   let entered = false;
+  let publicCalls = 0;
+  let ownerCalls = 0;
+  // Cada checkpoint alterna falha da operação / walk fresco estabilizado, para que o orçamento
+  // seja de fato consumido e se possa observar que ele é único e compartilhado entre eles.
   fs.realpathSync.native = function sharedBudgetRealpath(path, ...args) {
     if (resolve(String(path)) === resolve(fx.lock) && publicInjected < 2) {
-      publicInjected += 1;
-      const error = new Error('lock público ENOENT transitório');
-      error.code = 'ENOENT';
-      throw error;
+      publicCalls += 1;
+      if (publicCalls % 2 === 1) {
+        publicInjected += 1;
+        const error = new Error('lock público ENOENT transitório');
+        error.code = 'ENOENT';
+        throw error;
+      }
     }
     if (resolve(String(path)) === resolve(fx.owner) && ownerInjected < 2) {
-      ownerInjected += 1;
-      const error = new Error('owner ENOENT transitório');
-      error.code = 'ENOENT';
-      throw error;
+      ownerCalls += 1;
+      if (ownerCalls % 2 === 1) {
+        ownerInjected += 1;
+        const error = new Error('owner ENOENT transitório');
+        error.code = 'ENOENT';
+        throw error;
+      }
     }
     return originalRealpath.call(this, path, ...args);
   };
@@ -494,7 +625,14 @@ try {
   if (scenario === 'owner-enoent') result = await ownerRead('ENOENT');
   else if (scenario === 'owner-eacces') result = await ownerRead('EACCES');
   else if (scenario === 'retry-budget') result = await retryBudget();
+  else if (scenario === 'retry-persistent') result = await retryPersistent();
   else if (scenario === 'release-enoent') result = await releaseRace();
+  else if (scenario === 'acquire-errno-unknown') result = await acquirePlatformErrno('UNKNOWN');
+  else if (scenario === 'acquire-errno-ebadf') result = await acquirePlatformErrno('EBADF');
+  else if (scenario === 'acquire-errno-eperm') result = await acquirePlatformErrno('EPERM');
+  else if (scenario === 'acquire-errno-hostile') {
+    result = await acquirePlatformErrno('EBADF', { hostileTopology: true });
+  }
   else if (scenario === 'rename-collision') result = await renameRace('NATIVE');
   else if (scenario === 'rename-eacces') result = await renameRace('EACCES');
   else if (scenario === 'rename-eperm-bad-dest') result = await renameRace('EPERM_BAD_DEST');

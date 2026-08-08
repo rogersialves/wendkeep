@@ -335,17 +335,34 @@ function waitBriefly(ms) {
   Atomics.wait(signal, 0, 0, ms);
 }
 
-// A public lock may legitimately disappear while another owner releases it. Only ENOENT
-// observed by an operation explicitly scoped to that canonical lock receives bounded
-// backoff; private .pending paths and every unsafe topology fail closed.
-function retryablePublicLockError(lock, error, code, { allowRaw = true } = {}) {
+// A public lock may legitimately disappear while another owner releases it. Structural shape
+// only: which errno a concurrent removal produces is a platform detail — Windows reports
+// UNKNOWN, EBADF or EPERM where Linux reports ENOENT — so the code is merely the trigger to go
+// re-observe, never the answer. Private .pending paths are siblings, not descendants, of the
+// canonical lock and are excluded by the containment check.
+function publicLockRetryCandidate(lock, error, code, { allowRaw = true } = {}) {
   const failure = error?.[VAULT_PATH_FAILURE];
+  // A raw error carries no component to re-observe, so it stays on the narrow ENOENT path.
   if (!failure) return allowRaw && error?.code === 'ENOENT' && !error?.cause;
-  const causeCode = error?.cause?.code || failure.causeCode;
-  return causeCode === 'ENOENT'
-    && (error?.code === code || error?.code === 'VAULT_PATH_UNSAFE')
+  return (error?.code === code || error?.code === 'VAULT_PATH_UNSAFE')
     && ['component-realpath', 'component-missing'].includes(failure.kind)
     && containedBy(resolve(lock), resolve(failure.component));
+}
+
+// The decision itself. Only a fresh walk that settles as a missing suffix or the canonical
+// entry authorizes a retry; junction, symlink, reparse, a redirected component or a state that
+// is still unresolvable keeps failing closed, exactly as a first-time validation would.
+function publicLockComponentSettled(vaultBase, error, code) {
+  const component = error?.[VAULT_PATH_FAILURE]?.component;
+  if (typeof component !== 'string' || !component) return false;
+  try {
+    assertVaultPathSafe(vaultBase, component, {
+      label: 'revalidação do lock de escrita do Vault', code,
+    });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function vaultLockRenameCollision(error, pending, lock) {
@@ -374,17 +391,22 @@ function vaultLockRetryDeadlineError() {
   return error;
 }
 
-function withPublicLockRetry(lock, code, retryState, operation, initialError = null) {
+function withPublicLockRetry(vaultBase, lock, code, retryState, operation, initialError = null) {
   let error = initialError;
   while (true) {
     if (error) {
-      if (!retryablePublicLockError(lock, error, code)
+      if (!publicLockRetryCandidate(lock, error, code)
         || retryState.remaining <= 0) throw error;
       const remainingMs = retryState.deadline - Date.now();
       if (remainingMs <= 0) throw vaultLockRetryDeadlineError();
       retryState.remaining -= 1;
       waitBriefly(Math.min(VAULT_LOCK_TOPOLOGY_RETRY_MS, remainingMs));
       if (Date.now() >= retryState.deadline) throw vaultLockRetryDeadlineError();
+      // Reclassify only after the backoff, and only while the deadline still allows a retry:
+      // "settled" means observed once the concurrent owner had a chance to finish releasing.
+      // A raw error carries no component and already passed the narrow ENOENT filter above.
+      if (error[VAULT_PATH_FAILURE]
+        && !publicLockComponentSettled(vaultBase, error, code)) throw error;
     }
     try {
       return operation();
@@ -395,9 +417,11 @@ function withPublicLockRetry(lock, code, retryState, operation, initialError = n
 }
 
 function inspectVaultLock(vaultBase, lock, code, retryState, initialError = null) {
-  return withPublicLockRetry(lock, code, retryState, () => assertVaultPathSafe(vaultBase, lock, {
-    expectedType: 'directory', label: 'lock de escrita do Vault', code,
-  }), initialError);
+  return withPublicLockRetry(vaultBase, lock, code, retryState, () => assertVaultPathSafe(
+    vaultBase, lock, {
+      expectedType: 'directory', label: 'lock de escrita do Vault', code,
+    },
+  ), initialError);
 }
 
 function processIsAlive(pid) {
@@ -447,7 +471,7 @@ function vaultLockOwner(vaultBase, lock, code, retryState = null) {
     }
   };
   return retryState
-    ? withPublicLockRetry(lock, code, retryState, inspect)
+    ? withPublicLockRetry(vaultBase, lock, code, retryState, inspect)
     : inspect();
 }
 
@@ -492,7 +516,7 @@ function releaseOwnedVaultLock(vaultBase, lock, {
   // The token-specific lease is the filesystem CAS. An old finally/reaper can only
   // remove the directory after successfully unlinking the lease it originally saw;
   // a replacement lock never contains that unguessable path.
-  const leaseRemoved = withPublicLockRetry(lock, code, retryState, () => unlinkVaultFile(
+  const leaseRemoved = withPublicLockRetry(vaultBase, lock, code, retryState, () => unlinkVaultFile(
     vaultBase, vaultLockLease(lock, token), {
       label: 'lease do lock de escrita do Vault', code,
     },
@@ -503,12 +527,12 @@ function releaseOwnedVaultLock(vaultBase, lock, {
   const current = currentState.owner;
   if (current?.pid !== pid || current?.token !== token) return false;
   const ownerPath = join(lock, VAULT_LOCK_OWNER_FILE);
-  if (!withPublicLockRetry(lock, code, retryState, () => unlinkVaultFile(
+  if (!withPublicLockRetry(vaultBase, lock, code, retryState, () => unlinkVaultFile(
     vaultBase, ownerPath, {
       label: 'owner do lock de escrita do Vault', code,
     },
   ))) return false;
-  return withPublicLockRetry(lock, code, retryState, () => removeVaultLockDirectory(
+  return withPublicLockRetry(vaultBase, lock, code, retryState, () => removeVaultLockDirectory(
     vaultBase, lock, {
       missingOk: false, label: 'lock de escrita do Vault', code,
     },
@@ -516,7 +540,7 @@ function releaseOwnedVaultLock(vaultBase, lock, {
 }
 
 function reapDeadVaultLock(vaultBase, lock, staleMs, code, retryState) {
-  const initial = withPublicLockRetry(lock, code, retryState, () => {
+  const initial = withPublicLockRetry(vaultBase, lock, code, retryState, () => {
     const checked = assertVaultPathSafe(vaultBase, lock, {
       expectedType: 'directory', label: 'lock de escrita do Vault', code,
     });
@@ -530,7 +554,7 @@ function reapDeadVaultLock(vaultBase, lock, staleMs, code, retryState) {
   if (!observed.lockExists) return true;
   if (observed.owner) {
     if (processIsAlive(observed.owner.pid)) return false;
-    const lease = withPublicLockRetry(lock, code, retryState, () => {
+    const lease = withPublicLockRetry(vaultBase, lock, code, retryState, () => {
       const current = assertVaultPathSafe(vaultBase, lock, {
         expectedType: 'directory', label: 'lock de escrita do Vault', code,
       });
@@ -548,7 +572,7 @@ function reapDeadVaultLock(vaultBase, lock, staleMs, code, retryState) {
     // Compatibility with owner-aware locks from 0.58.x, which predate token leases.
     // A dead PID plus byte-identical owner and directory identity is sufficient here;
     // a live legacy owner was returned above and is never reaped by age.
-    const legacy = withPublicLockRetry(lock, code, retryState, () => {
+    const legacy = withPublicLockRetry(vaultBase, lock, code, retryState, () => {
       const current = assertVaultPathSafe(vaultBase, lock, {
         expectedType: 'directory', label: 'lock legado de escrita do Vault', code,
       });
@@ -565,12 +589,12 @@ function reapDeadVaultLock(vaultBase, lock, staleMs, code, retryState) {
     if (currentStat.birthtimeMs !== before.birthtimeMs
       || currentStat.mtimeMs !== before.mtimeMs
       || currentOwner.raw !== observed.raw) return false;
-    if (!withPublicLockRetry(lock, code, retryState, () => unlinkVaultFile(
+    if (!withPublicLockRetry(vaultBase, lock, code, retryState, () => unlinkVaultFile(
       vaultBase, currentOwner.path, {
         label: 'owner legado morto do lock de escrita do Vault', code,
       },
     ))) return false;
-    return withPublicLockRetry(lock, code, retryState, () => removeVaultLockDirectory(
+    return withPublicLockRetry(vaultBase, lock, code, retryState, () => removeVaultLockDirectory(
       vaultBase, checked.target, {
         missingOk: false, label: 'lock legado de escrita do Vault', code,
       },
@@ -580,7 +604,7 @@ function reapDeadVaultLock(vaultBase, lock, staleMs, code, retryState) {
   // Locks are published by atomic directory rename only after owner + lease exist.
   // Thus an old empty/partial directory is legacy or crash residue, never an in-flight
   // live acquisition. Unknown children remain fail-closed.
-  const partial = withPublicLockRetry(lock, code, retryState, () => {
+  const partial = withPublicLockRetry(vaultBase, lock, code, retryState, () => {
     const current = assertVaultPathSafe(vaultBase, lock, {
       expectedType: 'directory', label: 'lock de escrita do Vault', code,
     });
@@ -604,12 +628,12 @@ function reapDeadVaultLock(vaultBase, lock, staleMs, code, retryState) {
     || currentStat.mtimeMs !== before.mtimeMs
     || currentOwner.raw !== observed.raw) return false;
   if (entries.includes(VAULT_LOCK_OWNER_FILE)
-    && !withPublicLockRetry(lock, code, retryState, () => unlinkVaultFile(
+    && !withPublicLockRetry(vaultBase, lock, code, retryState, () => unlinkVaultFile(
       vaultBase, currentOwner.path, {
         label: 'owner parcial do lock de escrita do Vault', code,
       },
     ))) return false;
-  return withPublicLockRetry(lock, code, retryState, () => removeVaultLockDirectory(
+  return withPublicLockRetry(vaultBase, lock, code, retryState, () => removeVaultLockDirectory(
     vaultBase, checked.target, {
       missingOk: false, label: 'lock de escrita do Vault', code,
     },
@@ -672,7 +696,8 @@ export function withVaultPathLock(vaultBase, path, fn, {
             });
             break;
           } catch (error) {
-            const retryableRenameRace = retryablePublicLockError(lock, error, code, {
+            // Shape check only; inspectVaultLock below re-observes through the full retry path.
+            const retryableRenameRace = publicLockRetryCandidate(lock, error, code, {
               allowRaw: false,
             });
             const nativeRenameCollision = vaultLockRenameCollision(error, pending, lock);
