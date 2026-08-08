@@ -2,7 +2,9 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { extractReleaseNotes } from '../src/release-changelog.mjs';
-import { resolveReleasePlan } from '../scripts/release-plan.mjs';
+import {
+  npmHasVersion, npmVersionQueryArgs, releaseSteps, resolveReleasePlan,
+} from '../scripts/release-plan.mjs';
 
 const AUTO_TAG_WORKFLOW = readFileSync(new URL('../.github/workflows/auto-tag.yml', import.meta.url), 'utf8');
 const AGENT_RULES = readFileSync(new URL('../AGENTS.md', import.meta.url), 'utf8');
@@ -131,6 +133,44 @@ test('[sensor:release-tests] [req:CLI-PKG-2] tag apontando para outro commit abo
   }));
   assert.equal(plan.action, 'abort');
   assert.match(plan.reason, /outro commit|diverge/i);
+});
+
+test('[sensor:release-tests] [req:CLI-PKG-2] publish-and-tag executa publish, tag e push', () => {
+  const steps = releaseSteps({ action: 'publish-and-tag', reason: '' });
+  assert.deepEqual(steps, ['publish', 'tag', 'push']);
+});
+
+test('[sensor:release-tests] [req:CLI-PKG-2] publish-only publica e preserva a tag existente', () => {
+  // O ponto da mudança inteira: este caminho PRECISA publicar. Não publicar aqui reintroduz o
+  // defeito original em silêncio; recriar a tag faz `git tag -a` falhar depois do publish,
+  // deixando o release pela metade justamente no passo irreversível.
+  const steps = releaseSteps({ action: 'publish-only', reason: '' });
+  assert.ok(steps.includes('publish'), 'publish-only precisa publicar');
+  assert.ok(!steps.includes('tag'), 'publish-only não pode recriar a tag');
+  assert.deepEqual(steps, ['publish', 'push']);
+});
+
+test('[sensor:release-tests] [req:CLI-PKG-2] abort não executa passo algum', () => {
+  assert.deepEqual(releaseSteps({ action: 'abort', reason: 'qualquer' }), []);
+});
+
+test('[sensor:release-tests] [req:CLI-PKG-2] a consulta ao registry ignora cache de metadata', () => {
+  // Sem --prefer-online o npm responde de cache e pode negar uma versão recém-publicada,
+  // o que levaria o guard a liberar uma republicação.
+  const args = npmVersionQueryArgs('wendkeep', '1.2.3');
+  assert.ok(args.includes('--prefer-online'), `faltou --prefer-online em ${args.join(' ')}`);
+  assert.ok(args.includes('wendkeep@1.2.3'));
+});
+
+test('[sensor:release-tests] [req:CLI-PKG-2] versão presente no registry é reconhecida', () => {
+  assert.equal(npmHasVersion('wendkeep', '1.2.3', () => '1.2.3'), true);
+});
+
+test('[sensor:release-tests] [req:CLI-PKG-2] falha de consulta ao registry não bloqueia o release', () => {
+  // Fail-open deliberado: o registry é a autoridade final e recusa republicação com
+  // EPUBLISHCONFLICT. Bloquear aqui travaria um release legítimo por instabilidade de rede.
+  const offline = () => { throw new Error('ENOTFOUND registry.npmjs.org'); };
+  assert.equal(npmHasVersion('wendkeep', '1.2.3', offline), false);
 });
 
 test('auto-tag: existing tag still refreshes the GitHub Release from CHANGELOG', () => {

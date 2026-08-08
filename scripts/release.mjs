@@ -16,7 +16,9 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { extractReleaseNotes } from '../src/release-changelog.mjs';
-import { resolveReleasePlan } from './release-plan.mjs';
+import {
+  npmHasVersion, releaseSteps, resolveReleasePlan,
+} from './release-plan.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const DRY = process.argv.includes('--dry-run');
@@ -64,44 +66,45 @@ function tagCommit(ref) {
   }
 }
 
-// `--prefer-online` é deliberado: sem ele o npm serve metadata de cache e pode negar uma versão
-// recém-publicada. Falha de consulta cai como "não publicado" — o registry é a autoridade final
-// e recusa republicação com EPUBLISHCONFLICT, então este guard é só uma falha antecipada.
-function npmHasVersion(name, wanted) {
-  try {
-    return out('npm', ['view', `${name}@${wanted}`, 'version', '--prefer-online']) === wanted;
-  } catch {
-    return false;
-  }
-}
-
 const plan = resolveReleasePlan({
   name: pkg.name,
   version,
   tag,
   tagCommit: tagCommit(tag),
   headCommit: out('git', ['rev-parse', 'HEAD']),
-  publishedOnNpm: npmHasVersion(pkg.name, version),
+  publishedOnNpm: npmHasVersion(pkg.name, version, (args) => out('npm', args)),
 });
 if (plan.action === 'abort') die(plan.reason);
 
 const branch = out('git', ['rev-parse', '--abbrev-ref', 'HEAD']);
+const steps = releaseSteps(plan);
 
 console.log(`\nRelease ${pkg.name}@${version} (${tag}) na branch ${branch}\n`);
 if (plan.action === 'publish-only') console.log(`  ${plan.reason}\n`);
 
-step(`npm publish`);
-if (!DRY) sh('npm', ['publish']);
+const RUNNERS = {
+  publish: {
+    label: 'npm publish',
+    run: () => sh('npm', ['publish']),
+  },
+  tag: {
+    label: `git tag -a ${tag}`,
+    run: () => sh('git', ['tag', '-a', tag, '-m', tag]),
+  },
+  push: {
+    label: `git push origin ${branch} --follow-tags`,
+    run: () => sh('git', ['push', 'origin', branch, '--follow-tags']),
+  },
+};
 
-if (plan.action === 'publish-only') {
-  step(`git tag -a ${tag} — pulado, a tag já existe no commit corrente`);
-} else {
-  step(`git tag -a ${tag}`);
-  if (!DRY) sh('git', ['tag', '-a', tag, '-m', tag]);
+if (!steps.includes('tag')) {
+  console.log(`· tag ${tag} preservada — já existe no commit corrente\n`);
 }
-
-step(`git push origin ${branch} --follow-tags`);
-if (!DRY) sh('git', ['push', 'origin', branch, '--follow-tags']);
+for (const name of steps) {
+  const runner = RUNNERS[name];
+  step(runner.label);
+  if (!DRY) runner.run();
+}
 
 console.log(
   `\n✔ ${tag} publicado e pushado.` +

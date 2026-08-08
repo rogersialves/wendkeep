@@ -29,7 +29,8 @@ export function resolveReleasePlan({
     };
   }
 
-  // Checagem local e barata primeiro: elimina o estado ambíguo antes de qualquer rede.
+  // Divergência de commit é o estado mais ambíguo, então decide primeiro. Note que isso ordena
+  // a decisão, não o I/O: o chamador coleta `publishedOnNpm` antes de chamar esta função.
   if (tagCommit !== headCommit) {
     return {
       action: 'abort',
@@ -50,4 +51,46 @@ export function resolveReleasePlan({
     action: 'publish-only',
     reason: `tag ${tag} já existe no commit corrente (auto-tag.yml); falta apenas publicar`,
   };
+}
+
+/**
+ * Passos que um plano executa, em ordem. Manter o mapeamento aqui — e não espalhado em ifs no
+ * script — é o que permite verificar que `publish-only` de fato publica: não publicar reintroduz
+ * o defeito original, e recriar a tag faz `git tag -a` falhar depois do `npm publish`, deixando
+ * o release pela metade no único passo irreversível.
+ *
+ * @param {{action: string}} plan
+ * @returns {Array<'publish'|'tag'|'push'>}
+ */
+export function releaseSteps({ action }) {
+  if (action === 'abort') return [];
+  if (action === 'publish-only') return ['publish', 'push'];
+  return ['publish', 'tag', 'push'];
+}
+
+/**
+ * Argumentos da consulta de versão ao registry.
+ *
+ * `--prefer-online` é obrigatório: sem ele o npm responde de metadata em cache e pode negar uma
+ * versão recém-publicada, o que levaria o guard a liberar uma republicação.
+ */
+export function npmVersionQueryArgs(name, version) {
+  return ['view', `${name}@${version}`, 'version', '--prefer-online'];
+}
+
+/**
+ * @param {string} name
+ * @param {string} version
+ * @param {(args: string[]) => string} run  executor injetável (o script passa o npm real)
+ */
+export function npmHasVersion(name, version, run) {
+  try {
+    return run(npmVersionQueryArgs(name, version)) === version;
+  } catch {
+    // Fail-open deliberado. A consulta falha tanto para versão inexistente quanto para rede
+    // instável, e os dois casos são indistinguíveis pelo código de saída. Bloquear aqui travaria
+    // um release legítimo; liberar é seguro porque o registry recusa republicação com
+    // EPUBLISHCONFLICT e é a autoridade final.
+    return false;
+  }
 }
