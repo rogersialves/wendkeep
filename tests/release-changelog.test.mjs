@@ -2,9 +2,10 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { extractReleaseNotes } from '../src/release-changelog.mjs';
+import { execFileSync } from 'node:child_process';
 import {
-  npmExecutorSpec, npmHasVersion, npmVersionQueryArgs, releaseCommands, releaseSteps,
-  resolveReleasePlan,
+  executeRelease, npmExecutorSpec, npmHasVersion, npmVersionQueryArgs, releaseCommands,
+  releaseSteps, resolveReleasePlan,
 } from '../scripts/release-plan.mjs';
 
 const AUTO_TAG_WORKFLOW = readFileSync(new URL('../.github/workflows/auto-tag.yml', import.meta.url), 'utf8');
@@ -191,15 +192,59 @@ test('[sensor:release-tests] [req:CLI-PKG-2] sem npm_execpath o executor cai par
   assert.deepEqual(spec.args, ['publish']);
 });
 
-test('[sensor:release-tests] [req:CLI-PKG-2] o publish também passa pelo executor resolvido', () => {
-  // Mesma armadilha do guard: `sh('npm', ['publish'])` direto é irresolúvel no Windows.
-  const [publish] = releaseCommands({ action: 'publish-only' }, { tag: 'v1.2.3', branch: 'main' });
-  assert.equal(publish.step, 'publish');
-  assert.notEqual(publish.command, 'npm.cmd');
-  assert.ok(
-    publish.command === 'npm' || publish.args.some((a) => a.includes('npm-cli.js')),
-    `executor de publish inesperado: ${publish.command} ${publish.args.join(' ')}`,
-  );
+test('[sensor:release-tests] [req:CLI-PKG-2] o publish usa exatamente o executor resolvido', () => {
+  // Asserção da forma exata, não de uma disjunção: aceitar `command === 'npm'` OU o npm-cli.js
+  // deixaria a forma quebrada passar, que é justamente o defeito a barrar.
+  const [publish] = releaseCommands({ action: 'publish-only' }, {
+    tag: 'v1.2.3',
+    branch: 'main',
+    npmSpec: (args) => ({ command: '/usr/bin/node', args: ['/npm-cli.js', ...args], shell: false }),
+  });
+  assert.deepEqual(publish, {
+    step: 'publish', command: '/usr/bin/node', args: ['/npm-cli.js', 'publish'], shell: false,
+  });
+});
+
+test('[sensor:release-tests] [req:CLI-PKG-2] o default do executor lê npm_execpath do ambiente', () => {
+  // Os demais testes injetam os dois parâmetros, então nada exercitaria o default — e trocá-lo
+  // por `null` reintroduziria o ENOENT silencioso sem quebrar nada.
+  const previous = process.env.npm_execpath;
+  process.env.npm_execpath = '/injected/npm-cli.js';
+  try {
+    const spec = npmExecutorSpec(['view', 'x@1.0.0', 'version']);
+    assert.equal(spec.command, process.execPath);
+    assert.equal(spec.args[0], '/injected/npm-cli.js');
+  } finally {
+    if (previous === undefined) delete process.env.npm_execpath;
+    else process.env.npm_execpath = previous;
+  }
+});
+
+test('[sensor:release-tests] [req:CLI-PKG-2] fora de npm run o Windows recorre ao shell', () => {
+  // Sem npm_execpath, `npm` é irresolúvel no Windows; devolver o comando cru faria a consulta
+  // lançar e o fail-open desligar o guard em silêncio.
+  const win = npmExecutorSpec(['publish'], { npmExecPath: null, platform: 'win32' });
+  assert.deepEqual(win, { command: 'npm', args: ['publish'], shell: true });
+
+  const posix = npmExecutorSpec(['publish'], { npmExecPath: null, platform: 'linux' });
+  assert.deepEqual(posix, { command: 'npm', args: ['publish'], shell: false });
+});
+
+test('[sensor:release-tests] [req:CLI-PKG-2] dry-run não executa comando algum', () => {
+  // Perder esta guarda faz `npm run release:dry` publicar de verdade — irreversível.
+  const commands = releaseCommands({ action: 'publish-and-tag' }, { tag: 'v1.2.3', branch: 'main' });
+  const ran = [];
+  const executed = executeRelease(commands, { dry: true, run: (c) => ran.push(c.step) });
+  assert.deepEqual(ran, [], 'dry-run não pode executar nada');
+  assert.deepEqual(executed, []);
+});
+
+test('[sensor:release-tests] [req:CLI-PKG-2] execução real roda todos os passos na ordem', () => {
+  const commands = releaseCommands({ action: 'publish-and-tag' }, { tag: 'v1.2.3', branch: 'main' });
+  const ran = [];
+  const executed = executeRelease(commands, { dry: false, run: (c) => ran.push(c.step) });
+  assert.deepEqual(ran, ['publish', 'tag', 'push']);
+  assert.deepEqual(executed, ['publish', 'tag', 'push']);
 });
 
 test('[sensor:release-tests] [req:CLI-PKG-2] releaseCommands ancora o que o script executa', () => {
@@ -207,10 +252,10 @@ test('[sensor:release-tests] [req:CLI-PKG-2] releaseCommands ancora o que o scri
   const andTag = releaseCommands({ action: 'publish-and-tag' }, ctx);
   assert.deepEqual(andTag.map((c) => c.step), ['publish', 'tag', 'push']);
   assert.deepEqual(andTag[1], {
-    step: 'tag', command: 'git', args: ['tag', '-a', 'v1.2.3', '-m', 'v1.2.3'],
+    step: 'tag', command: 'git', args: ['tag', '-a', 'v1.2.3', '-m', 'v1.2.3'], shell: false,
   });
   assert.deepEqual(andTag[2], {
-    step: 'push', command: 'git', args: ['push', 'origin', 'main', '--follow-tags'],
+    step: 'push', command: 'git', args: ['push', 'origin', 'main', '--follow-tags'], shell: false,
   });
 
   const only = releaseCommands({ action: 'publish-only' }, ctx);
@@ -229,6 +274,59 @@ test('[sensor:release-tests] [req:CLI-PKG-2] falha de consulta ao registry não 
   // EPUBLISHCONFLICT. Bloquear aqui travaria um release legítimo por instabilidade de rede.
   const offline = () => { throw new Error('ENOTFOUND registry.npmjs.org'); };
   assert.equal(npmHasVersion('wendkeep', '1.2.3', offline), false);
+});
+
+test('[sensor:release-tests] [req:CLI-PKG-2] o script executa o plano derivado dos mesmos fatos', () => {
+  // Ancora scripts/release.mjs: sem isto, hardcodar os passos ou largar o executor sobrevive à
+  // suíte. O esperado é recomputado dos fatos reais do repositório, então o teste vale em
+  // qualquer estado — inclusive quando o plano correto é abortar.
+  const git = (args) => execFileSync('git', args, {
+    encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
+  }).trim();
+  const tag = `v${PACKAGE.version}`;
+  let tagCommit = null;
+  try {
+    tagCommit = git(['rev-list', '-n', '1', `refs/tags/${tag}`]);
+  } catch { /* tag ausente */ }
+
+  const plan = resolveReleasePlan({
+    name: PACKAGE.name,
+    version: PACKAGE.version,
+    tag,
+    tagCommit,
+    headCommit: git(['rev-parse', 'HEAD']),
+    publishedOnNpm: npmHasVersion(PACKAGE.name, PACKAGE.version, () => {
+      throw new Error('consulta ao registry fora do escopo deste teste');
+    }),
+  });
+
+  let result;
+  let aborted = false;
+  try {
+    result = execFileSync(process.execPath, ['scripts/release.mjs', '--dry-run'], {
+      encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
+    });
+  } catch (error) {
+    // Guards anteriores ao plano — working tree sujo, CHANGELOG ausente — também abortam, e
+    // durante o desenvolvimento é o caso comum. A asserção que sobrevive a qualquer estado é
+    // que um release abortado não executa passo algum; a comparação completa roda com a
+    // árvore limpa, como em CI.
+    result = `${error.stdout || ''}${error.stderr || ''}`;
+    aborted = true;
+  }
+
+  if (aborted || plan.action === 'abort') {
+    assert.doesNotMatch(result, /\[dry\]/, 'release abortado não pode listar passos');
+    return;
+  }
+
+  const expected = releaseCommands(plan, { tag, branch: git(['rev-parse', '--abbrev-ref', 'HEAD']) });
+  const listed = [...result.matchAll(/^· \[dry\] (.+)$/gm)].map((m) => m[1]);
+  assert.equal(listed.length, expected.length, `passos listados: ${listed.join(' | ')}`);
+  assert.match(listed[0], /npm publish/);
+  if (expected.some((c) => c.step === 'tag')) assert.ok(listed.some((l) => l.includes('git tag -a')));
+  else assert.ok(!listed.some((l) => l.includes('git tag -a')), 'publish-only não recria a tag');
+  assert.ok(listed.at(-1).includes('git push'));
 });
 
 test('auto-tag: existing tag still refreshes the GitHub Release from CHANGELOG', () => {

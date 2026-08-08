@@ -76,18 +76,41 @@ export function releaseSteps({ action }) {
  * @param {{tag: string, branch: string}} ctx
  * @returns {Array<{step: string, command: string, args: string[]}>}
  */
-export function releaseCommands(plan, { tag, branch }) {
+export function releaseCommands(plan, { tag, branch, npmSpec = npmExecutorSpec }) {
   const byStep = {
     publish: () => {
-      const spec = npmExecutorSpec(['publish']);
-      return { step: 'publish', command: spec.command, args: spec.args };
+      const spec = npmSpec(['publish']);
+      return {
+        step: 'publish', command: spec.command, args: spec.args, shell: spec.shell,
+      };
     },
-    tag: () => ({ step: 'tag', command: 'git', args: ['tag', '-a', tag, '-m', tag] }),
+    tag: () => ({
+      step: 'tag', command: 'git', args: ['tag', '-a', tag, '-m', tag], shell: false,
+    }),
     push: () => ({
-      step: 'push', command: 'git', args: ['push', 'origin', branch, '--follow-tags'],
+      step: 'push', command: 'git', args: ['push', 'origin', branch, '--follow-tags'], shell: false,
     }),
   };
   return releaseSteps(plan).map((step) => byStep[step]());
+}
+
+/**
+ * Executa os comandos de um release. Em dry-run nada roda — e isso precisa ser verificável, já
+ * que perder essa guarda faz `npm run release:dry` publicar de verdade.
+ *
+ * @param {Array<{step: string, command: string, args: string[], shell?: boolean}>} commands
+ * @param {{dry: boolean, run: (cmd: object) => void, log: (msg: string) => void}} io
+ * @returns {string[]} os passos executados (vazio em dry-run)
+ */
+export function executeRelease(commands, { dry, run, log = () => {} }) {
+  const executed = [];
+  for (const command of commands) {
+    log(`${dry ? '· [dry]' : '→'} ${command.step}`);
+    if (dry) continue;
+    run(command);
+    executed.push(command.step);
+  }
+  return executed;
 }
 
 /**
@@ -113,9 +136,14 @@ export function npmVersionQueryArgs(name, version) {
 export function npmExecutorSpec(args, {
   execPath = process.execPath,
   npmExecPath = process.env.npm_execpath,
+  platform = process.platform,
 } = {}) {
-  if (npmExecPath) return { command: execPath, args: [npmExecPath, ...args] };
-  return { command: 'npm', args };
+  if (npmExecPath) return { command: execPath, args: [npmExecPath, ...args], shell: false };
+  // Fora de `npm run` não há npm_execpath. No Windows, `npm` sozinho é irresolúvel e o
+  // fail-open de npmHasVersion transformaria isso em guard desligado sem aviso, então aqui o
+  // shell é a diferença entre consultar o registry e não consultar nada. Os args são fixos ou
+  // vêm do package.json, nunca de entrada externa.
+  return { command: 'npm', args, shell: platform === 'win32' };
 }
 
 /**

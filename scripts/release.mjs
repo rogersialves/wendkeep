@@ -17,21 +17,22 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { extractReleaseNotes } from '../src/release-changelog.mjs';
 import {
-  npmExecutorSpec, npmHasVersion, releaseCommands, resolveReleasePlan,
+  executeRelease, npmExecutorSpec, npmHasVersion, releaseCommands, resolveReleasePlan,
 } from './release-plan.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const DRY = process.argv.includes('--dry-run');
 
-function sh(cmd, args, { capture = false } = {}) {
+function sh(cmd, args, { capture = false, shell = false } = {}) {
   return execFileSync(cmd, args, {
     cwd: ROOT,
     encoding: 'utf8',
+    shell,
     stdio: capture ? ['ignore', 'pipe', 'pipe'] : 'inherit',
   });
 }
-function out(cmd, args) {
-  return sh(cmd, args, { capture: true }).trim();
+function out(cmd, args, options = {}) {
+  return sh(cmd, args, { ...options, capture: true }).trim();
 }
 function die(msg) {
   console.error(`\n✖ release abortado: ${msg}\n`);
@@ -70,7 +71,7 @@ function tagCommit(ref) {
 // execFileSync e a consulta falharia silenciosamente, desligando o guard.
 function runNpm(args) {
   const spec = npmExecutorSpec(args);
-  return out(spec.command, spec.args);
+  return out(spec.command, spec.args, { shell: spec.shell });
 }
 
 const plan = resolveReleasePlan({
@@ -98,10 +99,14 @@ const LABELS = {
   push: `git push origin ${branch} --follow-tags`,
 };
 
-for (const { step: name, command, args } of commands) {
-  step(LABELS[name]);
-  if (!DRY) sh(command, args);
-}
+executeRelease(commands, {
+  dry: DRY,
+  run: ({ command, args, shell }) => sh(command, args, { shell }),
+  log: (line) => {
+    const name = line.replace(/^[·→]\s*(\[dry\]\s*)?/, '');
+    step(LABELS[name] || name);
+  },
+});
 
 console.log(
   `\n✔ ${tag} publicado e pushado.` +
