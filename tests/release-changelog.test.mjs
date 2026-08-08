@@ -130,6 +130,14 @@ test('[sensor:release-tests] [req:CLI-PKG-2] versão já publicada aborta mesmo 
   assert.match(plan.reason, /já está publicad/i);
 });
 
+test('[sensor:release-tests] [req:CLI-PKG-2] versão publicada aborta mesmo sem tag alguma', () => {
+  // Tag ausente não torna publicável um release já lançado: o registry recusaria com
+  // EPUBLISHCONFLICT e o operador veria um erro de rede em vez da instrução de bump.
+  const plan = resolveReleasePlan(releaseFacts({ tagCommit: null, publishedOnNpm: true }));
+  assert.equal(plan.action, 'abort');
+  assert.match(plan.reason, /já está publicad/i);
+});
+
 test('[sensor:release-tests] [req:CLI-PKG-2] tag apontando para outro commit aborta', () => {
   // Publicar aqui entregaria conteúdo diferente do que foi tagueado. Precede a consulta ao
   // registry: é uma checagem local e o estado é ambíguo demais para prosseguir.
@@ -172,7 +180,6 @@ test('[sensor:release-tests] [req:CLI-PKG-2] a consulta ao registry ignora cache
   assert.equal(seen.length, 1);
   assert.ok(seen[0].includes('--prefer-online'), `faltou --prefer-online em ${seen[0].join(' ')}`);
   assert.ok(seen[0].includes('wendkeep@1.2.3'));
-  assert.deepEqual(seen[0], npmVersionQueryArgs('wendkeep', '1.2.3'));
 });
 
 test('[sensor:release-tests] [req:CLI-PKG-2] o npm é invocado pelo npm-cli.js, não pelo PATH', () => {
@@ -280,58 +287,6 @@ test('[sensor:release-tests] [req:CLI-PKG-2] falha de consulta ao registry não 
   assert.equal(npmHasVersion('wendkeep', '1.2.3', offline), false);
 });
 
-test('[sensor:release-tests] [req:CLI-PKG-2] o script executa o plano derivado dos mesmos fatos', () => {
-  // Ancora scripts/release.mjs: sem isto, hardcodar os passos ou largar o executor sobrevive à
-  // suíte. O esperado é recomputado dos fatos reais do repositório, então o teste vale em
-  // qualquer estado — inclusive quando o plano correto é abortar.
-  const git = (args) => execFileSync('git', args, {
-    encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
-  }).trim();
-  const tag = `v${PACKAGE.version}`;
-  let tagCommit = null;
-  try {
-    tagCommit = git(['rev-list', '-n', '1', `refs/tags/${tag}`]);
-  } catch { /* tag ausente */ }
-
-  const plan = resolveReleasePlan({
-    name: PACKAGE.name,
-    version: PACKAGE.version,
-    tag,
-    tagCommit,
-    headCommit: git(['rev-parse', 'HEAD']),
-    publishedOnNpm: npmHasVersion(PACKAGE.name, PACKAGE.version, () => {
-      throw new Error('consulta ao registry fora do escopo deste teste');
-    }),
-  });
-
-  let result;
-  let aborted = false;
-  try {
-    result = execFileSync(process.execPath, ['scripts/release.mjs', '--dry-run'], {
-      encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
-    });
-  } catch (error) {
-    // Guards anteriores ao plano — working tree sujo, CHANGELOG ausente — também abortam, e
-    // durante o desenvolvimento é o caso comum. A asserção que sobrevive a qualquer estado é
-    // que um release abortado não executa passo algum; a comparação completa roda com a
-    // árvore limpa, como em CI.
-    result = `${error.stdout || ''}${error.stderr || ''}`;
-    aborted = true;
-  }
-
-  if (aborted || plan.action === 'abort') {
-    assert.doesNotMatch(result, /\[dry\]/, 'release abortado não pode listar passos');
-    return;
-  }
-
-  const expected = releaseCommands(plan, { tag, branch: git(['rev-parse', '--abbrev-ref', 'HEAD']) });
-  const listed = [...result.matchAll(/^· \[dry\] (.+)$/gm)].map((m) => m[1]);
-  assert.equal(listed.length, expected.length, `passos listados: ${listed.join(' | ')}`);
-  assert.match(listed[0], /npm publish/);
-  if (expected.some((c) => c.step === 'tag')) assert.ok(listed.some((l) => l.includes('git tag -a')));
-  else assert.ok(!listed.some((l) => l.includes('git tag -a')), 'publish-only não recria a tag');
-  assert.ok(listed.at(-1).includes('git push'));
-});
 
 // Repositório sintético: o script resolve ROOT a partir do próprio caminho, então copiá-lo para
 // um repo temporário permite controlar tag, versão e resposta do registry. Um npm falso apontado

@@ -22,6 +22,16 @@
 export function resolveReleasePlan({
   name, version, tag, tagCommit, headCommit, publishedOnNpm,
 }) {
+  // Versão publicada nunca prossegue, com tag ou sem ela. Uma tag ausente não torna um release
+  // já lançado publicável de novo — o registry recusaria com EPUBLISHCONFLICT, e abortar aqui
+  // dá a mensagem certa em vez de um erro de rede opaco.
+  if (publishedOnNpm) {
+    return {
+      action: 'abort',
+      reason: `${name}@${version} já está publicado no npm. Bump a versão em package.json.`,
+    };
+  }
+
   if (!tagCommit) {
     return {
       action: 'publish-and-tag',
@@ -29,21 +39,14 @@ export function resolveReleasePlan({
     };
   }
 
-  // Divergência de commit é o estado mais ambíguo, então decide primeiro. Note que isso ordena
-  // a decisão, não o I/O: o chamador coleta `publishedOnNpm` antes de chamar esta função.
+  // Note que isto ordena a decisão, não o I/O: o chamador coleta `publishedOnNpm` antes de
+  // chamar esta função.
   if (tagCommit !== headCommit) {
     return {
       action: 'abort',
       reason: `tag ${tag} aponta para outro commit (${tagCommit.slice(0, 7)}), `
         + `não para o HEAD (${headCommit.slice(0, 7)}). Publicar entregaria conteúdo diverso do `
         + 'que foi tagueado.',
-    };
-  }
-
-  if (publishedOnNpm) {
-    return {
-      action: 'abort',
-      reason: `${name}@${version} já está publicado no npm. Bump a versão em package.json.`,
     };
   }
 
