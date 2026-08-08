@@ -1,6 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import {
+  mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { extractReleaseNotes } from '../src/release-changelog.mjs';
 import { execFileSync } from 'node:child_process';
 import {
@@ -327,6 +331,98 @@ test('[sensor:release-tests] [req:CLI-PKG-2] o script executa o plano derivado d
   if (expected.some((c) => c.step === 'tag')) assert.ok(listed.some((l) => l.includes('git tag -a')));
   else assert.ok(!listed.some((l) => l.includes('git tag -a')), 'publish-only não recria a tag');
   assert.ok(listed.at(-1).includes('git push'));
+});
+
+// Repositório sintético: o script resolve ROOT a partir do próprio caminho, então copiá-lo para
+// um repo temporário permite controlar tag, versão e resposta do registry. Um npm falso apontado
+// por npm_execpath torna `publishedOnNpm` determinístico e dispensa rede.
+function syntheticRelease({ version, tagAt, publishedVersions = [] }) {
+  const root = mkdtempSync(join(tmpdir(), 'wk-release-sim-'));
+  const git = (args) => execFileSync('git', args, {
+    cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
+  }).trim();
+  try {
+    mkdirSync(join(root, 'scripts'), { recursive: true });
+    mkdirSync(join(root, 'src'), { recursive: true });
+    for (const file of ['scripts/release.mjs', 'scripts/release-plan.mjs', 'src/release-changelog.mjs']) {
+      writeFileSync(join(root, file), readFileSync(new URL(`../${file}`, import.meta.url), 'utf8'));
+    }
+    writeFileSync(join(root, 'package.json'), JSON.stringify({ name: 'sim-pkg', version }, null, 2));
+    writeFileSync(join(root, 'CHANGELOG.md'), `# Changelog\n\n## [${version}] — 2026-08-08\n\n### Fixed\n\n- Nota.\n`);
+    writeFileSync(join(root, 'fake-npm.mjs'), `
+      const [, , sub, spec] = process.argv;
+      if (sub !== 'view') process.exit(0);
+      const wanted = String(spec).split('@').pop();
+      if (${JSON.stringify(publishedVersions)}.includes(wanted)) { console.log(wanted); process.exit(0); }
+      process.exit(1);
+    `);
+
+    git(['init', '-q']);
+    git(['config', 'user.email', 'sim@example.com']);
+    git(['config', 'user.name', 'sim']);
+    git(['add', '-A']);
+    git(['commit', '-q', '-m', 'sim']);
+    if (tagAt === 'head') git(['tag', '-a', `v${version}`, '-m', 'sim']);
+    if (tagAt === 'other') {
+      const first = git(['rev-parse', 'HEAD']);
+      writeFileSync(join(root, 'outro.txt'), 'divergente\n');
+      git(['add', '-A']);
+      git(['commit', '-q', '-m', 'segundo']);
+      git(['tag', '-a', `v${version}`, '-m', 'sim', first]);
+    }
+
+    try {
+      const stdout = execFileSync(process.execPath, ['scripts/release.mjs', '--dry-run'], {
+        cwd: root,
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'pipe'],
+        env: { ...process.env, npm_execpath: join(root, 'fake-npm.mjs') },
+      });
+      return { aborted: false, output: stdout };
+    } catch (error) {
+      return { aborted: true, output: `${error.stdout || ''}${error.stderr || ''}` };
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+}
+
+const simSteps = (output) => [...output.matchAll(/^· \[dry\] (.+)$/gm)].map((m) => m[1]);
+
+test('[sensor:release-tests] [req:CLI-PKG-2] script em repo sintético: sem tag publica e cria a tag', () => {
+  const { aborted, output } = syntheticRelease({ version: '1.0.0' });
+  assert.equal(aborted, false, output);
+  const steps = simSteps(output);
+  assert.equal(steps.length, 3, output);
+  assert.match(steps[0], /npm publish/);
+  assert.match(steps[1], /git tag -a v1\.0\.0/);
+  assert.match(steps[2], /git push/);
+});
+
+test('[sensor:release-tests] [req:CLI-PKG-2] script em repo sintético: tag no HEAD publica sem recriar a tag', () => {
+  // Este é o caminho que a mudança inteira existe para destravar, exercitado ponta a ponta.
+  const { aborted, output } = syntheticRelease({ version: '1.0.0', tagAt: 'head' });
+  assert.equal(aborted, false, output);
+  const steps = simSteps(output);
+  assert.deepEqual(steps.length, 2, output);
+  assert.match(steps[0], /npm publish/);
+  assert.ok(!steps.some((s) => s.includes('git tag -a')), `recriou a tag: ${output}`);
+});
+
+test('[sensor:release-tests] [req:CLI-PKG-2] script em repo sintético: versão publicada aborta sem executar', () => {
+  const { aborted, output } = syntheticRelease({
+    version: '1.0.0', tagAt: 'head', publishedVersions: ['1.0.0'],
+  });
+  assert.equal(aborted, true, output);
+  assert.deepEqual(simSteps(output), [], output);
+  assert.match(output, /já está publicad/i);
+});
+
+test('[sensor:release-tests] [req:CLI-PKG-2] script em repo sintético: tag divergente aborta sem executar', () => {
+  const { aborted, output } = syntheticRelease({ version: '1.0.0', tagAt: 'other' });
+  assert.equal(aborted, true, output);
+  assert.deepEqual(simSteps(output), [], output);
+  assert.match(output, /outro commit/i);
 });
 
 test('auto-tag: existing tag still refreshes the GitHub Release from CHANGELOG', () => {
