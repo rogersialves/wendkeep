@@ -183,7 +183,10 @@ test('[sensor:release-tests] [req:CLI-PKG-2] o npm é invocado pelo npm-cli.js, 
 });
 
 test('[sensor:release-tests] [req:CLI-PKG-2] sem npm_execpath o executor cai para o npm do PATH', () => {
-  const spec = npmExecutorSpec(['publish'], { execPath: '/usr/bin/node', npmExecPath: undefined });
+  // `null` e não `undefined`: um parâmetro com default só é sobrescrito por valor não-undefined,
+  // então passar `undefined` reativaria process.env.npm_execpath — que existe sob `npm test` e
+  // faria este teste medir o ambiente em vez da função.
+  const spec = npmExecutorSpec(['publish'], { execPath: '/usr/bin/node', npmExecPath: null });
   assert.equal(spec.command, 'npm');
   assert.deepEqual(spec.args, ['publish']);
 });
