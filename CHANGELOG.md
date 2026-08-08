@@ -4,6 +4,19 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.68.2] — 2026-08-08
+
+### Fixed
+
+- **O guard do `npm run release` deixa de bloquear a tag criada pelo `auto-tag.yml`.** Os dois
+  automatismos assumem ordens opostas: o script publica no npm e então cria a tag, enquanto o
+  workflow cria a tag no merge em `main`, antes de qualquer publish. Quando o merge precedia o
+  publish — o caminho normal de um PR — o release abortava num estado perfeitamente publicável.
+  O guard passa a proteger a unicidade da versão no registry, não a ausência da tag: publica e
+  preserva a tag existente quando ela aponta para o commit corrente, e continua abortando se a
+  versão já foi lançada ou se a tag aponta para outro commit. A decisão virou função pura, então
+  a matriz de estados é verificável sem publicar nem mutar o repositório.
+
 ## [0.68.1] — 2026-08-08
 
 ### Fixed

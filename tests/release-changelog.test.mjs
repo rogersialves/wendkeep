@@ -69,17 +69,23 @@ test('extractReleaseNotes: throws when the version is absent', () => {
   assert.throws(() => extractReleaseNotes(FIXTURE, '9.9.9'), /9\.9\.9/);
 });
 
-test('[sensor:release-tests] 0.68.1 notes are extractable and match the package', () => {
+test('[sensor:release-tests] 0.68.2 notes are extractable and match the package', () => {
+  const release = extractReleaseNotes(CHANGELOG, '0.68.2');
+  assert.equal(PACKAGE.version, '0.68.2');
+  assert.equal(release.date, '2026-08-08');
+  assert.match(release.notes, /auto-tag\.yml/);
+  assert.match(release.notes, /unicidade da versão no registry/i);
+  assert.match(release.notes, /commit corrente/i);
+  assert.doesNotMatch(release.notes, /019f[0-9a-f-]+/i);
+});
+
+test('[sensor:release-tests] as notas de 0.68.1 seguem extraíveis depois do bump', () => {
+  // A entrada anterior precisa continuar íntegra: a v0.68.1 já tem tag e GitHub Release, e o
+  // auto-tag relê o CHANGELOG para refrescar release existente.
   const release = extractReleaseNotes(CHANGELOG, '0.68.1');
-  assert.equal(PACKAGE.version, '0.68.1');
   assert.equal(release.date, '2026-08-08');
   assert.match(release.notes, /VAULT_PATH_UNSAFE/);
   assert.match(release.notes, /walk fresco/i);
-  assert.match(release.notes, /UNKNOWN[\s\S]*EBADF[\s\S]*EPERM/);
-  assert.match(release.notes, /ENOENT/);
-  assert.match(release.notes, /FLOW_VAULT_BOUNDARY/);
-  assert.match(release.notes, /orçamento de retry permanece único/i);
-  assert.doesNotMatch(release.notes, /019f[0-9a-f-]+/i);
 });
 
 const releaseFacts = (overrides = {}) => ({
