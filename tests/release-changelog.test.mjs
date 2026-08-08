@@ -68,15 +68,16 @@ test('extractReleaseNotes: throws when the version is absent', () => {
   assert.throws(() => extractReleaseNotes(FIXTURE, '9.9.9'), /9\.9\.9/);
 });
 
-test('[sensor:release-tests] 0.68.0 notes are extractable and match the package', () => {
-  const release = extractReleaseNotes(CHANGELOG, '0.68.0');
-  assert.equal(PACKAGE.version, '0.68.0');
-  assert.equal(release.date, '2026-08-02');
-  assert.match(release.notes, /memory curate --vault/i);
-  assert.match(release.notes, /memory candidates --active/i);
-  assert.match(release.notes, /memory repair/i);
-  assert.match(release.notes, /doctor[\s\S]*formato humano/i);
-  assert.match(release.notes, /somente leitura/i);
+test('[sensor:release-tests] 0.68.1 notes are extractable and match the package', () => {
+  const release = extractReleaseNotes(CHANGELOG, '0.68.1');
+  assert.equal(PACKAGE.version, '0.68.1');
+  assert.equal(release.date, '2026-08-08');
+  assert.match(release.notes, /VAULT_PATH_UNSAFE/);
+  assert.match(release.notes, /walk fresco/i);
+  assert.match(release.notes, /UNKNOWN[\s\S]*EBADF[\s\S]*EPERM/);
+  assert.match(release.notes, /ENOENT/);
+  assert.match(release.notes, /FLOW_VAULT_BOUNDARY/);
+  assert.match(release.notes, /orçamento de retry permanece único/i);
   assert.doesNotMatch(release.notes, /019f[0-9a-f-]+/i);
 });
 

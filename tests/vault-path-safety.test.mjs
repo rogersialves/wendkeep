@@ -228,10 +228,61 @@ test('[req:OP-7] retries de topologia compartilham orçamento global e terminam'
   assert.ok(result.elapsedMs < 500, `retry excedeu o limite: ${result.elapsedMs} ms`);
 });
 
+test('[req:OP-7] componente que não estabiliza falha fechado sem consumir o orçamento inteiro', () => {
+  const result = runVaultLockRaceProbe('retry-persistent', 2000);
+  // Contraponto do teste acima: lá o walk fresco estabiliza a cada rodada e o orçamento é gasto
+  // até o fim; aqui ele nunca estabiliza, então a aquisição desiste na primeira reclassificação.
+  assert.deepEqual({
+    injected: result.injected,
+    waits: result.waits,
+    errorCode: result.errorCode,
+    causeCode: result.causeCode,
+  }, {
+    injected: 2, waits: 1, errorCode: 'VAULT_PATH_UNSAFE', causeCode: 'ENOENT',
+  });
+  assert.ok(result.elapsedMs < 500, `retry excedeu o limite: ${result.elapsedMs} ms`);
+});
+
 test('[req:OP-7] release repete ENOENT transitório e não deixa lock público residual', () => {
   assert.deepEqual(runVaultLockRaceProbe('release-enoent'), {
     value: 'done', injected: 1, waits: 1, lockExists: false,
   });
+});
+
+test('[req:OP-7] liberação concorrente converge sob qualquer errno de plataforma, não só ENOENT', () => {
+  // O Windows reporta a remoção concorrente do lock como UNKNOWN, EBADF ou EPERM; o Linux, como
+  // ENOENT. Nenhum errno específico pode ser condição necessária para o retry.
+  for (const scenario of ['acquire-errno-unknown', 'acquire-errno-ebadf', 'acquire-errno-eperm']) {
+    const result = runVaultLockRaceProbe(scenario);
+    assert.deepEqual({
+      value: result.value,
+      errorCode: result.errorCode,
+      entered: result.entered,
+      injected: result.injected,
+      waits: result.waits,
+    }, {
+      value: 'acquired', errorCode: null, entered: true, injected: 1, waits: 1,
+    }, `${scenario} não convergiu: ${result.errorCode} ${result.message}`);
+  }
+});
+
+test('[req:OP-7] errno transitório não autoriza retry quando o walk fresco vê topologia hostil', (t) => {
+  const result = runVaultLockRaceProbe('acquire-errno-hostile');
+  if (!result.linkSupported) {
+    t.skip('links indisponíveis neste filesystem');
+    return;
+  }
+  // Mesmo errno, mesmo filtro estrutural e mesmo backoff do caso benigno acima — `waits: 1`
+  // prova que chegou até a reclassificação. O que diverge é só o estado visto no walk fresco,
+  // e a falha preserva o erro original em vez de trocar a superfície de erro do chamador.
+  assert.deepEqual({
+    value: result.value,
+    errorCode: result.errorCode,
+    entered: result.entered,
+    waits: result.waits,
+  }, {
+    value: null, errorCode: 'VAULT_PATH_UNSAFE', entered: false, waits: 1,
+  }, `topologia hostil não falhou fechado: ${result.message}`);
 });
 
 test('[req:OP-7] rename aceita colisão nativa, mas nunca converte EACCES em contenção', () => {

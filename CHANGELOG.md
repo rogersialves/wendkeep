@@ -4,6 +4,22 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.68.1] — 2026-08-08
+
+### Fixed
+
+- **A contenção de locks do Vault deixa de expor `VAULT_PATH_UNSAFE` no Windows.** A revalidação de
+  uma falha transiente de resolução do lock público passa a decidir por um walk fresco do
+  componente, e não pelo `errno` reportado pela plataforma. O Windows devolve `UNKNOWN`, `EBADF` ou
+  `EPERM` onde o Linux devolve `ENOENT`, então a guarda de retry nunca disparava lá e promoções FLOW
+  concorrentes falhavam de forma intermitente com o código de fronteira física em vez do conflito de
+  promoção. Sufixo ausente ou diretório canônico estabilizado autorizam o retry; junction, symlink,
+  reparse point, componente redirecionado ou estado irresolvível persistente continuam falhando
+  fechado, e o orçamento de retry permanece único e limitado por aquisição.
+- **Falha de lock nos caminhos FLOW reporta o código do domínio.** `withFlowPromotionLock` e o store
+  de sessão passam a propagar `FLOW_VAULT_BOUNDARY` para a fronteira física, alinhando a superfície
+  de erro ao resto da saga de promoção.
+
 ## [0.68.0] — 2026-08-02
 
 ### Added

@@ -84,10 +84,16 @@ function immutableJson(vaultBase, path, value) {
   return { created: true, path };
 }
 
+// Lock failures on the FLOW paths surface with the domain boundary code, like every other
+// Vault write in the promotion saga — not with the physical-boundary default.
 function underSessionLock(vaultBase, sessionId, fn) {
   const root = sessionRoot(vaultBase, sessionId);
-  mkdirVaultPath(vaultBase, root, { label: 'raiz runtime da sessão FLOW' });
-  const outcome = withVaultPathLock(vaultBase, join(root, '.state'), fn, { timeoutMs: 5000 });
+  mkdirVaultPath(vaultBase, root, {
+    label: 'raiz runtime da sessão FLOW', code: 'FLOW_VAULT_BOUNDARY',
+  });
+  const outcome = withVaultPathLock(vaultBase, join(root, '.state'), fn, {
+    timeoutMs: 5000, code: 'FLOW_VAULT_BOUNDARY',
+  });
   if (typeof outcome === 'symbol') {
     const error = new Error(`store FLOW ocupado para sessão ${sessionId}`);
     error.code = 'FLOW_STORE_BUSY';
@@ -107,10 +113,13 @@ export function withFlowPromotionLock(vaultBase, changeSlug, fn, {
 } = {}) {
   const slug = safeId(changeSlug, 'change_slug');
   const root = join(vaultBase, '.brain', 'runtime', 'flow-promotion-locks');
-  mkdirVaultPath(vaultBase, root, { label: 'raiz de locks de promoção FLOW' });
+  mkdirVaultPath(vaultBase, root, {
+    label: 'raiz de locks de promoção FLOW', code: 'FLOW_VAULT_BOUNDARY',
+  });
   const outcome = withVaultPathLock(vaultBase, join(root, slug), fn, {
     timeoutMs,
     staleMs: ownerGraceMs,
+    code: 'FLOW_VAULT_BOUNDARY',
   });
   if (outcome === VAULT_LOCK_BUSY) {
     const busy = new Error(`promoção FLOW ocupada para a change ${slug}`);
