@@ -4,6 +4,16 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.68.3] — 2026-08-13
+
+### Fixed
+
+- **Deferred replay reancora candidates de memória na fonte causal final.** Depois de uma
+  promoção legacy válida, um assert moderno reaplicado pelo replay não deixa mais os
+  candidates posteriores presos à fonte intermediária. A promoção explícita continua
+  exigindo o guard causal e mantém o fail-closed para linhagens incompletas ou ambíguas;
+  o ledger permanece append-only.
+
 ## [0.68.2] — 2026-08-08
 
 ### Fixed

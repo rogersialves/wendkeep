@@ -77,13 +77,13 @@ test('extractReleaseNotes: throws when the version is absent', () => {
   assert.throws(() => extractReleaseNotes(FIXTURE, '9.9.9'), /9\.9\.9/);
 });
 
-test('[sensor:release-tests] 0.68.2 notes are extractable and match the package', () => {
-  const release = extractReleaseNotes(CHANGELOG, '0.68.2');
-  assert.equal(PACKAGE.version, '0.68.2');
-  assert.equal(release.date, '2026-08-08');
-  assert.match(release.notes, /auto-tag\.yml/);
-  assert.match(release.notes, /unicidade da versão no registry/i);
-  assert.match(release.notes, /commit corrente/i);
+test('[sensor:release-tests] 0.68.3 notes are extractable and match the package', () => {
+  const release = extractReleaseNotes(CHANGELOG, '0.68.3');
+  assert.equal(PACKAGE.version, '0.68.3');
+  assert.equal(release.date, '2026-08-13');
+  assert.match(release.notes, /Deferred replay/i);
+  assert.match(release.notes, /fonte causal final/i);
+  assert.match(release.notes, /append-only/i);
   assert.doesNotMatch(release.notes, /019f[0-9a-f-]+/i);
 });
 

@@ -106,7 +106,9 @@ npx wendkeep validate-memory --vault <cofre-v2>
   A decisão conserva, sem coerção para string, o valor JSON já validado e copia do evento escolhido
   `canonical_session_id`, activation/epoch, `source_turn_id` e `turn_sequence`. Por isso, um Stop
   posterior da mesma sessão/activation avança o valor em vez de abrir outro candidate. Durante o
-  replay, um candidate transitório é reavaliado contra a fonte moderna final. Mesma
+  replay, um candidate transitório é reavaliado e, quando a supersession causal é provada,
+  reancorado contra a fonte moderna final; a promoção explícita usa essa nova âncora e inclui
+  somente os predecessores físicos necessários. Mesma
   sessão/activation/epoch e turno maior aplica o Stop; turno menor fica superseded. Identidade
   divergente, incompleta ou ambígua mantém o candidate para curadoria. `memory repair` compara o
   replay anterior e o atual e só migra checkpoint+espelho com identidade exata, backup, audit e

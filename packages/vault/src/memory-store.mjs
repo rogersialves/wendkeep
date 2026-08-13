@@ -446,6 +446,27 @@ function currentEventFromRecord(record) {
   return { ...record.source, value: record.value, revision: record.revision };
 }
 
+function supersededTransitively(superseded, sourceEventId, finalEventId) {
+  if (!sourceEventId || !finalEventId || sourceEventId === finalEventId) return false;
+  const edges = new Map();
+  for (const item of superseded) {
+    if (!edges.has(item.event_id)) edges.set(item.event_id, []);
+    edges.get(item.event_id).push(item.by_event_id);
+  }
+  const pending = [sourceEventId];
+  const visited = new Set();
+  while (pending.length) {
+    const current = pending.shift();
+    if (visited.has(current)) continue;
+    visited.add(current);
+    for (const next of edges.get(current) || []) {
+      if (next === finalEventId) return true;
+      if (!visited.has(next)) pending.push(next);
+    }
+  }
+  return false;
+}
+
 function isCausallyOlder(event, current) {
   if (!current) return false;
   if (sameCausalActivation(event, current)) {
@@ -636,6 +657,24 @@ export function reduceMemoryEvents(inputEvents = [], {
     }
     records.set(item.memory_key, { value: item.value, revision: current.revision + 1, source: item });
     tombstones.delete(item.memory_key);
+    const explicitlySupersededIds = new Set(
+      Array.isArray(item.supersedes)
+        ? item.supersedes
+        : (item.supersedes_event_id ? [item.supersedes_event_id] : []),
+    );
+    if (item.candidate_decision?.action === 'promote' && explicitlySupersededIds.size) {
+      for (const candidate of candidates) {
+        if (candidate.reason !== 'conflict' || !candidate.event_ids?.length) continue;
+        if (candidate.event_ids.every((eventId) => explicitlySupersededIds.has(eventId))) {
+          resolvedCandidateIds.add(candidate.candidate_id);
+        }
+      }
+      for (const pending of pendingAssertConflicts) {
+        if (explicitlySupersededIds.has(pending.event.event_id)) {
+          resolvedCandidateIds.add(pending.candidate.candidate_id);
+        }
+      }
+    }
     revision += 1;
     appliedEventIds.push(item.event_id);
   }
@@ -680,13 +719,36 @@ export function reduceMemoryEvents(inputEvents = [], {
     }
   }
 
+  const pendingByCandidateId = new Map(
+    pendingAssertConflicts.map((pending) => [pending.candidate.candidate_id, pending]),
+  );
+  const reanchoredCandidates = candidates
+    .map((candidate) => {
+      const pending = pendingByCandidateId.get(candidate.candidate_id);
+      if (!pending) return candidate;
+      const finalSource = currentEventFromRecord(records.get(candidate.memory_key));
+      const previousSource = candidate.events?.find(
+        (event) => event.event_id !== pending.event.event_id,
+      );
+      if (!finalSource || !previousSource || finalSource.event_id === previousSource.event_id) {
+        return candidate;
+      }
+      if (!sameCompleteCausalLineage(previousSource, finalSource)
+          || !supersededTransitively(superseded, previousSource.event_id, finalSource.event_id)) {
+        return candidate;
+      }
+      if (hashMemoryValue(finalSource.value) === hashMemoryValue(pending.event.value)) return null;
+      return conflictCandidate(candidate.memory_key, [finalSource, pending.event], finalSource);
+    })
+    .filter(Boolean);
+
   const stateEntries = [...records].map(([key, record]) => [key, record.value]);
   const recordEntries = [...records].map(([key, record]) => [key, record]);
   const tombstoneEntries = [...tombstones];
   const state = sortedObject(stateEntries);
   const recordObject = sortedObject(recordEntries);
   const tombstoneObject = sortedObject(tombstoneEntries);
-  const unresolvedCandidates = candidates
+  const unresolvedCandidates = reanchoredCandidates
     .filter((item) => !candidateDecisions.has(item.candidate_id)
       && !resolvedCandidateIds.has(item.candidate_id));
   unresolvedCandidates.sort((left, right) => left.candidate_id.localeCompare(right.candidate_id));

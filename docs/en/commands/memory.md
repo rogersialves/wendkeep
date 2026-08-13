@@ -108,7 +108,9 @@ npx wendkeep validate-memory --vault <v2-vault>
   the already validated JSON value without string coercion and copies the selected event's
   `canonical_session_id`, activation/epoch, `source_turn_id`, and `turn_sequence`. A later Stop
   from the same session/activation therefore advances the value instead of opening another candidate.
-  During replay, a transient candidate is re-evaluated against the final modern source. The same
+  During replay, a transient candidate is re-evaluated and, when causal supersession is proven,
+  re-anchored to the final modern source; explicit promotion uses that new anchor and includes only
+  the physical predecessors needed for replay. The same
   session/activation/epoch and a higher turn applies the Stop; a lower turn is superseded. A
   different, incomplete, or ambiguous identity keeps the candidate queued for curation. `memory
   repair` compares the old and current replay and migrates checkpoint+mirror only with exact

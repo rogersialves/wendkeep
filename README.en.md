@@ -379,8 +379,9 @@ it does not expose memory values or content. After human review,
 new promotion accepts a later Stop from the same session/activation without recreating a conflict.
 A promotion written by 0.66.1 remains historical: if the next Stop forms a new candidate, update
 to 0.66.3 and run `memory repair`. During replay, a transient candidate is re-evaluated against the
-final modern source: the same session/activation/epoch and a higher turn advances; a lower turn is
-superseded. Repair migrates the checkpoint and mirror only when it proves the exact previous
+final modern source and, when causal supersession is proven, re-anchored to it; explicit promotion
+uses that anchor and crosses only the physical predecessors required by replay. The same
+session/activation/epoch and a higher turn advances; a lower turn is superseded. Repair migrates the checkpoint and mirror only when it proves the exact previous
 replay, attempt identity, and absence of a real conflict; it creates a backup and audit without
 appending or rewriting events. Ambiguity stays queued for explicit curation. Do not publish or
 install 0.66.2; use 0.66.3 or later. Decisions survive repair/replay;

@@ -2,6 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import {
   existsSync, linkSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync,
   symlinkSync, writeFileSync,
@@ -732,6 +733,139 @@ test('[req:MEM-CUR-2] promoção preserva valor JSON e identidade causal do even
   } finally { rmSync(vault, { recursive: true, force: true }); }
 });
 
+test('[req:MEM-CUR-2] rebaseia candidate pendente na fonte final após replay deferred', async () => {
+  const vault = fixture();
+  try {
+    const { decideMemoryCandidate } = await import('../src/memory.mjs');
+    const base = {
+      ...memoryEvent('example-rebase-base', '[wk-fixture] fonte antiga', 0),
+      canonical_session_id: 'example-old-session',
+      activation_id: 'example-old-activation',
+      source_turn_id: 'example-old-turn',
+      observed_at: '2026-07-26T12:00:00.000Z',
+    };
+    const pendingCorrection = {
+      ...memoryEvent('example-rebase-correction', '[wk-fixture] correção moderna', 2),
+      canonical_session_id: 'example-modern-session',
+      activation_id: 'example-modern-activation',
+      source_turn_id: 'example-modern-turn-2',
+      observed_at: '2026-07-26T12:01:00.000Z',
+    };
+    const promotion = {
+      ...memoryEvent('example-rebase-promotion', '[wk-fixture] promoção legacy', 1),
+      operation: 'replace',
+      authority: 'verified',
+      canonical_session_id: 'example-modern-session',
+      activation_id: 'example-modern-activation',
+      source_turn_id: 'example-modern-turn-1',
+      turn_sequence: 1,
+      supersedes: [base.event_id],
+      observed_at: '2026-07-26T12:02:00.000Z',
+    };
+    const laterAssert = {
+      ...memoryEvent('example-rebase-later', '[wk-fixture] assert concorrente', 1),
+      canonical_session_id: 'example-later-session',
+      activation_id: 'example-later-activation',
+      source_turn_id: 'example-later-turn',
+      observed_at: '2026-07-26T12:03:00.000Z',
+    };
+    const events = [base, pendingCorrection, promotion, laterAssert];
+    writeMemoryProjection(vault, events);
+
+    const legacyProjection = deriveMemoryProjection(vault, events, { resolveDeferredAsserts: false });
+    const staleCandidate = legacyProjection.candidates
+      .find((item) => item.event_ids.includes(laterAssert.event_id));
+    assert.ok(staleCandidate);
+    const projection = deriveMemoryProjection(vault, events);
+    assert.equal(projection.records['handoff.latest'].source.event_id, pendingCorrection.event_id);
+    const candidate = readCandidates(vault)
+      .find((item) => item.event_ids.includes(laterAssert.event_id));
+    assert.ok(candidate);
+    const finalEventIds = [pendingCorrection.event_id, laterAssert.event_id].sort();
+    assert.deepEqual(candidate.event_ids, finalEventIds);
+    const expectedCandidateId = `memcand-${createHash('sha256')
+      .update(`${candidate.reason}\u0000${candidate.memory_key}\u0000${finalEventIds.join('\u0000')}`)
+      .digest('hex').slice(0, 16)}`;
+    assert.equal(candidate.candidate_id, expectedCandidateId);
+    assert.notEqual(candidate.candidate_id, staleCandidate.candidate_id);
+    assert.equal(candidate.values[candidate.event_ids.indexOf(laterAssert.event_id)], laterAssert.value);
+
+    const result = decideMemoryCandidate(vault, {
+      action: 'promote', candidateId: candidate.candidate_id, eventId: laterAssert.event_id,
+    });
+    assert.equal(result.status, 'promoted');
+    const ledger = readFileSync(join(vault, '.brain', 'MEMORY_EVENTS.jsonl'), 'utf8')
+      .trim().split('\n').map(JSON.parse);
+    const decision = ledger.find((event) => event.event_id === result.eventId);
+    assert.deepEqual(decision.candidate_decision.event_ids, finalEventIds);
+    assert.ok(decision.supersedes.includes(promotion.event_id));
+    assert.deepEqual(readCandidates(vault), []);
+  } finally { rmSync(vault, { recursive: true, force: true }); }
+});
+
+test('[req:MEM-CUR-2] preserva candidate original quando a linhagem do replay é incompleta', () => {
+  const vault = fixture();
+  try {
+    const base = {
+      ...memoryEvent('example-ambiguous-base', '[wk-fixture] fonte antiga', 0),
+      canonical_session_id: 'example-ambiguous-old-session',
+      activation_id: 'example-ambiguous-old-activation',
+      source_turn_id: 'example-ambiguous-old-turn',
+      observed_at: '2026-07-26T12:00:00.000Z',
+    };
+    const ambiguousCorrection = {
+      ...memoryEvent('example-ambiguous-correction', '[wk-fixture] correção sem prova completa', 2),
+      canonical_session_id: 'example-ambiguous-modern-session',
+      activation_id: 'example-ambiguous-modern-activation',
+      source_turn_id: '',
+      observed_at: '2026-07-26T12:01:00.000Z',
+    };
+    const promotion = {
+      ...memoryEvent('example-ambiguous-promotion', '[wk-fixture] promoção legacy', 1),
+      operation: 'replace',
+      authority: 'verified',
+      canonical_session_id: undefined,
+      activation_id: 'example-ambiguous-modern-activation',
+      source_turn_id: 'example-ambiguous-promotion-turn',
+      turn_sequence: 1,
+      supersedes: [base.event_id],
+      observed_at: '2026-07-26T12:02:00.000Z',
+    };
+    const laterAssert = {
+      ...memoryEvent('example-ambiguous-later', '[wk-fixture] assert concorrente', 1),
+      canonical_session_id: 'example-ambiguous-later-session',
+      activation_id: 'example-ambiguous-later-activation',
+      source_turn_id: 'example-ambiguous-later-turn',
+      observed_at: '2026-07-26T12:03:00.000Z',
+    };
+    const events = [base, ambiguousCorrection, promotion, laterAssert];
+    writeMemoryProjection(vault, events);
+    const legacyProjection = deriveMemoryProjection(vault, events, { resolveDeferredAsserts: false });
+    const originalCandidate = legacyProjection.candidates
+      .find((item) => item.event_ids.includes(laterAssert.event_id));
+    assert.ok(originalCandidate);
+
+    const projection = deriveMemoryProjection(vault, events);
+    const preservedCandidate = projection.candidates
+      .find((item) => item.candidate_id === originalCandidate.candidate_id);
+    assert.ok(preservedCandidate);
+    assert.deepEqual(preservedCandidate.event_ids, originalCandidate.event_ids);
+    assert.equal(projection.records['handoff.latest'].source.event_id, promotion.event_id);
+    const ambiguousCandidate = projection.candidates
+      .find((item) => item.event_ids.includes(ambiguousCorrection.event_id));
+    assert.ok(ambiguousCandidate);
+    assert.deepEqual(
+      ambiguousCandidate.event_ids,
+      [base.event_id, ambiguousCorrection.event_id].sort(),
+    );
+    assert.equal(
+      projection.candidates.some((item) => item.event_ids.includes(ambiguousCorrection.event_id)
+        && item.event_ids.includes(laterAssert.event_id)),
+      false,
+    );
+  } finally { rmSync(vault, { recursive: true, force: true }); }
+});
+
 test('[req:MEM-CUR-2] bridge temporal exige todas as provas legadas e causais', async () => {
   const { decideMemoryCandidate } = await import('../src/memory.mjs');
   const scenarios = [
@@ -778,6 +912,10 @@ test('[req:MEM-CUR-2] bridge temporal exige todas as provas legadas e causais', 
     {
       name: 'evento escolhido não possui turno maior',
       options: { selectedOverrides: { turn_sequence: 1 } },
+    },
+    {
+      name: 'evento escolhido tem identidade causal incompleta',
+      options: { selectedOverrides: { source_turn_id: undefined } },
     },
     {
       name: 'evento escolhido não foi anexado depois da promoção atual',

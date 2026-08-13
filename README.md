@@ -376,8 +376,10 @@ seguros — nunca valores ou conteúdo da memória. Depois da revisão humana,
 promoção nova aceita um Stop posterior da mesma sessão/activation sem recriar conflito. Uma
 promoção gravada pela 0.66.1 permanece histórica: se o próximo Stop formar novo candidate,
 atualize para a 0.66.3 e rode `memory repair`. Durante o replay, um candidate transitório é
-reavaliado contra a fonte moderna final: mesma sessão/activation/epoch e turno maior avança;
-turno menor fica superseded. O repair só migra checkpoint e espelho quando prova exatamente o
+reavaliado e, quando a supersession causal é provada, reancorado contra a fonte moderna final;
+uma promoção explícita usa essa âncora e atravessa somente os predecessores físicos necessários.
+Mesma sessão/activation/epoch e turno maior avança; turno menor fica superseded. O repair só
+migra checkpoint e espelho quando prova exatamente o
 replay anterior, a identidade do attempt e a ausência de conflito real; faz backup, registra audit
 e não acrescenta nem reescreve eventos. Ambiguidade continua na fila para curadoria explícita.
 Não publique nem instale a 0.66.2; use a 0.66.3 ou mais recente. Decisões sobrevivem a repair/replay;

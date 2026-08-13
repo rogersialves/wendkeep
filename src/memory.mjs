@@ -387,9 +387,16 @@ function promotedSupersedes(vault, candidate, selected) {
   const memberIds = new Set(Array.isArray(candidate.event_ids) ? candidate.event_ids : []);
   const ledger = readMemoryLedger(vault);
   if (ledger.status !== 'ok') throw new Error('Ledger de memória inválido durante a promoção.');
-  const current = deriveMemoryProjection(vault, ledger.events)
-    .records?.[candidate.memory_key]?.source;
-  if (!current?.event_id || memberIds.has(current.event_id)) return [...memberIds].sort();
+  const projection = deriveMemoryProjection(vault, ledger.events);
+  const current = projection.records?.[candidate.memory_key]?.source;
+  if (!current?.event_id) return [...memberIds].sort();
+  if (memberIds.has(current.event_id)) {
+    projection.superseded
+      .filter((item) => item.by_event_id === current.event_id)
+      .map((item) => item.event_id)
+      .forEach((eventId) => memberIds.add(eventId));
+    return [...memberIds].sort();
+  }
 
   const currentSelectedId = current.candidate_decision?.selected_event_id;
   const currentSelected = currentSelectedId

@@ -238,6 +238,31 @@ test('[req:MEM-HYB-4] newer same-session activation turn supersedes an older han
   assert.equal(forward.candidates.length, 0);
 });
 
+test('[req:MEM-CUR-2] compatibilidade legacy mantém precedência sem source_turn_id', () => {
+  const older = event('mem-legacy-handoff-1', 'handoff.latest', 'assert', 'legacy primeiro', {
+    canonical_session_id: 'legacy-session',
+    activation_id: 'legacy-activation',
+    source_turn_id: undefined,
+    turn_sequence: 1,
+  });
+  const newer = event('mem-legacy-handoff-2', 'handoff.latest', 'assert', 'legacy segundo', {
+    canonical_session_id: 'legacy-session',
+    activation_id: 'legacy-activation',
+    source_turn_id: undefined,
+    turn_sequence: 2,
+  });
+
+  const reduced = reduceMemoryEvents([older, newer]);
+
+  assert.equal(older.source_turn_id, undefined);
+  assert.equal(newer.source_turn_id, undefined);
+  assert.equal(reduced.records['handoff.latest'].source.event_id, newer.event_id);
+  assert.deepEqual(reduced.superseded, [{
+    event_id: older.event_id, by_event_id: newer.event_id,
+  }]);
+  assert.equal(reduced.candidates.length, 0);
+});
+
 test('[req:MEM-HYB-4] distinct activations asserting different handoffs remain in conflict', () => {
   const left = event('mem-handoff-left', 'handoff.latest', 'assert', 'resumo esquerdo', {
     activation_id: 'activation-left',
