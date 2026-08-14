@@ -70,6 +70,18 @@ npx wendkeep sensors add api-contracts "npm run test:contracts" --severity criti
 An archived change promotes its delta into the living spec, preserves proposal/design/tasks/proof,
 and mints an ADR. Archive passes only with closed tasks, green required sensors, and a fresh verdict.
 
+## Tool-scope fence
+
+`change-guard` is also projected to Codex `PreToolUse`. Before a Git mutation or supported writing
+tool runs, it compares the session, project, Git root, remote, branch, and worktree with the lease
+recorded in `SESSION_REGISTRY.json`. Missing, ambiguous, concurrent, or cross-project targets are
+blocked before the tool.
+
+Codex blocks with `permissionDecision: "deny"`; `ask` is not a valid `PreToolUse` decision.
+`commit`, `push`, `pull`, `merge`, `publish`, and destructive operations remain separate capabilities,
+including when one command contains multiple actions. Switching projects requires a new explicit
+selection/lease; never carry authorization from another conversation.
+
 ## Common errors and diagnosis
 
 - `no change`: select one with `change use <slug>` or pass `--change`.

@@ -17,6 +17,7 @@ import {
   readControl,
   readHookInput,
   readSessionRegistry,
+  resolveVault,
   sessionFileName,
   sessionFolderRel,
   sessionSummaryFromInput,
@@ -32,6 +33,7 @@ import {
   yamlQuote,
 } from './obsidian-common.mjs';
 import { resolveSessionIdentity } from './session-identity.mjs';
+import { captureProjectScope, projectScopePatch } from './project-scope.mjs';
 
 export function buildSessionContent({ relPath, now, summary = 'session', provider: providerId, sessionId = '' }) {
   const date = formatDate(now);
@@ -153,6 +155,7 @@ function buildAdditionalContext({ relPath, startedAt, vaultBase }) {
 function main() {
   const input = readHookInput();
   const vaultBase = getVaultBase(input);
+  const projectResolution = resolveVault(input);
   warnIfDefaultVault(input);
   const now = new Date();
   const provider = providerMeta();
@@ -169,11 +172,23 @@ function main() {
   }
   const sessionId = identity.canonicalConversationId;
   const transcriptPath = identity.transcriptPath;
+  const initialScope = captureProjectScope({
+    input,
+    projectRoot: projectResolution.projectRoot,
+    projectId: projectResolution.projectId,
+    provider: provider.id,
+    sessionId,
+  });
+  const scopePatchFor = (canonicalSessionId) => projectScopePatch(
+    readSessionRegistry(vaultBase).sessions?.[canonicalSessionId]?.project_scope,
+    { ...initialScope, sessionId: canonicalSessionId },
+  );
   const control = readControl(vaultBase);
   const activationId = input.activation_id || input.activationId || randomUUID();
   const activationStartedAt = formatLocalIso(now);
   const registerActivation = (canonicalSessionId, patch) => upsertSessionRegistry(vaultBase, canonicalSessionId, {
     ...patch,
+    ...scopePatchFor(canonicalSessionId),
     activation_id: activationId,
     activation_started_at: activationStartedAt,
     last_turn_sequence: 0,

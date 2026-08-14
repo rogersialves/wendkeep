@@ -33,6 +33,17 @@ change.
 - For FLOW, a Git repository, a path allowlist, a reason, and at least one existing sensor in
   `wendkeep.sensors.json`.
 
+### Tool scope and Git authorization
+
+Under `GOVERN`/`ASSURE`, Codex `PreToolUse` and the equivalent Claude gate validate the project lease
+before mutations. The lease includes the session, `project_id`, project root, Git root, remote,
+branch/worktree, and provider. `commit`, `push`, `pull`, `merge`, `publish`, and destructive operations
+are independent capabilities, including in compound commands; authorization never crosses projects or
+branches.
+
+If the host does not expose the effective directory, or the session is conflicted, the mutation is
+denied with a sanitized diagnostic. Read-only inspection may continue for investigation.
+
 ## Syntax
 
 ```bash

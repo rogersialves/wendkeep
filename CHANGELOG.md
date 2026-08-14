@@ -4,6 +4,15 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.68.4] — 2026-08-14
+
+### Fixed
+
+- **O guard de escopo do projeto passa a proteger mutações antes da ferramenta.** O `PreToolUse`
+  do Codex revalida sessão, projeto, raiz Git, remoto, branch/worktree e concorrência; mantém
+  `commit`, `push`, `pull`, `merge`, `publish` e operações destrutivas como capacidades
+  independentes, com bloqueio fail-closed para alvos ausentes ou divergentes.
+
 ## [0.68.3] — 2026-08-13
 
 ### Fixed

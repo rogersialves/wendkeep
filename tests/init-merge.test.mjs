@@ -57,7 +57,7 @@ test('mergeSettings: wira os 5 hooks de lifecycle nos eventos certos, por defaul
   assert.ok(post.some((g) => g.matcher === 'Edit|Write|MultiEdit' && g.hooks.some((h) => h.command.includes('change-warn'))), 'change-warn matcher Edit|Write');
   assert.ok(post.some((g) => g.matcher === 'ExitPlanMode' && g.hooks.some((h) => h.command.includes('plan-capture'))), 'plan-capture matcher ExitPlanMode');
   const guard = settings.hooks.PreToolUse.find((g) => g.hooks.some((h) => h.command.includes('change-guard')));
-  assert.equal(guard.matcher, 'Bash', 'guard só em Bash');
+  assert.equal(guard.matcher, 'Bash|exec_command|apply_patch|mcp__.*', 'guard só em ferramentas cujo payload é coberto');
   // sem instalação local no projeto → forma npx
   assert.ok(cmdsOf('PreToolUse').some((c) => c === 'npx wendkeep hook change-guard'), 'fallback npx');
 });

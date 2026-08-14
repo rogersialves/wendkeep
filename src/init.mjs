@@ -220,6 +220,7 @@ export function mergeCodexHooks(existing, { force = false } = {}) {
     const owning = groups.find((g) => (g.hooks || []).some(owns));
     if (owning) {
       const hk = owning.hooks.find(owns);
+      const matcher = CODEX_MATCHER_EVENTS.has(h.event) ? h.matcher : null;
       // `timeout` is the pre-0.46 key: Codex never read it. Migrate it even without --force,
       // otherwise the hook keeps running at the 600s default forever.
       const legacyTimeout = 'timeout' in hk;
@@ -233,6 +234,8 @@ export function mergeCodexHooks(existing, { force = false } = {}) {
           if (entry.statusMessage) hk.statusMessage = entry.statusMessage;
         }
       }
+      if (force && matcher) owning.matcher = matcher;
+      if (force && !matcher) delete owning.matcher;
       file.hooks[h.event] = groups;
       continue;
     }

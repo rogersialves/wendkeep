@@ -383,7 +383,8 @@ test('init wires .codex/hooks.json so Codex opens a session', () => {
     const wire = JSON.stringify(file);
     assert.ok(!wire.includes('"timeout"'), 'timeout viraria 600s — tem que ser timeoutSec');
     assert.ok(!wire.includes('CLAUDE_PROJECT_DIR'), 'variável do Claude não resolve no Codex');
-    assert.equal(file.hooks.PreToolUse, undefined, 'nenhum hook de tool (payload incompatível)');
+    assert.ok(file.hooks.PreToolUse, 'guard de escopo instalado no PreToolUse');
+    assert.equal(file.hooks.PreToolUse.find((g) => (g.hooks || []).some((h) => h.command.includes('change-guard'))).matcher, 'Bash|exec_command|apply_patch|mcp__.*');
     assert.equal(file.hooks.PostToolUse, undefined, 'nenhum hook de tool (payload incompatível)');
 
     // O usuário precisa saber do trust gate, senão reporta "hooks não disparam".

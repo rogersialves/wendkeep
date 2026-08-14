@@ -30,16 +30,18 @@ e `.agents/skills`.
 Codex tem canal próprio, **JSON**, em `<project>/.codex/hooks.json`; o `init` escreve junto
 com o `.claude/settings.json`, merge não-destrutivo, mesma disciplina. Não é TOML: declarar
 hooks no `config.toml` do projeto não dispara em sessão interativa (openai/codex#17532).
-- **Projetados (7)**, de `src/taxonomy.mjs` (`codex: true`): `brain-inject`, `session-start`
+- **Projetados (8)**, de `src/taxonomy.mjs` (`codex: true`): `brain-inject`, `session-start`
   (SessionStart), `session-ensure`, `change-context` (UserPromptSubmit), `session-stop`,
   `change-nag` (Stop), `subagent-stop` (SubagentStop). Chaves de evento PascalCase; comando
   sempre `npx wendkeep hook <name>` (a forma node-direct emite `${CLAUDE_PROJECT_DIR}`, que
   não existe no Codex); timeout na chave `timeoutSec` — `timeout` é ignorado em silêncio e cai
   no default de 600s.
-- **Fora (5)**, cada um com um `// codex:` no spec dizendo o porquê: `change-guard` — gate
-  PreToolUse que lê `tool_input.command`; no `exec` do Codex o `tool_input` **existe, mas é
-  string crua**, não objeto, então o gate não erra: degrada para liberar tudo (falha OPEN);
-  `change-warn` — *nudge* PostToolUse que lê `tool_input.file_path`, campo que o envelope do
+- `change-guard` é projetado adicionalmente no `PreToolUse`: o adaptador aceita `tool_input`
+  objeto, string crua e argv, valida a scope da sessão antes da mutação e responde
+  `permissionDecision: "deny"` no Codex; ele nunca usa `ask` nesse evento. `commit`, `push`,
+  `publish` e operações destrutivas são capacidades independentes, inclusive em comandos compostos.
+- **Fora (4)**, cada um com um `// codex:` no spec dizendo o porquê: `change-warn` — *nudge*
+  PostToolUse que lê `tool_input.file_path`, campo que o envelope do
   `apply_patch` não carrega; apenas não dispara (não há o que barrar, logo não falha OPEN);
   `decision-capture` — AskUserQuestion é ferramenta Claude-only; `plan-capture` — falta a
   transição de modo (não há equivalente a ExitPlanMode); `task-log` — falta o evento

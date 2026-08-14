@@ -31,7 +31,7 @@ test('[req:MOD-20] [req:MOD-21] Integrations owns host-hook rules while taxonomy
     assert.equal(taxonomy[name], canonical[name], `taxonomy must preserve identity for ${name}`);
   }
 
-  assert.deepEqual(canonical.CODEX_MATCHER_EVENTS, new Set(['SessionStart']));
+  assert.deepEqual(canonical.CODEX_MATCHER_EVENTS, new Set(['SessionStart', 'PreToolUse']));
   assert.equal(canonical.hookCommand('session-stop'), 'npx wendkeep hook session-stop');
   assert.equal(
     canonical.hookCommandLocal('change-context'),

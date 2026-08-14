@@ -160,6 +160,14 @@
       "severity": "critical",
       "type": "command",
       "command": "node --test --test-concurrency=1"
+    },
+    {
+      "id": "project-scope-guard",
+      "name": "project-scope-guard",
+      "description": "node --test tests/project-scope-guard.test.mjs tests/init-codex-hooks.test.mjs tests/change-hooks.test.mjs tests/project-vault.test.mjs",
+      "severity": "critical",
+      "type": "command",
+      "command": "node --test tests/project-scope-guard.test.mjs tests/init-codex-hooks.test.mjs tests/change-hooks.test.mjs tests/project-vault.test.mjs"
     }
   ]
 }

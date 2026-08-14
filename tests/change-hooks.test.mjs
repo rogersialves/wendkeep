@@ -148,6 +148,23 @@ test('changeCtxState: null sem changes; hash muda quando qualquer change muda', 
 
 // --- change-guard (PreToolUse Bash) -------------------------------------------
 
+function scopeFixture(overrides = {}) {
+  return {
+    schemaVersion: 1,
+    complete: true,
+    projectId: 'project-a',
+    projectRoot: 'C:/projects/a',
+    repoRoot: 'C:/projects/a',
+    remote: 'https://example.com/acme/a.git',
+    branch: 'main',
+    worktree: 'C:/projects/a/.git',
+    head: 'abc123',
+    provider: 'claude',
+    sessionId: 'session-a',
+    ...overrides,
+  };
+}
+
 test('guardDecision R1: deny em archive --force; escape só via env do processo', () => {
   const vault = mkdtempSync(join(tmpdir(), 'wk-gd1-'));
   try {
@@ -171,13 +188,14 @@ test('guardDecision R1: deny em archive --force; escape só via env do processo'
   } finally { rmSync(vault, { recursive: true, force: true }); }
 });
 
-test('guardDecision R2: ask em git commit com change ativa + redCritical ou --no-verify', () => {
+test('guardDecision R2: ask em git commit com scope válida + redCritical ou --no-verify', () => {
   const { vault, dir } = vaultWithChange();
+  const scope = scopeFixture();
   try {
     // gate verde: commit livre
-    assert.equal(guardDecision('git commit -m "x"', { vaultBase: vault, env: {} }), null);
+    assert.equal(guardDecision('git commit -m "x"', { vaultBase: vault, env: {}, expectedScope: scope, actualScope: scope }), null);
     // --no-verify com change ativa → ask (mesmo verde)
-    const nv = guardDecision('git add . && git commit --no-verify -m x', { vaultBase: vault, env: {} });
+    const nv = guardDecision('git add . && git commit --no-verify -m x', { vaultBase: vault, env: {}, expectedScope: scope, actualScope: scope });
     assert.equal(nv?.permissionDecision, 'ask');
     assert.match(nv.permissionDecisionReason, /no-verify/);
     for (const command of [
@@ -185,22 +203,47 @@ test('guardDecision R2: ask em git commit com change ativa + redCritical ou --no
       '"C:/Program Files/Git/bin/git.exe" commit --no-verify -m x',
       '& git commit --no-verify -m x',
     ]) {
-      const decision = guardDecision(command, { vaultBase: vault, env: {} });
+      const decision = guardDecision(command, { vaultBase: vault, env: {}, expectedScope: scope, actualScope: scope });
       assert.equal(decision?.permissionDecision, 'ask', command);
       assert.match(decision.permissionDecisionReason, /no-verify/);
     }
     // sensor crítico vermelho → ask
     writeFileSync(join(dir, 'evidencia.json'), JSON.stringify([{ id: 's', status: 'red', severity: 'critical' }]));
-    const red = guardDecision('git commit -m "y"', { vaultBase: vault, env: {} });
+    const red = guardDecision('git commit -m "y"', { vaultBase: vault, env: {}, expectedScope: scope, actualScope: scope });
     assert.equal(red?.permissionDecision, 'ask');
     assert.match(red.permissionDecisionReason, /vermelho|verify/);
   } finally { rmSync(vault, { recursive: true, force: true }); }
 });
 
-test('guardDecision: sem change ativa commit é livre; fast-path não toca o fs', () => {
+test('guardDecision R2: Codex nega o commit perigoso e nunca emite ask', () => {
+  const { vault } = vaultWithChange();
+  const scope = scopeFixture({ provider: 'codex' });
+  try {
+    const decision = guardDecision('git commit --no-verify -m x', {
+      vaultBase: vault,
+      env: {},
+      provider: 'codex',
+      host: 'codex',
+      input: { session_id: 'session-a', cwd: scope.projectRoot, tool_input: { command: 'git commit --no-verify -m x' } },
+      expectedScope: scope,
+      actualScope: scope,
+    });
+    assert.equal(decision?.permissionDecision, 'deny');
+    assert.notEqual(decision?.permissionDecision, 'ask');
+  } finally { rmSync(vault, { recursive: true, force: true }); }
+});
+
+test('guardDecision: sem scope Codex nega commit; fast-path não toca o fs', () => {
   const vault = mkdtempSync(join(tmpdir(), 'wk-gd3-'));
   try {
-    assert.equal(guardDecision('git commit -m "z"', { vaultBase: vault, env: {} }), null, 'sem change = livre');
+    const denied = guardDecision('git commit -m "z"', {
+      vaultBase: vault,
+      env: {},
+      provider: 'codex',
+      host: 'codex',
+      input: { session_id: 'session-a', cwd: 'C:/projects/a', tool_input: { command: 'git commit -m z' } },
+    });
+    assert.equal(denied?.permissionDecision, 'deny', 'sem scope = bloqueio fail-closed');
   } finally { rmSync(vault, { recursive: true, force: true }); }
   // fast-path: vault INEXISTENTE não importa para comando comum (nenhum I/O)
   assert.equal(guardDecision('npm test', { vaultBase: 'Z:/nao/existe', env: {} }), null);
@@ -208,7 +251,7 @@ test('guardDecision: sem change ativa commit é livre; fast-path não toca o fs'
   assert.equal(guardDecision('', { vaultBase: 'Z:/nao/existe', env: {} }), null);
 });
 
-test('change-guard e2e: deny JSON no stdout, exit 0; input malformado fail-open', () => {
+test('change-guard e2e: deny JSON no stdout, exit 0; input malformado gera deny visível', () => {
   const vault = mkdtempSync(join(tmpdir(), 'wk-gd4-'));
   try {
     const r = runHook('change-guard', JSON.stringify({ tool_name: 'Bash', tool_input: { command: 'wendkeep change archive x --force' } }), vault);
@@ -222,7 +265,10 @@ test('change-guard e2e: deny JSON no stdout, exit 0; input malformado fail-open'
     assert.equal(ok.stdout.trim() === '' || ok.stdout.trim() === '{}', true, 'allow = silêncio');
     // malformado
     const bad = runHook('change-guard', 'não-é-json', vault);
-    assert.equal(bad.status, 0, 'fail-open');
+    assert.equal(bad.status, 0, 'diagnóstico de segurança não deve quebrar o host');
+    const malformed = JSON.parse(bad.stdout);
+    assert.equal(malformed.hookSpecificOutput.permissionDecision, 'deny');
+    assert.match(malformed.hookSpecificOutput.permissionDecisionReason, /WENDKEEP_SCOPE_INPUT_INVALID/);
   } finally { rmSync(vault, { recursive: true, force: true }); }
 });
 

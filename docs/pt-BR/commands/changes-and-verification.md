@@ -70,6 +70,18 @@ npx wendkeep sensors add api-contracts "npm run test:contracts" --severity criti
 A change arquivada move seu delta para o spec vivo, preserva proposta/design/tarefas/evidência e
 gera um ADR. O archive só passa com tarefas fechadas, sensores exigidos verdes e verdict atual.
 
+## Cerca de escopo para ferramentas
+
+O `change-guard` também é projetado para o `PreToolUse` do Codex. Antes de uma mutação Git ou de
+uma ferramenta de escrita suportada, ele compara sessão, projeto, raiz Git, remoto, branch e
+worktree com a lease registrada no `SESSION_REGISTRY.json`. Um alvo ausente, ambíguo, concorrente ou
+fora do projeto é bloqueado antes da ferramenta.
+
+No Codex o bloqueio usa `permissionDecision: "deny"`; `ask` não é uma decisão válida de
+`PreToolUse`. `commit`, `push`, `pull`, `merge`, `publish` e operações destrutivas continuam
+capacidades separadas, inclusive quando um comando contém mais de uma ação. A troca de projeto
+exige uma nova seleção/lease; não use autorização de outra conversa.
+
 ## Erros comuns e diagnóstico
 
 - `no change`: selecione com `change use <slug>` ou informe `--change`.

@@ -79,6 +79,19 @@
           }
         ]
       }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash|exec_command|apply_patch|mcp__.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "npx wendkeep hook change-guard",
+            "timeoutSec": 10,
+            "statusMessage": "wendkeep: change gate"
+          }
+        ]
+      }
     ]
   }
 }

@@ -33,6 +33,17 @@ gates/policies do WendKeep; promova o trabalho para uma change.
 - Para FLOW, repositório Git, allowlist de paths, motivo e ao menos um sensor existente em
   `wendkeep.sensors.json`.
 
+### Escopo de ferramenta e autorização Git
+
+Em `GOVERN`/`ASSURE`, o `PreToolUse` do Codex e o gate equivalente do Claude validam a lease de
+projeto antes de mutações. A lease inclui sessão, `project_id`, raiz do projeto, raiz Git, remoto,
+branch/worktree e provider. `commit`, `push`, `pull`, `merge`, `publish` e operações destrutivas são
+capacidades independentes, inclusive em comandos compostos; uma autorização não atravessa projetos
+nem branches.
+
+Se o host não expuser o diretório efetivo, ou se a sessão estiver em conflito, a mutação é negada
+com diagnóstico sanitizado. Somente leitura pode continuar para investigação.
+
 ## Sintaxe
 
 ```bash

@@ -15,6 +15,7 @@ import {
   readControl,
   readHookInput,
   readSessionRegistry,
+  resolveVault,
   sessionFileName,
   sessionFolderRel,
   sessionSummaryFromInput,
@@ -34,6 +35,7 @@ import {
 import { resolveSessionIdentity } from './session-identity.mjs';
 import { readCodexRolloutMeta } from './codex-rollout-meta.mjs';
 import { mutateSessionNote } from './session-note-io.mjs';
+import { captureProjectScope, projectScopePatch } from './project-scope.mjs';
 
 function sessionIdFromInput(input) {
   return input.session_id || input.sessionId || input.codex_session_id || '';
@@ -265,7 +267,7 @@ function findSessionForInput(vaultBase, input, control) {
   return { sessionId, relPath: '', startedAt: '', fromRegistry: false };
 }
 
-function activateExistingSession({ vaultBase, relPath, startedAt, sessionId, input, now, identity }) {
+function activateExistingSession({ vaultBase, relPath, startedAt, sessionId, input, now, identity, scopePatch = {} }) {
   const sessionPath = join(vaultBase, relPath);
   if (!existsSync(sessionPath)) return false;
 
@@ -288,12 +290,13 @@ function activateExistingSession({ vaultBase, relPath, startedAt, sessionId, inp
     transcript_path: identity.transcriptPath,
     transcript_id: identity.transcriptId,
     provider: identity.provider,
+    ...scopePatch,
     ...causalTurnPatch(input, now),
   });
   return true;
 }
 
-function createSession({ vaultBase, sessionId, input, now, identity }) {
+function createSession({ vaultBase, sessionId, input, now, identity, scopePatch = {} }) {
   const summary = sessionSummaryFromInput(input);
   const { absPath, relPath } = allocateSessionPath(vaultBase, now, summary);
   const startedAt = formatLocalIso(now);
@@ -315,6 +318,7 @@ function createSession({ vaultBase, sessionId, input, now, identity }) {
     transcript_path: identity.transcriptPath,
     transcript_id: identity.transcriptId,
     provider: identity.provider,
+    ...scopePatch,
     ...causalTurnPatch(input, now),
   });
   return { relPath, startedAt };
@@ -363,6 +367,19 @@ function main() {
     return;
   }
 
+  const projectResolution = resolveVault(input);
+  const currentScope = captureProjectScope({
+    input,
+    projectRoot: projectResolution.projectRoot,
+    projectId: projectResolution.projectId,
+    provider: identity.provider,
+    sessionId,
+  });
+  const scopePatch = projectScopePatch(
+    readSessionRegistry(vaultBase).sessions?.[sessionId]?.project_scope,
+    currentScope,
+  );
+
   // Fast path: skip all writes if control file touched < 5 min ago and session matches
   try {
     const ctrlPath = controlPath(vaultBase);
@@ -381,6 +398,7 @@ function main() {
           transcript_path: identity.transcriptPath,
           transcript_id: identity.transcriptId,
           provider: identity.provider,
+          ...scopePatch,
           ...causalTurnPatch(input, now),
         });
         writeHookOutput({});
@@ -425,6 +443,7 @@ function main() {
         transcript_path: identity.transcriptPath,
         transcript_id: identity.transcriptId,
         provider: identity.provider,
+        ...scopePatch,
         ...causalTurnPatch(input, now),
       });
       writeHookOutput({});
@@ -436,7 +455,7 @@ function main() {
   const resolvedTarget = registered?.session_file
     ? { sessionId, relPath: registered.session_file, startedAt: registered.started_at || '' }
     : { sessionId, relPath: '', startedAt: '' };
-  if (resolvedTarget.relPath && activateExistingSession({ vaultBase, relPath: resolvedTarget.relPath, startedAt: resolvedTarget.startedAt, sessionId, input, now, identity })) {
+  if (resolvedTarget.relPath && activateExistingSession({ vaultBase, relPath: resolvedTarget.relPath, startedAt: resolvedTarget.startedAt, sessionId, input, now, identity, scopePatch })) {
     outputActiveContext({
       relPath: resolvedTarget.relPath,
       startedAt: resolvedTarget.startedAt || formatLocalIso(now),
@@ -446,7 +465,7 @@ function main() {
     return;
   }
 
-  const created = createSession({ vaultBase, sessionId, input, now, identity });
+  const created = createSession({ vaultBase, sessionId, input, now, identity, scopePatch });
   outputActiveContext({
     relPath: created.relPath,
     startedAt: created.startedAt,

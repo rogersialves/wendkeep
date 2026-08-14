@@ -41,7 +41,7 @@ export function hookCommandLocalLegacy(name) {
 }
 
 // Hooks do lifecycle de change (0.31.0) — enforcement do loop a2. Nudges (contexto/aviso/
-// cobrança/captura de plano) e gate (deny/ask no Bash). Separados em dois grupos para
+// cobrança/captura de plano) e gate (deny/ask no Bash/PreToolUse). Separados em dois grupos para
 // preservar a opção futura de gates opt-in; hoje o init wira TODOS por default.
 // preferLocal: alta frequência → invocação node-direta quando houver instalação local.
 export const CHANGE_NUDGE_HOOKS = [
@@ -54,9 +54,9 @@ export const CHANGE_NUDGE_HOOKS = [
 ];
 
 export const CHANGE_GATE_HOOKS = [
-  // codex: reads tool_input.command; Codex's exec sends a raw string and exec_command an argv,
-  // so the guard would silently fail OPEN — worse than absent, since the docs would promise it.
-  { event: 'PreToolUse', matcher: 'Bash', name: 'change-guard', timeout: 10, order: 10, preferLocal: true, statusMessage: 'wendkeep: change gate' },
+  // The adapter accepts Codex's object, raw-string and argv forms and fails closed when a
+  // mutable target cannot be proven. Keep the matcher narrow to the payloads covered by tests.
+  { event: 'PreToolUse', matcher: 'Bash|exec_command|apply_patch|mcp__.*', name: 'change-guard', timeout: 10, order: 10, preferLocal: true, codex: true, statusMessage: 'wendkeep: change gate' },
 ];
 
 // --- Codex projection ---------------------------------------------------------
@@ -65,9 +65,9 @@ export const CHANGE_GATE_HOOKS = [
 // rest carry a `// codex:` comment above them saying why. Three deltas from Claude, each
 // verified against codex-rs and each silent when wrong: the timeout key is `timeoutSec`
 // (`timeout` is not a field and falls through to a 600s default), there is no
-// ${CLAUDE_PROJECT_DIR} so `preferLocal` never applies, and matcher is only honoured on
-// SessionStart (UserPromptSubmit/Stop null it at discovery).
-export const CODEX_MATCHER_EVENTS = new Set(['SessionStart']);
+// ${CLAUDE_PROJECT_DIR} so `preferLocal` never applies, and matcher is honoured only for
+// events whose host contract is covered by tests.
+export const CODEX_MATCHER_EVENTS = new Set(['SessionStart', 'PreToolUse']);
 
 export function codexHookSpecs(specs) {
   return specs.filter((h) => h.codex === true && !h.command);

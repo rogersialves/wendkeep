@@ -17,9 +17,10 @@ const WIRED = [
   ['Stop', 'session-stop'],
   ['Stop', 'change-nag'],
   ['SubagentStop', 'subagent-stop'],
+  ['PreToolUse', 'change-guard'],
 ];
 
-const OMITTED = ['change-guard', 'change-warn', 'plan-capture', 'decision-capture', 'task-log'];
+const OMITTED = ['change-warn', 'plan-capture', 'decision-capture', 'task-log'];
 
 const entriesOf = (file, ev) => (file.hooks[ev] || []).flatMap((g) => g.hooks || []);
 const cmdsOf = (file, ev) => entriesOf(file, ev).map((h) => h.command);
@@ -27,9 +28,9 @@ const allEntries = (file) => Object.keys(file.hooks).flatMap((ev) => entriesOf(f
 const groupFor = (file, ev, name) =>
   (file.hooks[ev] || []).find((g) => (g.hooks || []).some((h) => h.command.includes(name)));
 
-// --- CODEX-1: os 7 hooks nos eventos certos, chaves PascalCase -----------------
+// --- CODEX-1: hooks de sessão + guard nos eventos certos, chaves PascalCase --------
 
-test('mergeCodexHooks: wira os 7 hooks de sessão nos eventos do Codex', () => {
+test('mergeCodexHooks: wira hooks de sessão e o guard de escopo nos eventos do Codex', () => {
   const file = mergeCodexHooks(null, {});
   for (const [event, name] of WIRED) {
     assert.ok(cmdsOf(file, event).some((c) => c.includes(name)), `${name} em ${event}`);
@@ -38,10 +39,7 @@ test('mergeCodexHooks: wira os 7 hooks de sessão nos eventos do Codex', () => {
 
 test('mergeCodexHooks: chaves de evento são PascalCase — snake_case parseia pra zero hooks', () => {
   const file = mergeCodexHooks(null, {});
-  assert.deepEqual(
-    Object.keys(file.hooks).sort(),
-    ['SessionStart', 'Stop', 'SubagentStop', 'UserPromptSubmit'],
-  );
+  assert.deepEqual(Object.keys(file.hooks).sort(), ['PreToolUse', 'SessionStart', 'Stop', 'SubagentStop', 'UserPromptSubmit']);
 });
 
 // --- CODEX-2: timeoutSec, nunca timeout ----------------------------------------
@@ -90,7 +88,8 @@ test('mergeCodexHooks: omite hooks de tool cujo payload não existe no Codex', (
   for (const name of OMITTED) {
     assert.ok(!wire.includes(name), `${name} não pode ser wirado no Codex`);
   }
-  assert.equal(file.hooks.PreToolUse, undefined, 'sem PreToolUse — tool_input incompatível');
+  assert.ok(file.hooks.PreToolUse, 'PreToolUse contém o guard de escopo');
+  assert.equal(groupFor(file, 'PreToolUse', 'change-guard').matcher, 'Bash|exec_command|apply_patch|mcp__.*');
   assert.equal(file.hooks.PostToolUse, undefined, 'sem PostToolUse — tool_input incompatível');
   assert.equal(file.hooks.TaskCompleted, undefined, 'TaskCompleted não existe no Codex');
 });
@@ -148,6 +147,22 @@ test('mergeCodexHooks: --force atualiza a entrada gerenciada in-place, sem dupli
   const groups = file.hooks.Stop.filter((g) => g.hooks.some((h) => h.command.includes('session-stop')));
   assert.equal(groups.length, 1, 'sem grupo duplicado');
   assert.equal(groups[0].hooks[0].timeoutSec, 60, 'force refresca o timeoutSec');
+  assert.ok(groups[0].hooks.some((h) => h.command === 'echo irmao-do-usuario'), 'irmão agrupado intacto');
+});
+
+test('mergeCodexHooks: --force migra o matcher legado do change-guard', () => {
+  const existing = {
+    hooks: {
+      PreToolUse: [{ matcher: 'Bash', hooks: [
+        { type: 'command', command: 'npx wendkeep hook change-guard', timeoutSec: 10 },
+        { type: 'command', command: 'echo irmao-do-usuario' },
+      ] }],
+    },
+  };
+  const file = mergeCodexHooks(existing, { force: true });
+  const groups = file.hooks.PreToolUse.filter((g) => g.hooks.some((h) => h.command.includes('change-guard')));
+  assert.equal(groups.length, 1, 'sem grupo duplicado');
+  assert.equal(groups[0].matcher, 'Bash|exec_command|apply_patch|mcp__.*');
   assert.ok(groups[0].hooks.some((h) => h.command === 'echo irmao-do-usuario'), 'irmão agrupado intacto');
 });
 
