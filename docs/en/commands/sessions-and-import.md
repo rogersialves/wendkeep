@@ -63,6 +63,13 @@ npx wendkeep import [options]
 - Observability is tri-state: `complete` publishes the full snapshot; `none` means zero proven by
   a causal Stop or stable offline scan; `degraded` preserves the previous snapshot and allowlisted
   diagnostics. An isolated `SubagentStop` never publishes `none`.
+- Every terminal `Stop`/`SubagentStop` attempt leaves a sanitized receipt in
+  `.brain/SESSION_ITERATION_OUTCOMES.jsonl`, keyed by session, `turn_id`, and stage. States
+  distinguish `inserted`, `duplicate`, `skipped`, `aborted`, `busy`, `failed`, and observability
+  statuses; the cursor advances only after the note is confirmed. The ledger is local, append-only,
+  idempotent, and never persists prompts, payloads, raw arguments, or raw errors.
+- In Codex, `subagent_notification` remains synthetic, `turn_aborted` is an explicit terminal
+  state, and `custom_tool_call_output` closes the existing call without counting a second tool.
 - When compacting conversations into `## Iterações`, the hook escapes code delimiters cut by the
   size limit; inline backticks and fences never remain open and consume the following line.
 - `session list` reads `SESSION_REGISTRY`; `show` displays one session and `use` only changes human
@@ -73,6 +80,10 @@ npx wendkeep import [options]
 - `import` reconciles observability even when no `wk-turn` is missing: a legacy schema, stale
   frontier, or unproven manifest triggers recomposition without duplicating iterations. A fresh
   checkpoint remains byte-identical; `degraded` is reported and does not change the note.
+- On definitive close, Stop marks the activation and session `done` in `SESSION_REGISTRY.json`
+  only after memory/observability publication; `CURRENT_SESSION.md` is a derived view and no
+  longer lists the finalized session. Hooks resolve identity from the registry and transcript,
+  never from the global pointer.
 - `hook session-backfill` recovers missing `wk-turn` markers for the selected session. Without
   `--write`, it only reports. On Codex, `missingTurns` contains only turns with `task_complete`;
   open turns appear under `incompleteTurns` and are never written. `--write` applies only completed
@@ -105,6 +116,8 @@ only recognized generated fields under `Iterações` and `Encerramento` are migr
 authored prose.
 Duplicate/stale hooks converge on the same frontier, and imports may refresh only observability
 without creating a new turn block.
+The per-attempt receipt in `SESSION_ITERATION_OUTCOMES.jsonl` distinguishes a confirmed duplicate
+from a busy lock or skipped path without reopening the original session.
 
 ## Common errors and diagnosis
 
@@ -122,6 +135,8 @@ without creating a new turn block.
 - Contaminated cost: validate `session_id → session_file → transcript_path → provider`.
 - `degraded` observability: preserve the note and run a targeted rebuild dry-run; never force a
   partial snapshot over the last `complete` one.
+- Missing or `busy` outcome ledger: preserve the transcript and note, inspect the Vault lock, and
+  retry the bounded hook/replay path; never mark the turn projected by hand.
 
 ## Next steps
 

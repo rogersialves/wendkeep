@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { spawn, spawnSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import {
   existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, rmdirSync, symlinkSync,
   unlinkSync, writeFileSync,
@@ -12,30 +12,26 @@ import { finishFlow, promoteFlow, startFlow } from '../hooks/flow-core.mjs';
 import {
   appendFlowAttempt, readFlow, reserveFlowPromotion, writeFlowReceipt,
 } from '../hooks/vault-runtime-store.mjs';
+import { copyGitFixture, git } from './helpers/git-fixture.mjs';
 
 // This bounded deadlock watchdog includes worker startup/import and Windows filesystem I/O.
 const PROMOTION_WORKER_TIMEOUT_MS = 30_000;
 
-function git(cwd, ...args) {
-  const result = spawnSync('git', args, { cwd, encoding: 'utf8' });
-  assert.equal(result.status, 0, `${args.join(' ')}\n${result.stderr}`);
-}
-
 function fixture() {
-  const root = mkdtempSync(join(tmpdir(), 'wk-flow-promotion-'));
-  const vault = join(root, '.vault');
-  const sessionRel = '02-Sessões/2026/07-JUL/DIA 26/promotion.md';
-  const sessionPath = join(vault, ...sessionRel.split('/'));
-  mkdirSync(join(root, 'src'), { recursive: true });
-  mkdirSync(join(vault, '.brain'), { recursive: true });
-  mkdirSync(join(sessionPath, '..'), { recursive: true });
-  writeFileSync(join(root, 'src', 'app.mjs'), 'export const value = 1;\n');
-  writeFileSync(join(root, '.gitignore'), '.vault/\n');
-  writeFileSync(join(root, 'wendkeep.sensors.json'), JSON.stringify({
-    version: 1,
-    sensors: [{ id: 'focused', severity: 'critical', command: 'node -e "process.exit(0)"' }],
-  }));
-  writeFileSync(sessionPath, `---
+  const root = copyGitFixture('flow-promotion', (templateRoot) => {
+    const vault = join(templateRoot, '.vault');
+    const sessionRel = ['02-Sessões', '2026', '07-JUL', 'DIA 26', 'promotion.md'].join('/');
+    const sessionPath = join(vault, ...sessionRel.split('/'));
+    mkdirSync(join(templateRoot, 'src'), { recursive: true });
+    mkdirSync(join(vault, '.brain'), { recursive: true });
+    mkdirSync(join(sessionPath, '..'), { recursive: true });
+    writeFileSync(join(templateRoot, 'src', 'app.mjs'), 'export const value = 1;\n');
+    writeFileSync(join(templateRoot, '.gitignore'), '.vault/\n');
+    writeFileSync(join(templateRoot, 'wendkeep.sensors.json'), JSON.stringify({
+      version: 1,
+      sensors: [{ id: 'focused', severity: 'critical', command: 'node -e "process.exit(0)"' }],
+    }));
+    writeFileSync(sessionPath, `---
 type: session
 session_id: session-promote
 status: active
@@ -47,20 +43,21 @@ status: active
 
 ## Encerramento
 `);
-  writeSessionRegistry(vault, {
-    version: 2,
-    sessions: {
-      'session-promote': {
-        status: 'active', provider: 'codex', session_file: sessionRel,
-        started_at: '2026-07-26T10:00:00.000Z',
+    writeSessionRegistry(vault, {
+      version: 2,
+      sessions: {
+        'session-promote': {
+          status: 'active', provider: 'codex', session_file: sessionRel,
+          started_at: '2026-07-26T10:00:00.000Z',
+        },
       },
-    },
+    });
+    git(templateRoot, 'add', '.');
+    git(templateRoot, 'commit', '-qm', 'base');
   });
-  git(root, 'init', '-q');
-  git(root, 'config', 'user.email', 'flow@example.invalid');
-  git(root, 'config', 'user.name', 'FLOW Test');
-  git(root, 'add', '.');
-  git(root, 'commit', '-qm', 'base');
+  const vault = join(root, '.vault');
+  const sessionRel = ['02-Sessões', '2026', '07-JUL', 'DIA 26', 'promotion.md'].join('/');
+  const sessionPath = join(vault, ...sessionRel.split('/'));
   return { root, vault, sessionRel, sessionPath };
 }
 
@@ -208,6 +205,7 @@ function spawnPromotion({ vaultBase, projectRoot, sessionId, flowId, readyPath }
       WK_PROMOTION_SESSION: sessionId,
       WK_PROMOTION_FLOW: flowId,
     },
+    windowsHide: true,
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   let stdout = '';

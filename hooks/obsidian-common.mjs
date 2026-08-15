@@ -565,6 +565,46 @@ export function applyStopActivation(registry, stop = {}) {
   return stopResult(next, 'applied', true);
 }
 
+// Finalization is a second causal transition: Stop first acknowledges the turn and publishes
+// observability while the activation is still addressable, then closes that same activation. The
+// explicit id check prevents a late Stop from closing a newer activation opened meanwhile.
+export function closeSessionActivation(registry, stop = {}) {
+  const next = cloneRegistry(registry);
+  const sessionId = stop.session_id || stop.canonical_session_id || '';
+  const current = next.sessions[sessionId];
+  const requestedActivationId = String(stop.activation_id || '');
+  const activeId = String(current?.active_activation_id || '');
+  const stopTurnId = String(stop.turn_id || '');
+  if (!current || !requestedActivationId) return stopResult(next, 'ambiguous');
+  if (!activeId && current.status === 'done' && current.last_turn_id === stopTurnId) {
+    return stopResult(next, 'duplicate');
+  }
+  if (!activeId || activeId !== requestedActivationId) return stopResult(next, 'superseded');
+
+  const active = current.activations?.[activeId];
+  if (!active || active.status !== 'active') return stopResult(next, 'ambiguous');
+
+  const endedAt = String(stop.ended_at || '');
+  const activations = {
+    ...(current.activations || {}),
+    [activeId]: {
+      ...active,
+      status: 'done',
+      ...(endedAt ? { ended_at: endedAt } : {}),
+      ...(stopTurnId ? { last_stop_turn_id: stopTurnId } : {}),
+    },
+  };
+  next.sessions[sessionId] = {
+    ...current,
+    status: 'done',
+    active_activation_id: '',
+    ...(endedAt ? { ended_at: endedAt } : {}),
+    ...(stopTurnId ? { last_turn_id: stopTurnId } : {}),
+    activations,
+  };
+  return stopResult(next, 'finalized', true);
+}
+
 // Remove one registry entry, but ONLY when its transcript matches the given path — this is
 // self-healing for entries wendkeep itself mis-wrote (a subagent rollout registered as a
 // top-level session by import <=0.46.1), never generic registry cleanup. An entry with the

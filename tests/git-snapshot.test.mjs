@@ -1,6 +1,5 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
 import { linkSync, mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -13,24 +12,16 @@ import {
   runGitDiffCheck,
 } from '../hooks/git-snapshot.mjs';
 import * as gitSnapshotModule from '../hooks/git-snapshot.mjs';
-
-function git(cwd, ...args) {
-  const result = spawnSync('git', args, { cwd, encoding: 'utf8' });
-  assert.equal(result.status, 0, `${args.join(' ')}\n${result.stderr}`);
-  return result.stdout.trim();
-}
+import { copyGitFixture, git } from './helpers/git-fixture.mjs';
 
 function repoFixture() {
-  const root = mkdtempSync(join(tmpdir(), 'wk-flow-git-'));
-  git(root, 'init', '-q');
-  git(root, 'config', 'user.email', 'flow@example.invalid');
-  git(root, 'config', 'user.name', 'FLOW Test');
-  mkdirSync(join(root, 'src'), { recursive: true });
-  writeFileSync(join(root, 'src', 'kept.txt'), 'base\n');
-  writeFileSync(join(root, 'src', 'dirty.txt'), 'base\n');
-  git(root, 'add', '.');
-  git(root, 'commit', '-qm', 'base');
-  return root;
+  return copyGitFixture('git-snapshot-repo', (root) => {
+    mkdirSync(join(root, 'src'), { recursive: true });
+    writeFileSync(join(root, 'src', 'kept.txt'), 'base\n');
+    writeFileSync(join(root, 'src', 'dirty.txt'), 'base\n');
+    git(root, 'add', '.');
+    git(root, 'commit', '-qm', 'base');
+  }, { prefix: 'wk-flow-git' });
 }
 
 test('[req:OP-6] snapshot Git não atribui sujeira preexistente inalterada ao FLOW', () => {
@@ -70,15 +61,12 @@ test('[req:OP-6] snapshot detecta mudança de HEAD mesmo com worktree final limp
 
 test('[req:OP-7] fingerprint detecta troca de commit em submodule já dirty', () => {
   const root = repoFixture();
-  const source = mkdtempSync(join(tmpdir(), 'wk-flow-submodule-source-'));
+  const source = copyGitFixture('git-snapshot-submodule-source', (sourceRoot) => {
+    writeFileSync(join(sourceRoot, 'lib.txt'), 'A\n');
+    git(sourceRoot, 'add', '.');
+    git(sourceRoot, 'commit', '-qm', 'A');
+  }, { prefix: 'wk-flow-submodule-source' });
   try {
-    git(source, 'init', '-q');
-    git(source, 'config', 'user.email', 'flow@example.invalid');
-    git(source, 'config', 'user.name', 'FLOW Test');
-    writeFileSync(join(source, 'lib.txt'), 'A\n');
-    git(source, 'add', '.');
-    git(source, 'commit', '-qm', 'A');
-
     git(root, '-c', 'protocol.file.allow=always', 'submodule', 'add', '-q', source, 'deps/lib');
     git(root, 'commit', '-qam', 'add submodule');
     const submodule = join(root, 'deps', 'lib');
@@ -104,14 +92,12 @@ test('[req:OP-7] fingerprint detecta troca de commit em submodule já dirty', ()
 
 test('[req:OP-7] snapshot vigia metadata de todo gitlink mesmo quando o submodule está limpo', (t) => {
   const root = repoFixture();
-  const source = mkdtempSync(join(tmpdir(), 'wk-flow-submodule-source-'));
+  const source = copyGitFixture('git-snapshot-submodule-source', (sourceRoot) => {
+    writeFileSync(join(sourceRoot, 'lib.txt'), 'A\n');
+    git(sourceRoot, 'add', '.');
+    git(sourceRoot, 'commit', '-qm', 'A');
+  }, { prefix: 'wk-flow-submodule-source' });
   try {
-    git(source, 'init', '-q');
-    git(source, 'config', 'user.email', 'flow@example.invalid');
-    git(source, 'config', 'user.name', 'FLOW Test');
-    writeFileSync(join(source, 'lib.txt'), 'A\n');
-    git(source, 'add', '.');
-    git(source, 'commit', '-qm', 'A');
     git(root, '-c', 'protocol.file.allow=always', 'submodule', 'add', '-q', source, 'plugins/ext');
     git(root, 'commit', '-qam', 'add clean submodule');
 

@@ -62,6 +62,13 @@ npx wendkeep import [opções]
 - A observabilidade usa tri-state: `complete` publica o snapshot integral; `none` representa zero
   comprovado por Stop causal ou scan offline estável; `degraded` preserva o snapshot anterior e
   diagnostics allowlisted. `SubagentStop` isolado nunca publica `none`.
+- Cada tentativa terminal de `Stop`/`SubagentStop` deixa um recibo sanitizado em
+  `.brain/SESSION_ITERATION_OUTCOMES.jsonl`, indexado por sessão, `turn_id` e estágio. Os estados
+  distinguem `inserted`, `duplicate`, `skipped`, `aborted`, `busy`, `failed` e os status de
+  observabilidade; o cursor só avança depois da confirmação da nota. O ledger é local, append-only,
+  idempotente e nunca persiste prompt, payload, argumento bruto ou erro bruto.
+- No Codex, `subagent_notification` continua sintético, `turn_aborted` é terminal explícito e
+  `custom_tool_call_output` fecha a chamada existente sem contar uma segunda ferramenta.
 - Ao compactar conversas em `## Iterações`, o hook escapa delimitadores de código cortados pelo
   limite de tamanho; backticks inline ou fences nunca ficam abertos para engolir a linha seguinte.
 - `session list` lê `SESSION_REGISTRY`; `show` exibe uma sessão e `use` muda apenas o foco humano
@@ -72,6 +79,10 @@ npx wendkeep import [opções]
 - `import` reconcilia a observabilidade mesmo quando nenhum `wk-turn` está ausente: schema legado,
   frontier stale ou manifest não comprovado disparam recomposição sem duplicar iterações. Um
   checkpoint fresco permanece byte-idêntico; `degraded` é reportado e não altera a nota.
+- No encerramento definitivo, o Stop fecha a activation e a sessão como `done` no
+  `SESSION_REGISTRY.json` depois de memória/observabilidade; `CURRENT_SESSION.md` é uma visão
+  derivada e deixa de listar a sessão finalizada. Hooks resolvem identidade pelo registry e pelo
+  transcript, nunca pelo ponteiro global.
 - `hook session-backfill` recupera `wk-turn` ausente da sessão selecionada. Sem `--write`, apenas
   relata. Em Codex, `missingTurns` contém somente turnos com `task_complete`; turnos ainda abertos
   aparecem em `incompleteTurns` e nunca são gravados. `--write` aplica apenas os candidatos
@@ -104,6 +115,8 @@ ao finalizar uma nota antiga, somente campos gerados reconhecíveis em `Iteraç�
 `Encerramento` são migrados, sem reescrever a prosa autoral. Hooks
 duplicados/stale convergem no mesmo frontier, e importações podem atualizar só a observabilidade
 sem criar um novo bloco de turno.
+O recibo de cada tentativa em `SESSION_ITERATION_OUTCOMES.jsonl` permite diferenciar uma duplicata
+confirmada de um lock ocupado ou de um caminho que foi pulado, sem reabrir a sessão original.
 
 ## Erros comuns e diagnóstico
 
@@ -121,6 +134,8 @@ sem criar um novo bloco de turno.
 - Custo contaminado: valide `session_id → session_file → transcript_path → provider`.
 - Observabilidade `degraded`: preserve a nota e rode o rebuild direcionado em dry-run; não force
   um snapshot parcial sobre o último `complete`.
+- Ledger de resultado ausente ou com `busy`: preserve o transcript e a nota, confira o lock do Vault
+  e repita o hook/replay limitado; nunca marque o turno como projetado manualmente.
 
 ## Próximos passos
 

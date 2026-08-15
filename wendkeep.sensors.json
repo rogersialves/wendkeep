@@ -11,6 +11,30 @@
       "command": "npm test"
     },
     {
+      "id": "session-iteration-outcome-ledger",
+      "name": "Session iteration outcome ledger",
+      "description": "Validates durable per-turn outcomes, lock behavior, observability status and Codex event normalization",
+      "severity": "critical",
+      "type": "command",
+      "command": "node --test tests/session-iteration-outcome-ledger.test.mjs tests/session-iteration-outcome-integration.test.mjs tests/transcript-outcome-normalization.test.mjs tests/turn-marker.test.mjs"
+    },
+    {
+      "id": "codex-transcript-observability",
+      "name": "Codex transcript observability",
+      "description": "Validates causal frontier publication, registry/note reconciliation, final session state and sanitized diagnostics",
+      "severity": "critical",
+      "type": "command",
+      "command": "node --test tests/session-observability-reconciliation.test.mjs tests/session-observability-cas.test.mjs tests/subagent-observability-lifecycle.test.mjs tests/import-observability-reconciliation.test.mjs tests/session-stop-migration-lifecycle.test.mjs tests/doctor-session-observability.test.mjs"
+    },
+    {
+      "id": "session-observability-reconciliation",
+      "name": "Session observability reconciliation",
+      "description": "Validates preview/apply reconciliation and the derived CURRENT_SESSION view",
+      "severity": "critical",
+      "type": "command",
+      "command": "node --test tests/session-observability-reconciliation.test.mjs tests/import-observability-reconciliation.test.mjs tests/session-identity.test.mjs"
+    },
+    {
       "id": "check",
       "name": "Syntax check",
       "description": "node --check on the entrypoints",
@@ -168,6 +192,22 @@
       "severity": "critical",
       "type": "command",
       "command": "node --test tests/project-scope-guard.test.mjs tests/init-codex-hooks.test.mjs tests/change-hooks.test.mjs tests/project-vault.test.mjs"
+    },
+    {
+      "id": "git-snapshot-windows-suite-timeout",
+      "name": "Windows Git fixture suite",
+      "description": "Validates isolated Git fixtures and bounded Git/Flow tests on Windows",
+      "severity": "critical",
+      "type": "command",
+      "command": "node --test --test-concurrency=1 tests/git-fixture.test.mjs tests/git-snapshot.test.mjs tests/flow-core.test.mjs tests/flow-promotion.test.mjs"
+    },
+    {
+      "id": "review-docs-sanitization",
+      "name": "review-docs-sanitization",
+      "description": "node --test tests/review-docs-sanitization.test.mjs",
+      "severity": "critical",
+      "type": "command",
+      "command": "node --test tests/review-docs-sanitization.test.mjs"
     }
   ]
 }

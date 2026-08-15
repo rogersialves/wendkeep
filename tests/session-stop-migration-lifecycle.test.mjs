@@ -151,7 +151,8 @@ function runMigrationLifecycle(runtimeRoot = ROOT) {
     // fixture remains synthetic; the following hooks and migration are real.
     const legacyRegistry = readRegistry(brain);
     const legacyEntry = legacyRegistry.sessions[SESSION_ID];
-    const legacyActivationId = legacyEntry.active_activation_id;
+    const legacyActivationId = legacyEntry.active_activation_id
+      || Object.keys(legacyEntry.activations || {}).at(-1);
     legacyEntry.status = 'done';
     legacyEntry.active_activation_id = '';
     legacyEntry.activations[legacyActivationId].status = 'done';
@@ -383,8 +384,10 @@ test('[req:MEM-STOP-2] Stop principal usa turn_sequences quando filhos intercala
     assertHookSucceeded(stop, 'mapped Stop');
 
     const after = readRegistry(brain).sessions[SESSION_ID];
-    const active = after.activations[after.active_activation_id];
+    const active = after.activations[Object.keys(after.activations || {}).at(-1)];
     const note = readFileSync(join(vault, after.session_file), 'utf8');
+    assert.equal(after.status, 'done');
+    assert.equal(after.active_activation_id, '');
     assert.equal(active.last_stop_turn_sequence, 18);
     assert.match(note, /<!-- wk-turn: wk-parent-turn-5 -->/);
   } finally {

@@ -16,6 +16,10 @@ const AUTO_TAG_WORKFLOW = readFileSync(new URL('../.github/workflows/auto-tag.ym
 const AGENT_RULES = readFileSync(new URL('../AGENTS.md', import.meta.url), 'utf8');
 const CHANGELOG = readFileSync(new URL('../CHANGELOG.md', import.meta.url), 'utf8');
 const PACKAGE = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+const AUTO_TAG_PUBLISH_STEP = AUTO_TAG_WORKFLOW.match(
+  /      - name: Publish to npm when the version is new[\s\S]*?(?=\n      - name:|$)/,
+)?.[0] || '';
+const AUTO_TAG_PUBLISH_GUARD = AUTO_TAG_PUBLISH_STEP.match(/if npm view[\s\S]*?\n\s*fi/)?.[0] || '';
 
 const FIXTURE = `# Changelog
 
@@ -77,13 +81,15 @@ test('extractReleaseNotes: throws when the version is absent', () => {
   assert.throws(() => extractReleaseNotes(FIXTURE, '9.9.9'), /9\.9\.9/);
 });
 
-test('[sensor:release-tests] 0.68.3 notes are extractable and match the package', () => {
-  const release = extractReleaseNotes(CHANGELOG, '0.68.3');
-  assert.equal(PACKAGE.version, '0.68.3');
-  assert.equal(release.date, '2026-08-13');
-  assert.match(release.notes, /Deferred replay/i);
-  assert.match(release.notes, /fonte causal final/i);
+test('[sensor:release-tests] 0.68.5 notes are extractable and match the package', () => {
+  const release = extractReleaseNotes(CHANGELOG, '0.68.5');
+  assert.equal(PACKAGE.version, '0.68.5');
+  assert.equal(release.date, '2026-08-14');
+  assert.match(release.notes, /resultado durável/i);
+  assert.match(release.notes, /turn_aborted/i);
   assert.match(release.notes, /append-only/i);
+  assert.match(release.notes, /publica no npm por OIDC/i);
+  assert.match(release.notes, /provenance/i);
   assert.doesNotMatch(release.notes, /019f[0-9a-f-]+/i);
 });
 
@@ -94,6 +100,25 @@ test('[sensor:release-tests] as notas de 0.68.1 seguem extraíveis depois do bum
   assert.equal(release.date, '2026-08-08');
   assert.match(release.notes, /VAULT_PATH_UNSAFE/);
   assert.match(release.notes, /walk fresco/i);
+});
+
+test('[sensor:release-tests] [req:CLI-PKG-3] auto-tag declara o necessário para OIDC', () => {
+  const permissions = AUTO_TAG_WORKFLOW.match(/^permissions:\r?\n(?:  [^\r\n]+\r?\n?)+/m)?.[0] || '';
+  assert.match(permissions, /id-token:\s*write/);
+  assert.match(AUTO_TAG_WORKFLOW, /registry-url:\s*['"]https:\/\/registry\.npmjs\.org['"]/);
+  assert.match(AUTO_TAG_WORKFLOW, /node-version:\s*['"]2[4-9]['"]/);
+});
+
+test('[sensor:release-tests] [req:CLI-PKG-3] publish precede a criação da tag e é idempotente', () => {
+  const publishAt = AUTO_TAG_WORKFLOW.indexOf('      - name: Publish to npm when the version is new');
+  const tagAt = AUTO_TAG_WORKFLOW.indexOf('      - name: Ensure tag + sync release from CHANGELOG');
+  assert.ok(publishAt > -1, 'workflow precisa ter um passo real de publish');
+  assert.ok(tagAt > -1, 'workflow precisa ter um passo real de tag/release');
+  assert.ok(publishAt < tagAt, 'publish precisa vir antes do passo de tag/release');
+  assert.match(AUTO_TAG_PUBLISH_STEP, /npm publish/);
+  assert.match(AUTO_TAG_PUBLISH_GUARD, /npm view[\s\S]*--prefer-online/);
+  assert.match(AUTO_TAG_PUBLISH_GUARD, /then[\s\S]*publish ignorado[\s\S]*else[\s\S]*npm publish/);
+  assert.doesNotMatch(AUTO_TAG_PUBLISH_GUARD, /npm publish[^\r\n]*--provenance/);
 });
 
 const releaseFacts = (overrides = {}) => ({

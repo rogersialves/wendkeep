@@ -8,6 +8,18 @@ export function isBootstrapPrompt(text = '') {
     || clean.startsWith('## Memory');
 }
 
+const SYNTHETIC_EVENT_TAG = /^<\/?(?:task-notification|system-reminder|local-command-stdout|local-command-stderr|local-command-caveat|command-message|command-name|command-args|user-prompt-submit-hook|subagent_notification|subagent-notification|ide_[A-Za-z0-9_-]+|environment_context)\b/i;
+
+// Shared by transcript and token-usage parsers. These wrappers are harness metadata, not human
+// prompts; keeping the filter here prevents the two import paths from drifting.
+export function isSyntheticTranscriptText(text = '') {
+  const trimmed = String(text || '').trim();
+  return SYNTHETIC_EVENT_TAG.test(trimmed)
+    || isBootstrapPrompt(trimmed)
+    || /^Generate a concise( UI)? title/i.test(trimmed)
+    || /^You are a helpful assistant\. You will be presented with a user prompt/i.test(trimmed);
+}
+
 export function redactSecrets(text) {
   if (!text) return '';
   return String(text)

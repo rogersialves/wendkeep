@@ -6,7 +6,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { copyFileSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
+import { copyFileSync, cpSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -88,9 +88,25 @@ test('nenhum README manda instalar por pnpm com @latest', () => {
 // O que realmente importa: o conteúdo do tarball, e o repo intacto depois.
 test('[req:OP-9] npm pack leva módulos de profile/FLOW, docs bilíngues e restaura o README', () => {
   const outDir = mkdtempSync(join(tmpdir(), 'wk-pack-'));
+  const packRoot = join(outDir, 'workspace');
   try {
+    // `prepack` troca README.md no cwd por exigência do npm. Empacotar a árvore de trabalho
+    // real durante `npm test` cria uma corrida com DOC-1/readme tests, que podem ler o inglês
+    // enquanto o hook está ativo. O contrato é o mesmo em uma cópia isolada, sem mutar o repo.
+    cpSync(ROOT, packRoot, {
+      recursive: true,
+      filter: (source) => {
+        const normalized = source.replaceAll('\\', '/');
+        return !normalized.includes('/node_modules/')
+          && !normalized.includes('/.git/')
+          && !normalized.includes('/.WendKeep-vault/')
+          && !normalized.includes('/.codex/')
+          && !normalized.includes('/.claude/')
+          && !normalized.includes('/.agents/');
+      },
+    });
     const packed = spawnSync('npm', ['pack', '--pack-destination', outDir], {
-      cwd: ROOT, encoding: 'utf8', shell: process.platform === 'win32',
+      cwd: packRoot, encoding: 'utf8', shell: process.platform === 'win32',
     });
     assert.equal(packed.status, 0, packed.stderr);
 
@@ -106,7 +122,7 @@ test('[req:OP-9] npm pack leva módulos de profile/FLOW, docs bilíngues e resta
 
     const pkg = join(outDir, 'package');
     const packedManifest = JSON.parse(readFileSync(join(pkg, 'package.json'), 'utf8'));
-    const sourceManifest = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8'));
+    const sourceManifest = JSON.parse(readFileSync(join(packRoot, 'package.json'), 'utf8'));
     assert.equal(packedManifest.version, sourceManifest.version,
       `DOC-5: o tarball deve declarar exatamente a release ${sourceManifest.version}`);
     assert.ok(isEn(readFileSync(join(pkg, 'README.md'), 'utf8')),
@@ -142,7 +158,7 @@ test('[req:OP-9] npm pack leva módulos de profile/FLOW, docs bilíngues e resta
       'o tarball não pode incluir o acervo histórico de docs');
 
     // O prepack troca os arquivos; o postpack tem de restaurar.
-    assert.ok(isPt(readFileSync(join(ROOT, 'README.md'), 'utf8')),
+    assert.ok(isPt(readFileSync(join(packRoot, 'README.md'), 'utf8')),
       'o repositório voltou ao português após o pack');
   } finally {
     rmSync(outDir, { recursive: true, force: true });

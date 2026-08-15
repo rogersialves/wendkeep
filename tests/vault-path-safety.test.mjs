@@ -14,7 +14,9 @@ import {
   writeVaultFileAtomic,
 } from '../hooks/vault-path-safety.mjs';
 
-async function waitFor(predicate, timeoutMs = 3000) {
+// A suíte completa inicia vários processos Node em paralelo no Windows; esta espera mede
+// somente o startup do probe, não o timeout do lock que o cenário está exercitando.
+async function waitFor(predicate, timeoutMs = 10_000) {
   const deadline = Date.now() + timeoutMs;
   while (!predicate()) {
     if (Date.now() >= deadline) throw new Error('timeout aguardando processo de lock');

@@ -16,6 +16,7 @@ import {
   readObservabilityStore,
 } from './session-observability-store.mjs';
 import { mutateSessionNote } from './session-note-io.mjs';
+import { appendIterationOutcome } from './session-iteration-outcome.mjs';
 import { applyDerivedSections, provenanceSessions } from './derived-sections.mjs';
 import { buildSessionMemoryEvents, collectLifecycleEvidence } from './memory-handoff.mjs';
 import { enqueueMemoryEvent, projectMemoryOutbox } from './memory-store.mjs';
@@ -33,7 +34,15 @@ import {
   parseTranscriptContent,
   resolveTurnIdentity,
 } from '../packages/integrations/src/transcripts.mjs';
-import { sanitizeAssistantMessage } from '../packages/integrations/src/prompt-content.mjs';
+import {
+  isSyntheticTranscriptText,
+  sanitizeAssistantMessage,
+} from '../packages/integrations/src/prompt-content.mjs';
+
+const UNRESOLVED_SESSION_ID = 'unresolved';
+const UNRESOLVED_TURN_ID = 'unresolved-turn';
+const ABORTED_TURN_NOTICE = 'wendkeep: Stop ignorado; o turno foi abortado no transcript.';
+
 export { resolveTurnIdentity };
 import {
   ensureDir,
@@ -43,7 +52,6 @@ import {
   formatLocalIso,
   getNextAdrNumber,
   getVaultBase,
-  isBootstrapPrompt,
   warnIfDefaultVault,
   listMarkdownFiles,
   readControl,
@@ -61,28 +69,15 @@ import {
   hasTurnMarker,
   normalizeTurnMarkers,
   mutateSessionRegistry,
+  closeSessionActivation,
   resolveRegisteredTurnSequence,
   resolveStopActivation,
   applyStopActivation,
 } from './obsidian-common.mjs';
 
-// Tags injetadas pelo harness (não são fala humana): notificações de task,
-// reminders do sistema, stdout de comando local, wrappers de slash-command e
-// contexto da IDE. Nunca devem virar título/Pedido/Usuário de iteração no Vault.
-const SYNTHETIC_EVENT_TAG = /^<\/?(?:task-notification|system-reminder|local-command-stdout|local-command-stderr|command-message|command-name|command-args|user-prompt-submit-hook|ide_selection|ide_opened_file|environment_context)\b/i;
-
 function shouldIgnoreUserText(text) {
-  const trimmed = String(text || '').trim();
-  // Bootstrap detection is DELEGATED, not copied: this used to duplicate isBootstrapPrompt's
-  // prefix list and the copies drifted — <recommended_plugins> made it into one and not the
-  // other, so the title came out clean while the same block still showed as "Usuário" in the
-  // conversation context. One filter, one place to add the next injected block.
-  return SYNTHETIC_EVENT_TAG.test(trimmed)
-    || isBootstrapPrompt(trimmed)
-    // Harness utility meta-prompts (title generation, classifiers) — not real user turns; they
-    // were leaking into note titles/summaries on import.
-    || /^Generate a concise( UI)? title/i.test(trimmed)
-    || /^You are a helpful assistant\. You will be presented with a user prompt/i.test(trimmed);
+  // Tags injetadas pelo harness não são fala humana e nunca viram título/Pedido/Usuário.
+  return isSyntheticTranscriptText(text);
 }
 
 function addUnique(list, value) {
@@ -486,11 +481,13 @@ function relocateOrphanIterations(content) {
 
 export function insertIteration(sessionPath, block, turnId, tx, vaultBase = '') {
   let inserted = false;
+  let duplicate = false;
   // Sob lock: outro hook (subagent-stop) pode estar reescrevendo a mesma nota agora.
-  mutateSessionNote(sessionPath, (original) => {
+  const mutation = mutateSessionNote(sessionPath, (original) => {
     // Self-heal: migrate any legacy `codex-turn` markers to the neutral name on this write.
     let content = normalizeTurnMarkers(original);
     if (hasTurnMarker(content, turnId)) {
+      duplicate = true;
       // Turno já registrado: ainda assim repara órfãos e seções dedicadas.
       return applyDedicatedSections(relocateOrphanIterations(content), tx);
     }
@@ -499,7 +496,24 @@ export function insertIteration(sessionPath, block, turnId, tx, vaultBase = '') 
     inserted = true;
     return applyDedicatedSections(content, tx);
   }, { vaultBase });
-  return inserted;
+  const result = duplicate
+    ? 'duplicate'
+    : mutation.written && inserted
+      ? 'inserted'
+      : mutation.reason === 'busy'
+        ? 'busy'
+        : 'failed';
+  return {
+    inserted: result === 'inserted',
+    confirmed: result === 'inserted' || result === 'duplicate',
+    written: Boolean(mutation.written),
+    result,
+    reason: mutation.reason || 'unknown',
+  };
+}
+
+export function confirmedLoggedTurnId(currentTurnId, candidateTurnId, projection) {
+  return projection?.confirmed ? candidateTurnId : currentTurnId;
 }
 
 function shouldFinalizeSession() {
@@ -993,10 +1007,14 @@ export async function refreshStopObservability({
   readStore = readObservabilityStore,
   resolveRoots = resolveObservabilityRoots,
   materialize = materializeStopObservability,
+  returnDetails = false,
 } = {}) {
-  if (causalStop && !causalStop.canPromoteMemory) return false;
+  const outcome = (ok, status, reason = '') => (
+    returnDetails ? { ok, status, reason } : ok
+  );
+  if (causalStop && !causalStop.canPromoteMemory) return outcome(false, 'skipped', 'causal-stop-not-promotable');
   const deadlineAt = hookStartedAt + STOP_OBSERVABILITY_DEADLINE_MS;
-  if (now() >= deadlineAt) return false;
+  if (now() >= deadlineAt) return outcome(false, 'stale', 'deadline-before-refresh');
 
   const expected = expectedStopCausalSnapshot(entry, causalStop, turnSequence);
   const fresh = resolveEntry(vaultBase, input, entry?.provider);
@@ -1004,18 +1022,24 @@ export async function refreshStopObservability({
     || fresh.identity.canonicalConversationId !== sessionId
     || !fresh.entry?.session_file
     || fresh.entry.session_file !== entry?.session_file
-    || !sameStopCausalSnapshot(expected, stopEntryCausalSnapshot(fresh.entry))) return false;
+    || !sameStopCausalSnapshot(expected, stopEntryCausalSnapshot(fresh.entry))) {
+    return outcome(false, 'stale', 'causal-snapshot-changed');
+  }
 
   const runtime = readStore(vaultBase, sessionId);
   const signalSequence = Number(runtime?.observability_signal_sequence || 0);
   if (expectedSignalSequence !== undefined
-    && signalSequence !== Number(expectedSignalSequence)) return false;
-  if (now() >= deadlineAt) return false;
+    && signalSequence !== Number(expectedSignalSequence)) {
+    return outcome(false, 'stale', 'signal-sequence-changed');
+  }
+  if (now() >= deadlineAt) return outcome(false, 'stale', 'deadline-before-materialize');
 
   const roots = fresh.identity.provider === 'codex'
     ? resolveRoots(fresh.entry)
     : stopClaudeRoots(fresh.entry);
-  if (roots?.state !== 'complete' || !roots.rootPaths?.length) return false;
+  if (roots?.state !== 'complete' || !roots.rootPaths?.length) {
+    return outcome(false, 'missing', 'observability-roots-missing');
+  }
 
   const frontier = {
     canonical_session_id: sessionId,
@@ -1106,7 +1130,64 @@ export async function refreshStopObservability({
     withPublicationGuard,
     writeRegistryCheckpoint,
   }));
-  return !['stale', 'conflict', 'degraded', 'missing'].includes(result?.status);
+  const status = result?.status || (result?.ok === false ? 'failed' : 'published');
+  return outcome(!['stale', 'conflict', 'degraded', 'missing'].includes(status), status);
+}
+
+export function recordStopOutcome(vaultBase, {
+  sessionId = UNRESOLVED_SESSION_ID,
+  transcriptId = '',
+  turnId = UNRESOLVED_TURN_ID,
+  turnSequence = 0,
+  hook = 'Stop',
+  stage = 'iteration',
+  result = 'failed',
+  lockStatus = 'unknown',
+  durationMs = 0,
+  reason = '',
+} = {}) {
+  try {
+    return appendIterationOutcome(vaultBase, {
+      session_id: sessionId,
+      transcript_id: transcriptId,
+      turn_id: turnId,
+      turn_sequence: turnSequence,
+      hook,
+      stage,
+      result,
+      lock_status: lockStatus,
+      duration_ms: durationMs,
+      occurred_at: new Date().toISOString(),
+      reason,
+    });
+  } catch {
+    // O ledger é diagnóstico: um problema nele nunca deve bloquear a sessão nem publicar o erro.
+    return { written: false, result: 'failed', reason: 'outcome-ledger-write-failed' };
+  }
+}
+
+export function finalizeSessionRegistry(vaultBase, {
+  sessionId = '',
+  activationId = '',
+  turnId = '',
+  endedAt = '',
+} = {}) {
+  let disposition = 'ambiguous';
+  mutateSessionRegistry(vaultBase, (registry) => {
+    const closed = closeSessionActivation(registry, {
+      session_id: sessionId,
+      activation_id: activationId,
+      turn_id: turnId,
+      ended_at: endedAt,
+    });
+    disposition = closed.stopDisposition;
+    if (closed.stopDisposition === 'finalized') {
+      registry.version = closed.registry.version;
+      registry.sessions = closed.registry.sessions;
+    }
+    return null;
+  });
+  return disposition;
 }
 
 export async function main({
@@ -1128,6 +1209,14 @@ export async function main({
   const { identity, entry } = resolveSessionEntry(vaultBase, input);
   if (identity.state !== 'resolved' || !entry?.session_file) {
     const why = identity.diagnostics?.join('; ') || 'sessão não registrada';
+    recordStopOutcome(vaultBase, {
+      sessionId: identity.canonicalConversationId || input.session_id || 'unresolved',
+      transcriptId: identity.transcriptId || input.transcript_id || '',
+      turnId: input.turn_id || input.turnId || 'unresolved-turn',
+      hook: input.hook_event_name || 'Stop',
+      result: 'ambiguous',
+      reason: `identity-unresolved: ${why}`,
+    });
     process.stderr.write(`[wendkeep] Stop sem identidade segura: ${why}\n`);
     // stderr alone is a black hole here: Codex discards it, which is how an entire session of
     // lost turns produced no signal at all. systemMessage is what the UI actually shows.
@@ -1141,6 +1230,14 @@ export async function main({
   // no global (contaminaria nota alheia): pulamos e o backfill recupera depois.
   const sessionRel = entry.session_file;
   if (!sessionRel) {
+    recordStopOutcome(vaultBase, {
+      sessionId: identity.canonicalConversationId,
+      transcriptId: identity.transcriptId,
+      turnId: input.turn_id || input.turnId || 'unresolved-turn',
+      hook: input.hook_event_name || 'Stop',
+      result: 'ambiguous',
+      reason: 'session-note-not-registered',
+    });
     writeHookOutput({});
     return;
   }
@@ -1149,6 +1246,14 @@ export async function main({
     expectedType: 'file', label: 'nota de sessão do Stop',
   });
   if (!checkedSession.exists) {
+    recordStopOutcome(vaultBase, {
+      sessionId: identity.canonicalConversationId,
+      transcriptId: identity.transcriptId,
+      turnId: input.turn_id || input.turnId || 'unresolved-turn',
+      hook: input.hook_event_name || 'Stop',
+      result: 'failed',
+      reason: 'session-note-missing-on-disk',
+    });
     writeHookOutput({});
     return;
   }
@@ -1173,12 +1278,36 @@ export async function main({
         observedAt: new Date(0).toISOString(),
       });
     }
+    recordStopOutcome(vaultBase, {
+      sessionId,
+      transcriptId: identity.transcriptId,
+      turnId: requestedTurnId || 'unresolved-turn',
+      turnSequence: Number(entry.last_turn_sequence || 0),
+      hook: input.hook_event_name || 'Stop',
+      result: 'ambiguous',
+      reason: 'turn-not-proven-by-transcript',
+    });
     const message = 'wendkeep: Stop ambiguous; o turno solicitado não foi provado pelo transcript.';
     process.stderr.write(`[wendkeep] ${message}\n`);
     writeHookOutput({ systemMessage: message });
     return;
   }
   const turnId = turnIdentity.id;
+  const parsedTurn = tx.turns.find((turn) => turn.turnId === turnId);
+  if (parsedTurn?.status === 'aborted') {
+    recordStopOutcome(vaultBase, {
+      sessionId,
+      transcriptId: identity.transcriptId,
+      turnId,
+      turnSequence: turnIdentity.order,
+      hook: input.hook_event_name || 'Stop',
+      result: 'aborted',
+      reason: 'transcript-turn-aborted',
+    });
+    process.stderr.write(`[wendkeep] ${ABORTED_TURN_NOTICE}\n`);
+    writeHookOutput({ systemMessage: ABORTED_TURN_NOTICE });
+    return;
+  }
   const now = finalizing ? new Date() : null;
   const endedAt = finalizing ? formatLocalIso(now) : '';
   const causalStop = finalizing
@@ -1269,6 +1398,17 @@ export async function main({
   }
   if (shouldAbortStopAfterStaging(causalStop, memoryAttempt)) {
     const disposition = memoryAttempt?.disposition || causalStop?.stopDisposition || 'ambiguous';
+    recordStopOutcome(vaultBase, {
+      sessionId,
+      transcriptId: identity.transcriptId,
+      turnId,
+      turnSequence: stopTurnSequence,
+      hook: input.hook_event_name || 'Stop',
+      result: disposition === 'duplicate' && memoryAttempt?.state === 'duplicate'
+        ? 'duplicate'
+        : 'skipped',
+      reason: `staging-${disposition}`,
+    });
     if (disposition === 'duplicate' && memoryAttempt?.state === 'duplicate') {
       writeHookOutput({});
       return;
@@ -1278,7 +1418,19 @@ export async function main({
     writeHookOutput({ systemMessage: message });
     return;
   }
+  const iterationStartedAt = clock();
   const logged = insertIteration(sessionPath, buildIterationBlock(tx, input), turnId, tx, vaultBase);
+  recordStopOutcome(vaultBase, {
+    sessionId,
+    transcriptId: identity.transcriptId,
+    turnId,
+    turnSequence: stopTurnSequence,
+    hook: input.hook_event_name || 'Stop',
+    result: logged.result,
+    lockStatus: logged.result === 'busy' ? 'busy' : logged.confirmed ? 'acquired' : 'unknown',
+    durationMs: Math.max(0, clock() - iterationStartedAt),
+    reason: `note-${logged.reason}`,
+  });
 
   try {
     applyLinearLinks(sessionPath, tx, vaultBase, sessionRel);
@@ -1287,7 +1439,7 @@ export async function main({
   }
 
   try {
-    await refreshObservability({
+    const refreshed = await refreshObservability({
       vaultBase,
       input,
       sessionPath,
@@ -1298,9 +1450,33 @@ export async function main({
       hookStartedAt,
     }, {
       now: clock,
+      returnDetails: true,
+    });
+    const observability = typeof refreshed === 'boolean'
+      ? { status: refreshed ? 'published' : 'failed', reason: 'legacy-boolean-result' }
+      : (refreshed || { status: 'missing', reason: 'empty-result' });
+    recordStopOutcome(vaultBase, {
+      sessionId,
+      transcriptId: identity.transcriptId,
+      turnId,
+      turnSequence: stopTurnSequence,
+      hook: input.hook_event_name || 'Stop',
+      stage: 'observability',
+      result: observability.status,
+      reason: observability.reason || 'observability-refresh',
     });
   } catch (error) {
-    process.stderr.write(`[wendkeep] Token usage falhou: ${error.message}\n`);
+    recordStopOutcome(vaultBase, {
+      sessionId,
+      transcriptId: identity.transcriptId,
+      turnId,
+      turnSequence: stopTurnSequence,
+      hook: input.hook_event_name || 'Stop',
+      stage: 'observability',
+      result: 'failed',
+      reason: 'observability-refresh-threw',
+    });
+    process.stderr.write(`[wendkeep] Observabilidade falhou: ${error.message}\n`);
   }
 
   if (!finalizing) {
@@ -1310,7 +1486,7 @@ export async function main({
       session_file: sessionRel,
       last_session_file: control.last_session_file || sessionRel,
       session_id: sessionId,
-      last_logged_turn_id: logged ? turnId : control.last_logged_turn_id,
+      last_logged_turn_id: confirmedLoggedTurnId(control.last_logged_turn_id, turnId, logged),
     });
     upsertSessionRegistry(vaultBase, sessionId, {
       session_file: sessionRel,
@@ -1319,7 +1495,7 @@ export async function main({
       // (definido no SessionStart). Usar control.started_at contaminava com o
       // started_at de sessões concorrentes que sobrescrevem o ponteiro global.
       ended_at: '',
-      last_turn_id: logged ? turnId : control.last_logged_turn_id,
+      last_turn_id: confirmedLoggedTurnId(control.last_logged_turn_id, turnId, logged),
       transcript_path: transcriptPath,
       transcript_id: identity.transcriptId,
       provider: identity.provider,
@@ -1333,7 +1509,6 @@ export async function main({
     createLinkedNotes(vaultBase, formatDate(now), sessionRel, tx),
     findLinkedDerivedNotes(vaultBase, sessionRel),
   );
-  finalizeSessionFile(sessionPath, tx, created, endedAt, vaultBase);
   // Link durável sessão↔change: uma seção "Mudanças" ANTES de `## Encerramento`. O append antigo
   // (após o Encerramento) era apagado a cada reopen por stripClosingSection, perdendo a aresta do
   // grafo quando a change fechava antes do turno seguinte. Aqui sobrevive ao reopen e acumula toda
@@ -1349,16 +1524,6 @@ export async function main({
       ), { vaultBase });
     }
   } catch { /* nunca derruba o Stop */ }
-  writeControl(vaultBase, {
-    status: 'inactive',
-    session_file: '',
-    last_session_file: sessionRel,
-    started_at: control.started_at,
-    ended_at: endedAt,
-    session_id: sessionId,
-    last_logged_turn_id: turnId,
-  });
-
   const memoryResult = projectStopMemoryAttempt(vaultBase, memoryAttempt);
   if (memoryResult.status === 'legacy') {
     mutateSessionRegistry(vaultBase, (registry) => {
@@ -1377,6 +1542,62 @@ export async function main({
   } else {
     recordStopMemoryOutcome(vaultBase, memoryAttempt, memoryResult);
   }
+
+  // A memória compartilhada é um consumidor causal do fechamento. Se o projetor estiver
+  // ocupado ou falhar, o outbox é a autoridade de retry e a sessão não pode ser marcada como
+  // encerrada: fechar aqui criaria uma sessão `done` sem a publicação que o fechamento promete.
+  if (memoryResult.status === 'degraded') {
+    upsertSessionRegistry(vaultBase, sessionId, {
+      session_file: sessionRel,
+      status: 'active',
+      ended_at: '',
+      last_turn_id: confirmedLoggedTurnId(control.last_logged_turn_id, turnId, logged),
+      transcript_path: transcriptPath,
+      transcript_id: identity.transcriptId,
+      provider: identity.provider,
+    });
+    writeControl(vaultBase, {
+      ...control,
+      status: 'active',
+      session_file: sessionRel,
+      last_session_file: sessionRel,
+      session_id: sessionId,
+      ended_at: '',
+      last_logged_turn_id: confirmedLoggedTurnId(control.last_logged_turn_id, turnId, logged),
+    });
+    pingObsidianVault(input.obsidian_api_key);
+    writeHookOutput({
+      systemMessage: 'wendkeep: memória compartilhada degradada; outbox preservado para retry e sessão mantida ativa.',
+    });
+    return;
+  }
+
+  finalizeSessionFile(sessionPath, tx, created, endedAt, vaultBase);
+
+  // Só fecha a activation depois do último consumidor causal (memória compartilhada) ter lido
+  // a activation ainda ativa. O registry fechado alimenta a visão CURRENT_SESSION abaixo.
+  let registryFinalization = 'ambiguous';
+  try {
+    registryFinalization = finalizeSessionRegistry(vaultBase, {
+      sessionId,
+      activationId: causalStop?.activationId || '',
+      turnId,
+      endedAt,
+    });
+  } catch (error) {
+    process.stderr.write(`[wendkeep] fechamento do registry falhou: ${error.message}\n`);
+  }
+
+  const registryClosed = registryFinalization === 'finalized' || registryFinalization === 'duplicate';
+  writeControl(vaultBase, {
+    status: registryClosed ? 'inactive' : 'active',
+    session_file: registryClosed ? '' : sessionRel,
+    last_session_file: sessionRel,
+    started_at: control.started_at,
+    ended_at: registryClosed ? endedAt : '',
+    session_id: sessionId,
+    last_logged_turn_id: confirmedLoggedTurnId(control.last_logged_turn_id, turnId, logged),
+  });
 
   // Reconstrói índice (camada fria) + digest (camada quente) ao finalizar. Nunca derruba o Stop.
   try {

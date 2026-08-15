@@ -17,6 +17,7 @@ on:
 
 permissions:
   contents: write
+  id-token: write
 
 jobs:
   tag-and-release:
@@ -27,7 +28,17 @@ jobs:
           fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+      - name: Publish to npm when the version is new
+        run: |
+          PKG=$(node -p "require('./package.json').name")
+          VERSION=$(node -p "require('./package.json').version")
+          if npm view "$PKG@$VERSION" version --prefer-online >/dev/null 2>&1; then
+            echo "$PKG@$VERSION já está no registry — publish ignorado"
+          else
+            npm publish
+          fi
       - name: Ensure tag + sync release from CHANGELOG
         env:
           GH_TOKEN: ${{ github.token }}

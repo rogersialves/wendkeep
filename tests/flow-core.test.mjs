@@ -1,6 +1,5 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
 import {
   existsSync, mkdirSync, mkdtempSync, readFileSync, rmdirSync, rmSync, symlinkSync, unlinkSync, writeFileSync,
 } from 'node:fs';
@@ -9,33 +8,30 @@ import { join } from 'node:path';
 import { writeSessionRegistry } from '../hooks/obsidian-common.mjs';
 import { finishFlow, flowStatus, isProtectedFlowPath, promoteFlow, resolveFlowSession, startFlow } from '../hooks/flow-core.mjs';
 import { readFlow } from '../hooks/vault-runtime-store.mjs';
-
-function git(cwd, ...args) {
-  const result = spawnSync('git', args, { cwd, encoding: 'utf8' });
-  assert.equal(result.status, 0, `${args.join(' ')}\n${result.stderr}`);
-}
+import { copyGitFixture, git } from './helpers/git-fixture.mjs';
 
 function fixture({ sensorStatus = 0, sensorCommand = '', twoSessions = false } = {}) {
-  const root = mkdtempSync(join(tmpdir(), 'wk-flow-core-'));
-  const vault = join(root, '.vault');
-  const sessionRel = '02-Sessões/2026/07-JUL/DIA 26/flow.md';
-  const sessionPath = join(vault, ...sessionRel.split('/'));
-  mkdirSync(join(root, 'src'), { recursive: true });
-  mkdirSync(join(vault, '.brain'), { recursive: true });
-  mkdirSync(join(sessionPath, '..'), { recursive: true });
-  writeFileSync(join(root, 'src', 'app.mjs'), 'export const value = 1;\n');
-  writeFileSync(join(root, 'other.txt'), 'base\n');
-  writeFileSync(join(root, 'package.json'), '{"name":"fixture"}\n');
-  writeFileSync(join(root, '.gitignore'), '.vault/\n');
-  writeFileSync(join(root, 'wendkeep.sensors.json'), JSON.stringify({
-    version: 1,
-    sensors: [{
-      id: 'focused',
-      severity: 'critical',
-      command: sensorCommand || `node -e "process.exit(${sensorStatus})"`,
-    }],
-  }));
-  writeFileSync(sessionPath, `---
+  const key = `flow-core-${JSON.stringify({ sensorStatus, sensorCommand, twoSessions })}`;
+  const root = copyGitFixture(key, (templateRoot) => {
+    const vault = join(templateRoot, '.vault');
+    const sessionRel = ['02-Sessões', '2026', '07-JUL', 'DIA 26', 'flow.md'].join('/');
+    const sessionPath = join(vault, ...sessionRel.split('/'));
+    mkdirSync(join(templateRoot, 'src'), { recursive: true });
+    mkdirSync(join(vault, '.brain'), { recursive: true });
+    mkdirSync(join(sessionPath, '..'), { recursive: true });
+    writeFileSync(join(templateRoot, 'src', 'app.mjs'), 'export const value = 1;\n');
+    writeFileSync(join(templateRoot, 'other.txt'), 'base\n');
+    writeFileSync(join(templateRoot, 'package.json'), '{"name":"fixture"}\n');
+    writeFileSync(join(templateRoot, '.gitignore'), '.vault/\n');
+    writeFileSync(join(templateRoot, 'wendkeep.sensors.json'), JSON.stringify({
+      version: 1,
+      sensors: [{
+        id: 'focused',
+        severity: 'critical',
+        command: sensorCommand || `node -e "process.exit(${sensorStatus})"`,
+      }],
+    }));
+    writeFileSync(sessionPath, `---
 type: session
 session_id: session-1
 status: active
@@ -49,16 +45,17 @@ status: active
 
 ## Encerramento
 `);
-  const sessions = {
-    'session-1': { status: 'active', provider: 'codex', session_file: sessionRel, started_at: '2026-07-26T10:00:00.000Z' },
-  };
-  if (twoSessions) sessions['session-2'] = { status: 'active', provider: 'claude', session_file: '02-Sessões/other.md' };
-  writeSessionRegistry(vault, { version: 2, sessions });
-  git(root, 'init', '-q');
-  git(root, 'config', 'user.email', 'flow@example.invalid');
-  git(root, 'config', 'user.name', 'FLOW Test');
-  git(root, 'add', '.');
-  git(root, 'commit', '-qm', 'base');
+    const sessions = {
+      'session-1': { status: 'active', provider: 'codex', session_file: sessionRel, started_at: '2026-07-26T10:00:00.000Z' },
+    };
+    if (twoSessions) sessions['session-2'] = { status: 'active', provider: 'claude', session_file: '02-Sessões/other.md' };
+    writeSessionRegistry(vault, { version: 2, sessions });
+    git(templateRoot, 'add', '.');
+    git(templateRoot, 'commit', '-qm', 'base');
+  }, { prefix: 'wk-flow-core' });
+  const vault = join(root, '.vault');
+  const sessionRel = ['02-Sessões', '2026', '07-JUL', 'DIA 26', 'flow.md'].join('/');
+  const sessionPath = join(vault, ...sessionRel.split('/'));
   return { root, vault, sessionRel, sessionPath };
 }
 

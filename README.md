@@ -395,7 +395,11 @@ boundary/registry inseguro também resulta em memória bloqueada, comando seguro
 e JSON estruturado, nunca em um falso “bundle íntegro” ou stack trace. Veja sintaxe, pré-condições e
 falhas fechadas em [memória e curadoria](docs/pt-BR/commands/memory.md).
 
-As notas de sessão usam um único snapshot vivo `## Agentes, tokens e custos`. Os hooks do agente principal e dos subagents recompõem o bloco atomicamente, incluindo custo, dimensões de tokens, reasoning e effort por modelo/origem. No Codex, prompts de subagents registram o rollout para observabilidade sem avançar a sequência do agente principal; `SubagentStop` lê o filho em `agent_transcript_path` e só persiste o sinal quando seu `parent_thread_id` corresponde a um root validado da sessão. O Stop principal usa o mapeamento causal de `turn_id` do registry antes da ordem local do transcript. Para recuperar marcadores ausentes com a conversa aberta, `hook session-backfill` é dry-run por padrão e nunca grava um turno Codex sem `task_complete`.
+As notas de sessão usam um único snapshot vivo `## Agentes, tokens e custos`. Os hooks do agente principal e dos subagents recompõem o bloco atomicamente, incluindo custo, dimensões de tokens, reasoning e effort por modelo/origem. No Codex, prompts de subagents registram o rollout para observabilidade sem avançar a sequência do agente principal; `SubagentStop` lê o filho em `agent_transcript_path` e só persiste o sinal quando seu `parent_thread_id` corresponde a um root validado da sessão. O Stop principal usa o mapeamento causal de `turn_id` do registry antes da ordem local do transcript. Cada tentativa terminal deixa um recibo sanitizado e idempotente em `.brain/SESSION_ITERATION_OUTCOMES.jsonl`, distinguindo inserção, duplicata, caminho pulado, abortado, lock ocupado, falha e status de observabilidade; o cursor só avança após confirmação da nota. `subagent_notification` não vira prompt, `turn_aborted` é explícito e a saída de `custom_tool_call` não é contada duas vezes. Para recuperar marcadores ausentes com a conversa aberta, `hook session-backfill` é dry-run por padrão e nunca grava um turno Codex sem `task_complete`.
+
+No encerramento definitivo, a activation e a sessão só passam a `done` no
+`SESSION_REGISTRY.json` depois de memória/observabilidade; `CURRENT_SESSION.md` é uma visão
+derivada, não a autoridade de identidade, e não lista sessões finalizadas.
 
 ## Memória retroativa (`import`) — instale hoje, lembre de ontem
 

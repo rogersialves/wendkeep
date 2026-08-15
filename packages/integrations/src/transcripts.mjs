@@ -1,5 +1,5 @@
 import {
-  isBootstrapPrompt,
+  isSyntheticTranscriptText,
   redactSecrets,
   sanitizeAssistantMessage,
 } from './prompt-content.mjs';
@@ -20,14 +20,8 @@ function extractContentText(content) {
     .trim();
 }
 
-const SYNTHETIC_EVENT_TAG = /^<\/?(?:task-notification|system-reminder|local-command-stdout|local-command-stderr|command-message|command-name|command-args|user-prompt-submit-hook|ide_selection|ide_opened_file|environment_context)\b/i;
-
 function shouldIgnoreUserText(text) {
-  const trimmed = String(text || '').trim();
-  return SYNTHETIC_EVENT_TAG.test(trimmed)
-    || isBootstrapPrompt(trimmed)
-    || /^Generate a concise( UI)? title/i.test(trimmed)
-    || /^You are a helpful assistant\. You will be presented with a user prompt/i.test(trimmed);
+  return isSyntheticTranscriptText(text);
 }
 
 function addUnique(list, value) {
@@ -180,6 +174,16 @@ export function completedCodexTurnIdsContent(content = '') {
   return completed;
 }
 
+export function abortedCodexTurnIdsContent(content = '') {
+  const aborted = new Set();
+  for (const event of jsonLines(content)) {
+    if (event.type !== 'event_msg' || event.payload?.type !== 'turn_aborted') continue;
+    const turnId = String(event.payload?.turn_id || event.turn_id || '').trim();
+    if (turnId) aborted.add(turnId);
+  }
+  return aborted;
+}
+
 export function parseCodexTranscriptContent(content, options = {}) {
   const result = createResult('codex');
   const eventUserPrompts = [];
@@ -206,6 +210,11 @@ export function parseCodexTranscriptContent(content, options = {}) {
     if (event.type === 'event_msg' && event.payload?.type === 'task_started') {
       result.latestTurnId = event.payload.turn_id || result.latestTurnId;
       ensureTurn(result.latestTurnId, event.timestamp);
+      continue;
+    }
+    if (event.type === 'event_msg' && event.payload?.type === 'turn_aborted') {
+      const turn = ensureTurn(event.payload.turn_id || event.turn_id || result.latestTurnId, event.timestamp);
+      turn.status = 'aborted';
       continue;
     }
     if (event.type === 'turn_context') {
@@ -279,6 +288,26 @@ export function parseCodexTranscriptContent(content, options = {}) {
           addUnique(turn.changedFiles, path);
         }
       }
+    }
+    if (payload.type === 'custom_tool_call') {
+      const name = payload.name || payload.tool_name || payload.tool || 'custom_tool_call';
+      const turn = ensureTurn(payload.turn_id || event.turn_id || result.latestTurnId, event.timestamp);
+      addUnique(result.tools, name);
+      addUnique(turn.tools, name);
+      const parsed = parseToolArguments(payload.arguments ?? payload.input ?? payload.parameters);
+      const combined = typeof parsed.raw === 'string' ? parsed.raw : toolArgumentText(parsed);
+      for (const path of extractPaths(combined, paths)) {
+        addUnique(result.consultedFiles, path);
+        addUnique(turn.consultedFiles, path);
+      }
+      for (const path of extractPatchFiles(combined)) {
+        addUnique(result.changedFiles, path);
+        addUnique(turn.changedFiles, path);
+      }
+    }
+    if (payload.type === 'custom_tool_call_output') {
+      // A custom tool output closes an existing call; it is deliberately not a second tool.
+      ensureTurn(payload.turn_id || event.turn_id || result.latestTurnId, event.timestamp);
     }
     if (payload.type === 'tool_search_call') {
       const turn = ensureTurn(payload.turn_id || event.turn_id || result.latestTurnId, event.timestamp);

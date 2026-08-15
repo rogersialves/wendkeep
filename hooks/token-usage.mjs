@@ -14,6 +14,7 @@ import {
   normalizeClaudeUsage,
   normalizeCodexUsage,
 } from '../packages/integrations/src/transcript-usage.mjs';
+import { isSyntheticTranscriptText } from '../packages/integrations/src/prompt-content.mjs';
 export {
   addUsage,
   emptyTokenUsage,
@@ -277,17 +278,7 @@ function extractTextContent(content) {
 }
 
 function shouldIgnoreUserText(text) {
-  return /^# AGENTS\.md instructions/.test(text)
-    || text.startsWith('<environment_context>')
-    || text.startsWith('<permissions instructions>')
-    || text.startsWith('<system-reminder>')
-    || text.startsWith('<local-command-caveat>')
-    || text.startsWith('<command-name>')
-    || text.startsWith('<ide_')
-    || text.startsWith('## Memory')
-    || text.includes('You are Codex, a coding agent')
-    || /^Generate a concise( UI)? title/i.test(text)
-    || /^You are a helpful assistant\. You will be presented with a user prompt/i.test(text);
+  return isSyntheticTranscriptText(text);
 }
 
 function emptyParseResult(transcriptPath) {
@@ -368,6 +359,17 @@ function parseCodexLines(lines, result) {
     if (event.type === 'response_item' && payload.type === 'function_call') {
       result.toolCalls += 1;
       addUnique(result.tools, payload.name || 'function_call');
+      continue;
+    }
+
+    if (event.type === 'response_item' && payload.type === 'custom_tool_call') {
+      result.toolCalls += 1;
+      addUnique(result.tools, payload.name || payload.tool_name || payload.tool || 'custom_tool_call');
+      continue;
+    }
+
+    if (event.type === 'response_item' && payload.type === 'custom_tool_call_output') {
+      // The output closes the call; it is not a second tool invocation and never a prompt.
       continue;
     }
 

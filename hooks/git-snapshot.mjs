@@ -31,6 +31,16 @@ function gitOptional(cwd, args, { spawn = spawnSync } = {}) {
   return result.status === 0 ? String(result.stdout || '').trim() : '';
 }
 
+function parseGitConfigPaths(output) {
+  const values = new Map();
+  for (const line of String(output || '').split(/\r?\n/).filter(Boolean)) {
+    const separator = line.search(/\s/);
+    if (separator < 0) continue;
+    values.set(line.slice(0, separator).toLowerCase(), line.slice(separator + 1).trim());
+  }
+  return values;
+}
+
 function fingerprintFsEntry(path, unsafePaths = [], label = '') {
   let stat;
   try {
@@ -83,10 +93,16 @@ function fingerprintGitIndirection(path, unsafePaths) {
 }
 
 function gitMetadataSnapshot(root, options = {}) {
-  const gitDir = resolveGitPath(root, git(root, ['rev-parse', '--git-dir'], options));
-  const commonDir = resolveGitPath(root, git(root, ['rev-parse', '--git-common-dir'], options));
-  const configuredHooks = gitOptional(root, ['config', '--path', '--get', 'core.hooksPath'], options);
-  const configuredExcludes = gitOptional(root, ['config', '--path', '--get', 'core.excludesFile'], options);
+  const [gitDirValue, commonDirValue] = String(git(root, [
+    'rev-parse', '--git-dir', '--git-common-dir',
+  ], options)).trim().split(/\r?\n/);
+  const gitDir = resolveGitPath(root, gitDirValue);
+  const commonDir = resolveGitPath(root, commonDirValue);
+  const configuredPaths = parseGitConfigPaths(gitOptional(root, [
+    'config', '--path', '--get-regexp', '^core\\.(hooksPath|excludesFile)$',
+  ], options));
+  const configuredHooks = configuredPaths.get('core.hookspath') || '';
+  const configuredExcludes = configuredPaths.get('core.excludesfile') || '';
   const hooksPath = configuredHooks ? resolveGitPath(root, configuredHooks) : join(commonDir, 'hooks');
   const unsafePaths = [];
   const targets = [
@@ -508,7 +524,10 @@ function worktreeFingerprint(root, relPath, options = {}, diagnostics = {
 
 export function captureGitSnapshot(projectRoot, options = {}) {
   const start = resolve(projectRoot);
-  const root = realpathSync.native(resolve(String(git(start, ['rev-parse', '--show-toplevel'], options)).trim()));
+  const [rootValue, headValue] = String(git(start, [
+    'rev-parse', '--show-toplevel', '--verify', 'HEAD',
+  ], options)).trim().split(/\r?\n/);
+  const root = realpathSync.native(resolve(rootValue));
   const canonicalRoot = canonicalFsPath(root);
   const expectedRoot = options._expectedGitlinkRoot ? canonicalFsPath(options._expectedGitlinkRoot) : '';
   if (expectedRoot && canonicalRoot !== expectedRoot) {
@@ -525,7 +544,7 @@ export function captureGitSnapshot(projectRoot, options = {}) {
   }
   seen.add(canonicalRoot);
   options = { ...options, _gitlinkDepth: depth, _gitlinkSeen: [...seen] };
-  const head = String(git(root, ['rev-parse', '--verify', 'HEAD'], options)).trim();
+  const head = String(headValue || '').trim();
   const status = git(root, ['status', '--porcelain=v2', '-z', '--untracked-files=all'], { ...options, binary: true });
   const fingerprints = {};
   const dirtyPaths = new Set();

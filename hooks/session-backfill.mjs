@@ -137,7 +137,7 @@ export function backfillSessions({ vaultBase, write = false, limit = 0, session 
           tx,
           vaultBase,
         );
-        if (inserted) {
+        if (inserted.result === 'inserted') {
           report.inserted += 1;
           sessionReport.inserted += 1;
         }

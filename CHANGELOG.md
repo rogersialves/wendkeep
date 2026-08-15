@@ -4,6 +4,25 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.68.5] — 2026-08-14
+
+### Fixed
+
+- **O Stop passa a deixar um resultado durável por sessão, turno e estágio.** O ledger local,
+  append-only,
+  sanitizado distingue inserção, duplicata, caminho pulado, abortado, lock ocupado, falha e status
+  de observabilidade; o cursor só avança após confirmação da nota.
+- **A importação Codex compartilha a normalização de conteúdo sintético e ferramentas.**
+  `subagent_notification` não vira prompt, `turn_aborted` é explícito e a saída de uma
+  `custom_tool_call` não é contada como uma segunda chamada.
+- **O encerramento de uma sessão alinha a projeção e a autoridade causal.** O Stop marca a
+  activation e a sessão como `done` no `SESSION_REGISTRY.json` somente depois da publicação de
+  memória/observabilidade; `CURRENT_SESSION.md` continua sendo uma visão derivada e não lista
+  sessões já finalizadas.
+- **O release automático publica no npm por OIDC antes de criar tag e GitHub Release.** O
+  `auto-tag.yml` usa Node 24, prepara o registry público, ignora versões já publicadas com
+  `--prefer-online` e deixa a provenance ser gerada pela própria publicação confiável.
+
 ## [0.68.4] — 2026-08-14
 
 ### Fixed
