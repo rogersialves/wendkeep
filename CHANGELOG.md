@@ -4,6 +4,15 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.68.6] — 2026-08-16
+
+### Fixed
+
+- **A orientação de atualização em monorepos pnpm agora resolve a versão publicada antes da
+  instalação.** README e guias bilíngues deixam de oferecer `X.Y.Z` como argumento copiável,
+  explicam o cooldown silencioso de `@latest` e orientam a regeneração segura do lock quando a
+  integridade do tarball divergir.
+
 ## [0.68.5] — 2026-08-14
 
 ### Fixed
