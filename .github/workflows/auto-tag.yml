@@ -14,6 +14,7 @@ on:
     paths:
       - 'package.json'
       - 'CHANGELOG.md'
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -21,6 +22,7 @@ permissions:
 
 jobs:
   tag-and-release:
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
