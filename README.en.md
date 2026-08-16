@@ -357,7 +357,9 @@ Codex uses `session_id`/`turn_id` plus transcript order, with no artificial caus
 
 ### Injection and budgets
 
-`brain-inject` delivers the same revision/hash on `startup`, `/clear`, and `/compact` `SessionStart` events, always placing CORE and SHARED before change context. The full envelope is capped at 24 KiB; CORE reserves up to 4 KiB, SHARED up to 6 KiB, and each line is capped at 320 characters. Under pressure, lessons are removed first, then non-current changes. CORE and SHARED are never prefix-sliced: a missing, invalid, or over-budget layer becomes a visible, repairable `<wk_memory_error>`.
+`CORE.md` is the only manual layer: it accepts up to 40 lines, warns from 35, keeps a 4 KiB ceiling, and caps each line at 320 characters. `SHARED_MEMORY.md` is generated exclusively by the projector and ledger; never edit it to repair state. `brain-inject` delivers the same revision/hash on `startup`, `/clear`, and `/compact` `SessionStart` events, always placing CORE and SHARED before change context. The full envelope is capped at 24 KiB; SHARED reserves up to 6 KiB. Under pressure, lessons are removed first, then non-current changes. CORE and SHARED are never prefix-sliced: a missing, invalid, or over-budget layer becomes a visible, repairable `<wk_memory_error>`.
+
+`memory status --gate` and `validate-memory --vault` also check semantic coverage: they report a code, counts, and active/projected/missing keys. An empty v2 bundle is neutral; a missing projectable event, placeholders as the only content, or an unresolved decision link becomes an explicit degraded/blocking diagnosis without printing memory values.
 
 `DIGEST.md` is no longer the operational handoff: it remains the `/brain-recall` bridge and legacy-vault fallback. A vault without SHARED receives CORE+DIGEST with a deprecation warning; migrate during the compatibility window:
 

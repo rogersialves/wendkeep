@@ -437,6 +437,29 @@ function conflictCandidate(memoryKey, events, currentEvent = null) {
   };
 }
 
+function conflictReviewEvent(candidate, candidateCount = 1) {
+  const source = candidate.events?.[0] || {};
+  const memoryKey = sanitizeMemoryText(candidate.memory_key || 'unknown');
+  const eventCount = Array.isArray(candidate.event_ids) ? candidate.event_ids.length : 0;
+  return {
+    v: 1,
+    event_id: `mem-review-${candidate.candidate_id}`,
+    project_id: source.project_id || '',
+    memory_key: candidate.memory_key,
+    operation: 'assert',
+    value: `[revisão pendente: ${memoryKey}; candidates: ${candidateCount}; events: ${eventCount}]`,
+    authority: 'candidate',
+    canonical_session_id: source.canonical_session_id || 'memory-reducer',
+    activation_id: source.activation_id || 'memory-reducer',
+    activation_epoch: Number.isInteger(source.activation_epoch) ? source.activation_epoch : 0,
+    turn_sequence: 0,
+    source_turn_id: 'memory-review',
+    observed_at: source.observed_at || new Date(0).toISOString(),
+    evidence: ['MEMORY_CANDIDATES.jsonl'],
+    review_pending: true,
+  };
+}
+
 function sortedObject(entries) {
   return Object.fromEntries([...entries].sort(([left], [right]) => left.localeCompare(right)));
 }
@@ -753,14 +776,19 @@ export function reduceMemoryEvents(inputEvents = [], {
       && !resolvedCandidateIds.has(item.candidate_id));
   unresolvedCandidates.sort((left, right) => left.candidate_id.localeCompare(right.candidate_id));
   superseded.sort((left, right) => left.event_id.localeCompare(right.event_id));
-  const activeEvents = Object.entries(recordObject).map(([memoryKey, record]) => ({
-    ...record.source,
-    memory_key: memoryKey,
-    operation: 'assert',
-    value: record.value,
-  }));
   const eventCursor = events.at(-1)?.event_id || 'none';
   const stateHash = hashMemoryValue({ state, tombstones: tombstoneObject });
+  const activeEvents = [
+    ...Object.entries(recordObject).map(([memoryKey, record]) => ({
+      ...record.source,
+      memory_key: memoryKey,
+      operation: 'assert',
+      value: record.value,
+    })),
+    ...unresolvedCandidates.map((candidate) => (
+      conflictReviewEvent(candidate, unresolvedCandidates.length)
+    )),
+  ];
 
   return {
     state,

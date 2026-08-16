@@ -65,8 +65,10 @@ export function resolveSessionIdentity(vaultBase, input = {}, provider = detectP
 export function resolveSessionEntry(vaultBase, input = {}, provider = detectProvider()) {
   const identity = resolveSessionIdentity(vaultBase, input, provider);
   if (identity.state !== 'resolved') return { identity, entry: null };
+  const entry = readSessionRegistry(vaultBase).sessions?.[identity.canonicalConversationId] || null;
+  const workSessionId = entry?.work_session_id ? String(entry.work_session_id) : '';
   return {
-    identity,
-    entry: readSessionRegistry(vaultBase).sessions?.[identity.canonicalConversationId] || null,
+    identity: workSessionId ? { ...identity, work_session_id: workSessionId } : identity,
+    entry,
   };
 }

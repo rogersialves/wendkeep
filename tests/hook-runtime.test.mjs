@@ -4,11 +4,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { bindProjectVault } from '../src/project-vault.mjs';
+import { resolveSessionEntry } from '../hooks/session-identity.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const BIN = join(here, '..', 'bin', 'wendkeep.mjs');
@@ -62,5 +63,43 @@ test('hook fails closed when no project vault is configured', () => {
     assert.deepEqual(readdirSync(fakeHome), [], 'no fallback vault or session file was created');
   } finally {
     rmSync(fakeHome, { recursive: true, force: true });
+  }
+});
+
+test('[req:MEM-HYB-10] session ensure persists work_session_id without replacing canonical identity', () => {
+  const neutralCwd = mkdtempSync(join(tmpdir(), 'wk-cwd-work-session-'));
+  const vault = join(neutralCwd, '.vault');
+  const workSessionId = 'wk-fixture-example-work-session';
+  try {
+    bindProjectVault({ projectRoot: neutralCwd, vaultPath: vault });
+    const env = { ...process.env, OBSIDIAN_VAULT_PATH: join(neutralCwd, 'wrong-global-vault') };
+    delete env.CLAUDECODE;
+    delete env.CLAUDE_CODE_SESSION_ID;
+    delete env.CLAUDE_PROJECT_DIR;
+    const transcript = join(neutralCwd, 'rollout.jsonl');
+    writeFileSync(transcript, `${JSON.stringify({
+      type: 'session_meta',
+      payload: { id: 'runtime-rollout', session_id: 'runtime-session', model_provider: 'openai' },
+    })}\n`);
+    const r = runHook('session-ensure', {
+      env,
+      cwd: neutralCwd,
+      input: {
+        transcript_path: transcript,
+        session_id: 'runtime-session',
+        shared: { work_session_id: workSessionId },
+      },
+    });
+
+    assert.equal(r.status, 0, `exit 0; stderr=\n${r.stderr}`);
+    const registry = JSON.parse(readFileSync(join(vault, '.brain', 'SESSION_REGISTRY.json'), 'utf8'));
+    assert.equal(registry.sessions['runtime-session'].work_session_id, workSessionId);
+
+    const resolved = resolveSessionEntry(vault, { transcript_path: transcript, session_id: 'runtime-session' }, 'codex');
+    assert.equal(resolved.identity.canonicalConversationId, 'runtime-session');
+    assert.equal(resolved.identity.work_session_id, workSessionId);
+    assert.equal(resolved.entry.work_session_id, workSessionId);
+  } finally {
+    rmSync(neutralCwd, { recursive: true, force: true });
   }
 });

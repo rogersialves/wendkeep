@@ -7,6 +7,10 @@
 Inspecionar e curar CORE, SHARED, ledger, outbox, attempts e candidates sem confundir autoria
 canônica com estado operacional gerado.
 
+`CORE.md` é a única camada manual e canônica: aceita até 40 linhas, alerta a partir de 35,
+mantém o teto de 4 KiB e limita cada linha a 320 caracteres. `SHARED_MEMORY.md` é uma projeção
+gerada pelo ledger e não deve ser editado à mão.
+
 ## Quando usar
 
 Use no CI, antes de verify/archive, diante de avisos do doctor ou para decidir candidates.
@@ -113,7 +117,12 @@ npx wendkeep validate-memory --vault <cofre-v2>
   divergente, incompleta ou ambígua mantém o candidate para curadoria. `memory repair` compara o
   replay anterior e o atual e só migra checkpoint+espelho com identidade exata, backup, audit e
   CAS; ele não reordena, reescreve nem acrescenta evento ao ledger.
-- `validate-memory <CORE.md>` valida cap de 25 linhas, seções e segredos.
+- `validate-memory <CORE.md>` valida cap rígido de 40 linhas, alerta em 35, 4 KiB, 320 caracteres
+  por linha, seções e segredos/PII.
+- `validate-memory --vault` também compara a cobertura semântica do ledger com SHARED e imprime
+  código, contagens e chaves ativas/projetadas/ausentes. Bundle v2 vazio é neutro; evento
+  projetável ausente, placeholders exclusivos ou link de decisão morto geram diagnóstico
+  degradado/bloqueante sem expor valores.
 - `validate-memory --vault` exige bundle v2 completo; não é o gate correto para vault legado.
 - Para `recover-attempt`, exit `0` indica dry-run/apply válido, inclusive `unchanged`; exit `1`
   indica falha de pré-condição, autoridade, CAS, topologia ou lock; exit `2` indica

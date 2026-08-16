@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -37,6 +37,20 @@ function runHook(script, { project, vault, input }) {
   return spawnSync(process.execPath, [script], {
     cwd: project,
     env: cleanSyntheticHookEnv(vault),
+    encoding: 'utf8',
+    input: JSON.stringify(input),
+  });
+}
+
+function runHookAs(provider, script, { project, vault, input }) {
+  const env = cleanSyntheticHookEnv(vault);
+  if (provider === 'claude') {
+    env.CLAUDECODE = '1';
+    env.CLAUDE_CODE_SESSION_ID = SYNTHETIC_MEMORY.sessionId;
+  }
+  return spawnSync(process.execPath, [script], {
+    cwd: project,
+    env,
     encoding: 'utf8',
     input: JSON.stringify(input),
   });
@@ -152,6 +166,121 @@ test('[req:MEM-STOP-7] synthetic Stop projects lifecycle memory and remains idem
       new RegExp(escapeRegExp(fact), 'i'),
       '[wk-fixture] injected context contains projected memory',
     );
+  }
+});
+
+test('[req:MEM-HYB-10] Stop forwards structured shared handoff into the projected ledger', () => {
+  const { project, vault, brain, transcript } = seedSyntheticHybridLifecycle();
+  const workSessionId = 'wk-fixture-example-work-session';
+  try {
+    const stop = runHook(STOP, {
+      project,
+      vault,
+      input: {
+        ...stopInput(project, transcript),
+        shared: {
+          work_session_id: workSessionId,
+          objective: '[wk-fixture] continue the artificial lifecycle.',
+          next_actions: '[wk-fixture] inspect the next artificial checkpoint.',
+        },
+      },
+    });
+
+    assert.equal(stop.status, 0, stop.stderr);
+    const events = readMemoryLedger(vault).events;
+    const structured = events.filter((event) => ['objective.current', 'next.action'].includes(event.memory_key));
+    assert.deepEqual(structured.map((event) => event.memory_key).sort(), ['next.action', 'objective.current']);
+    assert.equal(events.some((event) => event.memory_key === 'handoff.latest'), false);
+    assert.ok(structured.every((event) => event.work_session_id === workSessionId));
+    assert.equal(structured.find((event) => event.memory_key === 'objective.current').value, '[wk-fixture] continue the artificial lifecycle.');
+    assert.equal(structured.find((event) => event.memory_key === 'next.action').value, '[wk-fixture] inspect the next artificial checkpoint.');
+    assert.match(readFileSync(join(brain, 'SHARED_MEMORY.md'), 'utf8'), /continue the artificial lifecycle/i);
+  } finally {
+    // The fixture is intentionally local-only; remove it after the proof.
+    rmSync(project, { recursive: true, force: true });
+  }
+});
+
+test('[req:MEM-HYB-10] [req:MEM-HYB-2] Codex and Claude carry a structured Stop handoff into a new SessionStart', () => {
+  const providers = [
+    {
+      name: 'codex',
+      objective: '[wk-fixture] Codex objective survives the next session.',
+      next: '[wk-fixture] Codex next action is inspect the checkpoint.',
+    },
+    {
+      name: 'claude',
+      objective: '[wk-fixture] Claude objective survives the next session.',
+      next: '[wk-fixture] Claude next action is inspect the checkpoint.',
+    },
+  ];
+
+  for (const { name, objective, next } of providers) {
+    const fixture = seedSyntheticHybridLifecycle();
+    const { project, vault, brain, transcript } = fixture;
+    try {
+      if (name === 'claude') {
+        writeFileSync(transcript, [
+          { type: 'user', uuid: SYNTHETIC_MEMORY.turnOne, timestamp: SYNTHETIC_MEMORY.observedAt, sessionId: SYNTHETIC_MEMORY.sessionId, message: { role: 'user', content: '[wk-fixture] Claude request.' } },
+          { type: 'assistant', uuid: 'wk-fixture-claude-assistant', timestamp: SYNTHETIC_MEMORY.observedAt, sessionId: SYNTHETIC_MEMORY.sessionId, message: { role: 'assistant', content: [{ type: 'text', text: '[wk-fixture] Claude response.' }] } },
+        ].map((event) => JSON.stringify(event)).join('\n') + '\n');
+        const registryPath = join(brain, 'SESSION_REGISTRY.json');
+        const registry = JSON.parse(readFileSync(registryPath, 'utf8'));
+        registry.sessions[SYNTHETIC_MEMORY.sessionId].provider = 'claude';
+        registry.sessions[SYNTHETIC_MEMORY.sessionId].activations[SYNTHETIC_MEMORY.activationOne].provider = 'claude';
+        writeFileSync(registryPath, JSON.stringify(registry));
+      }
+
+      const workSessionId = `wk-fixture-${name}-vertical-work-session`;
+      const stop = runHookAs(name, STOP, {
+        project,
+        vault,
+        input: {
+          ...stopInput(project, transcript),
+          shared: { work_session_id: workSessionId, objective, next_actions: next },
+        },
+      });
+      assert.equal(stop.status, 0, `${name} Stop: ${stop.stderr}`);
+
+      const events = readMemoryLedger(vault).events;
+      const objectiveEvent = events.find((event) => event.memory_key === 'objective.current');
+      const nextEvent = events.find((event) => event.memory_key === 'next.action');
+      assert.equal(objectiveEvent?.value, objective, `${name} objective event`);
+      assert.equal(nextEvent?.value, next, `${name} next action event`);
+      assert.equal(objectiveEvent?.work_session_id, workSessionId);
+      assert.equal(nextEvent?.work_session_id, workSessionId);
+
+      const start = runHookAs(name, START, {
+        project,
+        vault,
+        input: {
+          hook_event_name: 'SessionStart',
+          cwd: project,
+          session_id: SYNTHETIC_MEMORY.sessionId,
+          transcript_path: transcript,
+          activation_id: SYNTHETIC_MEMORY.activationTwo,
+        },
+      });
+      assert.equal(start.status, 0, `${name} SessionStart: ${start.stderr}`);
+
+      const inject = runHookAs(name, INJECT, {
+        project,
+        vault,
+        input: {
+          hook_event_name: 'UserPromptSubmit',
+          source: 'startup',
+          cwd: project,
+          session_id: SYNTHETIC_MEMORY.sessionId,
+        },
+      });
+      assert.equal(inject.status, 0, `${name} reinjection: ${inject.stderr}`);
+      const context = JSON.parse(inject.stdout).hookSpecificOutput.additionalContext;
+      assert.match(context, /<wk_shared_state authority="operational">/);
+      assert.match(context, new RegExp(escapeRegExp(objective)));
+      assert.match(context, new RegExp(escapeRegExp(next)));
+    } finally {
+      rmSync(project, { recursive: true, force: true });
+    }
   }
 });
 

@@ -60,7 +60,8 @@ test('[req:MEM-HYB-3] projector blocks an operational contradiction against an e
 
     assert.equal(readFileSync(corePath, 'utf8'), core, 'projector must not rewrite CORE bytes');
     assert.match(shared, /review-interface/, 'independent operational state remains projectable');
-    assert.doesNotMatch(shared, /automatic|release\.push/, 'contradiction is not promoted to SHARED');
+    assert.match(shared, /\[revisão pendente: release\.push;/, 'blocked contradiction leaves only a safe review marker');
+    assert.doesNotMatch(shared, /automatic/, 'contradictory value is not promoted to SHARED');
     assert.equal(projected.candidates, 1);
     assert.deepEqual(candidates, [{
       v: 1,

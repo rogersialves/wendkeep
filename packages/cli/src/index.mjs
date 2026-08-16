@@ -107,7 +107,7 @@ Usage:
                            promote <candidate> [--event <event-id>] | reject <candidate>. --vault P.
                            Reconcile is dry-run by default; the original attempt remains audited.
   wendkeep validate-memory [path]  Validate .brain/CORE.md against the compaction
-                           protocol (cap 25, 3 sections, no secrets/PII).
+                           protocol (cap 40, warning 35, 4 KiB, 320 chars/line, 3 sections, no secrets/PII).
                            --vault <path> validates the complete v2 bundle.
   wendkeep sync-defs [opts]    Copy versioned defs from the vault's .brain into the
                            project: .brain/agents/*.toml -> .codex/agents,

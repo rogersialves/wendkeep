@@ -4,6 +4,15 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.69.0] — 2026-08-16
+
+### Added
+
+- **A Shared Project Memory v2 preserva handoffs estruturados entre providers.** Stop publica
+  objetivo, entrega, restrições, decisões, próximas ações, bloqueios e riscos com `work_session_id`;
+  CORE continua manual com cap 40/alerta 35, e status/validate-memory diagnosticam cobertura
+  semântica sem expor valores privados.
+
 ## [0.68.6] — 2026-08-16
 
 ### Fixed

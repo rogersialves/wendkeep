@@ -36,9 +36,27 @@ import { resolveSessionIdentity } from './session-identity.mjs';
 import { readCodexRolloutMeta } from './codex-rollout-meta.mjs';
 import { mutateSessionNote } from './session-note-io.mjs';
 import { captureProjectScope, projectScopePatch } from './project-scope.mjs';
+import { sanitizeMemoryText } from './memory-schema.mjs';
 
 function sessionIdFromInput(input) {
   return input.session_id || input.sessionId || input.codex_session_id || '';
+}
+
+function workSessionIdFromInput(input = {}) {
+  const shared = input.shared || input.handoff?.shared;
+  const value = input.work_session_id
+    || input.workSessionId
+    || shared?.work_session_id
+    || shared?.workSessionId
+    || input.handoff?.work_session_id
+    || input.handoff?.workSessionId
+    || '';
+  return sanitizeMemoryText(value).trim();
+}
+
+function workSessionPatch(input = {}) {
+  const workSessionId = workSessionIdFromInput(input);
+  return workSessionId ? { work_session_id: workSessionId } : {};
 }
 
 function turnSequenceFromInput(input = {}) {
@@ -290,6 +308,7 @@ function activateExistingSession({ vaultBase, relPath, startedAt, sessionId, inp
     transcript_path: identity.transcriptPath,
     transcript_id: identity.transcriptId,
     provider: identity.provider,
+    ...workSessionPatch(input),
     ...scopePatch,
     ...causalTurnPatch(input, now),
   });
@@ -318,6 +337,7 @@ function createSession({ vaultBase, sessionId, input, now, identity, scopePatch 
     transcript_path: identity.transcriptPath,
     transcript_id: identity.transcriptId,
     provider: identity.provider,
+    ...workSessionPatch(input),
     ...scopePatch,
     ...causalTurnPatch(input, now),
   });
@@ -361,6 +381,7 @@ function main() {
       upsertSessionRegistry(vaultBase, sessionId, {
         transcript_paths: [identity.transcriptPath],
         provider: identity.provider,
+        ...workSessionPatch(input),
       });
     }
     writeHookOutput({});
@@ -398,6 +419,7 @@ function main() {
           transcript_path: identity.transcriptPath,
           transcript_id: identity.transcriptId,
           provider: identity.provider,
+          ...workSessionPatch(input),
           ...scopePatch,
           ...causalTurnPatch(input, now),
         });
@@ -443,6 +465,7 @@ function main() {
         transcript_path: identity.transcriptPath,
         transcript_id: identity.transcriptId,
         provider: identity.provider,
+        ...workSessionPatch(input),
         ...scopePatch,
         ...causalTurnPatch(input, now),
       });

@@ -39,6 +39,10 @@ export function renderVaultHealthLines(result) {
     `[memória] ${healthStatusLabel(result.memoryStatus)} — schema: ${metricValue(memory.schemaVersion)} · revisão: ${metricValue(memory.revision)} · cursor: ${metricValue(memory.eventCursor)} · hash: ${metricValue(memory.stateHash)}`,
   );
   lines.push(`  ledger: ${metricValue(memory.ledgerEvents)} evento(s) · outbox: ${metricValue(memory.pendingOutbox)} · candidates: ${metricValue(memory.candidates)} · conflitos: ${metricValue(memory.activeConflicts)}`);
+  const semanticKeys = memory.semanticActiveKeys || [];
+  const semanticProjected = memory.semanticProjectedKeys || [];
+  const semanticMissing = memory.semanticMissingKeys || [];
+  lines.push(`  semântica: ${metricValue(memory.semanticCode)} · ativas: ${semanticKeys.length} [${semanticKeys.join(', ')}] · projetadas: ${semanticProjected.length} · ausentes: ${semanticMissing.length}`);
   for (const failure of memoryFailures) lines.push(`  ✗ ${failure}`);
   for (const warning of memoryWarnings) lines.push(`  ! ${warning}`);
   if (result.memoryStatus === 'healthy' && !memoryFailures.length && !memoryWarnings.length) {

@@ -19,7 +19,7 @@ import {
   resolveHookOperatingProfile,
 } from './operating-profile-runtime.mjs';
 import { assertVaultPathSafe } from './vault-path-safety.mjs';
-import { validateCore } from '../src/validate-core.mjs';
+import { CORE_LIMITS, validateCore } from '../src/validate-core.mjs';
 
 // The process ROUTER — the enforcement layer. The wk-* skills are passive files; without a
 // standing instruction the model plans in chat, leaves the change scaffold raw and forces the
@@ -52,8 +52,8 @@ function processRouter(localeId) {
 
 const INJECTION_LIMITS = Object.freeze({
   totalBytes: 24 * 1024,
-  lineChars: 320,
-  coreBytes: 4 * 1024,
+  lineChars: CORE_LIMITS.lineChars,
+  coreBytes: CORE_LIMITS.bytes,
   sharedBytes: 6 * 1024,
   attentionBytes: 1024,
   recallBytes: 512,

@@ -106,6 +106,46 @@
       "command": "node bin/wendkeep.mjs memory status --gate"
     },
     {
+      "id": "decision-digest-writer",
+      "name": "Decision digest writer",
+      "description": "Validates resolved ADR links and deterministic decision titles in the digest",
+      "severity": "critical",
+      "type": "command",
+      "command": "node --test tests/brain-core.test.mjs tests/prose-decisions.test.mjs"
+    },
+    {
+      "id": "shared-memory-injection",
+      "name": "Shared memory injection",
+      "description": "Validates direct CORE/SHARED SessionStart blocks and recall-only digest behavior",
+      "severity": "critical",
+      "type": "command",
+      "command": "node --test tests/brain-inject-memory.test.mjs tests/init-codex-hooks.test.mjs"
+    },
+    {
+      "id": "core-curation-limit",
+      "name": "CORE curation limit",
+      "description": "Validates the 40-line CORE cap, 35-line warning and byte/character budgets",
+      "severity": "critical",
+      "type": "command",
+      "command": "node --test tests/validate-core.test.mjs"
+    },
+    {
+      "id": "semantic-memory-health",
+      "name": "Semantic memory health",
+      "description": "Validates semantic coverage diagnostics without exposing memory values",
+      "severity": "critical",
+      "type": "command",
+      "command": "node --test tests/memory-semantic-health.test.mjs tests/validate-memory-cli.test.mjs tests/vault-health-memory.test.mjs"
+    },
+    {
+      "id": "memory-vertical-e2e",
+      "name": "Memory vertical E2E",
+      "description": "Validates Codex and Claude Stop-to-SessionStart structured handoff continuity",
+      "severity": "critical",
+      "type": "command",
+      "command": "node --test tests/memory-hybrid-e2e.test.mjs tests/session-memory-lifecycle.test.mjs tests/brain-inject-memory.test.mjs"
+    },
+    {
       "id": "doctor-copyable-repair-commands",
       "name": "Doctor copyable repair commands",
       "description": "Validates local executable prefix, resolved Vault quoting and dry-run/apply ordering in doctor output",

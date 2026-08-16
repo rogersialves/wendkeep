@@ -521,6 +521,21 @@ function shouldFinalizeSession() {
   return process.env.OBSIDIAN_NO_AUTO_FINALIZE !== '1';
 }
 
+function sharedHandoffFromInput(input = {}, entry = {}) {
+  const supplied = input.shared || input.handoff?.shared;
+  const shared = supplied && typeof supplied === 'object' && !Array.isArray(supplied)
+    ? { ...supplied }
+    : {};
+  const workSessionId = shared.work_session_id
+    || shared.workSessionId
+    || input.work_session_id
+    || input.workSessionId
+    || entry?.work_session_id
+    || '';
+  if (!shared.work_session_id && workSessionId) shared.work_session_id = workSessionId;
+  return Object.keys(shared).length ? shared : null;
+}
+
 export function commitSessionMemory(vaultBase, handoff, { projectOptions = {} } = {}) {
   if (detectMemoryMode(vaultBase).mode === 'legacy') {
     return { status: 'legacy', eventCount: 0, eventIds: [], checkpoint: null };
@@ -1378,6 +1393,7 @@ export async function main({
       summary: finalSummary,
       noteRel: sessionRel,
     });
+    const sharedHandoff = sharedHandoffFromInput(input, entry);
     memoryHandoff = {
       projectId,
       identity,
@@ -1390,6 +1406,7 @@ export async function main({
       observedAt: turnIdentity.observedAt || new Date(0).toISOString(),
       summary: finalSummary,
       evidence: memoryEvidence,
+      ...(sharedHandoff ? { shared: sharedHandoff } : {}),
     };
     memoryAttempt = stageMemory(vaultBase, {
       handoff: memoryHandoff,
