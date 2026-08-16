@@ -60,13 +60,21 @@ npm install --save-dev wendkeep@latest
 npx wendkeep sync --yes
 ```
 
-With pnpm, pin a concrete version because minimum-release-age policies may keep `latest` silently
-behind:
+With pnpm, query the published version and reuse the returned value. Minimum-release-age policies
+may keep `latest` silently behind; in a monorepo, `-w` targets the workspace root:
 
-```bash
-pnpm add -D wendkeep@X.Y.Z --config.minimumReleaseAge=0
+```powershell
+$version = pnpm view wendkeep version
+pnpm add -D -w "wendkeep@$version" --config.minimumReleaseAge=0
+pnpm install --update-checksums --config.minimumReleaseAge=0
 pnpm exec wendkeep sync --yes
 ```
+
+Do not edit only the version or integrity in `pnpm-lock.yaml`. If
+`ERR_PNPM_TARBALL_INTEGRITY` appears after a manual edit, run `pnpm store prune` and repeat
+`pnpm install --update-checksums --config.minimumReleaseAge=0`. The
+`minimumReleaseAgeExclude` entry in `pnpm-workspace.yaml` is also manual and must use the
+version returned by `pnpm view`; pnpm does not write that line.
 
 ## Expected result
 

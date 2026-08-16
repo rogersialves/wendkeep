@@ -176,24 +176,37 @@ The install stays outside `sync` on purpose: a running process cannot replace it
 keep going — the code in memory would still be the old one.
 
 In a **pnpm** monorepo the install command differs (`npm` in a pnpm repo fails with
-`Cannot read properties of null (reading 'matches')`) and the version must be **exact**:
+`Cannot read properties of null (reading 'matches')`). Resolve the published version first and
+reuse exactly the value returned:
 
-```bash
-pnpm add -D -w wendkeep@X.Y.Z --config.minimumReleaseAge=0 && npx --no-install wendkeep sync --project . --yes
+```powershell
+$version = pnpm view wendkeep version
+pnpm add -D -w "wendkeep@$version" --config.minimumReleaseAge=0
+pnpm install --update-checksums --config.minimumReleaseAge=0
+pnpm exec wendkeep sync --project . --yes
 ```
 
 > **Do not ask pnpm for `wendkeep@latest`.** pnpm 11 ignores packages published in the last
 > 24h by default (`minimumReleaseAge`, a supply-chain guard) — and it does not complain: it
 > installs the previous version, exits 0, and the only hint is a quiet `(X.Y.Z is available)`
 > in the output. You end up on the old version thinking you upgraded. Check with
-> `npx wendkeep --version`.
+> `pnpm exec wendkeep --version`.
+>
+> Do not edit only the version or integrity in `pnpm-lock.yaml`. `pnpm add` and
+> `pnpm install --update-checksums` must recalculate the complete entry. If the lock is already
+> inconsistent and `ERR_PNPM_TARBALL_INTEGRITY` appears, prune the local store and repeat:
+>
+> ```powershell
+> pnpm store prune
+> pnpm install --update-checksums --config.minimumReleaseAge=0
+> ```
 >
 > After installing, record the exception in `pnpm-workspace.yaml` — **pnpm does not write
 > that line for you**:
 >
 > ```yaml
 > minimumReleaseAgeExclude:
->   - wendkeep@X.Y.Z
+>   - wendkeep@<the version returned by pnpm view>
 > ```
 >
 > Without it, CI's `pnpm install` fails with `ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION` until

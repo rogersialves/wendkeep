@@ -85,6 +85,28 @@ test('nenhum README manda instalar por pnpm com @latest', () => {
   }
 });
 
+test('a atualização por pnpm resolve e reinstala a versão publicada', () => {
+  const files = [
+    'README.md',
+    'README.en.md',
+    'docs/pt-BR/commands/getting-started.md',
+    'docs/en/commands/getting-started.md',
+  ];
+  for (const file of files) {
+    const text = readFileSync(join(ROOT, file), 'utf8');
+    assert.match(text, /pnpm view wendkeep version/, `${file} consulta a versão publicada`);
+    assert.match(text, /wendkeep@\$version/, `${file} reutiliza a versão consultada`);
+    assert.match(text, /pnpm add .*--config\.minimumReleaseAge=0/, `${file} desativa o cooldown só para a atualização`);
+    assert.match(text, /pnpm install --update-checksums --config\.minimumReleaseAge=0/, `${file} documenta a regeneração do lock`);
+    assert.match(text, /pnpm exec wendkeep sync/, `${file} executa o binário pelo pnpm`);
+    assert.doesNotMatch(
+      text,
+      /^pnpm add .*wendkeep@(?:latest|X\.Y\.Z).*$/m,
+      `${file} não pode deixar um argumento literal ou silenciosamente atrasado copiável`,
+    );
+  }
+});
+
 // O que realmente importa: o conteúdo do tarball, e o repo intacto depois.
 test('[req:OP-9] npm pack leva módulos de profile/FLOW, docs bilíngues e restaura o README', () => {
   const outDir = mkdtempSync(join(tmpdir(), 'wk-pack-'));

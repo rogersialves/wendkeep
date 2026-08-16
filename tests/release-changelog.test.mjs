@@ -81,15 +81,14 @@ test('extractReleaseNotes: throws when the version is absent', () => {
   assert.throws(() => extractReleaseNotes(FIXTURE, '9.9.9'), /9\.9\.9/);
 });
 
-test('[sensor:release-tests] 0.68.5 notes are extractable and match the package', () => {
-  const release = extractReleaseNotes(CHANGELOG, '0.68.5');
-  assert.equal(PACKAGE.version, '0.68.5');
-  assert.equal(release.date, '2026-08-14');
-  assert.match(release.notes, /resultado durável/i);
-  assert.match(release.notes, /turn_aborted/i);
-  assert.match(release.notes, /append-only/i);
-  assert.match(release.notes, /publica no npm por OIDC/i);
-  assert.match(release.notes, /provenance/i);
+test('[sensor:release-tests] 0.68.6 notes are extractable and match the package', () => {
+  const release = extractReleaseNotes(CHANGELOG, '0.68.6');
+  assert.equal(PACKAGE.version, '0.68.6');
+  assert.equal(release.date, '2026-08-16');
+  assert.match(release.notes, /monorepos pnpm/i);
+  assert.match(release.notes, /X\.Y\.Z/);
+  assert.match(release.notes, /cooldown/i);
+  assert.match(release.notes, /integridade/i);
   assert.doesNotMatch(release.notes, /019f[0-9a-f-]+/i);
 });
 
