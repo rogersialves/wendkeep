@@ -354,7 +354,9 @@ Lifecycle resumido: cada `SessionStart` abre um epoch que atravessa vários `Sto
 
 ### Injeção e budgets
 
-`brain-inject` entrega a mesma revision/hash no `SessionStart` de `startup`, `/clear` e `/compact`, sempre com CORE e SHARED antes do contexto da change. O envelope total tem 24 KiB; CORE reserva até 4 KiB, SHARED até 6 KiB e cada linha até 320 caracteres. Sob pressão, lessons saem primeiro e depois changes não atuais. CORE e SHARED nunca sofrem corte de prefixo: uma camada ausente, inválida ou acima do budget vira um `<wk_memory_error>` visível e reparável.
+`CORE.md` é a única camada manual: aceita até 40 linhas, alerta a partir de 35, mantém o teto de 4 KiB e limita cada linha a 320 caracteres. `SHARED_MEMORY.md` é exclusivamente gerado pelo projector e pelo ledger; nunca o edite para corrigir o estado. `brain-inject` entrega a mesma revision/hash no `SessionStart` de `startup`, `/clear` e `/compact`, sempre com CORE e SHARED antes do contexto da change. O envelope total tem 24 KiB e SHARED reserva até 6 KiB. Sob pressão, lessons saem primeiro e depois changes não atuais. CORE e SHARED nunca sofrem corte de prefixo: uma camada ausente, inválida ou acima do budget vira um `<wk_memory_error>` visível e reparável.
+
+`memory status --gate` e `validate-memory --vault` também verificam a cobertura semântica: reportam um código, contagens e chaves ativas/projetadas/ausentes. Bundle v2 vazio é neutro; evento projetável ausente, placeholders como único conteúdo ou decisão sem link resolvido bloqueiam/degradam de forma explícita, sem imprimir valores da memória.
 
 `DIGEST.md` não é mais o handoff operacional: permanece como ponte para `/brain-recall` e fallback de vault legado. Um vault sem SHARED recebe CORE+DIGEST com aviso de depreciação; migre durante a janela de compatibilidade:
 

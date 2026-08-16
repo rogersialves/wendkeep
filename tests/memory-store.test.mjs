@@ -14,6 +14,7 @@ import {
   deriveMemoryProjection,
   enqueueMemoryEvent,
   hashMemoryValue,
+  prepareMemoryProjection,
   projectMemoryOutbox,
   readMemoryLedger,
   reduceMemoryEvents,
@@ -188,6 +189,49 @@ test('[req:MEM-HYB-4] concurrent scalar patches preserve the common base and bot
   assert.equal(forward.candidates[0].reason, 'conflict');
   assert.deepEqual(forward.candidates[0].event_ids, ['mem-2', 'mem-3']);
   assert.deepEqual(forward.candidates[0].values, ['approve', 'discard']);
+});
+
+test('[req:MEM-HYB-11] pending conflict keeps independent state and renders a safe review marker', () => {
+  const base = event('mem-review-base', 'next.ui', 'assert', 'review', {
+    activation_id: 'activation-review-base',
+    activation_epoch: 1,
+    source_turn_id: 'turn-review-base',
+  });
+  const baseHash = hashMemoryValue(base.value);
+  const approve = event('mem-review-approve', 'next.ui', 'replace', 'approve', {
+    activation_id: 'activation-review-approve',
+    activation_epoch: 1,
+    source_turn_id: 'turn-review-approve',
+    base_revision: 1,
+    base_value_hash: baseHash,
+  });
+  const discard = event('mem-review-discard', 'next.ui', 'replace', 'discard', {
+    activation_id: 'activation-review-discard',
+    activation_epoch: 1,
+    source_turn_id: 'turn-review-discard',
+    base_revision: 1,
+    base_value_hash: baseHash,
+  });
+  const independent = event('mem-review-independent', 'objective.current', 'assert', 'continue');
+  const events = [base, approve, discard, independent];
+  const reduced = reduceMemoryEvents(events);
+
+  assert.equal(reduced.state['next.ui'], 'review', 'conflict keeps the last known common base');
+  assert.equal(reduced.state['objective.current'], 'continue');
+  assert.equal(reduced.candidates.length, 1);
+  assert.deepEqual(reduced.candidates[0].event_ids, ['mem-review-approve', 'mem-review-discard']);
+
+  const vault = scratch();
+  try {
+    const prepared = prepareMemoryProjection(vault, events);
+    assert.match(prepared.sharedContent, /revis[aã]o pendente.*next\.ui/i);
+    assert.match(prepared.sharedContent, /candidates?:\s*1/i);
+    assert.match(prepared.sharedContent, /continue/);
+    assert.doesNotMatch(prepared.sharedContent, /approve|discard/);
+    assert.match(prepared.candidatesContent, /mem-review-approve/);
+  } finally {
+    rmSync(vault, { recursive: true, force: true });
+  }
 });
 
 test('[req:MEM-HYB-4] stale same-activation event is superseded and tombstone keeps provenance', () => {

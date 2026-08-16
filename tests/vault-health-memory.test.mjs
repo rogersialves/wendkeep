@@ -692,7 +692,7 @@ test('[req:DIAG-8] ledger/projection lag and hash divergence are blocking', () =
   } finally { rmSync(vault, { recursive: true, force: true }); }
 });
 
-test('[req:DIAG-8] active semantic conflicts explain safe human curation without leaking or mutating', () => {
+test('[req:DIAG-8] [req:DIAG-12] [req:MEM-HYB-7] active semantic conflicts explain safe human curation without leaking or mutating', () => {
   const vault = createBundle();
   try {
     writeFileSync(join(vault, '.brain', 'MEMORY_CANDIDATES.jsonl'), [
@@ -710,6 +710,8 @@ test('[req:DIAG-8] active semantic conflicts explain safe human curation without
     const result = checkMemoryBundle(vault);
     assert.equal(result.ok, false);
     assert.equal(result.metrics.activeConflicts, 2);
+    assert.notEqual(result.metrics.semanticCode, 'MEMORY_SEMANTIC_EMPTY_NEUTRAL');
+    assert.ok(result.metrics.semanticCounts.candidates >= 2, 'preserved candidates are visible to semantic health');
     const failure = result.failures.find((item) => /conflitos? ativos?/i.test(item));
     assert.ok(failure);
     assert.match(failure, /conflito semântico.*curadoria humana/i);

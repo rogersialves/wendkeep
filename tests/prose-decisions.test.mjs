@@ -9,6 +9,7 @@ import { join } from 'node:path';
 import { extractProseDecisions, captureProseDecisions } from '../hooks/decision-capture.mjs';
 import { createLinkedNotes } from '../hooks/linked-notes.mjs';
 import { importSession, rescanDecisions } from '../hooks/import-sessions.mjs';
+import { buildBrainDigest, buildBrainIndex } from '../hooks/brain-core.mjs';
 
 function turnWith(conv) { return { turnId: 't', timestamp: '', userPrompts: [], assistantMessages: [], tools: [], consultedFiles: [], changedFiles: [], conversation: conv, usage: {} }; }
 
@@ -64,6 +65,11 @@ test('captureProseDecisions writes the decision note; createLinkedNotes links it
     assert.match(note, /Painel HTML local/);
     assert.match(note, /Runner Scalp operacional/);
     assert.match(note, /\*\*Escolhido:\*\* `as duas`/);
+    const sessionRel = '02-Sessões/2026/07-JUL/DIA 09/09-00-s.md';
+    mkdirSync(join(vault, '02-Sessões', '2026', '07-JUL', 'DIA 09'), { recursive: true });
+    writeFileSync(join(vault, sessionRel), `---\ntype: session\ndate: 2026-07-09\nprovider: codex\nsummary: prose fixture\n---\n\n## Decisões geradas nesta sessão\n\n- [[${linked.decisions[0].replace(/\.md$/i, '')}]]\n`);
+    const digest = buildBrainDigest(vault, buildBrainIndex(vault)).join('\n');
+    assert.match(digest, /Decisão:.*ADR-.*Minha recomendação é a 2\. Qual você prefere\?/i);
     // idempotent
     const again = createLinkedNotes(vault, '2026-07-09', '02-Sessões/2026/07-JUL/DIA 09/09-00-s.md', tx, { provider: 'codex' });
     assert.equal(again.decisions.length, 0, 'no duplicate on re-run');

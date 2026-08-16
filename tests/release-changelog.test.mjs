@@ -81,15 +81,21 @@ test('extractReleaseNotes: throws when the version is absent', () => {
   assert.throws(() => extractReleaseNotes(FIXTURE, '9.9.9'), /9\.9\.9/);
 });
 
-test('[sensor:release-tests] 0.68.6 notes are extractable and match the package', () => {
-  const release = extractReleaseNotes(CHANGELOG, '0.68.6');
-  assert.equal(PACKAGE.version, '0.68.6');
+test('[sensor:release-tests] current release notes are extractable and match the package', () => {
+  const release = extractReleaseNotes(CHANGELOG, PACKAGE.version);
   assert.equal(release.date, '2026-08-16');
+  assert.match(release.notes, /Shared Project Memory v2/i);
+  assert.match(release.notes, /work_session_id/);
+  assert.match(release.notes, /cobertura/i);
+  assert.doesNotMatch(release.notes, /019f[0-9a-f-]+/i);
+});
+
+test('[sensor:release-tests] 0.68.6 notes remain extractable after the bump', () => {
+  const release = extractReleaseNotes(CHANGELOG, '0.68.6');
   assert.match(release.notes, /monorepos pnpm/i);
   assert.match(release.notes, /X\.Y\.Z/);
   assert.match(release.notes, /cooldown/i);
   assert.match(release.notes, /integridade/i);
-  assert.doesNotMatch(release.notes, /019f[0-9a-f-]+/i);
 });
 
 test('[sensor:release-tests] as notas de 0.68.1 seguem extraíveis depois do bump', () => {

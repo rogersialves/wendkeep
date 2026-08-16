@@ -64,7 +64,7 @@ function makeVault({ core = CORE, shared = sharedMemory(), digest = 'DIGEST_RECA
 function criticalMemoryAtLimits() {
   const coreLines = [
     '# CORE', '', '## Preferências do Usuário', '- pt-BR', '', '## Padrões Ativos', '- canonical', '',
-    '## Pendências Abertas', ...Array.from({ length: 16 }, (_, i) => `- durable-${i}`),
+    '## Pendências Abertas', ...Array.from({ length: 31 }, (_, i) => `- durable-${i}`),
   ];
   const core = `${coreLines.join('\n')}\n`;
   const baseShared = sharedMemory();
@@ -74,7 +74,7 @@ function criticalMemoryAtLimits() {
       `- shared-fill-${i} ${'s'.repeat(240)}${i === fillCount - 1 ? ' SHARED_TAIL_MUST_SURVIVE' : ''}`
     )),
   });
-  assert.equal(core.trimEnd().split('\n').length, 25);
+  assert.equal(core.trimEnd().split('\n').length, 40);
   assert.equal(shared.trimEnd().split('\n').length, 48);
   assert.ok(Buffer.byteLength(shared, 'utf8') <= 6 * 1024);
   return { core, shared };
@@ -151,8 +151,27 @@ test('[req:MEM-HYB-2] [req:HOOK-MEM-1] startup, clear and compact receive the sa
   } finally { rmSync(vault, { recursive: true, force: true }); }
 });
 
+test('[req:MEM-HYB-2] [req:HOOK-MEM-2] SessionStart exposes SHARED metadata directly and keeps DIGEST recall-only', () => {
+  const digestBody = 'DIGEST_BODY_MUST_REMAIN_RECALL_ONLY';
+  const stateHash = 'state-hash-session-start-contract';
+  const vault = makeVault({
+    shared: sharedMemory({ revision: 31, hash: stateHash }),
+    digest: digestBody,
+  });
+  try {
+    for (const source of ['startup', 'clear', 'compact']) {
+      const out = buildInjection(vault, { source });
+      assert.match(out, new RegExp(`<brain_memory version="2" revision="31" state_hash="${stateHash}">`));
+      assert.match(out, /<wk_core authority="canonical">[\s\S]*CORE_CANONICAL_DIRECT[\s\S]*<\/wk_core>/);
+      assert.match(out, new RegExp(`<wk_shared_state authority="operational">[\\s\\S]*revision: 31[\\s\\S]*state_hash: ${stateHash}[\\s\\S]*<\\/wk_shared_state>`));
+      assert.match(out, /<wk_recall>[\s\S]*\/brain-recall <tópico>[\s\S]*<\/wk_recall>/);
+      assert.doesNotMatch(out, new RegExp(digestBody));
+    }
+  } finally { rmSync(vault, { recursive: true, force: true }); }
+});
+
 test('[req:MEM-HYB-6] invalid CORE or SHARED is replaced atomically by wk_memory_error, never a silent prefix slice', () => {
-  const oversizedCore = `${CORE.trimEnd()}\n${Array.from({ length: 20 }, (_, i) => `- core-overflow-${i}`).join('\n')}\n`;
+  const oversizedCore = `${CORE.trimEnd()}\n${Array.from({ length: 32 }, (_, i) => `- core-overflow-${i}`).join('\n')}\n`;
   const oversizedShared = sharedMemory({
     extra: Array.from({ length: 30 }, (_, i) => `- shared-overflow-${i}`),
   });
@@ -170,9 +189,9 @@ test('[req:MEM-HYB-6] invalid CORE or SHARED is replaced atomically by wk_memory
 test('[req:MEM-HYB-6] [req:MEM-HYB-7] global pressure drops lessons then non-current changes while preserving the current blocker and 24 KiB envelope', () => {
   const coreLines = [
     '# CORE', '', '## Preferências do Usuário', '- pt-BR', '', '## Padrões Ativos', '- canonical', '',
-    '## Pendências Abertas', ...Array.from({ length: 16 }, (_, i) => `- durable-${i}`),
+    '## Pendências Abertas', ...Array.from({ length: 31 }, (_, i) => `- durable-${i}`),
   ];
-  assert.equal(coreLines.length, 25);
+  assert.equal(coreLines.length, 40);
   const coreAtLimit = `${coreLines.join('\n')}\n`;
   const baseShared = sharedMemory();
   const fillCount = 48 - baseShared.trimEnd().split('\n').length;

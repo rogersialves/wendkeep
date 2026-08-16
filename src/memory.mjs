@@ -1874,13 +1874,16 @@ export function runValidateMemoryBundle(argv) {
     return;
   }
   const result = validateMemoryBundle(vault);
+  const semantic = result.semantic || {};
+  const semanticSummary = `semântica ${semantic.code || 'n/a'} · ativas: ${semantic.counts?.activeKeys ?? 0} · projetadas: ${semantic.counts?.projectedKeys ?? 0} · ausentes: ${semantic.counts?.missingKeys ?? 0}`;
   if (!result.ok) {
     process.stderr.write(`❌  bundle de memória inválido (${result.errors.length} erro(s)):\n`);
+    process.stderr.write(`   ${semanticSummary}\n`);
     for (const error of result.errors) process.stderr.write(`   - ${error}\n`);
     process.exitCode = 1;
     return;
   }
-  process.stdout.write('✅  bundle de memória v2 OK (CORE + ledger + SHARED).\n');
+  process.stdout.write(`✅  bundle de memória v2 OK (CORE + ledger + SHARED; ${semanticSummary}).\n`);
   process.exitCode = 0;
 }
 

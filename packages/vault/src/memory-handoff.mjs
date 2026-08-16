@@ -4,10 +4,53 @@ import { basename, join, relative } from 'node:path';
 
 import { sanitizeMemoryText } from './memory-schema.mjs';
 
+const SHARED_HANDOFF_FIELDS = Object.freeze([
+  ['objective', 'objective.current'],
+  ['delivered', 'state.delivered'],
+  ['constraints', 'constraint.active'],
+  ['decisions', 'decision.active'],
+  ['next_actions', 'next.action'],
+  ['blockers', 'blocker.active'],
+  ['risks', 'risk.known'],
+]);
+
 function canonicalValue(value) {
   if (Array.isArray(value)) return value.map(canonicalValue);
   if (!value || typeof value !== 'object') return value;
   return Object.fromEntries(Object.keys(value).sort().map((key) => [key, canonicalValue(value[key])]));
+}
+
+function sanitizeValue(value) {
+  if (typeof value === 'string') return sanitizeMemoryText(value);
+  if (Array.isArray(value)) return value.map(sanitizeValue);
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.keys(value).sort().map((key) => [key, sanitizeValue(value[key])]));
+  }
+  return value;
+}
+
+function hasMeaningfulValue(value) {
+  if (typeof value === 'string') return value.trim().length > 0;
+  if (Array.isArray(value)) return value.length > 0;
+  if (value && typeof value === 'object') return Object.keys(value).length > 0;
+  return value !== undefined && value !== null;
+}
+
+/** Normalize the portable operational handoff without inventing missing identity. */
+export function normalizeSharedHandoff(shared) {
+  if (!shared || typeof shared !== 'object' || Array.isArray(shared)) return null;
+
+  const normalized = {};
+  const workSessionId = sanitizeMemoryText(shared.work_session_id ?? shared.workSessionId ?? '').trim();
+  if (workSessionId) normalized.work_session_id = workSessionId;
+
+  for (const [field] of SHARED_HANDOFF_FIELDS) {
+    if (!Object.hasOwn(shared, field)) continue;
+    const value = sanitizeValue(shared[field]);
+    if (hasMeaningfulValue(value)) normalized[field] = value;
+  }
+
+  return Object.keys(normalized).length ? normalized : null;
 }
 
 function eventId(context, memoryKey, value) {
@@ -26,8 +69,8 @@ function eventId(context, memoryKey, value) {
 }
 
 function makeEvent(context, { memoryKey, value, authority, evidence }) {
-  const cleanValue = typeof value === 'string' ? sanitizeMemoryText(value) : canonicalValue(value);
-  return {
+  const cleanValue = sanitizeValue(value);
+  const event = {
     v: 1,
     event_id: eventId(context, memoryKey, cleanValue),
     project_id: String(context.projectId || ''),
@@ -43,6 +86,8 @@ function makeEvent(context, { memoryKey, value, authority, evidence }) {
     observed_at: context.observedAt,
     evidence: (evidence || []).filter(Boolean).map((item) => sanitizeMemoryText(item)),
   };
+  if (context.workSessionId) event.work_session_id = context.workSessionId;
+  return event;
 }
 
 function readJson(path) {
@@ -133,14 +178,35 @@ export function buildSessionMemoryEvents({
   observedAt,
   summary,
   evidence = {},
+  shared,
 }) {
-  const context = { projectId, identity, activation, turn, observedAt };
-  const events = [makeEvent(context, {
-    memoryKey: 'handoff.latest',
-    value: sanitizeMemoryText(summary),
-    authority: 'reported',
-    evidence: [noteRel],
-  })];
+  const normalizedShared = normalizeSharedHandoff(shared);
+  const context = {
+    projectId, identity, activation, turn, observedAt,
+    workSessionId: normalizedShared?.work_session_id || '',
+  };
+  const events = [];
+
+  if (normalizedShared) {
+    for (const [field, memoryKey] of SHARED_HANDOFF_FIELDS) {
+      if (!Object.hasOwn(normalizedShared, field)) continue;
+      events.push(makeEvent(context, {
+        memoryKey,
+        value: normalizedShared[field],
+        authority: 'reported',
+        evidence: [noteRel],
+      }));
+    }
+  }
+
+  if (!events.length) {
+    events.push(makeEvent(context, {
+      memoryKey: 'handoff.latest',
+      value: sanitizeMemoryText(summary),
+      authority: 'reported',
+      evidence: [noteRel],
+    }));
+  }
 
   if (evidence.change?.slug && evidence.change?.status && evidence.change?.adr) {
     events.push(makeEvent(context, {

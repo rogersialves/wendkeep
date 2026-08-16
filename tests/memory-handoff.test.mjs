@@ -26,6 +26,47 @@ test('[req:MEM-STOP-7] synthetic handoff redacts an artificial local path', () =
   assert.doesNotMatch(JSON.stringify(events[0]), /[A-Za-z]:\\Users\\/i);
 });
 
+test('[req:MEM-HYB-10] structured handoff emits portable events for every shared category', () => {
+  const workSessionId = 'wk-fixture-example-work-session';
+  const localPath = syntheticWindowsHomePath();
+  const shared = {
+    work_session_id: workSessionId,
+    objective: `[wk-fixture] Objetivo artificial ${localPath}`,
+    delivered: `[wk-fixture] Estado entregue artificial ${localPath}`,
+    constraints: `[wk-fixture] Restrição artificial ${localPath}`,
+    decisions: `[wk-fixture] Decisão artificial ${localPath}`,
+    next_actions: `[wk-fixture] Próxima ação artificial ${localPath}`,
+    blockers: `[wk-fixture] Bloqueio artificial ${localPath}`,
+    risks: `[wk-fixture] Risco artificial ${localPath}`,
+  };
+  const events = buildSessionMemoryEvents({
+    ...makeSyntheticHandoff({ summary: '[wk-fixture] resumo livre que não deve substituir o handoff estruturado' }),
+    shared,
+  });
+  const expectedKeys = [
+    'objective.current',
+    'state.delivered',
+    'constraint.active',
+    'decision.active',
+    'next.action',
+    'blocker.active',
+    'risk.known',
+  ];
+  const byKey = new Map(events.map((event) => [event.memory_key, event]));
+
+  assert.equal(events.length, expectedKeys.length);
+  assert.deepEqual([...byKey.keys()].sort(), [...expectedKeys].sort());
+  for (const key of expectedKeys) {
+    const event = byKey.get(key);
+    assert.equal(event.canonical_session_id, SYNTHETIC_MEMORY.conversationId);
+    assert.equal(event.work_session_id, workSessionId);
+    assert.equal(event.authority, 'reported');
+    assert.deepEqual(event.evidence, [SYNTHETIC_MEMORY.noteRel]);
+    assert.match(JSON.stringify(event.value), /\[REDACTED_LOCAL_PATH\]/);
+    assert.doesNotMatch(JSON.stringify(event), /[A-Za-z]:\\Users\\/i);
+  }
+});
+
 test('[req:MEM-STOP-7] synthetic lifecycle evidence creates causal memory events', () => {
   const evidence = {
     change: {

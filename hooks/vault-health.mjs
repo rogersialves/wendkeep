@@ -231,6 +231,12 @@ function memoryMetrics() {
     pendingOutbox: 0,
     candidates: 0,
     activeConflicts: 0,
+    semanticStatus: null,
+    semanticCode: null,
+    semanticActiveKeys: [],
+    semanticProjectedKeys: [],
+    semanticMissingKeys: [],
+    semanticCounts: {},
   };
 }
 
@@ -505,6 +511,7 @@ export function checkMemoryBundle(vaultBase, { registry } = {}) {
   for (const warning of bundle.warnings || []) warnings.push(warning);
 
   const ok = failures.length === 0;
+  const semantic = bundle.semantic || {};
   return {
     ok,
     status: ok ? (warnings.length ? 'warning' : 'healthy') : 'blocked',
@@ -519,6 +526,12 @@ export function checkMemoryBundle(vaultBase, { registry } = {}) {
       pendingOutbox: outbox.count,
       candidates: candidates.items.length,
       activeConflicts: activeConflicts.length,
+      semanticStatus: semantic.status ?? null,
+      semanticCode: semantic.code ?? null,
+      semanticActiveKeys: semantic.activeKeys || [],
+      semanticProjectedKeys: semantic.projectedKeys || [],
+      semanticMissingKeys: semantic.missingKeys || [],
+      semanticCounts: semantic.counts || {},
     },
   };
 }

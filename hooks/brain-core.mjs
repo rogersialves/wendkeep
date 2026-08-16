@@ -4,6 +4,7 @@ import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { ensureDir, stripYamlQuotes, toVaultRelative } from './obsidian-common.mjs';
 import { getLocale } from './locale.mjs';
+import { sanitizeMemoryText } from './memory-schema.mjs';
 
 export function brainDir(vaultBase) {
   return join(vaultBase, '.brain');
@@ -104,6 +105,41 @@ function adrNumber(path) {
   return m ? Number(m[1]) : -1;
 }
 
+function decisionTitle(content, path) {
+  const frontmatter = parseFrontmatter(content);
+  const heading = content.match(/^#\s+(.+?)\s*$/m)?.[1] || '';
+  const raw = frontmatter.title || frontmatter.name || heading;
+  if (!raw) return '';
+  const title = sanitizeMemoryText(String(raw)
+    .replace(/^ADR-\d+\s*(?:[-:—]\s*)?/i, '')
+    .replace(/\s+/g, ' ')
+    .trim());
+  return title.slice(0, 180).trim();
+}
+
+function decisionNotes(vaultBase) {
+  const byPath = new Map();
+  const byBasename = new Map();
+  const decisionsDir = join(vaultBase, getLocale(vaultBase).folders.decisions);
+  for (const filePath of walkMd(decisionsDir)) {
+    let content;
+    try { content = readFileSync(filePath, 'utf8'); } catch { continue; }
+    const rel = toVaultRelative(vaultBase, filePath).replace(/\.md$/i, '');
+    const note = { path: rel, title: decisionTitle(content, rel) };
+    byPath.set(rel, note);
+    const key = basename(rel);
+    if (!byBasename.has(key)) byBasename.set(key, note);
+  }
+  return { byPath, byBasename };
+}
+
+function resolveDecisionTarget(target, notes) {
+  const normalized = String(target || '').replace(/\.md$/i, '').trim();
+  if (!normalized || normalized.includes('...') || normalized.includes('…')) return null;
+  const note = notes.byPath.get(normalized) || notes.byBasename.get(basename(normalized));
+  return note?.title ? note : null;
+}
+
 // Destila index.jsonl em .brain/DIGEST.md (camada quente, determinístico, 0 token LLM).
 // Cap por construção: 1 header + 13 itens (5/4/2/2) + 1 pointer = máx 15 linhas.
 export function buildBrainDigest(vaultBase, rows = null) {
@@ -139,13 +175,21 @@ export function buildBrainDigest(vaultBase, rows = null) {
   };
   const pickLive = (kind, max) => pick(kind, max * 4).filter(resolves).slice(0, max);
 
-  const decisions = pickLive('decisions', DIGEST_CAPS.decisions).sort((a, b) => adrNumber(b) - adrNumber(a));
+  const notes = decisionNotes(vaultBase);
+  const decisions = [];
+  for (const target of pick('decisions', DIGEST_CAPS.decisions * 4)) {
+    const resolved = resolveDecisionTarget(target, notes);
+    if (!resolved || decisions.some((item) => item.path === resolved.path)) continue;
+    decisions.push(resolved);
+    if (decisions.length >= DIGEST_CAPS.decisions) break;
+  }
+  decisions.sort((a, b) => adrNumber(b.path) - adrNumber(a.path));
   const sessions = byDateDesc.slice(0, DIGEST_CAPS.sessions);
   const bugs = pickLive('bugs', DIGEST_CAPS.bugs);
   const learnings = pickLive('learnings', DIGEST_CAPS.learnings);
 
   const lines = ['<!-- AUTO-GERADO por brain-core.mjs (0 token LLM). NÃO editar. Rebuild: node .agent/hooks/brain-reindex.mjs -->'];
-  for (const d of decisions) lines.push(`- Decisão: [[${d}]]`);
+  for (const d of decisions) lines.push(`- Decisão: [[${d.path}]] — ${d.title}`);
   for (const s of sessions) lines.push(`- Sessão ${s.date} (${s.provider || '?'}): ${s.summary || s.file} → [[${String(s.file || '').replace(/\.md$/, '')}]]`);
   for (const b of bugs) lines.push(`- Bug: [[${b}]]`);
   for (const l of learnings) lines.push(`- Aprendizado: [[${l}]]`);
