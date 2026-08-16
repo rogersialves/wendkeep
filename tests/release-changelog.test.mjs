@@ -121,6 +121,15 @@ test('[sensor:release-tests] [req:CLI-PKG-3] publish precede a criação da tag 
   assert.doesNotMatch(AUTO_TAG_PUBLISH_GUARD, /npm publish[^\r\n]*--provenance/);
 });
 
+test('[sensor:release-tests] [req:CLI-PKG-3] dispatch manual só publica na main', () => {
+  const trigger = AUTO_TAG_WORKFLOW.match(/^on:\r?\n[\s\S]*?(?=^permissions:)/m)?.[0] || '';
+  assert.match(trigger, /^  workflow_dispatch:\s*$/m);
+  assert.match(
+    AUTO_TAG_WORKFLOW,
+    /^  tag-and-release:\r?\n    if:\s*github\.ref\s*==\s*['"]refs\/heads\/main['"]/m,
+  );
+});
+
 const releaseFacts = (overrides = {}) => ({
   name: 'wendkeep',
   version: '1.2.3',
