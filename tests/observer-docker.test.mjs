@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
-test('[req:OBS-7] Docker Observer publica somente loopback e não monta vaults', () => {
+test('[req:OBS-LOCAL-3] Docker Observer publica somente loopback e não exige token', () => {
   const composePath = join(ROOT, 'docker', 'wendkeep-observer', 'compose.yaml');
   const dockerfilePath = join(ROOT, 'docker', 'wendkeep-observer', 'Dockerfile');
   assert.equal(existsSync(composePath), true);
@@ -16,7 +16,7 @@ test('[req:OBS-7] Docker Observer publica somente loopback e não monta vaults',
   assert.match(compose, /127\.0\.0\.1:8787:8787/);
   assert.match(compose, /observer-data/);
   assert.doesNotMatch(compose, /C:\\\\GitHub|\.WendKeep-vault/);
-  assert.match(compose, /WENDKEEP_OBSERVER_TOKEN:\s*"?\$\{/);
+  assert.doesNotMatch(compose, /WENDKEEP_OBSERVER_TOKEN|--token/);
   const dockerfile = readFileSync(dockerfilePath, 'utf8');
   assert.match(dockerfile, /healthz/);
   assert.match(dockerfile, /0\.0\.0\.0/);

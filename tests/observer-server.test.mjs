@@ -13,36 +13,36 @@ async function request(base, path, options = {}) {
   return { status: response.status, body };
 }
 
-test('[req:OBS-3] [req:OBS-5] servidor protege API, registra projeto e publica snapshot', async () => {
+test('[req:OBS-LOCAL-2] servidor local consulta, registra e publica sem token', async () => {
   const dataDir = makeDataDir();
   const fixture = makeObserverFixture();
-  const server = await startObserverServer({ host: '127.0.0.1', port: 0, dataDir, token: 'local-secret' });
+  const server = await startObserverServer({ host: '127.0.0.1', port: 0, dataDir });
   const base = `http://127.0.0.1:${server.address().port}`;
   try {
     const health = await request(base, '/healthz');
-    const denied = await request(base, '/v1/projects');
+    const open = await request(base, '/v1/projects');
     assert.equal(health.status, 200);
     assert.deepEqual(health.body, { ok: true, service: 'wendkeep-observer', schema_version: 1 });
-    assert.equal(denied.status, 401);
+    assert.equal(open.status, 200);
 
-    const auth = { authorization: 'Bearer local-secret', 'content-type': 'application/json' };
+    const localHeaders = { 'content-type': 'application/json' };
     const registered = await request(base, '/v1/projects/project-a', {
-      method: 'PUT', headers: auth, body: JSON.stringify({ project_id: 'project-a', project_name: 'Project A' }),
+      method: 'PUT', headers: localHeaders, body: JSON.stringify({ project_id: 'project-a', project_name: 'Project A' }),
     });
     assert.equal(registered.status, 201);
     const snapshot = buildProjectSnapshot({ vaultBase: fixture.vaultBase, projectRoot: fixture.projectRoot, now: '2026-08-16T12:00:00Z' });
     const published = await request(base, '/v1/projects/project-a/snapshot', {
-      method: 'POST', headers: auth, body: JSON.stringify(snapshot),
+      method: 'POST', headers: localHeaders, body: JSON.stringify(snapshot),
     });
     assert.equal(published.status, 201);
 
-    const projects = await request(base, '/v1/projects', { headers: { authorization: 'Bearer local-secret' } });
+    const projects = await request(base, '/v1/projects');
     assert.deepEqual(projects.body.projects.map((p) => p.projectId), ['project-a']);
-    const changes = await request(base, '/v1/projects/project-a/changes', { headers: { authorization: 'Bearer local-secret' } });
+    const changes = await request(base, '/v1/projects/project-a/changes');
     assert.equal(changes.body.changes[0].openTasks, 1);
 
     const raw = await request(base, '/v1/projects/project-a/snapshot', {
-      method: 'POST', headers: auth, body: JSON.stringify({ ...snapshot, projectRoot: 'C:\\GitHub\\secret' }),
+      method: 'POST', headers: localHeaders, body: JSON.stringify({ ...snapshot, projectRoot: 'C:\\GitHub\\secret' }),
     });
     assert.equal(raw.status, 400);
   } finally {
@@ -52,18 +52,18 @@ test('[req:OBS-3] [req:OBS-5] servidor protege API, registra projeto e publica s
   }
 });
 
-test('[req:OBS-5] servidor recusa bind não-loopback e JSON inválido', async () => {
+test('[req:OBS-LOCAL-2] servidor recusa bind não-loopback e JSON inválido', async () => {
   const dataDir = makeDataDir();
   await assert.rejects(
-    () => startObserverServer({ host: '0.0.0.0', port: 0, dataDir, token: 'x' }),
+    () => startObserverServer({ host: '0.0.0.0', port: 0, dataDir }),
     /loopback/i,
   );
-  const server = await startObserverServer({ host: '127.0.0.1', port: 0, dataDir, token: 'x' });
+  const server = await startObserverServer({ host: '127.0.0.1', port: 0, dataDir });
   const base = `http://127.0.0.1:${server.address().port}`;
   try {
     const result = await request(base, '/v1/projects/project-a', {
       method: 'PUT',
-      headers: { authorization: 'Bearer x', 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json' },
       body: '{invalid',
     });
     assert.equal(result.status, 400);
@@ -71,7 +71,7 @@ test('[req:OBS-5] servidor recusa bind não-loopback e JSON inválido', async ()
 
     const oversized = await request(base, '/v1/projects/project-a', {
       method: 'PUT',
-      headers: { authorization: 'Bearer x', 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ project_id: 'project-a', project_name: 'x'.repeat(40 * 1024) }),
     });
     assert.equal(oversized.status, 413);
@@ -82,9 +82,9 @@ test('[req:OBS-5] servidor recusa bind não-loopback e JSON inválido', async ()
   }
 });
 
-test('[req:OBS-7] servidor permite bind interno explícito somente quando autorizado', async () => {
+test('[req:OBS-LOCAL-3] servidor permite bind interno explícito somente quando autorizado', async () => {
   const dataDir = makeDataDir();
-  const server = await startObserverServer({ host: '0.0.0.0', port: 0, dataDir, token: 'x', allowNonLoopback: true });
+  const server = await startObserverServer({ host: '0.0.0.0', port: 0, dataDir, allowNonLoopback: true });
   try {
     assert.equal(server.address().address, '0.0.0.0');
   } finally {
@@ -93,13 +93,13 @@ test('[req:OBS-7] servidor permite bind interno explícito somente quando autori
   }
 });
 
-test('[sensor:observer-e2e] [req:OBS-3] [req:OBS-4] [req:OBS-7] dois projetos permanecem isolados após replay e restart', async () => {
+test('[sensor:observer-e2e] [req:OBS-LOCAL-2] [req:OBS-LOCAL-3] dois projetos permanecem isolados após replay e restart', async () => {
   const dataDir = makeDataDir();
   const first = makeObserverFixture({ projectId: 'project-a', slug: 'change-a', openTasks: ['A task'] });
   const second = makeObserverFixture({ projectId: 'project-b', slug: 'change-b', openTasks: ['B task'] });
-  const server = await startObserverServer({ host: '127.0.0.1', port: 0, dataDir, token: 'local-secret' });
+  const server = await startObserverServer({ host: '127.0.0.1', port: 0, dataDir });
   const base = `http://127.0.0.1:${server.address().port}`;
-  const headers = { authorization: 'Bearer local-secret', 'content-type': 'application/json' };
+  const headers = { 'content-type': 'application/json' };
   try {
     for (const fixture of [first, second]) {
       const registration = await request(base, `/v1/projects/${fixture.projectId}`, {
@@ -117,17 +117,17 @@ test('[sensor:observer-e2e] [req:OBS-3] [req:OBS-4] [req:OBS-7] dois projetos pe
       assert.equal(replay.status, 200);
       assert.equal(replay.body.duplicate, true);
     }
-    const projects = await request(base, '/v1/projects', { headers });
+    const projects = await request(base, '/v1/projects');
     assert.deepEqual(projects.body.projects.map((item) => item.projectId), ['project-a', 'project-b']);
-    const firstChanges = await request(base, '/v1/projects/project-a/changes', { headers });
-    const secondChanges = await request(base, '/v1/projects/project-b/changes', { headers });
+    const firstChanges = await request(base, '/v1/projects/project-a/changes');
+    const secondChanges = await request(base, '/v1/projects/project-b/changes');
     assert.equal(firstChanges.body.changes[0].slug, 'change-a');
     assert.equal(secondChanges.body.changes[0].slug, 'change-b');
   } finally {
     await server.close();
-    const restarted = await startObserverServer({ host: '127.0.0.1', port: 0, dataDir, token: 'local-secret' });
+    const restarted = await startObserverServer({ host: '127.0.0.1', port: 0, dataDir });
     try {
-      const persisted = await request(`http://127.0.0.1:${restarted.address().port}`, '/v1/projects', { headers });
+      const persisted = await request(`http://127.0.0.1:${restarted.address().port}`, '/v1/projects');
       assert.deepEqual(persisted.body.projects.map((item) => item.projectId), ['project-a', 'project-b']);
     } finally {
       await restarted.close();

@@ -67,6 +67,11 @@ test('DOC-5: somente os diretórios de guias bilíngues são adicionados ao paco
   assert.ok(!files.includes('docs'), 'o acervo histórico inteiro não pode viajar por acidente');
 });
 
+test('[req:OBS-UI-1] a interface do Observer viaja explicitamente no pacote', () => {
+  const files = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')).files;
+  assert.ok(files.includes('web/observer'), 'a interface do Observer precisa ser empacotada');
+});
+
 // Medido num projeto pnpm limpo, sem configuração alguma (pnpm 11.5.2):
 //   $ pnpm add -D wendkeep@latest
 //   + wendkeep 0.49.0 (0.57.1 is available)
@@ -158,6 +163,10 @@ test('[req:OP-9] npm pack leva módulos de profile/FLOW, docs bilíngues e resta
       'hooks/flow-core.mjs',
       'hooks/operating-profile-task-store.mjs',
       'hooks/vault-path-safety.mjs',
+      'web/observer/index.html',
+      'web/observer/styles.css',
+      'web/observer/app.mjs',
+      'web/observer/favicon.svg',
     ]) {
       assert.ok(
         existsSync(join(pkg, ...modulePath.split('/'))),

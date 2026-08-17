@@ -76,7 +76,7 @@ npx wendkeep import                          # importa sessões passadas do Clau
 
 ## O problema: o contexto morre quando a janela fecha
 
-Decisões, becos sem saída, o motivo de você ter escolhido X em vez de Y — some na próxima sessão. As peças pra resolver existem, mas espalhadas (qmd‑sessions, memsearch, Nexus, hooks feitos à mão). O wendkeep entrega tudo num pacote turnkey que escreve num grafo de conhecimento **dentro do cofre Obsidian que você já usa** — sem setup manual, sem snapshot pra manter sincronizado.
+Decisões, becos sem saída, o motivo de você ter escolhido X em vez de Y — some na próxima sessão. As peças pra resolver existem, mas espalhadas (qmd‑sessions, memsearch, Nexus, hooks feitos à mão). O wendkeep entrega captura local e um Observer Docker opcional que mantém a memória completa navegável sem depender do Obsidian.
 
 | | |
 |---|---|
@@ -86,7 +86,7 @@ Decisões, becos sem saída, o motivo de você ter escolhido X em vez de Y — s
 | **Custo** — quanto tudo custou | Preço por modelo, ciente de cache, por sessão — mais `cost --trend` com projeção run‑rate no cofre inteiro; research previews sem tarifa final ficam como custo não estimado. |
 | **Multi‑agente** — um cofre, os dois agentes | O `init` wira os hooks de sessão no `.claude/settings.json` *e* no `.codex/hooks.json`, e cada nota é marcada com o agente que a escreveu: o Claude Code é detectado pelo ambiente dele, qualquer outro é registrado como Codex. Um grafo só, esteja você em qual agente estiver. |
 | **Local‑first** — sem nuvem, sem conta | Tudo é Markdown puro no seu disco. Um MCP opcional (`@bitbonsai/mcpvault`) deixa o agente ler/escrever o cofre. |
-| **Observer local** — vários projetos, uma visão | `wendkeep observer` mantém um índice HTTP local de snapshots sanitizados e idempotentes; os vaults continuam locais, o container não os monta e hooks indisponíveis usam outbox sem bloquear a sessão. |
+| **Observer local** — vários projetos, uma visão | `wendkeep observer` mantém no volume Docker snapshots e uma cópia integral de sessões, decisões, bugs, aprendizados, specs e changes; o painel read-only abre diretamente em `http://127.0.0.1:8787/`, sem token no modo local, e hooks indisponíveis usam outbox sem bloquear a sessão. |
 
 ## Requisitos
 

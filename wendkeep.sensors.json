@@ -320,6 +320,134 @@
       "severity": "critical",
       "type": "command",
       "command": "node --test tests/observer-server.test.mjs"
+    },
+    {
+      "id": "observer-dashboard-http",
+      "name": "Observer dashboard HTTP",
+      "description": "Validates dashboard static serving, content types, traversal rejection and API compatibility",
+      "severity": "critical",
+      "type": "command",
+      "command": "node --test tests/observer-dashboard.test.mjs"
+    },
+    {
+      "id": "observer-dashboard-client",
+      "name": "Observer dashboard client",
+      "description": "Validates the direct local dashboard, rendering states, project isolation and privacy allowlist",
+      "severity": "critical",
+      "type": "command",
+      "command": "node --test tests/observer-dashboard.test.mjs"
+    },
+    {
+      "id": "observer-dashboard-e2e",
+      "name": "Observer dashboard E2E",
+      "description": "Validates the dashboard against the real local Observer container",
+      "severity": "critical",
+      "type": "command",
+      "command": "node --test tests/observer-dashboard-browser.test.mjs"
+    },
+    {
+      "id": "observer-dashboard-docs",
+      "name": "Observer dashboard documentation",
+      "description": "Validates bilingual Observer docs and dashboard packaging",
+      "severity": "critical",
+      "type": "command",
+      "command": "node --test tests/docs-bilingual.test.mjs tests/readme-packaging.test.mjs"
+    },
+    {
+      "id": "observer-local-http",
+      "name": "Observer local HTTP and publisher",
+      "description": "Validates local API and outbox without authentication headers",
+      "severity": "critical",
+      "type": "command",
+      "command": "node --test tests/observer-server.test.mjs tests/observer-publish.test.mjs"
+    },
+    {
+      "id": "observer-local-ui",
+      "name": "Observer local UI",
+      "description": "Validates direct dashboard loading without a token form",
+      "severity": "critical",
+      "type": "command",
+      "command": "node --test tests/observer-dashboard.test.mjs tests/observer-dashboard-browser.test.mjs"
+    },
+    {
+      "id": "observer-local-docs",
+      "name": "Observer local docs and package",
+      "description": "Validates bilingual docs, compose contract, changelog and package contents",
+      "severity": "critical",
+      "type": "command",
+      "command": "node --test tests/observer-docker.test.mjs tests/readme-packaging.test.mjs tests/release-changelog.test.mjs"
+    },
+    {
+      "id": "observer-local-e2e",
+      "name": "Observer local direct-link E2E",
+      "description": "Validates the direct-link browser contract against the running local Observer",
+      "severity": "critical",
+      "type": "command",
+      "command": "node --test tests/observer-dashboard-browser.test.mjs"
+    },
+    {
+      "id": "observer-memory-store",
+      "name": "Observer memory store",
+      "description": "Validates canonical Markdown storage, event idempotency and conflict handling",
+      "severity": "critical",
+      "type": "command",
+      "command": "node --test tests/observer-memory-store.test.mjs"
+    },
+    {
+      "id": "observer-memory-http",
+      "name": "Observer memory HTTP",
+      "description": "Validates complete memory ingestion, tree, document, search, sync mode and export",
+      "severity": "critical",
+      "type": "command",
+      "command": "node --test tests/observer-memory-server.test.mjs"
+    },
+    {
+      "id": "observer-memory-publish",
+      "name": "Observer memory publisher",
+      "description": "Validates complete hook collection, incremental publishing and fail-open memory outbox",
+      "severity": "critical",
+      "type": "command",
+      "command": "node --test tests/observer-memory-publish.test.mjs tests/observer-publish.test.mjs"
+    },
+    {
+      "id": "observer-memory-import",
+      "name": "Observer memory import",
+      "description": "Validates initial vault import and per-file hash parity",
+      "severity": "critical",
+      "type": "command",
+      "command": "node --test tests/observer-memory-import.test.mjs"
+    },
+    {
+      "id": "observer-memory-ui",
+      "name": "Observer memory UI",
+      "description": "Validates workspace routes, complete document view models and no-token loading",
+      "severity": "critical",
+      "type": "command",
+      "command": "node --test tests/observer-memory-ui.test.mjs tests/observer-dashboard.test.mjs tests/observer-dashboard-browser.test.mjs"
+    },
+    {
+      "id": "observer-memory-e2e",
+      "name": "Observer memory browser contract",
+      "description": "Validates the real dashboard shell and workspace navigation contract for the canonical memory UI",
+      "severity": "critical",
+      "type": "command",
+      "command": "node --test tests/observer-dashboard-browser.test.mjs"
+    },
+    {
+      "id": "observer-memory-docker",
+      "name": "Observer memory Docker",
+      "description": "Validates named volume, loopback compose and persistent Observer image contract",
+      "severity": "critical",
+      "type": "command",
+      "command": "node --test tests/observer-docker.test.mjs"
+    },
+    {
+      "id": "observer-memory-docs",
+      "name": "Observer memory documentation",
+      "description": "Validates bilingual memory authority documentation and release notes",
+      "severity": "critical",
+      "type": "command",
+      "command": "node --test tests/docs-bilingual.test.mjs tests/readme-packaging.test.mjs tests/release-changelog.test.mjs"
     }
   ]
 }

@@ -84,12 +84,27 @@ test('extractReleaseNotes: throws when the version is absent', () => {
 test('[sensor:release-tests] current release notes are extractable and match the package', () => {
   const release = extractReleaseNotes(CHANGELOG, PACKAGE.version);
   assert.equal(release.date, '2026-08-17');
+  assert.match(release.notes, /Observer local abre diretamente/i);
+  assert.match(release.notes, /Authorization/i);
+  assert.match(release.notes, /variável de\s+token/i);
+  assert.doesNotMatch(release.notes, /019f[0-9a-f-]+/i);
+});
+
+test('[sensor:release-tests] 0.71.0 dashboard notes remain extractable after the local-open fix', () => {
+  const release = extractReleaseNotes(CHANGELOG, '0.71.0');
+  assert.match(release.notes, /Painel web local do Observer/i);
+  assert.match(release.notes, /snapshots sanitizados/i);
+  assert.match(release.notes, /imagem Docker/i);
+  assert.match(release.notes, /sessionStorage/i);
+});
+
+test('[sensor:release-tests] 0.70.0 notes remain extractable after the dashboard bump', () => {
+  const release = extractReleaseNotes(CHANGELOG, '0.70.0');
   assert.match(release.notes, /Observer local multi-projeto/i);
   assert.match(release.notes, /snapshots sanitizados/i);
   assert.match(release.notes, /loopback/i);
   assert.match(release.notes, /research preview/i);
   assert.match(release.notes, /preço inventado/i);
-  assert.doesNotMatch(release.notes, /019f[0-9a-f-]+/i);
 });
 
 test('[sensor:release-tests] 0.68.6 notes remain extractable after the bump', () => {

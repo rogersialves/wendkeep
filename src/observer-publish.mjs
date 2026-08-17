@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { buildProjectSnapshot } from './observer-snapshot.mjs';
+import { publishObserverMemory } from './observer-memory-publish.mjs';
 
 const OUTBOX_REL = join('.brain', 'observer-outbox');
 const REQUEST_TIMEOUT_MS = 500;
@@ -45,14 +46,13 @@ function removeOutbox(vaultBase, eventId) {
   if (existsSync(path)) unlinkSync(path);
 }
 
-async function postSnapshot(url, token, event) {
+async function postSnapshot(url, event) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   try {
     const response = await fetch(`${String(url).replace(/\/$/, '')}/v1/projects/${encodeURIComponent(event.project_id)}/snapshot`, {
       method: 'POST',
       headers: {
-        authorization: `Bearer ${token}`,
         'content-type': 'application/json',
       },
       body: JSON.stringify(event),
@@ -70,14 +70,14 @@ async function postSnapshot(url, token, event) {
   }
 }
 
-export async function retryObserverOutbox({ vaultBase, url, token } = {}) {
-  if (!url || !token) return { attempted: 0, confirmed: 0, pending: listOutbox(vaultBase).length };
+export async function retryObserverOutbox({ vaultBase, url } = {}) {
+  if (!url) return { attempted: 0, confirmed: 0, pending: listOutbox(vaultBase).length };
   let attempted = 0;
   let confirmed = 0;
   for (const event of listOutbox(vaultBase)) {
     attempted += 1;
     try {
-      await postSnapshot(url, token, event);
+      await postSnapshot(url, event);
       removeOutbox(vaultBase, event.event_id);
       confirmed += 1;
     } catch { /* preserve the event for a later retry */ }
@@ -89,22 +89,33 @@ export async function publishObserverSnapshot({
   vaultBase,
   projectRoot,
   url = process.env.WENDKEEP_OBSERVER_URL || '',
-  token = process.env.WENDKEEP_OBSERVER_TOKEN || '',
   now = new Date(),
 } = {}) {
   try {
     const event = buildProjectSnapshot({ vaultBase, projectRoot, now });
     if (!url) return { ok: true, skipped: true, queued: false, hookExitCode: 0, event_id: event.event_id };
 
-    await retryObserverOutbox({ vaultBase, url, token });
+    await retryObserverOutbox({ vaultBase, url });
+    let memory;
     try {
-      const response = await postSnapshot(url, token, event);
+      memory = await publishObserverMemory({
+        vaultBase,
+        projectId: event.project_id,
+        url,
+        now,
+      });
+    } catch (error) {
+      memory = { ok: false, queued: false, error: error.message };
+    }
+    try {
+      const response = await postSnapshot(url, event);
       return {
         ok: true,
         queued: false,
         hookExitCode: 0,
         event_id: event.event_id,
         duplicate: response.duplicate === true,
+        memory,
       };
     } catch (error) {
       queueOutbox(vaultBase, event);
@@ -114,6 +125,7 @@ export async function publishObserverSnapshot({
         hookExitCode: 0,
         event_id: event.event_id,
         error: error.message,
+        memory,
       };
     }
   } catch (error) {
