@@ -119,12 +119,14 @@ test('[req:OP-9] npm pack leva módulos de profile/FLOW, docs bilíngues e resta
       recursive: true,
       filter: (source) => {
         const normalized = source.replaceAll('\\', '/');
-        return !normalized.includes('/node_modules/')
-          && !normalized.includes('/.git/')
-          && !normalized.includes('/.WendKeep-vault/')
-          && !normalized.includes('/.codex/')
-          && !normalized.includes('/.claude/')
-          && !normalized.includes('/.agents/');
+        const isExcludedPath = (name) => normalized.includes(`/${name}/`)
+          || normalized.endsWith(`/${name}`);
+        return !isExcludedPath('node_modules')
+          && !isExcludedPath('.git')
+          && !isExcludedPath('.WendKeep-vault')
+          && !isExcludedPath('.codex')
+          && !isExcludedPath('.claude')
+          && !isExcludedPath('.agents');
       },
     });
     const packed = spawnSync('npm', ['pack', '--pack-destination', outDir], {

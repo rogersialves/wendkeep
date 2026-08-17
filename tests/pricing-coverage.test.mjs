@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { priceForModel } from '../hooks/token-usage.mjs';
+import { costBreakdown, priceForModel } from '../hooks/token-usage.mjs';
 import { checkUnpricedModels, renderUnpricedModelLines } from '../hooks/harness-doctor.mjs';
 
 // --- OBS-9: a tabela cobre os modelos correntes -----------------------------
@@ -31,6 +31,26 @@ test('priceForModel: variantes de escrita do id resolvem para o mesmo preço', (
     assert.deepEqual(priceForModel(variant), base, `${variant} deve resolver como claude-opus-5`);
   }
   assert.deepEqual(priceForModel('anthropic/claude-mythos-5'), priceForModel('claude-mythos-5'));
+});
+
+test('priceForModel: Spark é conhecido como research preview sem tarifa inventada', () => {
+  const base = priceForModel('gpt-5.3-codex-spark');
+  assert.ok(base, 'Spark deve ser reconhecido pela tabela');
+  assert.equal(base.pricingStatus, 'research-preview');
+  assert.equal(base.input, null);
+  assert.equal(base.cachedInput, null);
+  assert.equal(base.output, null);
+
+  for (const variant of [
+    'gpt-5-3-codex-spark',
+    'openai/gpt-5.3-codex-spark',
+    'openai/gpt-5-3-codex-spark[1m]',
+  ]) {
+    assert.deepEqual(priceForModel(variant), base, `${variant} deve resolver para Spark`);
+  }
+
+  const breakdown = costBreakdown({ input: 1_000_000, cached: 500_000, cacheWrite: 100_000, output: 250_000 }, base);
+  assert.equal(breakdown.total, 0, 'sem tarifa final o custo não pode receber estimativa inventada');
 });
 
 // O regime de falha que motivou a change: uso real fechando com custo zero.
@@ -91,6 +111,20 @@ test('checkUnpricedModels: acha o modelo sem preço numa sessão multi-modelo co
   }
 });
 
+test('checkUnpricedModels: separa research preview de modelo realmente desconhecido', () => {
+  const vault = vaultWith({
+    'preview.md': note({ models: ['gpt-5.3-codex-spark'], tokens: 5000, custo: 0 }),
+    'unknown.md': note({ models: ['claude-inexistente-9'], tokens: 5000, custo: 0 }),
+  });
+  try {
+    const r = checkUnpricedModels(vault);
+    assert.deepEqual(r.models.map((m) => m.model), ['claude-inexistente-9']);
+    assert.deepEqual(r.researchPreview, [{ model: 'gpt-5.3-codex-spark', notes: 1 }]);
+  } finally {
+    rmSync(vault, { recursive: true, force: true });
+  }
+});
+
 test('checkUnpricedModels: sessão sem uso não é sintoma', () => {
   const vault = vaultWith({ 'vazia.md': note({ models: ['claude-qualquer'], tokens: 0, custo: 0 }) });
   try {
@@ -142,6 +176,22 @@ test('doctor diz que a tabela está completa quando não há modelo sem preço',
     assert.equal(lines.length, 2);
     assert.match(lines[1], /tabela de preços completa/);
     assert.ok(!lines.some((l) => l.includes('pricing.json')), 'vault são não sugere edição');
+  } finally {
+    rmSync(vault, { recursive: true, force: true });
+  }
+});
+
+test('doctor explica research preview sem mandar inventar preço', () => {
+  const vault = vaultWith({
+    'preview.md': note({ models: ['gpt-5.3-codex-spark'], tokens: 5000, custo: 0 }),
+  });
+  try {
+    const lines = renderUnpricedModelLines(checkUnpricedModels(vault));
+    assert.match(lines[0], /^\[preços\] 0 modelo\(s\) sem preço/);
+    assert.ok(lines.some((line) => /research preview/i.test(line)));
+    assert.ok(lines.some((line) => /tarifa final|não estimado/i.test(line)));
+    assert.ok(!lines.some((line) => line.includes('adicione o modelo')),
+      'modelo conhecido sem tarifa não deve pedir preço inventado');
   } finally {
     rmSync(vault, { recursive: true, force: true });
   }

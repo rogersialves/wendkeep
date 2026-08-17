@@ -11,6 +11,14 @@
       "command": "npm test"
     },
     {
+      "id": "pricing-coverage",
+      "name": "Pricing coverage",
+      "description": "Validates published prices, explicit research-preview status and doctor classification",
+      "severity": "critical",
+      "type": "command",
+      "command": "node --test tests/pricing-coverage.test.mjs"
+    },
+    {
       "id": "session-iteration-outcome-ledger",
       "name": "Session iteration outcome ledger",
       "description": "Validates durable per-turn outcomes, lock behavior, observability status and Codex event normalization",
