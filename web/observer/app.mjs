@@ -96,9 +96,80 @@ export async function loadProjectMemory(fetchImpl = globalThis.fetch, projectId 
   return { tree, sync };
 }
 
+export function usageQuery(filters = {}) {
+  const params = new URLSearchParams();
+  const keys = ['from', 'to', 'agent_id', 'subagent_id', 'provider', 'model_provider', 'model', 'change', 'session_id', 'role'];
+  for (const key of keys) {
+    const value = filters[key] ?? filters[key.replace('_id', 'Id')] ?? '';
+    if (String(value).trim()) params.set(key, String(value));
+  }
+  const query = params.toString();
+  return query ? `?${query}` : '';
+}
+
+export async function loadProjectUsage(fetchImpl = globalThis.fetch, projectId = '', filters = {}) {
+  const id = encodeURIComponent(projectId);
+  const query = usageQuery(filters);
+  const [summary, breakdown, calls] = await Promise.all([
+    requestJson(fetchImpl, `/v1/projects/${id}/usage/summary${query}`),
+    requestJson(fetchImpl, `/v1/projects/${id}/usage/breakdown${query}`),
+    requestJson(fetchImpl, `/v1/projects/${id}/usage/calls${query}`),
+  ]);
+  return { summary, breakdown, calls, filters: { ...filters } };
+}
+
+export function buildUsageViewModel(usage = {}) {
+  const summary = usage.summary || {};
+  const agents = (Array.isArray(usage.breakdown?.agents) ? usage.breakdown.agents : []).map((agent) => ({ ...agent, children: [] }));
+  const byId = new Map(agents.map((agent) => [agent.agent_id, agent]));
+  for (const agent of agents) {
+    const parent = agent.parent_agent_id ? byId.get(agent.parent_agent_id) : null;
+    if (parent && parent !== agent) parent.children.push(agent);
+  }
+  const roots = agents.filter((agent) => !agent.parent_agent_id || !byId.has(agent.parent_agent_id));
+  const tokens = {
+    input: Number(summary.tokens?.input || 0),
+    cacheWrite: Number(summary.tokens?.cache_write || 0),
+    cacheRead: Number(summary.tokens?.cache_read || 0),
+    output: Number(summary.tokens?.output || 0),
+    reasoning: Number(summary.tokens?.reasoning || 0),
+    total: Number(summary.tokens?.total || 0),
+  };
+  const coverage = summary.coverage || {};
+  const complete = Number(coverage.complete || 0);
+  const summaryOnly = Number(coverage.summary_only || 0);
+  return {
+    totalCost: Number(summary.cost_usd || 0),
+    mainCost: Number(summary.main_cost_usd || 0),
+    subagentCost: Number(summary.subagent_cost_usd || 0),
+    wastedCost: Number(summary.wasted_usd || 0),
+    calls: Array.isArray(usage.calls?.calls) ? usage.calls.calls : [],
+    callCount: Number(summary.calls || usage.calls?.total || 0),
+    sessions: Number(summary.sessions || 0),
+    agentsCount: Number(summary.agents || 0),
+    subagentsCount: Number(summary.subagents || 0),
+    modelsCount: Number(summary.models || 0),
+    tokens,
+    trend: Array.isArray(summary.by_day) ? summary.by_day : [],
+    agents: roots,
+    allAgents: agents,
+    coverage: {
+      complete,
+      summaryOnly,
+      total: Number(coverage.transcripts || complete + summaryOnly),
+      label: `${complete} completo${complete === 1 ? '' : 's'} · ${summaryOnly} agregado${summaryOnly === 1 ? '' : 's'}`,
+    },
+    hasUnknownPricing: Number(summary.unknown_priced_rollups || 0) > 0,
+  };
+}
+
 export async function loadMemoryDocument(fetchImpl = globalThis.fetch, projectId = '', logicalPath = '') {
   const query = new URLSearchParams({ path: logicalPath });
   return requestJson(fetchImpl, '/v1/projects/' + encodeURIComponent(projectId) + '/memory/document?' + query.toString());
+}
+
+export async function loadProjectTranscript(fetchImpl = globalThis.fetch, projectId = '', transcriptId = '') {
+  return requestJson(fetchImpl, `/v1/projects/${encodeURIComponent(projectId)}/transcripts/${encodeURIComponent(transcriptId)}`);
 }
 
 export async function searchProjectMemory(fetchImpl = globalThis.fetch, projectId = '', query = '') {
@@ -401,6 +472,165 @@ function renderSync(container, sync, projectId = '') {
   container.replaceChildren(heading, facts, note, exportLink);
 }
 
+function formatNumber(value) {
+  return new Intl.NumberFormat('pt-BR').format(Number(value) || 0);
+}
+
+function formatUsd(value) {
+  return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'USD', minimumFractionDigits: 4 }).format(Number(value) || 0);
+}
+
+function usageFilter(label, name, value, type = 'text') {
+  const wrapper = node('label', 'usage-filter');
+  wrapper.append(node('span', '', label));
+  const input = node('input');
+  input.name = name;
+  input.type = type;
+  input.value = String(value || '');
+  wrapper.append(input);
+  return wrapper;
+}
+
+function usageSelect(label, name, value, options) {
+  const wrapper = node('label', 'usage-filter');
+  wrapper.append(node('span', '', label));
+  const select = node('select');
+  select.name = name;
+  for (const [optionValue, optionLabel] of options) {
+    const option = node('option', '', optionLabel);
+    option.value = optionValue;
+    option.selected = optionValue === String(value || '');
+    select.append(option);
+  }
+  wrapper.append(select);
+  return wrapper;
+}
+
+function renderUsage(container, projectId, usage, { onFiltersChanged, onTranscript } = {}) {
+  const view = buildUsageViewModel(usage);
+  const filters = usage?.filters || {};
+  const heading = node('div', 'workspace-section-heading');
+  heading.append(node('p', 'eyebrow', 'PROJECT CONSUMPTION'), node('h2', '', 'Consumo'));
+
+  const filterForm = node('form', 'usage-filters');
+  filterForm.append(
+    usageFilter('De', 'from', filters.from, 'date'),
+    usageFilter('Até', 'to', filters.to, 'date'),
+    usageSelect('Escopo', 'role', filters.role, [['', 'Principal + subagentes'], ['main', 'Principal'], ['subagent', 'Subagentes']]),
+    usageFilter('Agente', 'agent_id', filters.agent_id || filters.agentId),
+    usageFilter('Subagente', 'subagent_id', filters.subagent_id || filters.subagentId),
+    usageFilter('Provedor', 'provider', filters.provider),
+    usageFilter('Provedor do modelo', 'model_provider', filters.model_provider || filters.modelProvider),
+    usageFilter('Modelo', 'model', filters.model),
+    usageFilter('Change', 'change', filters.change || filters.changeSlug),
+    usageFilter('Sessão', 'session_id', filters.session_id || filters.sessionId),
+    node('button', 'button-primary', 'Aplicar filtros'),
+  );
+  filterForm.addEventListener('submit', (event) => {
+    event.preventDefault();
+    const form = new FormData(filterForm);
+    onFiltersChanged?.({
+      from: form.get('from') || '', to: form.get('to') || '', role: form.get('role') || '',
+      agent_id: form.get('agent_id') || '', subagent_id: form.get('subagent_id') || '',
+      provider: form.get('provider') || '', model_provider: form.get('model_provider') || '', model: form.get('model') || '',
+      change: form.get('change') || '', session_id: form.get('session_id') || '',
+    });
+  });
+
+  const cards = node('div', 'usage-summary-grid');
+  const summaryCards = [
+    ['Custo total', formatUsd(view.totalCost), `${formatUsd(view.mainCost)} principal · ${formatUsd(view.subagentCost)} subagentes`],
+    ['Tokens', formatNumber(view.tokens.total), `entrada ${formatNumber(view.tokens.input)} · saída ${formatNumber(view.tokens.output)}`],
+    ['Chamadas', formatNumber(view.callCount), `${formatNumber(view.sessions)} sessões · ${formatNumber(view.modelsCount)} modelos`],
+    ['Cobertura', view.coverage.label, `${formatNumber(view.coverage.total)} transcript(s)`],
+  ];
+  for (const [label, value, caption] of summaryCards) {
+    const card = node('article', 'usage-summary-card');
+    card.append(node('span', 'metric-label', label), node('strong', 'usage-summary-value', value), node('span', 'metric-caption', caption));
+    cards.append(card);
+  }
+
+  const content = [];
+  if (view.hasUnknownPricing) content.push(node('div', 'usage-warning', 'Há modelos sem tarifa conhecida. Os custos históricos registrados não foram recalculados.'));
+  if (view.wastedCost > 0) content.push(node('div', 'usage-callout', `Desperdício registrado em workflows interrompidos: ${formatUsd(view.wastedCost)}.`));
+
+  const tokenPanel = node('section', 'usage-panel');
+  tokenPanel.append(node('h3', '', 'Tokens por categoria'));
+  const tokenGrid = node('div', 'usage-token-grid');
+  for (const [label, value] of [['Entrada', view.tokens.input], ['Cache write', view.tokens.cacheWrite], ['Cache read', view.tokens.cacheRead], ['Saída', view.tokens.output], ['Reasoning', view.tokens.reasoning], ['Total', view.tokens.total]]) {
+    tokenGrid.append(fact(label, formatNumber(value)));
+  }
+  tokenPanel.append(tokenGrid);
+  content.push(tokenPanel);
+
+  const trendPanel = node('section', 'usage-panel');
+  trendPanel.append(node('h3', '', 'Tendência diária'));
+  const trend = node('div', 'usage-trend');
+  if (!view.trend.length) trend.append(node('p', 'muted', 'Sem atividade no período selecionado.'));
+  else for (const day of view.trend) {
+    const row = node('div', 'usage-trend-row');
+    row.append(node('span', '', day.date), node('span', '', `${formatNumber(day.tokens_total)} tokens`), node('strong', '', formatUsd(day.cost_usd)));
+    trend.append(row);
+  }
+  trendPanel.append(trend);
+  content.push(trendPanel);
+
+  const hierarchy = node('section', 'usage-panel usage-hierarchy');
+  hierarchy.append(node('h3', '', 'Agentes, modelos e subagentes'));
+  if (!view.agents.length) hierarchy.append(node('p', 'muted', 'Nenhum agente com consumo no período.'));
+  const renderAgent = (agent) => {
+    const details = node('details', 'usage-agent');
+    const summary = node('summary');
+    summary.append(node('strong', '', agent.agent_name || agent.agent_id), node('span', 'usage-agent-meta', `${agent.role} · ${formatNumber(agent.tokens_total)} tokens · ${formatUsd(agent.cost_usd)}`));
+    details.append(summary);
+    const models = node('div', 'usage-model-list');
+    for (const model of agent.models || []) {
+      const row = node('div', 'usage-model-row');
+      row.append(node('span', '', `${model.model_provider || '—'} · ${model.model || 'modelo sem nome'}`), node('span', '', `${formatNumber(model.tokens_total)} tokens`), node('strong', '', formatUsd(model.cost_usd)));
+      models.append(row);
+    }
+    details.append(models);
+    for (const child of agent.children || []) details.append(renderAgent(child));
+    return details;
+  };
+  for (const agent of view.agents) hierarchy.append(renderAgent(agent));
+  content.push(hierarchy);
+
+  const callsPanel = node('section', 'usage-panel usage-calls');
+  callsPanel.append(node('h3', '', 'Chamadas e transcripts'));
+  if (!view.calls.length) callsPanel.append(node('p', 'muted', 'Nenhuma chamada individual disponível; históricos agregados aparecem acima.'));
+  for (const call of view.calls) {
+    const details = node('details', 'usage-call');
+    const summary = node('summary');
+    summary.append(node('strong', '', call.model || 'modelo sem nome'), node('span', 'usage-agent-meta', `${call.role || 'principal'} · ${formatNumber(call.tokens?.total)} tokens · ${formatUsd(call.cost_usd)}`));
+    details.append(summary);
+    const copy = node('div', 'usage-call-copy');
+    copy.append(node('p', '', `Sessão: ${call.session_id || '—'} · Agente: ${call.agent_id || '—'}`));
+    copy.append(node('h4', '', 'Prompt'), node('pre', '', call.prompt || '—'), node('h4', '', 'Resposta'), node('pre', '', call.response || '—'));
+    if (call.transcript_id) {
+      const transcriptButton = node('button', 'reader-toggle', 'Abrir transcript completo');
+      const transcriptTarget = node('pre', 'usage-transcript', 'Carregando transcript…');
+      transcriptTarget.hidden = true;
+      transcriptButton.addEventListener('click', async () => {
+        transcriptTarget.hidden = false;
+        if (transcriptTarget.dataset.loaded) return;
+        try {
+          const transcript = await onTranscript?.(call.transcript_id);
+          transcriptTarget.textContent = transcript?.content || 'Transcript vazio.';
+          transcriptTarget.dataset.loaded = 'true';
+        } catch (error) {
+          transcriptTarget.textContent = error.message || 'Transcript indisponível.';
+        }
+      });
+      copy.append(transcriptButton, transcriptTarget);
+    }
+    details.append(copy);
+    callsPanel.append(details);
+  }
+  content.push(callsPanel);
+  container.replaceChildren(heading, filterForm, cards, ...content);
+}
+
 function renderReader(container, document) {
   const heading = node('div', 'reader-heading');
   heading.append(node('p', 'eyebrow', document.category), node('h2', '', document.title));
@@ -438,6 +668,8 @@ function startDashboardV2() {
     selectedId: '',
     filter: '',
     memory: new Map(),
+    usage: new Map(),
+    usageFilters: new Map(),
     route: parseObserverRoute(globalThis.location?.hash || ''),
   };
   const dashboardError = byId('dashboard-error');
@@ -497,6 +729,12 @@ function startDashboardV2() {
     if (!state.memory.has(projectId)) state.memory.set(projectId, await loadProjectMemory(fetchJson, projectId));
     return state.memory.get(projectId);
   };
+  const ensureProjectUsage = async (projectId) => {
+    const filters = state.usageFilters.get(projectId) || {};
+    const usage = await loadProjectUsage(fetchJson, projectId, filters);
+    state.usage.set(projectId, usage);
+    return usage;
+  };
   const renderSearchRoute = async (query) => {
     const model = state.models.find((item) => item.projectId === state.selectedId) || state.models[0];
     setHidden(dashboardPanel, true);
@@ -542,7 +780,16 @@ function startDashboardV2() {
         renderReader(workspaceContent, buildMemoryDocumentViewModel(payload, payload.content));
         return;
       }
-      if (route.section === 'sessions') renderSessions(workspaceContent, model.projectId, documents);
+      if (route.section === 'usage') {
+        const usage = await ensureProjectUsage(model.projectId);
+        renderUsage(workspaceContent, model.projectId, usage, {
+          onFiltersChanged: (filters) => {
+            state.usageFilters.set(model.projectId, filters);
+            renderWorkspaceRoute({ ...route });
+          },
+          onTranscript: (transcriptId) => loadProjectTranscript(fetchJson, model.projectId, transcriptId),
+        });
+      } else if (route.section === 'sessions') renderSessions(workspaceContent, model.projectId, documents);
       else if (route.section === 'memory') renderMemory(workspaceContent, model.projectId, documents);
       else if (route.section === 'changes') renderChanges(workspaceContent, model.projectId, documents);
       else if (route.section === 'sync') renderSync(workspaceContent, memory.sync, model.projectId);

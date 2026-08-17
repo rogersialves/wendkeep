@@ -24,6 +24,8 @@ export const SESSION_HOOKS = [
   { event: 'PostToolUse', matcher: 'AskUserQuestion', name: 'decision-capture', timeout: 15, statusMessage: 'wendkeep: recording decision' },
   // Refresh subagent/workflow telemetry as each subagent finishes (resilient to a missed Stop).
   { event: 'SubagentStop', matcher: null, name: 'subagent-stop', timeout: 20, codex: true, statusMessage: 'wendkeep: subagent telemetry' },
+  // Publish the SQL observer projection after the subagent telemetry is settled.
+  { event: 'SubagentStop', matcher: null, name: 'observer-publish', timeout: 5, order: 20, codex: true, statusMessage: 'wendkeep: publishing local observer usage' },
   // Log plan/task progress into the active session note when a task is marked complete.
   // codex: TaskCompleted is not in Codex's hook event enum.
   { event: 'TaskCompleted', matcher: null, name: 'task-log', timeout: 10, statusMessage: 'wendkeep: plan progress' },

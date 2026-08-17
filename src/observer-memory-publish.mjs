@@ -68,7 +68,8 @@ function entityType(logicalPath) {
 }
 
 function shouldSkip(name, relativePath) {
-  if (TRANSIENT_NAMES.has(name) || name.endsWith('.tmp') || name.endsWith('.lock')) return true;
+  if (TRANSIENT_NAMES.has(name) || name === 'observer-sql-state.json' || name === 'observer-sql-outbox'
+    || name.endsWith('.tmp') || name.endsWith('.lock')) return true;
   if (relativePath === MEMORY_STATE_FILE) return true;
   return false;
 }

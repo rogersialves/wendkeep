@@ -22,7 +22,11 @@ test('[req:OBS-LOCAL-2] servidor local consulta, registra e publica sem token', 
     const health = await request(base, '/healthz');
     const open = await request(base, '/v1/projects');
     assert.equal(health.status, 200);
-    assert.deepEqual(health.body, { ok: true, service: 'wendkeep-observer', schema_version: 1 });
+    assert.equal(health.body.ok, true);
+    assert.equal(health.body.service, 'wendkeep-observer');
+    assert.equal(health.body.database.engine, 'sqlite');
+    assert.equal(health.body.database.file, 'observer.sqlite');
+    assert.equal(health.body.database.ready, true);
     assert.equal(open.status, 200);
 
     const localHeaders = { 'content-type': 'application/json' };

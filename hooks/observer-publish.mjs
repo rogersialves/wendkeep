@@ -9,6 +9,7 @@ async function main() {
   const result = await publishObserverSnapshot({
     vaultBase: resolved.base,
     projectRoot: resolved.projectRoot,
+    input,
   });
   if (!result.ok && result.error) debugLog('Observer publish fail-open:', result.error);
 }

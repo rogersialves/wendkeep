@@ -4,21 +4,23 @@
 
 ## Objetivo
 
-O Observer consolida a observabilidade de vários projetos WendKeep em um serviço local e grava no
-volume Docker uma cópia integral da memória publicada pelos hooks. O conteúdo fica disponível
-para navegação e busca no próprio container, sem depender do Obsidian para consulta.
+O Observer consolida a observabilidade de vários projetos WendKeep em um serviço local. O volume
+Docker mantém o SQLite `/data/observer.sqlite` como autoridade única para documentos, sessões,
+agentes, uso, chamadas e transcripts completos. O conteúdo fica disponível para navegação e busca
+no próprio container, sem depender do Obsidian para consulta.
 
 ## Quando usar
 
-Use para consultar changes, sessões, decisões, bugs, aprendizados, specs, documentos do brain e
-saúde de vários projetos em uma única memória local. Durante a transição, o vault continua sendo
-preservado como cópia de origem para recuperação; o Observer é a autoridade de consulta do seu
-container.
+Use para consultar changes, sessões, decisões, bugs, aprendizados, specs, documentos do brain,
+consumo por agente/modelo e saúde de vários projetos em uma única memória local. Durante a
+transição, o vault e os arquivos Markdown legados continuam preservados como cópia de origem para
+recuperação; o Observer é a autoridade de consulta do seu container.
 
 ## Quando não usar
 
-Não use o Observer para editar, concluir ou arquivar changes, curar memória, armazenar transcripts
-ou expor o serviço na rede. As edições continuam passando pelos hooks e pelo WendKeep local.
+Não use o Observer para editar, concluir ou arquivar changes, curar memória, exportar a autoridade
+de volta para Markdown automaticamente ou expor o serviço na rede. As edições continuam passando
+pelos hooks e pelo WendKeep local.
 
 ## Pré-requisitos
 
@@ -68,11 +70,12 @@ O painel é servido pelo mesmo processo e abre diretamente, sem formulário ou t
 presa ao loopback do computador; não coloque o endereço em uma interface de rede.
 
 O painel mostra a lista multi-projeto, versão, saúde, sessão mais recente, change ativa, contagem
-de changes e data da última captura. Ao abrir um projeto, o workspace oferece as telas Overview,
-Sessões, Memória, Changes e Sincronização. Cada lista abre o documento Markdown completo em um
-leitor read-only, com filtro local, busca no corpo e alternância para a fonte. Os estados de
-carregamento, vazio, servidor indisponível, conflito e dados desatualizados ficam visíveis, e a
-atualização pode ser manual ou automática a cada 15 segundos.
+de changes e data da última captura. Ao abrir um projeto, o workspace oferece Overview, Consumo,
+Sessões, Memória, Changes e Sincronização. A aba Consumo mostra custo total, tokens por categoria,
+agentes principais, subagentes, provedores, modelos, tendência diária, cobertura histórica e
+chamadas com prompt, resposta e transcript completo. Os estados de carregamento, vazio, servidor
+indisponível, conflito, modelo sem tarifa e dados desatualizados ficam visíveis, e a atualização
+pode ser manual ou automática a cada 15 segundos.
 
 Se o navegador mostrar a tela mas a lista falhar, confirme a saúde em
 `http://127.0.0.1:8787/healthz` e verifique se o container está em execução.
@@ -80,25 +83,32 @@ Se o navegador mostrar a tela mas a lista falhar, confirme a saúde em
 ## Resultado esperado
 
 `register` grava `project_id`, nome, versão e data de registro. `publish` lê o vault local,
-produz o snapshot e também envia eventos idempotentes com o conteúdo integral das sessões,
-decisões, bugs, aprendizados, specs, changes, CORE, DIGEST, SHARED_MEMORY e estado do brain. O
-container grava os Markdown em `/data/memory` e mantém `MEMORY_EVENTS.jsonl` e
-`MEMORY_INDEX.json` no volume `observer-data`; não monta `C:\GitHub` nem qualquer
-`.WendKeep-vault`. `memory import` faz a carga inicial e retorna a paridade por arquivo e hash.
+produz o snapshot e envia eventos idempotentes para o SQLite com o conteúdo integral das sessões,
+decisões, bugs, aprendizados, specs, changes, CORE, DIGEST, SHARED_MEMORY, estado do brain,
+sessões de agentes, rollups de custo, chamadas e transcripts. O container grava tudo em
+`/data/observer.sqlite`; não monta `C:\GitHub` nem qualquer `.WendKeep-vault`. Markdown é aceito
+somente como conteúdo de uma coluna SQL e volta a existir como arquivo apenas pela exportação
+read-only sob demanda. `memory import` faz a carga inicial e retorna a paridade por arquivo e hash.
+Na migração, o total de custo/token registrado no frontmatter é preservado por uma linha de
+reconciliação quando o ledger detalhado não fecha com ele; essa linha não inventa chamadas.
+Sessões históricas com o mesmo `session_id` recebem uma identidade canônica por arquivo para
+evitar que um rollup sobrescreva o outro.
 
-O `init` projeta `observer-publish` para `SessionStart` e `Stop` depois dos hooks principais. Sem
-`WENDKEEP_OBSERVER_URL`, o hook é no-op. Com o servidor parado, ele grava os snapshots em
-`.brain/observer-outbox/` e a memória integral em `.brain/observer-memory-outbox/`, sem bloquear a
-sessão; uma execução posterior tenta reenviar os dois tipos de evento.
+O `init` projeta `observer-publish` para `SessionStart`, `Stop` e `SubagentStop` depois dos hooks
+principais. Sem servidor disponível, ele grava snapshots em `.brain/observer-outbox/` e eventos
+SQL em `.brain/observer-sql-outbox/`, sem bloquear a sessão; uma execução posterior tenta
+reenviar os lotes. Os lotes SQL são enviados com gzip para que transcripts completos maiores que
+64 MB em JSON puro continuem dentro do limite do transporte; o Observer descomprime e valida o
+corpo antes de ingerir. O outbox é transporte temporário, não autoridade.
 
 ## Erros comuns e diagnóstico
 
 - `project_not_registered`: rode `observer register` antes de publicar.
 - `host loopback`: troque `0.0.0.0` ou endereço LAN por `127.0.0.1`.
-- Outbox pendente: o serviço estava indisponível; preserve `.brain/observer-outbox/` e repita o
-  publisher. Não apague eventos manualmente.
-- Se a memória ficar incompleta, verifique a tela Sincronização, preserve o outbox e rode
-  `observer memory import` para reconstruir a cópia a partir do vault.
+- Outbox pendente: o serviço estava indisponível; preserve `.brain/observer-outbox/` e
+  `.brain/observer-sql-outbox/` e repita o publisher. Não apague eventos manualmente.
+- Se a memória ou o consumo ficarem incompletos, verifique a tela Sincronização, preserve o
+  outbox e rode `observer memory import` para reconstruir a carga a partir do vault.
 
 ## Próximos passos
 
@@ -107,25 +117,34 @@ removido com `docker compose down -v` durante a operação normal, pois isso apa
 
 ## Autoridade dos dados
 
-O container é a memória canônica para consultas do Observer e guarda o conteúdo integral
-publicado. O vault continua preservado localmente durante a migração como cópia de transição e
-fonte de recuperação; as telas do Observer não concluem, arquivam, reparam ou promovem estado.
+O SQLite do container é a memória canônica para consultas do Observer e guarda o conteúdo integral
+publicado. O vault e qualquer `/data/memory` legado continuam preservados durante a migração como
+cópia de transição e fonte de recuperação; os hooks não atualizam Markdown no container depois do
+corte. As telas do Observer não concluem, arquivam, reparam ou promovem estado.
 
 ## API mínima
 
-- `GET /healthz` — disponibilidade sem dados de projeto.
-- `GET /v1/projects` — projetos com snapshot aceito.
+- `GET /healthz` — disponibilidade, versão das migrações SQLite e estado da migração legada.
+- `GET /v1/projects` — projetos registrados no SQLite, com snapshot quando houver.
 - `GET /v1/projects/:project_id` — último snapshot do projeto.
 - `GET /v1/projects/:project_id/changes` — resumo das changes do snapshot.
 - `PUT /v1/projects/:project_id` — registro explícito local.
 - `POST /v1/projects/:project_id/snapshot` — ingestão local idempotente.
+- `POST /v1/projects/:project_id/ingest` — lote idempotente de documentos, sessões, agentes, rollups,
+  chamadas e transcripts.
 - `GET /v1/projects/:project_id/memory/tree` — árvore e metadados dos documentos.
 - `GET /v1/projects/:project_id/memory/document?path=...` — conteúdo Markdown integral.
 - `GET /v1/projects/:project_id/memory/search?q=...` — busca no caminho e no corpo.
 - `GET /v1/projects/:project_id/sync` — modo, contagem, conflitos e último evento.
-- `PUT /v1/projects/:project_id/sync` — altera explicitamente o modo local.
+- `PUT /v1/projects/:project_id/sync` — compatibilidade de configuração; a autoridade continua SQL.
 - `GET /v1/projects/:project_id/memory/export` — exportação read-only com conteúdo completo.
 - `POST /v1/projects/:project_id/memory/events` — ingestão idempotente em lote.
+- `GET /v1/projects/:project_id/usage/summary` — totais filtráveis por período, change, sessão,
+  agente, provedor, modelo e papel.
+- `GET /v1/projects/:project_id/usage/breakdown` — hierarquia de agentes, subagentes e modelos.
+- `GET /v1/projects/:project_id/usage/calls` — chamadas individuais com prompt e resposta.
+- `GET /v1/projects/:project_id/transcripts/:transcript_id` — transcript comprimido, validado por hash.
 
-As rotas `/v1` rejeitam corpo acima do limite e validam projeto, caminho, revisão, hash e
-isolamento antes de gravar o conteúdo no volume.
+As rotas `/v1` rejeitam corpo transportado ou expandido acima do limite e validam projeto, caminho,
+revisão, hash, idempotência e isolamento antes de gravar o conteúdo no SQLite. Para preservar uma
+cópia Markdown, use a rota `memory/export`; ela não altera a autoridade SQL.

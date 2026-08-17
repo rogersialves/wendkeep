@@ -74,7 +74,7 @@ test('[req:MEM-API-3] [req:MEM-QUERY-4] API ingere lote, lista árvore, lê docu
     const sync = await request(base, '/v1/projects/project-a/sync');
     assert.equal(sync.status, 200);
     assert.equal(sync.body.document_count, 1);
-    assert.equal(sync.body.mode, 'mirror');
+    assert.equal(sync.body.mode, 'container-authority');
 
     const mode = await request(base, '/v1/projects/project-a/sync', {
       method: 'PUT',

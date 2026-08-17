@@ -20,6 +20,7 @@ test('[req:OBS-LOCAL-1] browser contract serve página real do Observer sem desb
     assert.match(html, /id="workspace-panel"/i);
     assert.match(html, /id="workspace-content"/i);
     assert.match(html, /Sessões/i);
+    assert.match(html, /Consumo/i);
     assert.match(html, /Memória/i);
     assert.match(html, /Changes/i);
     assert.match(html, /Sincronização/i);

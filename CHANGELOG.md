@@ -4,6 +4,34 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.72.0] — 2026-08-17
+
+### Added
+
+- **Observer SQL authority.** O volume Docker agora usa `/data/observer.sqlite` como
+  autoridade única para documentos, sessões, agentes, uso, chamadas LLM e transcripts
+  comprimidos; as migrações SQL são versionadas e idempotentes.
+- **Ingestão resiliente.** Hooks de sessão e subagentes enviam eventos idempotentes ao
+  Observer, preservam custos registrados e usam outbox local quando o container está
+  indisponível.
+- **Dashboard de Consumo.** Cada projeto ganhou resumo de tokens/custos, filtros,
+  hierarquia agente/subagente/modelo, tendência diária, chamadas e leitura de transcript.
+- **Migração sem perda.** Conteúdo legado do volume, `MEMORY_EVENTS.jsonl`, frontmatter de
+  custo e históricos sem transcript são importados sem apagar as fontes existentes;
+  históricos incompletos são marcados como `summary_only`; divergências entre frontmatter e
+  ledger ficam em linhas explícitas de reconciliação e `session_id` duplicado é desambiguado
+  por arquivo.
+
+### Changed
+
+- Markdown deixou de ser autoridade operacional no container. Ele permanece armazenado como
+  conteúdo documental no SQLite e só é materializado por exportação explícita.
+- O transporte divide lotes por quantidade e tamanho, reconhece retries do hash legado e
+  preserva transcripts grandes dentro do limite HTTP do Observer.
+- Lotes SQL agora usam gzip no transporte e são expandidos com limite controlado no Observer,
+  permitindo importar transcripts históricos que excedem 64 MB em JSON puro sem aumentar
+  indiscriminadamente o limite de requisição.
+
 ## [0.71.1] — 2026-08-17
 
 ### Added

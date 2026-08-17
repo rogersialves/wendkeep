@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { buildProjectSnapshot } from './observer-snapshot.mjs';
-import { publishObserverMemory } from './observer-memory-publish.mjs';
+import { publishObserverSql } from './observer-sql-publish.mjs';
 
 const OUTBOX_REL = join('.brain', 'observer-outbox');
 const REQUEST_TIMEOUT_MS = 500;
@@ -90,23 +90,23 @@ export async function publishObserverSnapshot({
   projectRoot,
   url = process.env.WENDKEEP_OBSERVER_URL || '',
   now = new Date(),
+  input = {},
 } = {}) {
   try {
     const event = buildProjectSnapshot({ vaultBase, projectRoot, now });
-    if (!url) return { ok: true, skipped: true, queued: false, hookExitCode: 0, event_id: event.event_id };
+    const sql = await publishObserverSql({
+      vaultBase,
+      projectId: event.project_id,
+      url,
+      input,
+      now,
+    });
+    if (!url) return { ok: sql.ok, skipped: true, queued: sql.queued, hookExitCode: 0, event_id: event.event_id, sql };
 
     await retryObserverOutbox({ vaultBase, url });
-    let memory;
-    try {
-      memory = await publishObserverMemory({
-        vaultBase,
-        projectId: event.project_id,
-        url,
-        now,
-      });
-    } catch (error) {
-      memory = { ok: false, queued: false, error: error.message };
-    }
+    // SQL is the live authority. Keep the legacy-shaped `memory` field for
+    // older integrations while reporting the real SQL publication separately.
+    const memory = { ok: sql.ok, queued: sql.queued, changed: sql.changed, pending: sql.pending, authority: 'sqlite' };
     try {
       const response = await postSnapshot(url, event);
       return {
@@ -116,6 +116,7 @@ export async function publishObserverSnapshot({
         event_id: event.event_id,
         duplicate: response.duplicate === true,
         memory,
+        sql,
       };
     } catch (error) {
       queueOutbox(vaultBase, event);
@@ -126,6 +127,7 @@ export async function publishObserverSnapshot({
         event_id: event.event_id,
         error: error.message,
         memory,
+        sql,
       };
     }
   } catch (error) {

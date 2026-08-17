@@ -448,6 +448,118 @@
       "severity": "critical",
       "type": "command",
       "command": "node --test tests/docs-bilingual.test.mjs tests/readme-packaging.test.mjs tests/release-changelog.test.mjs"
+    },
+    {
+      "id": "observer-sql-schema",
+      "name": "Observer SQL schema",
+      "description": "Validates the versioned SQLite schema and migrations",
+      "severity": "critical",
+      "type": "command",
+      "command": "node --test tests/observer-sql-store.test.mjs"
+    },
+    {
+      "id": "observer-sql-store",
+      "name": "Observer SQL store",
+      "description": "Validates SQL persistence, idempotency, conflicts and project isolation",
+      "severity": "critical",
+      "type": "command",
+      "command": "node --test tests/observer-sql-store.test.mjs"
+    },
+    {
+      "id": "observer-transcript-store",
+      "name": "Observer transcript store",
+      "description": "Validates compressed transcript storage and coverage metadata",
+      "severity": "critical",
+      "type": "command",
+      "command": "node --test tests/observer-transcript-store.test.mjs"
+    },
+    {
+      "id": "observer-sql-api",
+      "name": "Observer SQL API",
+      "description": "Validates ingest, usage queries, calls and transcript endpoints",
+      "severity": "critical",
+      "type": "command",
+      "command": "node --test tests/observer-sql-api.test.mjs"
+    },
+    {
+      "id": "observer-sql-memory",
+      "name": "Observer SQL memory adapter",
+      "description": "Validates SQL-backed memory routes, publishing and migration",
+      "severity": "critical",
+      "type": "command",
+      "command": "node --test tests/observer-memory-store.test.mjs tests/observer-memory-server.test.mjs tests/observer-memory-publish.test.mjs tests/observer-memory-import.test.mjs"
+    },
+    {
+      "id": "observer-sql-health",
+      "name": "Observer SQL health",
+      "description": "Validates database readiness and Observer health diagnostics",
+      "severity": "critical",
+      "type": "command",
+      "command": "node --test tests/observer-server.test.mjs"
+    },
+    {
+      "id": "observer-sql-migration",
+      "name": "Observer SQL migration",
+      "description": "Validates legacy document, event, session and usage migration",
+      "severity": "critical",
+      "type": "command",
+      "command": "node --test tests/observer-sql-migrate.test.mjs tests/observer-legacy-migration.test.mjs"
+    },
+    {
+      "id": "observer-sql-ingest",
+      "name": "Observer SQL ingestion",
+      "description": "Validates hook payloads, chunking and outbox replay",
+      "severity": "critical",
+      "type": "command",
+      "command": "node --test tests/observer-sql-publish.test.mjs"
+    },
+    {
+      "id": "observer-sql-dashboard",
+      "name": "Observer SQL dashboard",
+      "description": "Validates consumption view models, filters and hierarchy",
+      "severity": "critical",
+      "type": "command",
+      "command": "node --test tests/observer-usage-ui.test.mjs tests/observer-dashboard.test.mjs"
+    },
+    {
+      "id": "observer-sql-browser",
+      "name": "Observer SQL browser",
+      "description": "Validates the real local dashboard shell and project workspace contract",
+      "severity": "critical",
+      "type": "command",
+      "command": "node --test tests/observer-dashboard-browser.test.mjs"
+    },
+    {
+      "id": "observer-sql-docker",
+      "name": "Observer SQL Docker",
+      "description": "Validates loopback Compose and persistent volume behavior",
+      "severity": "critical",
+      "type": "command",
+      "command": "node --test tests/observer-docker.test.mjs"
+    },
+    {
+      "id": "observer-sql-docs",
+      "name": "Observer SQL documentation",
+      "description": "Validates bilingual Observer documentation and packaging references",
+      "severity": "critical",
+      "type": "command",
+      "command": "node --test tests/docs-bilingual.test.mjs tests/readme-packaging.test.mjs"
+    },
+    {
+      "id": "observer-sql-release",
+      "name": "Observer SQL release",
+      "description": "Validates changelog, package version and release packaging",
+      "severity": "critical",
+      "type": "command",
+      "command": "node --test tests/release-changelog.test.mjs tests/tarball-smoke.test.mjs"
+    },
+    {
+      "id": "observer-sql-transport",
+      "name": "Observer SQL transport",
+      "description": "Validates gzip ingestion for large transcripts and idempotent replay",
+      "severity": "critical",
+      "type": "command",
+      "command": "node --test tests/observer-sql-publish.test.mjs tests/observer-sql-api.test.mjs"
     }
   ]
 }

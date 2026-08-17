@@ -1,0 +1,398 @@
+import { createHash } from 'node:crypto';
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  renameSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs';
+import { basename, join } from 'node:path';
+import { gzipSync } from 'node:zlib';
+import { parseTranscriptContent } from '../packages/integrations/src/transcripts.mjs';
+import { parseSessionCost, } from './cost.mjs';
+import { buildSessionIdentityMap, listMigrationDocuments, parseFrontmatter, sessionEvents } from './observer-sql-migrate.mjs';
+
+export const SQL_OUTBOX_REL = '.brain/observer-sql-outbox';
+export const SQL_STATE_REL = '.brain/observer-sql-state.json';
+const SQL_SCHEMA_VERSION = 1;
+export const SQL_EVENT_BATCH_SIZE = 64;
+export const SQL_EVENT_BATCH_BYTES = 8 * 1024 * 1024;
+const REQUEST_TIMEOUT_MS = 15000;
+
+function text(value, fallback = '') { return String(value ?? fallback); }
+function hash(value) { return createHash('sha256').update(typeof value === 'string' ? value : JSON.stringify(value)).digest('hex'); }
+function eventId(kind, projectId, seed) { return `sql-${kind}-${hash(`${projectId}:${seed}`).slice(0, 24)}`; }
+function isoNow(value) {
+  const date = value instanceof Date ? value : new Date(value || Date.now());
+  if (Number.isNaN(date.getTime())) throw new Error('occurred_at inválido.');
+  return date.toISOString();
+}
+function readJson(path, fallback) {
+  if (!existsSync(path)) return fallback;
+  try { return JSON.parse(readFileSync(path, 'utf8')); } catch { return fallback; }
+}
+function atomicJson(path, value) {
+  mkdirSync(join(path, '..'), { recursive: true });
+  const temp = `${path}.${process.pid}.${Date.now()}.tmp`;
+  writeFileSync(temp, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
+  renameSync(temp, path);
+}
+function statePath(vaultBase) { return join(vaultBase, SQL_STATE_REL); }
+function readState(vaultBase) {
+  return readJson(statePath(vaultBase), { schema_version: SQL_SCHEMA_VERSION, files: {}, transcripts: {} });
+}
+function outboxDir(vaultBase) { return join(vaultBase, SQL_OUTBOX_REL); }
+function outboxPath(vaultBase, batch) { return join(outboxDir(vaultBase), `sql-${hash(JSON.stringify(batch.events)).slice(0, 24)}.json`); }
+
+function normalizePath(value) { return String(value || '').replaceAll('\\', '/'); }
+function readRegistry(vaultBase) {
+  return readJson(join(vaultBase, '.brain', 'SESSION_REGISTRY.json'), { sessions: {} });
+}
+function registryEntry(vaultBase, logicalPath, sessionId) {
+  const sessions = readRegistry(vaultBase).sessions || {};
+  return Object.entries(sessions).find(([id, entry]) => id === sessionId || normalizePath(entry?.session_file) === logicalPath)?.[1] || {};
+}
+function transcriptIdFromPath(path) { return basename(String(path || '')).replace(/\.jsonl?$/i, '') || ''; }
+function modelProvider(provider, model) {
+  const clean = String(provider || '').toLowerCase();
+  if (clean.includes('claude') || clean.includes('anthropic') || String(model).startsWith('claude-')) return 'anthropic';
+  if (clean.includes('codex') || clean.includes('openai') || String(model).startsWith('gpt-')) return 'openai';
+  return clean;
+}
+function tokenPayload(usage = {}) {
+  return {
+    input: Number(usage.input) || 0,
+    cache_write: Number(usage.cacheWrite) || 0,
+    cache_read: Number(usage.cached) || 0,
+    output: Number(usage.output) || 0,
+    reasoning: Number(usage.reasoning) || 0,
+    total: Number(usage.total) || 0,
+  };
+}
+
+function documentEvent({ projectId, logicalPath, content, metadata, revision, occurredAt }) {
+  const contentHash = hash(content);
+  return {
+    schema_version: 1,
+    event_id: eventId('document', projectId, `${logicalPath}:${revision}:${contentHash}`),
+    kind: 'document.upsert',
+    project_id: projectId,
+    occurred_at: occurredAt,
+    payload: {
+      logical_path: logicalPath,
+      entity_type: logicalPath.startsWith('02-Sessões/') ? 'session'
+        : logicalPath.startsWith('04-Decisões/') ? 'decision'
+          : logicalPath.startsWith('05-Bugs/') ? 'bug'
+            : logicalPath.startsWith('06-Aprendizados/') ? 'learning'
+              : logicalPath.startsWith('07-Specs/') ? 'spec'
+                : logicalPath.startsWith('08-Mudanças/') ? 'change' : 'memory',
+      title: basename(logicalPath).replace(/\.md$/i, ''),
+      content,
+      content_hash: contentHash,
+      revision,
+      metadata,
+      source_session_id: text(metadata?.session_id),
+    },
+  };
+}
+
+function agentEvent({ projectId, sessionId, agentId, parentAgentId = '', role = 'main', provider = '', model = '', input = {}, occurredAt }) {
+  const fingerprint = hash({ agentId, role, provider, model, input: input.agent_id || input.agent_transcript_path || '' }).slice(0, 24);
+  return {
+    schema_version: 1,
+    event_id: eventId('agent', projectId, `${agentId}:${fingerprint}`),
+    kind: 'agent.upsert',
+    project_id: projectId,
+    occurred_at: occurredAt,
+    payload: {
+      agent_id: agentId,
+      session_id: sessionId,
+      parent_agent_id: parentAgentId || null,
+      role,
+      agent_name: text(input.agent_name || input.agentName || provider),
+      agent_type: text(input.agent_type || input.agentType || role),
+      workflow: text(input.workflow),
+      status: text(input.status, 'running'),
+      model,
+      effort: text(input.effort || input.nivel_pensamento),
+      started_at: input.started_at || null,
+      ended_at: input.ended_at || null,
+    },
+  };
+}
+
+function transcriptCalls({ projectId, sessionId, agentId, role, provider, modelFallback, transcriptId, content, occurredAt }) {
+  let parsed;
+  try { parsed = parseTranscriptContent(content); } catch { return []; }
+  return (parsed.turns || []).flatMap((turn, index) => {
+    const prompt = (turn.userPrompts || []).join('\n\n');
+    const response = (turn.assistantMessages || []).join('\n\n');
+    const tokens = tokenPayload(turn.usage);
+    if (!prompt && !response && !tokens.total) return [];
+    const model = text(turn.model || parsed.model || modelFallback, '?');
+    const callId = eventId('call', projectId, `${transcriptId}:${agentId}:${turn.turnId || index + 1}:${hash(content).slice(0, 16)}`);
+    return [{
+      schema_version: 1,
+      event_id: eventId('call-event', projectId, callId),
+      kind: 'llm_call',
+      project_id: projectId,
+      occurred_at: text(turn.timestamp, occurredAt),
+      payload: {
+        call_id: callId,
+        session_id: sessionId,
+        agent_id: agentId,
+        role,
+        provider,
+        model_provider: modelProvider(provider, model),
+        model,
+        effort: '',
+        sequence: index + 1,
+        occurred_at: text(turn.timestamp, occurredAt),
+        tokens,
+        cost_usd: 0,
+        cost_status: 'unknown',
+        transcript_id: transcriptId,
+        prompt_text: prompt,
+        response_text: response,
+        status: turn.status === 'aborted' ? 'aborted' : 'complete',
+        metadata: { tools: turn.tools || [], source: 'transcript-parser' },
+      },
+    }];
+  });
+}
+
+function sourceCandidates({ vaultBase, logicalPath, fm, input }) {
+  const sessionId = text(fm.session_id || input?.session_id || input?.sessionId);
+  const registry = registryEntry(vaultBase, logicalPath, sessionId);
+  const candidates = [];
+  const add = (path, id = '', role = 'main', agentInput = {}) => {
+    if (!path || !existsSync(path)) return;
+    const transcriptId = text(id) || transcriptIdFromPath(path);
+    if (transcriptId && !candidates.some((item) => item.transcriptId === transcriptId)) candidates.push({ path, transcriptId, role, agentInput });
+  };
+  add(input?.transcript_path || input?.transcriptPath || '', input?.transcript_id || input?.transcriptId, 'main', input || {});
+  add(input?.agent_transcript_path || input?.agentTranscriptPath || '', input?.agent_transcript_id || input?.agentTranscriptId, 'subagent', input || {});
+  add(fm.transcript_path || fm.transcriptPath || '', fm.observability_transcript_id);
+  add(registry.transcript_path, registry.transcript_id);
+  for (const path of registry.transcript_paths || []) add(path, transcriptIdFromPath(path));
+  return candidates;
+}
+
+function completeTranscriptEvents({ projectId, sessionId, mainAgentId, provider, model, source, now }) {
+  const content = readFileSync(source.path, 'utf8');
+  const agentId = source.role === 'subagent'
+    ? `${projectId}:${sessionId}:subagent:${hash(source.path).slice(0, 16)}`
+    : mainAgentId;
+  const agent = source.role === 'subagent'
+    ? agentEvent({ projectId, sessionId, agentId, parentAgentId: mainAgentId, role: 'subagent', provider, model, input: source.agentInput, occurredAt: now })
+    : null;
+  const fingerprint = hash(content);
+  const transcript = {
+    schema_version: 1,
+    event_id: eventId('transcript', projectId, `${source.transcriptId}:${fingerprint}`),
+    kind: 'transcript.upsert',
+    project_id: projectId,
+    occurred_at: now,
+    payload: {
+      transcript_id: source.transcriptId,
+      session_id: sessionId,
+      agent_id: agentId,
+      coverage: 'complete',
+      content,
+      source: 'hook-transcript',
+      metadata: { original_path: source.path.replaceAll('\\', '/') },
+    },
+  };
+  const calls = transcriptCalls({ projectId, sessionId, agentId, role: source.role, provider, modelFallback: model, transcriptId: source.transcriptId, content, occurredAt: now });
+  return { events: [agent, transcript, ...calls].filter(Boolean), fingerprint, transcriptId: source.transcriptId };
+}
+
+function dedupeEvents(events) {
+  const seen = new Set();
+  return events.filter((event) => {
+    if (seen.has(event.event_id)) return false;
+    seen.add(event.event_id);
+    return true;
+  });
+}
+
+export function buildObserverSqlEventBatch({ vaultBase, projectId, input = {}, now = new Date(), state = readState(vaultBase), remoteDocuments = {} } = {}) {
+  if (!vaultBase || !projectId) throw new Error('vaultBase e projectId são obrigatórios.');
+  const occurredAt = isoNow(now);
+  const nextState = { schema_version: SQL_SCHEMA_VERSION, files: { ...(state.files || {}) }, transcripts: { ...(state.transcripts || {}) } };
+  const events = [];
+  const sessionContexts = [];
+  const files = listMigrationDocuments(vaultBase);
+  const sessionFiles = files.flatMap((file) => {
+    if (!file.logicalPath.startsWith('02-Sessões/')) return [];
+    const content = readFileSync(file.absolute, 'utf8');
+    const fm = parseFrontmatter(content);
+    return fm.type === 'session' ? [{ file, content, fm }] : [];
+  });
+  const sessionIdentity = buildSessionIdentityMap({ projectId, sessionFiles });
+  let changed = 0;
+  for (const file of files) {
+    const content = readFileSync(file.absolute, 'utf8');
+    const contentHash = hash(content);
+    const previous = state.files?.[file.logicalPath];
+    const remote = remoteDocuments?.[file.logicalPath];
+    const baseRevision = Math.max(Number(previous?.revision || 0), Number(remote?.revision || 0));
+    const unchanged = previous?.content_hash === contentHash || remote?.content_hash === contentHash;
+    const revision = baseRevision + (unchanged ? 0 : 1);
+    nextState.files[file.logicalPath] = { content_hash: contentHash, revision: revision || 1 };
+    const fm = parseFrontmatter(content);
+    if (fm.type === 'session') sessionContexts.push({ file, content, fm, contentHash, revision: revision || 1, sessionId: sessionIdentity.get(file.logicalPath) });
+    if (previous?.content_hash === contentHash) continue;
+    changed += 1;
+    events.push(documentEvent({ projectId, logicalPath: file.logicalPath, content, metadata: fm, revision: revision || 1, occurredAt }));
+    if (fm.type === 'session') {
+      const cost = parseSessionCost(content) || { model: '?', mainCost: 0, subCost: 0, tokens: 0, subTokens: 0, ledger: [] };
+      events.push(...sessionEvents({ projectId, logicalPath: file.logicalPath, content, cost, revision: revision || 1, sessionId: sessionIdentity.get(file.logicalPath) }).events);
+    }
+  }
+
+  for (const context of sessionContexts) {
+    const sessionId = text(context.sessionId || context.fm.session_id || `historical:${hash(`${projectId}:${context.file.logicalPath}`).slice(0, 20)}`);
+    const mainAgentId = `${projectId}:${sessionId}:main`;
+    const provider = text(context.fm.provider);
+    const model = text(context.fm.modelo || context.fm.custo_modelo_label, '?');
+    const sources = sourceCandidates({ vaultBase, logicalPath: context.file.logicalPath, fm: context.fm, input })
+      .map((source) => ({ ...source, role: source.role || 'main' }));
+    for (const source of sources) {
+      const content = readFileSync(source.path, 'utf8');
+      const fingerprint = hash(content);
+      if (state.transcripts?.[source.transcriptId]?.content_hash === fingerprint) continue;
+      const complete = completeTranscriptEvents({ projectId, sessionId, mainAgentId, provider, model, source, now: occurredAt });
+      nextState.transcripts[source.transcriptId] = { content_hash: complete.fingerprint, coverage: 'complete' };
+      const summaryId = complete.transcriptId;
+      for (const event of complete.events) {
+        if (event.kind === 'agent.upsert' && event.payload.agent_id !== mainAgentId) events.push(event);
+        else if (event.kind !== 'agent.upsert') events.push(event);
+      }
+      // A session document may have emitted a summary-only placeholder. The
+      // complete event follows it and is intentionally idempotent by content hash.
+      void summaryId;
+    }
+    if (sources.length === 0 && context.fm.observability_transcript_id) {
+      nextState.transcripts[context.fm.observability_transcript_id] ||= { content_hash: '', coverage: 'summary_only' };
+    }
+  }
+  return { events: dedupeEvents(events), nextState, scanned: Object.keys(nextState.files).length, changed };
+}
+
+function queueOutbox(vaultBase, batch) {
+  mkdirSync(outboxDir(vaultBase), { recursive: true });
+  const path = outboxPath(vaultBase, batch);
+  if (!existsSync(path)) atomicJson(path, batch);
+  return path;
+}
+
+export function listSqlOutbox(vaultBase) {
+  const dir = outboxDir(vaultBase);
+  if (!existsSync(dir)) return [];
+  return readdirSync(dir).filter((name) => /^sql-[a-f0-9]{24}\.json$/.test(name)).sort().flatMap((name) => {
+    try { return [{ path: join(dir, name), ...JSON.parse(readFileSync(join(dir, name), 'utf8')) }]; } catch { return []; }
+  });
+}
+
+async function postSqlChunk({ url, projectId, events, fetchImpl = globalThis.fetch }) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  const wireBody = gzipSync(Buffer.from(JSON.stringify({ events }), 'utf8'));
+  try {
+    const response = await fetchImpl(`${String(url).replace(/\/$/, '')}/v1/projects/${encodeURIComponent(projectId)}/ingest`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'content-encoding': 'gzip', accept: 'application/json' },
+      body: wireBody,
+      signal: controller.signal,
+    });
+    const responseBody = await response.json().catch(() => ({}));
+    if (!response.ok || responseBody.conflicts > 0 || responseBody.rejected > 0) throw new Error(`Observer ingest respondeu HTTP ${response.status}.`);
+    return responseBody;
+  } finally { clearTimeout(timer); }
+}
+
+async function readRemoteDocuments({ url, projectId, fetchImpl = globalThis.fetch }) {
+  if (!url) return {};
+  try {
+    const response = await fetchImpl(`${String(url).replace(/\/$/, '')}/v1/projects/${encodeURIComponent(projectId)}/memory/tree`, {
+      headers: { accept: 'application/json' },
+    });
+    if (!response.ok) return {};
+    const body = await response.json().catch(() => ({}));
+    return Object.fromEntries((body.documents || []).map((item) => [item.logical_path, item]));
+  } catch {
+    return {};
+  }
+}
+
+async function postSqlBatch({ url, projectId, events, fetchImpl = globalThis.fetch }) {
+  const aggregate = { accepted: 0, rejected: 0, conflicts: 0, stale: 0, duplicates: 0 };
+  let chunk = [];
+  let chunkBytes = 0;
+  const send = async (items) => {
+    if (!items.length) return;
+    const response = await postSqlChunk({
+      url,
+      projectId,
+      events: items,
+      fetchImpl,
+    });
+    for (const key of Object.keys(aggregate)) aggregate[key] += Number(response?.[key]) || 0;
+  };
+  for (const event of events) {
+    const eventBytes = Buffer.byteLength(JSON.stringify(event));
+    const exceedsCount = chunk.length >= SQL_EVENT_BATCH_SIZE;
+    const exceedsBytes = chunk.length > 0 && chunkBytes + eventBytes > SQL_EVENT_BATCH_BYTES;
+    if (exceedsCount || exceedsBytes) {
+      await send(chunk);
+      chunk = [];
+      chunkBytes = 0;
+    }
+    chunk.push(event);
+    chunkBytes += eventBytes;
+  }
+  await send(chunk);
+  return aggregate;
+}
+
+export async function retryObserverSqlOutbox({ vaultBase, projectId, url, fetchImpl = globalThis.fetch } = {}) {
+  const pending = listSqlOutbox(vaultBase);
+  if (!url) return { attempted: 0, confirmed: 0, pending: pending.length };
+  let attempted = 0;
+  let confirmed = 0;
+  for (const batch of pending) {
+    attempted += 1;
+    try {
+      await postSqlBatch({ url, projectId, events: batch.events, fetchImpl });
+      unlinkSync(batch.path);
+      confirmed += 1;
+    } catch { break; }
+  }
+  return { attempted, confirmed, pending: listSqlOutbox(vaultBase).length };
+}
+
+export async function publishObserverSql({ vaultBase, projectId, url = process.env.WENDKEEP_OBSERVER_URL || '', input = {}, now = new Date(), fetchImpl = globalThis.fetch } = {}) {
+  if (!vaultBase || !projectId) throw new Error('vaultBase e projectId são obrigatórios.');
+  const replay = await retryObserverSqlOutbox({ vaultBase, projectId, url, fetchImpl });
+  const state = readState(vaultBase);
+  const remoteDocuments = Object.keys(state.files || {}).length === 0
+    ? await readRemoteDocuments({ url, projectId, fetchImpl })
+    : {};
+  const batch = buildObserverSqlEventBatch({ vaultBase, projectId, input, now, state, remoteDocuments });
+  atomicJson(statePath(vaultBase), batch.nextState);
+  if (!batch.events.length) return { ok: true, queued: false, scanned: batch.scanned, changed: batch.changed, pending: listSqlOutbox(vaultBase).length, replay };
+  if (!url) {
+    queueOutbox(vaultBase, { schema_version: SQL_SCHEMA_VERSION, project_id: projectId, events: batch.events });
+    return { ok: false, queued: true, scanned: batch.scanned, changed: batch.changed, pending: listSqlOutbox(vaultBase).length, replay, hookExitCode: 0 };
+  }
+  try {
+    const response = await postSqlBatch({ url, projectId, events: batch.events, fetchImpl });
+    return { ok: true, queued: false, scanned: batch.scanned, changed: batch.changed, pending: listSqlOutbox(vaultBase).length, replay, response };
+  } catch (error) {
+    queueOutbox(vaultBase, { schema_version: SQL_SCHEMA_VERSION, project_id: projectId, events: batch.events });
+    return { ok: false, queued: true, scanned: batch.scanned, changed: batch.changed, pending: listSqlOutbox(vaultBase).length, replay, hookExitCode: 0, error: error.message };
+  }
+}

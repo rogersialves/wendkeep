@@ -1,6 +1,7 @@
 import { createServer } from 'node:http';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { gunzipSync } from 'node:zlib';
 import {
   appendObserverEvent,
   getObserverProject,
@@ -10,19 +11,35 @@ import {
 } from './observer-store.mjs';
 import { MAX_SNAPSHOT_BYTES, validateObserverSnapshot } from './observer-snapshot.mjs';
 import {
-  applyMemoryEvent,
-  exportMemoryBundle,
-  readMemoryDocument,
-  readMemorySync,
-  readMemoryTree,
   setMemoryMode,
-  searchMemory,
   validateMemoryEvent,
 } from './observer-memory.mjs';
+import {
+  OBSERVER_SQL_FILE,
+  OBSERVER_SQL_SCHEMA_VERSION,
+  ensureObserverDatabase,
+  ingestObserverEvents,
+  migrateObserverDatabase,
+  readSqlProject,
+  listSqlProjects,
+  readSqlDocument,
+  readSqlSync,
+  readSqlTree,
+  searchSqlDocuments,
+  exportSqlMemoryBundle,
+  readTranscript,
+  readUsageBreakdown,
+  readUsageCalls,
+  readUsageSummary,
+  registerSqlProject,
+} from './observer-sql-store.mjs';
+import { migrateObserverContainerData } from './observer-sql-migrate.mjs';
 
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '::1']);
 const MAX_BODY_BYTES = MAX_SNAPSHOT_BYTES + 4096;
 const MAX_MEMORY_BODY_BYTES = 8 * 1024 * 1024;
+const MAX_SQL_BODY_BYTES = 64 * 1024 * 1024;
+const MAX_SQL_EXPANDED_BODY_BYTES = 256 * 1024 * 1024;
 const STATIC_ROOT = fileURLToPath(new URL('../web/observer/', import.meta.url));
 const STATIC_ASSETS = new Map([
   ['/index.html', { file: 'index.html', type: 'text/html; charset=utf-8' }],
@@ -67,7 +84,7 @@ function serveStatic(res, pathname) {
   return true;
 }
 
-function readBody(req, maxBytes = MAX_BODY_BYTES) {
+function readBody(req, maxBytes = MAX_BODY_BYTES, { gunzip = false, expandedMaxBytes = maxBytes } = {}) {
   return new Promise((resolve, reject) => {
     let size = 0;
     let tooLarge = false;
@@ -85,7 +102,24 @@ function readBody(req, maxBytes = MAX_BODY_BYTES) {
       chunks.push(chunk);
     });
     req.on('end', () => {
-      if (!tooLarge) resolve(Buffer.concat(chunks).toString('utf8'));
+      if (tooLarge) return;
+      let body = Buffer.concat(chunks);
+      if (gunzip && String(req.headers['content-encoding'] || '').toLowerCase() === 'gzip') {
+        try { body = gunzipSync(body); }
+        catch {
+          const error = new Error('corpo gzip inválido.');
+          error.code = 'invalid_content_encoding';
+          reject(error);
+          return;
+        }
+        if (body.length > expandedMaxBytes) {
+          const error = new Error('corpo expandido acima do limite.');
+          error.code = 'payload_too_large';
+          reject(error);
+          return;
+        }
+      }
+      resolve(body.toString('utf8'));
     });
     req.on('error', reject);
   });
@@ -108,11 +142,41 @@ function projectIdFrom(parts) {
   return parts[0] === 'v1' && parts[1] === 'projects' && parts[2] ? parts[2] : '';
 }
 
-function projectKnown(dataDir, projectId) {
-  return Boolean(
-    getObserverProject(dataDir, projectId)
-    || listRegisteredObserverProjects(dataDir).some((item) => item.projectId === projectId),
-  );
+function ensureSqlProjectRegistration(dataDir, sqlDb, projectId) {
+  try {
+    if (readSqlProject(sqlDb, projectId)) return true;
+  } catch (error) {
+    if (error?.code !== 'project_not_registered') throw error;
+  }
+  const legacy = getObserverProject(dataDir, projectId)
+    || listRegisteredObserverProjects(dataDir).find((item) => item.projectId === projectId);
+  if (!legacy) return false;
+  registerSqlProject(sqlDb, {
+    projectId: legacy.projectId,
+    projectName: legacy.projectName,
+    wendkeepVersion: legacy.snapshot?.wendkeep_version || legacy.wendkeepVersion || '',
+  });
+  return true;
+}
+
+function sqlMemoryEvent(projectId, event) {
+  return {
+    schema_version: 1,
+    event_id: event.event_id,
+    kind: event.operation === 'delete' ? 'document.delete' : 'document.upsert',
+    project_id: projectId,
+    occurred_at: event.captured_at || new Date().toISOString(),
+    payload: {
+      logical_path: event.logical_path,
+      entity_type: event.entity_type,
+      content: event.content || '',
+      content_hash: event.content_hash || '',
+      revision: event.revision || 1,
+      source_session_id: event.source_session_id || '',
+      source_turn_id: event.source_turn_id || '',
+      metadata: event.metadata || {},
+    },
+  };
 }
 
 export async function startObserverServer({
@@ -125,11 +189,35 @@ export async function startObserverServer({
     throw new Error(`Observer HTTP aceita somente host loopback; recebido: ${host}`);
   }
   if (!dataDir) throw new Error('dataDir é obrigatório.');
+  const sqlDb = ensureObserverDatabase(dataDir);
+  const databaseMigration = migrateObserverDatabase(sqlDb);
+  const legacyMigration = migrateObserverContainerData(dataDir, { database: sqlDb });
+  const registered = [
+    ...listRegisteredObserverProjects(dataDir),
+    ...readObserverIndex(dataDir).projects.map((item) => ({
+      projectId: item.projectId,
+      projectName: item.projectName,
+      wendkeepVersion: item.snapshot?.wendkeep_version || '',
+    })),
+  ];
+  for (const project of registered) registerSqlProject(sqlDb, project);
   const server = createServer(async (req, res) => {
     try {
       const pathname = new URL(req.url || '/', 'http://127.0.0.1').pathname;
       if (req.method === 'GET' && pathname === '/healthz') {
-        json(res, 200, { ok: true, service: 'wendkeep-observer', schema_version: 1 });
+        json(res, 200, {
+          ok: true,
+          service: 'wendkeep-observer',
+          schema_version: 1,
+          database: {
+            engine: 'sqlite',
+            file: OBSERVER_SQL_FILE,
+            schema_version: OBSERVER_SQL_SCHEMA_VERSION,
+            migrations: databaseMigration.applied.length,
+            legacy_migration: legacyMigration,
+            ready: true,
+          },
+        });
         return;
       }
       if (req.method === 'GET' && (pathname === '/' || STATIC_ASSETS.has(pathname))) {
@@ -148,9 +236,20 @@ export async function startObserverServer({
 
       if (parts.length === 2 && req.method === 'GET') {
         const index = readObserverIndex(dataDir);
+        const legacy = new Map(index.projects.map(({ snapshot, ...summary }) => [summary.projectId, summary]));
+        for (const project of listSqlProjects(sqlDb)) {
+          const current = legacy.get(project.project_id) || {};
+          legacy.set(project.project_id, {
+            ...current,
+            projectId: project.project_id,
+            projectName: current.projectName || project.project_name,
+            wendkeepVersion: current.wendkeepVersion || project.wendkeep_version,
+            registeredAt: current.registeredAt || project.registered_at,
+          });
+        }
         json(res, 200, {
           schema_version: index.schema_version,
-          projects: index.projects.map(({ snapshot, ...summary }) => summary),
+          projects: [...legacy.values()].sort((a, b) => a.projectId.localeCompare(b.projectId)),
         });
         return;
       }
@@ -160,18 +259,78 @@ export async function startObserverServer({
         errorResponse(res, 404, 'not_found', 'projeto não informado.');
         return;
       }
+      ensureSqlProjectRegistration(dataDir, sqlDb, projectId);
 
-      if (parts.length === 4 && parts[3] === 'sync' && req.method === 'GET') {
-        if (!projectKnown(dataDir, projectId)) {
+      if (parts.length === 4 && parts[3] === 'ingest' && req.method === 'POST') {
+        if (!ensureSqlProjectRegistration(dataDir, sqlDb, projectId)) {
           errorResponse(res, 404, 'project_not_found', 'projeto não encontrado: ' + projectId);
           return;
         }
-        json(res, 200, readMemorySync(dataDir, projectId));
+        const body = parseJson(await readBody(req, MAX_SQL_BODY_BYTES, {
+          gunzip: true,
+          expandedMaxBytes: MAX_SQL_EXPANDED_BODY_BYTES,
+        }));
+        const events = Array.isArray(body.events) ? body.events : [];
+        if (events.length === 0) {
+          errorResponse(res, 400, 'invalid_ingest_batch', 'events deve conter pelo menos um evento.');
+          return;
+        }
+        const result = ingestObserverEvents(sqlDb, { projectId, events });
+        const status = result.conflicts > 0 ? 409 : result.rejected > 0 ? 400 : result.accepted > 0 ? 201 : 200;
+        json(res, status, result);
+        return;
+      }
+
+      if (parts.length >= 4 && parts[3] === 'usage' && req.method === 'GET') {
+        if (!ensureSqlProjectRegistration(dataDir, sqlDb, projectId)) {
+          errorResponse(res, 404, 'project_not_found', 'projeto não encontrado: ' + projectId);
+          return;
+        }
+        const query = new URL(req.url || '/', 'http://127.0.0.1').searchParams;
+        const filters = {
+          from: query.get('from') || '', to: query.get('to') || '', agentId: query.get('agent_id') || '', subagentId: query.get('subagent_id') || '',
+          sessionId: query.get('session_id') || '', changeSlug: query.get('change') || query.get('change_slug') || '', role: query.get('role') || '',
+          model: query.get('model') || '', provider: query.get('provider') || '', modelProvider: query.get('model_provider') || '',
+          limit: query.get('limit') || 100, offset: query.get('offset') || 0,
+        };
+        if (parts[4] === 'summary') {
+          json(res, 200, readUsageSummary(sqlDb, projectId, filters));
+          return;
+        }
+        if (parts[4] === 'breakdown') {
+          json(res, 200, readUsageBreakdown(sqlDb, projectId, filters));
+          return;
+        }
+        if (parts[4] === 'calls') {
+          json(res, 200, readUsageCalls(sqlDb, projectId, filters));
+          return;
+        }
+      }
+
+      if (parts.length === 5 && parts[3] === 'transcripts' && req.method === 'GET') {
+        if (!ensureSqlProjectRegistration(dataDir, sqlDb, projectId)) {
+          errorResponse(res, 404, 'project_not_found', 'projeto não encontrado: ' + projectId);
+          return;
+        }
+        try {
+          json(res, 200, readTranscript(sqlDb, projectId, parts[4]));
+        } catch (error) {
+          errorResponse(res, error?.code === 'transcript_not_found' ? 404 : 400, error?.code || 'transcript_error', error?.message || 'transcript indisponível.');
+        }
+        return;
+      }
+
+      if (parts.length === 4 && parts[3] === 'sync' && req.method === 'GET') {
+        if (!ensureSqlProjectRegistration(dataDir, sqlDb, projectId)) {
+          errorResponse(res, 404, 'project_not_found', 'projeto não encontrado: ' + projectId);
+          return;
+        }
+        json(res, 200, { ...readSqlSync(sqlDb, projectId), mode: 'container-authority' });
         return;
       }
 
       if (parts.length === 4 && parts[3] === 'sync' && req.method === 'PUT') {
-        if (!projectKnown(dataDir, projectId)) {
+        if (!ensureSqlProjectRegistration(dataDir, sqlDb, projectId)) {
           errorResponse(res, 404, 'project_not_found', 'projeto não encontrado: ' + projectId);
           return;
         }
@@ -185,20 +344,21 @@ export async function startObserverServer({
       }
 
       if (parts.length >= 4 && parts[3] === 'memory') {
-        if (!projectKnown(dataDir, projectId)) {
+        if (!ensureSqlProjectRegistration(dataDir, sqlDb, projectId)) {
           errorResponse(res, 404, 'project_not_found', 'projeto não encontrado: ' + projectId);
           return;
         }
         const memoryAction = parts[4] || '';
         if (memoryAction === 'tree' && req.method === 'GET') {
           const query = new URL(req.url || '/', 'http://127.0.0.1').searchParams;
-          json(res, 200, readMemoryTree(dataDir, projectId, query.get('prefix') || ''));
+          const tree = readSqlTree(sqlDb, projectId, query.get('prefix') || '');
+          json(res, 200, { ...tree, document_count: tree.documents.length });
           return;
         }
         if (memoryAction === 'document' && req.method === 'GET') {
           const query = new URL(req.url || '/', 'http://127.0.0.1').searchParams;
           try {
-            json(res, 200, readMemoryDocument(dataDir, projectId, query.get('path') || ''));
+            json(res, 200, readSqlDocument(sqlDb, projectId, query.get('path') || ''));
           } catch (error) {
             const status = error?.code === 'memory_not_found' ? 404 : 400;
             errorResponse(res, status, error?.code || 'invalid_memory_path', error?.message || 'documento inválido.');
@@ -207,11 +367,11 @@ export async function startObserverServer({
         }
         if (memoryAction === 'search' && req.method === 'GET') {
           const query = new URL(req.url || '/', 'http://127.0.0.1').searchParams;
-          json(res, 200, { project_id: projectId, query: query.get('q') || '', results: searchMemory(dataDir, projectId, query.get('q') || '') });
+          json(res, 200, { project_id: projectId, query: query.get('q') || '', results: searchSqlDocuments(sqlDb, projectId, query.get('q') || '') });
           return;
         }
         if (memoryAction === 'export' && req.method === 'GET') {
-          json(res, 200, exportMemoryBundle(dataDir, projectId));
+          json(res, 200, { ...exportSqlMemoryBundle(sqlDb, projectId), mode: 'container-authority' });
           return;
         }
         if (memoryAction === 'events' && req.method === 'POST') {
@@ -221,30 +381,36 @@ export async function startObserverServer({
             errorResponse(res, 400, 'invalid_memory_batch', 'events deve conter pelo menos um evento.');
             return;
           }
-          const results = [];
+          const validationErrors = [];
           for (const event of events) {
-            if (event?.project_id !== projectId) {
-              results.push({ accepted: false, errors: ['project_id do evento não corresponde à rota.'] });
-              continue;
-            }
             const validation = validateMemoryEvent(event);
-            results.push(validation.ok ? applyMemoryEvent(dataDir, event) : { accepted: false, errors: validation.errors });
+            if (!validation.ok) validationErrors.push(...validation.errors);
           }
-          const accepted = results.filter((item) => item.accepted).length;
-          const duplicates = results.filter((item) => item.duplicate).length;
-          const conflicts = results.filter((item) => item.conflict).length;
-          const rejected = results.length - accepted - duplicates - conflicts;
-          if (conflicts > 0 || rejected > 0) {
-            json(res, conflicts > 0 ? 409 : 400, { accepted, duplicates, conflicts, rejected, results });
+          if (validationErrors.length) {
+            errorResponse(res, 400, 'invalid_memory_batch', validationErrors.join(' '));
             return;
           }
-          json(res, accepted > 0 ? 201 : 200, { accepted, duplicates, conflicts, rejected, results });
+          const result = ingestObserverEvents(sqlDb, { projectId, events: events.map((event) => sqlMemoryEvent(projectId, event)) });
+          const status = result.conflicts > 0 ? 409 : result.rejected > 0 ? 400 : result.accepted > 0 ? 201 : 200;
+          json(res, status, result);
           return;
         }
       }
 
       if (parts.length === 3 && req.method === 'GET') {
-        const project = getObserverProject(dataDir, projectId);
+        let project = getObserverProject(dataDir, projectId);
+        if (!project) {
+          try {
+            const sqlProject = readSqlProject(sqlDb, projectId);
+            project = {
+              projectId: sqlProject.project_id,
+              projectName: sqlProject.project_name,
+              wendkeepVersion: sqlProject.wendkeep_version,
+              registeredAt: sqlProject.registered_at,
+              eventCount: 0,
+            };
+          } catch { /* handled as not found below */ }
+        }
         if (!project) {
           errorResponse(res, 404, 'project_not_found', `projeto não encontrado: ${projectId}`);
           return;
@@ -268,6 +434,11 @@ export async function startObserverServer({
           errorResponse(res, 400, 'invalid_project', result.errors.join(' '));
           return;
         }
+        registerSqlProject(sqlDb, {
+          projectId,
+          projectName: body.project_name,
+          wendkeepVersion: body.wendkeep_version,
+        });
         json(res, 201, result.project);
         return;
       }
@@ -275,7 +446,15 @@ export async function startObserverServer({
       if (parts.length === 4 && parts[3] === 'changes' && req.method === 'GET') {
         const project = getObserverProject(dataDir, projectId);
         if (!project) {
-          errorResponse(res, 404, 'project_not_found', `projeto não encontrado: ${projectId}`);
+          let sqlProject;
+          try { sqlProject = readSqlProject(sqlDb, projectId); } catch (error) {
+            if (error?.code !== 'project_not_registered') throw error;
+          }
+          if (!sqlProject) {
+            errorResponse(res, 404, 'project_not_found', `projeto não encontrado: ${projectId}`);
+            return;
+          }
+          json(res, 200, { project_id: projectId, changes: [] });
           return;
         }
         json(res, 200, { project_id: projectId, changes: project.snapshot?.changes || [] });
@@ -306,7 +485,7 @@ export async function startObserverServer({
       errorResponse(res, 404, 'not_found', 'rota não encontrada.');
     } catch (error) {
       if (res.headersSent) return;
-      const status = error?.code === 'payload_too_large' ? 413 : error?.code === 'invalid_json' ? 400 : 500;
+      const status = error?.code === 'payload_too_large' ? 413 : ['invalid_json', 'invalid_content_encoding'].includes(error?.code) ? 400 : 500;
       errorResponse(res, status, error?.code || 'observer_error', error?.message || 'erro interno do Observer.');
     }
   });
@@ -328,6 +507,10 @@ export async function startObserverServer({
   return {
     server,
     address: () => server.address(),
-    close: () => new Promise((resolve, reject) => server.close((error) => (error ? reject(error) : resolve()))),
+    close: () => new Promise((resolve, reject) => server.close((error) => {
+      try { sqlDb.close(); } catch { /* already closed */ }
+      if (error) reject(error);
+      else resolve();
+    })),
   };
 }

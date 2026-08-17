@@ -84,9 +84,11 @@ test('extractReleaseNotes: throws when the version is absent', () => {
 test('[sensor:release-tests] current release notes are extractable and match the package', () => {
   const release = extractReleaseNotes(CHANGELOG, PACKAGE.version);
   assert.equal(release.date, '2026-08-17');
-  assert.match(release.notes, /Observer local abre diretamente/i);
-  assert.match(release.notes, /Authorization/i);
-  assert.match(release.notes, /variável de\s+token/i);
+  assert.match(release.notes, /Observer SQL authority/i);
+  assert.match(release.notes, /observer\.sqlite/i);
+  assert.match(release.notes, /Dashboard de Consumo/i);
+  assert.match(release.notes, /outbox local/i);
+  assert.match(release.notes, /summary_only/i);
   assert.doesNotMatch(release.notes, /019f[0-9a-f-]+/i);
 });
 

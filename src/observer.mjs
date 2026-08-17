@@ -2,8 +2,10 @@ import { homedir } from 'node:os';
 import { isAbsolute, resolve } from 'node:path';
 import { appendObserverEvent, readObserverIndex, registerObserverProject } from './observer-store.mjs';
 import { buildProjectSnapshot } from './observer-snapshot.mjs';
-import { compareMemoryParity, publishObserverMemory } from './observer-memory-publish.mjs';
+import { compareMemoryParity } from './observer-memory-publish.mjs';
+import { publishObserverSql } from './observer-sql-publish.mjs';
 import { startObserverServer } from './observer-server.mjs';
+import { ensureObserverDatabase, migrateObserverDatabase, listSqlProjects, OBSERVER_SQL_FILE, OBSERVER_SQL_SCHEMA_VERSION } from './observer-sql-store.mjs';
 import { resolveProjectVault } from '../packages/vault/src/project-vault.mjs';
 
 export const OBSERVER_HELP = `wendkeep observer — Observer local multi-projeto
@@ -54,6 +56,21 @@ function summary(index) {
   };
 }
 
+function databaseSummary(dir) {
+  const db = ensureObserverDatabase(dir);
+  try {
+    const migrations = migrateObserverDatabase(db);
+    return {
+      engine: 'sqlite',
+      file: OBSERVER_SQL_FILE,
+      schema_version: OBSERVER_SQL_SCHEMA_VERSION,
+      migrations: migrations.applied.length,
+      projects: listSqlProjects(db).length,
+      ready: true,
+    };
+  } finally { db.close(); }
+}
+
 export async function runObserver(argv = [], { write = (chunk) => process.stdout.write(chunk) } = {}) {
   const [sub] = argv;
   const asJson = argv.includes('--json');
@@ -64,7 +81,7 @@ export async function runObserver(argv = [], { write = (chunk) => process.stdout
   const dir = dataDir(argv);
 
   if (sub === 'status') {
-    print(summary(readObserverIndex(dir)), asJson, write);
+    print({ ...summary(readObserverIndex(dir)), database: databaseSummary(dir) }, asJson, write);
     return 0;
   }
 
@@ -103,7 +120,7 @@ export async function runObserver(argv = [], { write = (chunk) => process.stdout
       },
     );
     if (!registration.ok) throw new Error('Observer não registrou o projeto: HTTP ' + registration.status + '.');
-    const memory = await publishObserverMemory({
+    const sql = await publishObserverSql({
       vaultBase: vault,
       projectId: snapshot.project_id,
       url,
@@ -114,9 +131,10 @@ export async function runObserver(argv = [], { write = (chunk) => process.stdout
       url,
     });
     const result = {
-      ok: memory.ok && parity.missing === 0 && parity.mismatched === 0,
+      ok: sql.ok && parity.missing === 0 && parity.mismatched === 0,
       project_id: snapshot.project_id,
-      memory,
+      sql,
+      memory: { ...sql, authority: 'sqlite' },
       parity,
     };
     print(result, asJson, write);
