@@ -9,7 +9,7 @@ import { makeDataDir, makeObserverFixture } from './helpers/observer-fixture.mjs
 const BIN = join(dirname(fileURLToPath(import.meta.url)), '..', 'bin', 'wendkeep.mjs');
 const run = (args) => spawnSync(process.execPath, [BIN, ...args], { encoding: 'utf8' });
 
-test('[req:OBS-1] [req:OBS-8] CLI observer expõe status, register e publish', () => {
+test('[req:OBS-LOCAL-2] [req:OBS-LOCAL-3] CLI observer expõe status, register, publish e mantém loopback', () => {
   const dataDir = makeDataDir();
   const fixture = makeObserverFixture();
   try {

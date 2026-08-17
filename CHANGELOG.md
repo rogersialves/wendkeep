@@ -4,6 +4,35 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.71.1] — 2026-08-17
+
+### Added
+
+- **Observer memory authority.** O container local agora recebe a cópia integral das sessões,
+  decisões, bugs, aprendizados, specs, changes, CORE, DIGEST, SHARED_MEMORY e estado do brain.
+  A API oferece árvore, leitura completa, busca por corpo, sincronização, modos
+  `mirror`/`container-read`/`container-authority` e exportação read-only.
+- **Workspace de memória no navegador.** O painel local navega por projeto, sessões, memória,
+  changes, sincronização e leitor Markdown completo, sem formulário ou token no loopback.
+- **Importação do WendKeep.** `observer memory import` registra a carga inicial e informa paridade
+  por arquivo e hash; o volume Docker permanece preservado em rebuild e reinício.
+
+### Fixed
+
+- **Observer local abre diretamente.** O dashboard não exige mais token, formulário ou
+  `Authorization` para consultar a projeção no loopback; o compose também inicia sem variável de
+  token obrigatória.
+
+## [0.71.0] — 2026-08-17
+
+### Added
+
+- **Painel web local do Observer.** O servidor agora entrega uma interface read-only no navegador
+  para consultar projetos, saúde, sessões, changes e snapshots sanitizados da última captura. A interface é empacotada no
+  npm e na imagem Docker, exige o token local para consultar `/v1`, mantém o token somente no
+  `sessionStorage` da aba e
+  não amplia o contrato de dados sanitizados.
+
 ## [0.70.0] — 2026-08-17
 
 ### Added

@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="dark">
+    <meta name="description" content="Painel local de observabilidade dos projetos WendKeep">
+    <title>WendKeep Observer</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <div class="ambient ambient-left" aria-hidden="true"></div>
+    <div class="ambient ambient-right" aria-hidden="true"></div>
+    <div class="app-shell">
+      <header class="topbar">
+        <a class="brand" href="/" aria-label="WendKeep Observer início">
+          <span class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></span>
+          <span>
+            <span class="eyebrow">LOCAL OPERATIONS CONSOLE</span>
+            <strong class="brand-name">WendKeep Observer</strong>
+          </span>
+        </a>
+        <div class="connection-cluster" aria-live="polite">
+          <span id="connection-dot" class="connection-dot is-offline" aria-hidden="true"></span>
+          <span id="connection-label">Conectando</span>
+          <form id="global-search-form" class="global-search">
+            <label class="sr-only" for="global-search">Buscar na memória</label>
+            <span aria-hidden="true">⌕</span>
+            <input id="global-search" type="search" placeholder="Buscar memória" autocomplete="off">
+            <button class="global-search-submit" type="submit" aria-label="Pesquisar">↵</button>
+          </form>
+          <button id="refresh-button" class="icon-button" type="button" title="Atualizar dados" aria-label="Atualizar dados">
+            <span aria-hidden="true">↻</span>
+          </button>
+        </div>
+      </header>
+
+      <main id="app" class="main-content">
+        <section id="dashboard-panel">
+          <div class="hero-row">
+            <div>
+              <p class="eyebrow">LOCAL PROJECT MAP</p>
+              <h1>Visão geral do seu trabalho.</h1>
+              <p id="last-sync" class="muted">Aguardando primeira leitura.</p>
+            </div>
+          </div>
+
+          <div id="metrics-grid" class="metrics-grid" aria-label="Resumo operacional"></div>
+
+          <div id="dashboard-error" class="dashboard-error panel" role="alert" hidden></div>
+
+          <div class="workspace-grid">
+            <section class="panel project-panel" aria-labelledby="projects-title">
+              <div class="panel-heading">
+                <div>
+                  <p class="eyebrow">REGISTERED PROJECTS</p>
+                  <h2 id="projects-title">Projetos</h2>
+                </div>
+                <label class="search-field" for="project-filter">
+                  <span class="sr-only">Filtrar projetos</span>
+                  <span aria-hidden="true">⌕</span>
+                  <input id="project-filter" type="search" placeholder="Filtrar" autocomplete="off">
+                </label>
+              </div>
+              <div id="project-list" class="project-list" role="list"></div>
+              <div id="empty-state" class="empty-state" hidden>
+                <span class="empty-orbit" aria-hidden="true">◌</span>
+                <strong>Nenhum projeto encontrado</strong>
+                <span>Ajuste o filtro ou publique um snapshot pelo hook.</span>
+              </div>
+            </section>
+
+            <section id="project-detail" class="panel detail-panel" aria-labelledby="detail-title" aria-live="polite">
+              <div class="detail-placeholder">
+                <span class="detail-glyph" aria-hidden="true">✦</span>
+                <p class="eyebrow">PROJECT DETAIL</p>
+                <h2 id="detail-title">Selecione um projeto</h2>
+                <p>Saúde, sessão e changes aparecem aqui quando você escolher um ponto da constelação.</p>
+              </div>
+            </section>
+          </div>
+        </section>
+
+        <section id="workspace-panel" hidden aria-live="polite">
+          <div class="workspace-header">
+            <a id="workspace-back" class="back-link" href="#overview">← Visão geral</a>
+            <div>
+              <p class="eyebrow">PROJECT WORKSPACE</p>
+              <h1 id="workspace-title">Projeto</h1>
+              <p id="workspace-subtitle" class="muted">Memória local do container.</p>
+            </div>
+            <span id="workspace-sync-badge" class="sync-badge">Sincronizando</span>
+          </div>
+          <div class="workspace-layout">
+            <aside class="workspace-rail panel" aria-label="Navegação do projeto">
+              <nav id="workspace-nav" class="workspace-nav">
+                <a data-workspace-section="overview" href="#project/project-a/overview">Overview</a>
+                <a data-workspace-section="sessions" href="#project/project-a/sessions">Sessões</a>
+                <a data-workspace-section="memory" href="#project/project-a/memory">Memória</a>
+                <a data-workspace-section="changes" href="#project/project-a/changes">Changes</a>
+                <a data-workspace-section="sync" href="#project/project-a/sync">Sincronização</a>
+              </nav>
+              <div id="workspace-meta" class="workspace-meta"></div>
+            </aside>
+            <section id="workspace-content" class="panel workspace-content">
+              <div class="detail-placeholder">
+                <span class="detail-glyph" aria-hidden="true">✦</span>
+                <p class="eyebrow">MEMORY WORKSPACE</p>
+                <h2>Selecione uma seção</h2>
+              </div>
+            </section>
+          </div>
+        </section>
+      </main>
+
+      <footer class="footer-note">
+        <span>Container local é a memória canônica.</span>
+        <span class="footer-separator" aria-hidden="true">·</span>
+        <span>Vault preservado como cópia de transição.</span>
+      </footer>
+    </div>
+    <script type="module" src="/app.mjs"></script>
+  </body>
+</html>

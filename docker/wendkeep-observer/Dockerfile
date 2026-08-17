@@ -10,6 +10,7 @@ COPY src ./src
 COPY packages ./packages
 COPY hooks ./hooks
 COPY schema ./schema
+COPY web ./web
 
 ENV NODE_ENV=production
 ENV WENDKEEP_OBSERVER_DATA_DIR=/data

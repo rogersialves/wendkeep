@@ -78,7 +78,7 @@ npx wendkeep import                          # backfill past Claude + Codex sess
 
 ## The problem: the context dies when the window closes
 
-Decisions, dead ends, the reason you chose X over Y — gone next session. The pieces to fix that exist but are scattered (qmd‑sessions, memsearch, Nexus, hand‑written hooks). wendkeep ships them as one turnkey package that writes into a knowledge graph **inside the Obsidian vault you already use** — no manual setup, no snapshot to keep in sync.
+Decisions, dead ends, the reason you chose X over Y — gone next session. The pieces to fix that exist but are scattered (qmd‑sessions, memsearch, Nexus, hand‑written hooks). wendkeep ships local capture plus an optional Docker Observer that keeps complete memory browsable without depending on Obsidian.
 
 | | |
 |---|---|
@@ -88,7 +88,7 @@ Decisions, dead ends, the reason you chose X over Y — gone next session. The p
 | **Cost** — what it all cost | Per‑model, cache‑aware token pricing per session — plus `cost --trend` with a run‑rate projection across the whole vault; research previews without a final rate remain unestimated. |
 | **Multi‑agent** — one vault, both agents | `init` wires the session hooks into `.claude/settings.json` *and* `.codex/hooks.json`, and every note is tagged with the agent that wrote it: Claude Code is detected from its environment, anything else is recorded as Codex. One shared graph, whichever agent you are in. |
 | **Local‑first** — no cloud, no account | Everything is plain Markdown on your disk. An optional MCP server (`@bitbonsai/mcpvault`) lets the agent read/write the vault. |
-| **Local Observer** — many projects, one view | `wendkeep observer` keeps a local HTTP index of sanitized, idempotent snapshots; vaults remain local, the container does not mount them, and unavailable hooks use an outbox without blocking the session. |
+| **Local Observer** — many projects, one view | `wendkeep observer` keeps snapshots plus a complete copy of sessions, decisions, bugs, learnings, specs, and changes in the Docker volume; the read-only dashboard opens directly at `http://127.0.0.1:8787/`, local mode has no token, and unavailable hooks use an outbox without blocking the session. |
 
 ## Requirements
 
