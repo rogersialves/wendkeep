@@ -22,6 +22,17 @@
             "statusMessage": "wendkeep: opening Obsidian session"
           }
         ]
+      },
+      {
+        "matcher": "startup|resume|clear|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "npx wendkeep hook observer-publish",
+            "timeoutSec": 5,
+            "statusMessage": "wendkeep: publishing local observer snapshot"
+          }
+        ]
       }
     ],
     "Stop": [
@@ -42,6 +53,16 @@
             "command": "npx wendkeep hook change-nag",
             "timeoutSec": 15,
             "statusMessage": "wendkeep: open tasks check"
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "npx wendkeep hook observer-publish",
+            "timeoutSec": 5,
+            "statusMessage": "wendkeep: publishing local observer snapshot"
           }
         ]
       }

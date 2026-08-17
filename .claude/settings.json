@@ -22,6 +22,17 @@
             "statusMessage": "wendkeep: opening Obsidian session"
           }
         ]
+      },
+      {
+        "matcher": "startup|resume|clear|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "npx wendkeep hook observer-publish",
+            "timeout": 5,
+            "statusMessage": "wendkeep: publishing local observer snapshot"
+          }
+        ]
       }
     ],
     "Stop": [
@@ -45,6 +56,16 @@
             "args": [
               "${CLAUDE_PROJECT_DIR}/node_modules/wendkeep/hooks/change-nag.mjs"
             ]
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "npx wendkeep hook observer-publish",
+            "timeout": 5,
+            "statusMessage": "wendkeep: publishing local observer snapshot"
           }
         ]
       }
