@@ -212,9 +212,11 @@ export function checkStackedFrontmatter(vaultBase) {
 }
 
 // Um modelo fora de `pricing.json` faz `priceForModel` devolver null e a parcela dele do custo
-// virar zero — sem erro, sem aviso. Modelo novo (claude-opus-5, claude-mythos-5) cai nisso por
-// default. A checagem é sobre o vault, não sobre o caminho de cálculo: o cálculo roda em hook a
-// cada turno, onde avisar viraria ruído e lançar derrubaria a captura da sessão.
+// virar zero — sem erro, sem aviso. Modelos conhecidos sem tarifa final (por exemplo, um
+// research preview) ficam na tabela com status explícito e são reportados separadamente: isso
+// evita tanto o silêncio quanto a sugestão de inventar um preço. A checagem é sobre o vault, não
+// sobre o caminho de cálculo: o cálculo roda em hook a cada turno, onde avisar viraria ruído e
+// lançar derrubaria a captura da sessão.
 //
 // Cada modelo citado na nota é consultado direto em `priceForModel` — NÃO se infere pelo
 // sintoma "custo zerado". Numa sessão multi-modelo (`modelo: "claude-opus-4.8 + claude-opus-5"`)
@@ -222,6 +224,7 @@ export function checkStackedFrontmatter(vaultBase) {
 // motivou esta change, a nota fecha com $415 e a fatia do Opus 5 é a única zerada.
 export function checkUnpricedModels(vaultBase) {
   const counts = new Map();
+  const researchPreview = new Map();
 
   const modelsOf = (frontmatter) => {
     // `modelos:` é a lista canônica; `modelo:` é o rótulo agregado (junta com " + ").
@@ -247,23 +250,34 @@ export function checkUnpricedModels(vaultBase) {
       for (const raw of modelsOf(fm[1])) {
         const model = raw.trim().replace(/^["']|["']$/g, '');
         if (!model || model === 'unknown') continue;
-        if (priceForModel(model)) continue;
-        counts.set(model, (counts.get(model) || 0) + 1);
+        const price = priceForModel(model);
+        if (price?.pricingStatus === 'research-preview') {
+          researchPreview.set(model, (researchPreview.get(model) || 0) + 1);
+        } else if (!price) {
+          counts.set(model, (counts.get(model) || 0) + 1);
+        }
       }
     }
   };
 
   walk(join(vaultBase, '02-Sessões'));
-  return { models: [...counts].map(([model, notes]) => ({ model, notes })) };
+  return {
+    models: [...counts].map(([model, notes]) => ({ model, notes })),
+    researchPreview: [...researchPreview].map(([model, notes]) => ({ model, notes })),
+  };
 }
 
 export function renderUnpricedModelLines(unpriced) {
+  const preview = unpriced.researchPreview || [];
   const lines = [`[preços] ${unpriced.models.length} modelo(s) sem preço na tabela`];
   for (const { model, notes } of unpriced.models) {
     lines.push(`  ✗ ${model} (${notes} nota(s) com custo zerado)`);
   }
   if (unpriced.models.length) lines.push('  → adicione o modelo em hooks/pricing.json');
-  else lines.push('  tabela de preços completa ✓');
+  else if (!preview.length) lines.push('  tabela de preços completa ✓');
+  for (const { model, notes } of preview) {
+    lines.push(`  ! ${model} (${notes} nota(s)): research preview sem tarifa final; custo não estimado`);
+  }
   return lines;
 }
 

@@ -13,7 +13,11 @@ export const SESSION_HOOKS = [
   // memory injection for the whole session.
   { event: 'SessionStart', matcher: 'startup|clear|compact', name: 'brain-inject', timeout: 45, order: -10, codex: true, statusMessage: 'wendkeep: injecting memory + active change' },
   { event: 'SessionStart', matcher: 'startup', name: 'session-start', timeout: 30, codex: true, statusMessage: 'wendkeep: opening Obsidian session' },
+  // Observer publication is a derived, fail-open projection and therefore runs only after
+  // the local lifecycle hook has written its authoritative session state.
+  { event: 'SessionStart', matcher: 'startup|resume|clear|compact', name: 'observer-publish', timeout: 5, order: 20, codex: true, statusMessage: 'wendkeep: publishing local observer snapshot' },
   { event: 'Stop', matcher: null, name: 'session-stop', timeout: 60, codex: true, statusMessage: 'wendkeep: writing session checkpoint' },
+  { event: 'Stop', matcher: null, name: 'observer-publish', timeout: 5, order: 20, codex: true, statusMessage: 'wendkeep: publishing local observer snapshot' },
   { event: 'UserPromptSubmit', matcher: null, name: 'session-ensure', timeout: 30, codex: true, statusMessage: 'wendkeep: ensuring active session' },
   // Capture an interactive decision (AskUserQuestion) — options + the user's choice — into 04-Decisões.
   // codex: AskUserQuestion is a Claude-only tool; there is nothing to match on.

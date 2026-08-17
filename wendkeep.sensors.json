@@ -11,6 +11,14 @@
       "command": "npm test"
     },
     {
+      "id": "pricing-coverage",
+      "name": "Pricing coverage",
+      "description": "Validates published prices, explicit research-preview status and doctor classification",
+      "severity": "critical",
+      "type": "command",
+      "command": "node --test tests/pricing-coverage.test.mjs"
+    },
+    {
       "id": "session-iteration-outcome-ledger",
       "name": "Session iteration outcome ledger",
       "description": "Validates durable per-turn outcomes, lock behavior, observability status and Codex event normalization",
@@ -248,6 +256,70 @@
       "severity": "critical",
       "type": "command",
       "command": "node --test tests/review-docs-sanitization.test.mjs"
+    },
+    {
+      "id": "observer-snapshot",
+      "name": "observer-snapshot",
+      "description": "node --test tests/observer-snapshot.test.mjs",
+      "severity": "critical",
+      "type": "command",
+      "command": "node --test tests/observer-snapshot.test.mjs"
+    },
+    {
+      "id": "observer-store",
+      "name": "observer-store",
+      "description": "node --test tests/observer-store.test.mjs",
+      "severity": "critical",
+      "type": "command",
+      "command": "node --test tests/observer-store.test.mjs"
+    },
+    {
+      "id": "observer-http",
+      "name": "observer-http",
+      "description": "node --test tests/observer-server.test.mjs",
+      "severity": "critical",
+      "type": "command",
+      "command": "node --test tests/observer-server.test.mjs"
+    },
+    {
+      "id": "observer-cli",
+      "name": "observer-cli",
+      "description": "node --test tests/observer-cli.test.mjs",
+      "severity": "critical",
+      "type": "command",
+      "command": "node --test tests/observer-cli.test.mjs"
+    },
+    {
+      "id": "observer-hook",
+      "name": "observer-hook",
+      "description": "node --test tests/observer-publish.test.mjs",
+      "severity": "critical",
+      "type": "command",
+      "command": "node --test tests/observer-publish.test.mjs"
+    },
+    {
+      "id": "observer-docker",
+      "name": "observer-docker",
+      "description": "node --test tests/observer-docker.test.mjs",
+      "severity": "critical",
+      "type": "command",
+      "command": "node --test tests/observer-docker.test.mjs"
+    },
+    {
+      "id": "observer-tests",
+      "name": "observer-tests",
+      "description": "node --test tests/observer-snapshot.test.mjs tests/observer-store.test.mjs tests/observer-server.test.mjs tests/observer-cli.test.mjs tests/observer-publish.test.mjs tests/observer-docker.test.mjs",
+      "severity": "critical",
+      "type": "command",
+      "command": "node --test tests/observer-snapshot.test.mjs tests/observer-store.test.mjs tests/observer-server.test.mjs tests/observer-cli.test.mjs tests/observer-publish.test.mjs tests/observer-docker.test.mjs"
+    },
+    {
+      "id": "observer-e2e",
+      "name": "observer-e2e",
+      "description": "node --test tests/observer-server.test.mjs",
+      "severity": "critical",
+      "type": "command",
+      "command": "node --test tests/observer-server.test.mjs"
     }
   ]
 }

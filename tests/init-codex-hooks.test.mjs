@@ -12,9 +12,11 @@ import { mergeCodexHooks } from '../src/init.mjs';
 const WIRED = [
   ['SessionStart', 'brain-inject'],
   ['SessionStart', 'session-start'],
+  ['SessionStart', 'observer-publish'],
   ['UserPromptSubmit', 'session-ensure'],
   ['UserPromptSubmit', 'change-context'],
   ['Stop', 'session-stop'],
+  ['Stop', 'observer-publish'],
   ['Stop', 'change-nag'],
   ['SubagentStop', 'subagent-stop'],
   ['PreToolUse', 'change-guard'],

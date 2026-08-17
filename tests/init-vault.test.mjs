@@ -394,8 +394,8 @@ test('init wires .codex/hooks.json so Codex opens a session', () => {
     const second = run();
     assert.equal(second.status, 0, second.stderr);
     const again = JSON.parse(readFileSync(hooksPath, 'utf8'));
-    assert.equal((again.hooks.SessionStart || []).length, 2, 'SessionStart continua com 2 grupos');
-    assert.equal((again.hooks.Stop || []).length, 2, 'Stop continua com 2 grupos');
+    assert.equal((again.hooks.SessionStart || []).length, 3, 'SessionStart continua com 3 grupos');
+    assert.equal((again.hooks.Stop || []).length, 3, 'Stop continua com 3 grupos');
   } finally { rmSync(proj, { recursive: true, force: true }); }
 });
 

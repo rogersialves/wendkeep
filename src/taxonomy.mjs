@@ -99,6 +99,7 @@ export const HOOK_FILES = [
   'change-guard.mjs',
   'change-nag.mjs',
   'plan-capture.mjs',
+  'observer-publish.mjs',
 ];
 
 // Hook scripts that are safe to invoke directly via `wendkeep hook <name>`.
@@ -122,6 +123,7 @@ export const RUNNABLE_HOOKS = [
   'change-guard',
   'change-nag',
   'plan-capture',
+  'observer-publish',
 ];
 
 // --- companion plugins / MCP --------------------------------------------------

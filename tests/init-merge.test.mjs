@@ -47,11 +47,13 @@ test('[req:MOD-17] [req:MOD-18] legacy MCP exports and merge preserve canonical 
 
 // --- 0.31.0: hooks de lifecycle default + invocação node-direta -----------------
 
-test('mergeSettings: wira os 5 hooks de lifecycle nos eventos certos, por default', () => {
+test('mergeSettings: wira hooks de lifecycle e Observer nos eventos certos, por default', () => {
   const { settings } = mergeSettings(null, { vaultPath: '/v', withMcp: true, companions: [] });
   const cmdsOf = (ev) => (settings.hooks[ev] || []).flatMap((g) => (g.hooks || []).map((h) => h.command));
   assert.ok(cmdsOf('UserPromptSubmit').some((c) => c.includes('change-context')), 'change-context em UserPromptSubmit');
   assert.ok(cmdsOf('Stop').some((c) => c.includes('change-nag')), 'change-nag em Stop');
+  assert.ok(cmdsOf('Stop').some((c) => c.includes('observer-publish')), 'observer-publish em Stop');
+  assert.ok(cmdsOf('SessionStart').some((c) => c.includes('observer-publish')), 'observer-publish em SessionStart');
   assert.ok(cmdsOf('PreToolUse').some((c) => c.includes('change-guard')), 'change-guard em PreToolUse');
   const post = settings.hooks.PostToolUse || [];
   assert.ok(post.some((g) => g.matcher === 'Edit|Write|MultiEdit' && g.hooks.some((h) => h.command.includes('change-warn'))), 'change-warn matcher Edit|Write');
@@ -60,6 +62,10 @@ test('mergeSettings: wira os 5 hooks de lifecycle nos eventos certos, por defaul
   assert.equal(guard.matcher, 'Bash|exec_command|apply_patch|mcp__.*', 'guard só em ferramentas cujo payload é coberto');
   // sem instalação local no projeto → forma npx
   assert.ok(cmdsOf('PreToolUse').some((c) => c === 'npx wendkeep hook change-guard'), 'fallback npx');
+  const sessionCommands = cmdsOf('SessionStart');
+  assert.ok(sessionCommands.indexOf('npx wendkeep hook observer-publish') > sessionCommands.indexOf('npx wendkeep hook session-start'));
+  const stopCommands = cmdsOf('Stop');
+  assert.ok(stopCommands.indexOf('npx wendkeep hook observer-publish') > stopCommands.indexOf('npx wendkeep hook session-stop'));
 });
 
 test('hookCommandFor: node-direto ancorado no projeto quando o pacote existe; senão npx', () => {

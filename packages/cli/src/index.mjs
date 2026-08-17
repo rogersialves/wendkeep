@@ -49,6 +49,7 @@ Usage:
                            cannot replace itself. · --vault P · --profile <name> · --yes.
 
   wendkeep doctor [--vault P]  Run a vault health check.
+  wendkeep observer <sub>     Local multi-project Observer: serve | register | publish | status.
   wendkeep change <sub>        Change lifecycle: new [--simple] | use | bind <slug> --session <id> | continue | list | show |
                            status | done <id> | undone <id> | diff | archive [--force] | abandon | relink | backlink.
                            archive exige verdict (rode verify --deep); abandon descarta sem ADR.
@@ -199,7 +200,7 @@ async function main(argv) {
     // `sync` starts with `init` and resolves the freshly bound Vault itself. Pre-resolving
     // here would prevent that repair step from reporting a corrupt binding as its own
     // first-stage failure (and could never make it as far as the guarded init).
-    && !['init', 'sync', 'hook', '--version', '-v', '--help', '-h', 'help'].includes(cmd)) {
+    && !['init', 'sync', 'hook', 'observer', '--version', '-v', '--help', '-h', 'help'].includes(cmd)) {
     await preferProjectVault(rest);
   }
   switch (cmd) {
@@ -214,6 +215,12 @@ async function main(argv) {
     case 'doctor': {
       const { runDoctor } = await import('../../../src/doctor.mjs');
       process.exit(runDoctor(rest));
+      break;
+    }
+    case 'observer': {
+      const { runObserver } = await import('../../../src/observer.mjs');
+      const observerExitCode = await runObserver(rest);
+      if (rest[0] !== 'serve') process.exit(observerExitCode);
       break;
     }
     case 'sync': {

@@ -19,7 +19,9 @@ projetos com registries misturados.
 
 ## Pré-requisitos
 
-Registry consistente, tabela de preços completa e acesso aos transcripts das sessões reconstruídas.
+Registry consistente, tabela de preços para os modelos com tarifa publicada e acesso aos transcripts
+das sessões reconstruídas. Um research preview sem tarifa final deve permanecer explicitamente
+como custo não estimado.
 
 ## Sintaxe
 
@@ -64,9 +66,17 @@ tri-state devolve `complete`, `none` ou `degraded`, mais frontier, manifest e di
 sanitizados. Rode e revise o dry-run antes de repetir o mesmo comando com `--apply`; uma segunda
 aplicação semanticamente idêntica preserva nota, checkpoint, relatório e mtime.
 
+## Modelos sem tarifa final
+
+O `doctor` separa um modelo realmente ausente da tabela de um modelo conhecido em
+`research-preview`. O primeiro continua acionável e pede atualização de
+`hooks/pricing.json`; o segundo aparece como **tarifa final não publicada** e **custo não
+estimado**. Não copie o preço de outro modelo para preencher essa lacuna.
+
 ## Erros comuns e diagnóstico
 
-- Modelo sem preço: atualize a tabela antes de aceitar o total.
+- Modelo desconhecido sem preço: atualize a tabela antes de aceitar o total.
+- Research preview sem tarifa final: mantenha o custo não estimado; não invente uma tarifa.
 - Custos de provider errado: valide a cadeia de identidade da sessão.
 - Transcript ausente: não estime silenciosamente; mantenha a lacuna visível.
 - Total duplicado por subagent/fork: confirme relação pai/subagent e deduplicação do registry.
