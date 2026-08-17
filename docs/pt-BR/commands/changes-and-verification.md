@@ -77,6 +77,10 @@ uma ferramenta de escrita suportada, ele compara sessão, projeto, raiz Git, rem
 worktree com a lease registrada no `SESSION_REGISTRY.json`. Um alvo ausente, ambíguo, concorrente ou
 fora do projeto é bloqueado antes da ferramenta.
 
+O [Observer local](observer.md) é uma projeção read-only da observabilidade: o vault e a change
+continuam autoridades locais. Consultas do Observer não concluem, arquivam, reparam ou promovem
+estado no vault.
+
 No Codex o bloqueio usa `permissionDecision: "deny"`; `ask` não é uma decisão válida de
 `PreToolUse`. `commit`, `push`, `pull`, `merge`, `publish` e operações destrutivas continuam
 capacidades separadas, inclusive quando um comando contém mais de uma ação. A troca de projeto

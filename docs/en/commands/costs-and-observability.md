@@ -19,7 +19,8 @@ projects whose registries are mixed.
 
 ## Prerequisites
 
-A consistent registry, complete price table, and transcript access for rebuilt sessions.
+A consistent registry, a price table for models with published rates, and transcript access for
+rebuilt sessions. A research preview without a final rate must remain explicitly unestimated.
 
 ## Syntax
 
@@ -64,9 +65,17 @@ returns `complete`, `none`, or `degraded`, plus a frontier, manifest, and saniti
 Run and review the dry-run before repeating the same command with `--apply`; a semantically
 identical second apply preserves the note, checkpoint, report, and mtime.
 
+## Models without a final rate
+
+`doctor` separates a model that is truly missing from the table from a known
+`research-preview` model. The former remains actionable and asks for an update to
+`hooks/pricing.json`; the latter is reported as **final rate not published** and **cost not
+estimated**. Do not copy another model's price into the gap.
+
 ## Common errors and diagnosis
 
-- Model without a price: update the table before accepting totals.
+- Unknown model without a price: update the table before accepting totals.
+- Research preview without a final rate: keep the cost unestimated; do not invent a rate.
 - Wrong-provider costs: validate the session identity chain.
 - Missing transcript: do not estimate silently; keep the gap visible.
 - Duplicated parent/subagent/fork totals: verify registry relationships and deduplication.

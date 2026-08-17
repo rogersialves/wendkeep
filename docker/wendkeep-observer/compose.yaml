@@ -1,0 +1,16 @@
+services:
+  wendkeep-observer:
+    build:
+      context: ../..
+      dockerfile: docker/wendkeep-observer/Dockerfile
+    environment:
+      WENDKEEP_OBSERVER_DATA_DIR: /data
+      WENDKEEP_OBSERVER_TOKEN: "${WENDKEEP_OBSERVER_TOKEN:?set WENDKEEP_OBSERVER_TOKEN in the shell or .env}"
+    ports:
+      - "127.0.0.1:8787:8787"
+    volumes:
+      - observer-data:/data
+    restart: unless-stopped
+
+volumes:
+  observer-data:

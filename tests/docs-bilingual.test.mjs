@@ -19,6 +19,7 @@ const GUIDES = [
   'verify.md',
   'memory-migration.md',
   'retroactive-import.md',
+  'observer.md',
 ];
 const GUIDE_DIR = {
   pt: join(ROOT, 'docs', 'pt-BR', 'commands'),
@@ -45,6 +46,7 @@ const README_GROUPS = [
   { pt: 'Notas e conhecimento', en: 'Notes and knowledge', guide: 'notes-and-knowledge.md' },
   { pt: 'Custos e observabilidade', en: 'Costs and observability', guide: 'costs-and-observability.md' },
   { pt: 'Manutenção e diagnóstico', en: 'Maintenance and diagnostics', guide: 'maintenance-and-diagnostics.md' },
+  { pt: 'Observer local', en: 'Local Observer', guide: 'observer.md' },
 ];
 const DEEP_GUIDES = ['verify.md', 'memory-migration.md', 'retroactive-import.md'];
 const GUIDE_FOR_FAMILY = new Map([
@@ -65,6 +67,7 @@ const GUIDE_FOR_FAMILY = new Map([
   ['wendkeep validate-memory', 'memory.md'],
   ['wendkeep sync-defs', 'maintenance-and-diagnostics.md'], ['wendkeep --version', 'maintenance-and-diagnostics.md'],
   ['wendkeep --help', 'maintenance-and-diagnostics.md'],
+  ['wendkeep observer', 'observer.md'],
 ]);
 const SEMANTIC_CONCEPTS = {
   'getting-started.md': { pt: [/instala/i, /atualiza/i, /vínculo|vincul/i], en: [/install/i, /updat/i, /bind/i] },
@@ -78,6 +81,7 @@ const SEMANTIC_CONCEPTS = {
   'verify.md': { pt: [/sensor/i, /evidência/i, /independente/i], en: [/sensor/i, /evidence/i, /independent/i] },
   'memory-migration.md': { pt: [/legad/i, /migra/i, /dry[- ]run/i], en: [/legacy/i, /migrat/i, /dry[- ]run/i] },
   'retroactive-import.md': { pt: [/retroativ/i, /deduplic|duplicata/i, /fork/i], en: [/retroactive/i, /deduplic|duplicate/i, /fork/i] },
+  'observer.md': { pt: [/Observer/i, /snapshot/i, /outbox/i], en: [/Observer/i, /snapshot/i, /outbox/i] },
 };
 
 const markdownLinks = (text) => [...text.matchAll(/\[[^\]]*\]\(([^)]+)\)/g)].map((m) => m[1]);
@@ -175,7 +179,7 @@ function assertVerifyExitSemantics(text, locale) {
   }
 }
 
-test('DOC-2: PT-BR e EN têm exatamente os mesmos onze guias', () => {
+test('DOC-2: PT-BR e EN têm exatamente os doze guias', () => {
   for (const dir of Object.values(GUIDE_DIR)) assert.ok(existsSync(dir), `diretório ausente: ${dir}`);
   const pt = readdirSync(GUIDE_DIR.pt).filter((f) => f.endsWith('.md')).sort();
   const en = readdirSync(GUIDE_DIR.en).filter((f) => f.endsWith('.md')).sort();
@@ -204,7 +208,7 @@ test('DOC-2: cada par mantém estrutura editorial e alternador de idioma', () =>
   }
 });
 
-test('DOC-1: READMEs preservam primeiro uso e navegam pelos onze guias do próprio idioma', () => {
+test('DOC-1: READMEs preservam primeiro uso e navegam pelos doze guias do próprio idioma', () => {
   const pt = readFileSync(join(ROOT, 'README.md'), 'utf8');
   const en = readFileSync(join(ROOT, 'README.en.md'), 'utf8');
   assert.match(pt, /^## Instalar & configurar$/m);

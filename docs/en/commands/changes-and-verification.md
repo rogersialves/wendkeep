@@ -77,6 +77,10 @@ tool runs, it compares the session, project, Git root, remote, branch, and workt
 recorded in `SESSION_REGISTRY.json`. Missing, ambiguous, concurrent, or cross-project targets are
 blocked before the tool.
 
+The [local Observer](observer.md) is a read-only observability projection: the vault and change
+remain local authorities. Observer queries do not complete, archive, repair, or promote state in a
+vault.
+
 Codex blocks with `permissionDecision: "deny"`; `ask` is not a valid `PreToolUse` decision.
 `commit`, `push`, `pull`, `merge`, `publish`, and destructive operations remain separate capabilities,
 including when one command contains multiple actions. Switching projects requires a new explicit

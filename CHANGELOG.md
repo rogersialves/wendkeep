@@ -4,6 +4,20 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.70.0] — 2026-08-17
+
+### Added
+
+- **Observer local multi-projeto.** O WendKeep agora expõe snapshots sanitizados, ingestão HTTP
+  loopback, índice append-only reconstruível, CLI `observer`, outbox fail-open nos hooks e um
+  compose Docker que persiste somente a projeção; os vaults locais continuam sendo a autoridade.
+
+### Fixed
+
+- **Modelos research preview agora são distinguidos de modelos desconhecidos.** O Spark é
+  reconhecido sem preço inventado, o `doctor` mantém o custo não estimado e a cobertura de
+  preços passa a ser validada por sensor crítico.
+
 ## [0.69.0] — 2026-08-16
 
 ### Added
