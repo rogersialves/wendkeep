@@ -6,6 +6,7 @@ on:
 
 permissions:
   contents: write
+  issues: write
 
 jobs:
   reconcile:
@@ -51,3 +52,8 @@ jobs:
           name: release-receipt-0.72.1
           path: release-receipt.json
           if-no-files-found: error
+      - name: Close completed milestone
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api --method PATCH "repos/${GITHUB_REPOSITORY}/milestones/1" -f state=closed --jq .state | grep -qx closed
