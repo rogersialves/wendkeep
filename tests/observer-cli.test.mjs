@@ -21,6 +21,10 @@ test('[req:OBS-LOCAL-2] [req:OBS-LOCAL-3] CLI observer expõe status, register, 
     assert.equal(registered.status, 0, registered.stderr);
     const published = run(['observer', 'publish', '--data-dir', dataDir, '--project', fixture.projectRoot, '--vault', fixture.vaultBase, '--json']);
     assert.equal(published.status, 0, published.stderr);
+    assert.equal(JSON.parse(published.stdout).authority, 'sqlite');
+    const reconciled = run(['observer', 'reconcile', '--data-dir', dataDir, '--project', fixture.projectRoot, '--vault', fixture.vaultBase, '--json']);
+    assert.equal(reconciled.status, 0, reconciled.stderr);
+    assert.equal(JSON.parse(reconciled.stdout).mode, 'local-sqlite');
     const status = run(['observer', 'status', '--data-dir', dataDir, '--json']);
     assert.equal(status.status, 0, status.stderr);
     assert.deepEqual(JSON.parse(status.stdout).projects.map((p) => p.projectId), ['project-a']);

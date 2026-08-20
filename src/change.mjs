@@ -1,5 +1,5 @@
 // `wendkeep change <sub>` — native change lifecycle CLI (Pilar B).
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { isAbsolute, join, resolve } from 'node:path';
 import {
   newChange,
@@ -22,6 +22,22 @@ import { evaluateGate, requiredSensors } from '../hooks/sensors-core.mjs';
 import { buildEffectiveRequirementPackage, evaluateVerdict, formatOrphanReqs, tasksHashOf, parseSpecsList, parseDelta, parseRequirements, applyDelta, validateSpecImpact } from '../hooks/spec-core.mjs';
 import { getNextAdrNumber, readControl, readSessionRegistry, upsertSessionRegistry } from '../hooks/obsidian-common.mjs';
 import { getLocale } from '../hooks/locale.mjs';
+import { enqueueObserverDocumentChange } from './observer-sql-publish.mjs';
+import { readProjectForValidation } from '../packages/vault/src/validate-memory.mjs';
+
+function observerMarkdownUnder(vaultBase, relativeRoot) {
+  const output = [];
+  const walk = (absolute, relative) => {
+    for (const entry of readdirSync(absolute, { withFileTypes: true })) {
+      const nextAbsolute = join(absolute, entry.name);
+      const nextRelative = join(relative, entry.name);
+      if (entry.isDirectory()) walk(nextAbsolute, nextRelative);
+      else if (entry.isFile() && entry.name.endsWith('.md')) output.push(nextRelative);
+    }
+  };
+  try { walk(join(vaultBase, relativeRoot), relativeRoot); } catch { /* reconcile recupera */ }
+  return output;
+}
 
 function resolveVault(argv) {
   let vault;
@@ -299,6 +315,30 @@ export function runChange(argv) {
       process.stderr.write(`change archive BLOCKED (gate): ${r.failing.join('; ')}\n`);
       process.exit(1);
     }
+    try {
+      const project = readProjectForValidation(vaultBase);
+      if (project.ok && project.projectId) {
+        const loc = getLocale(vaultBase);
+        for (const archivedPath of observerMarkdownUnder(vaultBase, r.archivedRel)) {
+          enqueueObserverDocumentChange({ vaultBase, projectId: project.projectId, logicalPath: archivedPath });
+          const suffix = archivedPath.slice(String(r.archivedRel).length).replace(/^[\\/]+/, '');
+          enqueueObserverDocumentChange({
+            vaultBase,
+            projectId: project.projectId,
+            logicalPath: join(loc.folders.changes, slug, suffix),
+            deleted: true,
+          });
+        }
+        if (r.adrRel) enqueueObserverDocumentChange({ vaultBase, projectId: project.projectId, logicalPath: r.adrRel });
+        for (const capability of r.promoted || []) {
+          enqueueObserverDocumentChange({
+            vaultBase,
+            projectId: project.projectId,
+            logicalPath: join(loc.folders.specs, capability, 'spec.md'),
+          });
+        }
+      }
+    } catch { /* Observer é fail-open; reconcile recupera qualquer enqueue perdido. */ }
     process.stdout.write(`archived: ${r.archivedRel}${r.adrRel ? `; ADR: ${r.adrRel}` : '; GUIDE compacta: sem ADR'}\n`);
     if (r.promoted && r.promoted.length) process.stdout.write(`specs promovidas: ${r.promoted.join(', ')}\n`);
     if (r.specWarnings && r.specWarnings.length) for (const w of r.specWarnings) process.stderr.write(`  aviso spec: ${w}\n`);

@@ -4,6 +4,41 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.75.0] — 2026-08-20
+
+### Added
+
+- **Identidades SQL escopadas por projeto.** Sessões, agentes, rollups, chamadas e transcripts
+  mantêm chaves internas derivadas de `project_id` + identificador externo, constraints compostas
+  e foreign keys que carregam o projeto. Colisões deliberadas entre projetos ficam isoladas.
+- **Migrações comprováveis.** Cada arquivo de schema recebe checksum; uma migração estrutural de
+  base existente cria backup consistente antes da transação e pode ser retomada com segurança.
+- **Reconciliação explícita.** `observer reconcile` reserva a varredura integral para bootstrap,
+  reparo e comprovação de paridade por hash, localmente ou contra o serviço.
+- **Outbox observável.** `doctor` informa lotes, eventos, bytes e idade; uma lease admite apenas um
+  publisher e batches do mesmo escopo são coalescidos.
+
+### Changed
+
+- **Publicação incremental nos hooks.** `SessionStart` apenas drena, `Stop` lê uma sessão e
+  `SubagentStop` somente o transcript afetado. `note new` e `change archive` enfileiram diretamente
+  os documentos que escreveram. O file store antigo deixa de receber publicação viva e permanece
+  apenas como fonte de migração.
+- **Schema SQL 5.** O mesmo `session_id`, `agent_id`, `call_id`, `transcript_id` ou `rollup_key`
+  pode existir em projetos diferentes sem disputar uma linha global.
+
+### Fixed
+
+- **Ingest atômico por evento.** Cada evento usa `SAVEPOINT ingest_one`; qualquer falha reverte o
+  registro de ingestão e todas as projeções antes de o batch continuar. Retry permanece idempotente.
+- **Chamadas incrementais estáveis.** Turnos concluídos usam identidade causal estável, evitando
+  duplicação quando um transcript cresce após a primeira publicação.
+
+### Performance
+
+- O caminho de hook não varre mais o Vault. A fixture de publicação incremental comprova
+  `p95 < 200 ms`, uma sessão lida por `Stop` e zero documentos lidos por `SessionStart`.
+
 ## [0.74.0] — 2026-08-20
 
 ### Added

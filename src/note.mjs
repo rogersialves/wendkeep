@@ -17,6 +17,8 @@ import { getLocale } from '../hooks/locale.mjs';
 import { buildManualBugNote, buildManualLearningNote, relinkDerivedNotes } from '../hooks/linked-notes.mjs';
 import { repairStackedFrontmatter } from '../hooks/frontmatter-repair.mjs';
 import { repairDerivedSections } from '../hooks/derived-sections.mjs';
+import { enqueueObserverDocumentChange } from './observer-sql-publish.mjs';
+import { readProjectForValidation } from '../packages/vault/src/validate-memory.mjs';
 
 const TYPES = {
   bug: { folderKey: 'bugs', prefix: 'BUG', build: buildManualBugNote },
@@ -120,6 +122,11 @@ export function runNote(argv) {
   } catch { /* sem sessão ativa — nota nasce sem backlink */ }
 
   writeFileSync(filePath, kind.build(title.trim(), { num, dateStr, sessionRel, localeId: loc.id }), 'utf8');
-  process.stdout.write(`${toVaultRelative(vaultBase, filePath)}\n`);
+  const logicalPath = toVaultRelative(vaultBase, filePath);
+  try {
+    const project = readProjectForValidation(vaultBase);
+    if (project.ok && project.projectId) enqueueObserverDocumentChange({ vaultBase, projectId: project.projectId, logicalPath });
+  } catch { /* Observer é fail-open; reconcile recupera qualquer enqueue perdido. */ }
+  process.stdout.write(`${logicalPath}\n`);
   process.exit(0);
 }

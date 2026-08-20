@@ -112,6 +112,7 @@ test('[req:OP-6] init recomenda ignorar somente o runtime local de FLOW', () => 
     assert.match(ignoreLine, /\.brain\/runtime\/flows\//);
     assert.match(ignoreLine, /\.brain\/observer-sql-state\.json/);
     assert.match(ignoreLine, /\.brain\/observer-sql-outbox\//);
+    assert.match(ignoreLine, /\.brain\/observer-sql-publisher\.lock/);
     assert.doesNotMatch(ignoreLine, /\.brain\/\*/);
     assert.doesNotMatch(ignoreLine, /07-Specs|08-Mudanças|docs/i);
   } finally {

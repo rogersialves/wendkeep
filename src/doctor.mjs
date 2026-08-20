@@ -5,6 +5,7 @@ import { checkHarness, checkVaultLinks, checkSessionActivity, checkStackedFrontm
 import { runVaultHealth } from '../hooks/vault-health.mjs';
 import { checkSyncDefs } from './sync-defs.mjs';
 import { resolveProjectVault } from './project-vault.mjs';
+import { inspectObserverSqlOutbox } from './observer-sql-publish.mjs';
 
 const healthStatusLabel = (status) => ({
   healthy: 'saudável', warning: 'atenção', degraded: 'degradada', blocked: 'bloqueada', legacy: 'legado',
@@ -155,6 +156,10 @@ export function runDoctor(argv) {
   // 3e. Observabilidade materializada: schema vigente não basta sem frontier + manifest frescos.
   const observability = checkSessionObservability(vaultBase);
   process.stdout.write(`\n${renderSessionObservabilityLines(observability).join('\n')}\n`);
+  const observerOutbox = inspectObserverSqlOutbox(vaultBase);
+  const oldestSeconds = Math.round(observerOutbox.oldest_age_ms / 1000);
+  process.stdout.write(`[observer] outbox SQL: ${observerOutbox.batches} lote(s) · ${observerOutbox.events} evento(s) · ${observerOutbox.bytes} bytes${observerOutbox.batches ? ` · mais antigo: ${oldestSeconds}s` : ''}\n`);
+  if (observerOutbox.batches) process.stdout.write('  → wendkeep observer reconcile --project . (ou inicie o servidor para o hook drenar a fila)\n');
 
   // 4. Sessão: não mente "inativa" quando há atividade recente (workflow/subagente em background).
   const act = checkSessionActivity(vaultBase);

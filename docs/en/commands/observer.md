@@ -34,6 +34,7 @@ loopback reads remain open, while every mutation requires a Bearer token.
 npx wendkeep observer status --data-dir <directory> --json
 npx wendkeep observer register --project <project> --vault <vault> --data-dir <directory>
 npx wendkeep observer publish --project <project> --vault <vault> --data-dir <directory>
+npx wendkeep observer reconcile --project <project> --vault <vault> --data-dir <directory> [--url http://127.0.0.1:8787]
 npx wendkeep observer memory import --project <project> --vault <vault> --url http://127.0.0.1:8787 --token <token> --json
 npx wendkeep observer serve --host 127.0.0.1 --port 8787 --data-dir <directory> --token <token>
 ```
@@ -42,7 +43,7 @@ npx wendkeep observer serve --host 127.0.0.1 --port 8787 --data-dir <directory> 
 
 - `--data-dir` selects the local event and index directory; the default is
   `WENDKEEP_OBSERVER_DATA_DIR` or `~/.wendkeep-observer`.
-- `--project` and `--vault` identify a project for `register`, `publish`, and `memory import`.
+- `--project` and `--vault` identify a project for `register`, `publish`, `reconcile`, and `memory import`.
 - `--host` accepts only `127.0.0.1`, `localhost`, or `::1`; other hosts are rejected before
   listening.
 - `--token` or `WENDKEEP_OBSERVER_TOKEN` authenticates mutations; `--allow-non-loopback` fails without one.
@@ -84,8 +85,8 @@ If the browser shows the shell but the list fails, check the service health at
 
 ## Expected result
 
-`register` stores `project_id`, name, version, and registration time. `publish` reads the local
-vault, produces the snapshot, and sends idempotent events to SQLite containing the complete content
+`register` stores `project_id`, name, version, and registration time. `publish` and `reconcile`
+perform an explicit full-vault scan and send idempotent events to SQLite containing the complete content
 of sessions, decisions, bugs, learnings, specs, changes, CORE, DIGEST, SHARED_MEMORY, brain state,
 agent sessions, cost rollups, and calls. Messages and transcripts are only sent by capture levels
 that explicitly enable them. The container stores everything in
@@ -96,16 +97,26 @@ cost/token total recorded in frontmatter is preserved through an explicit reconc
 the detailed ledger does not add up; that row does not invent calls. Historical sessions sharing
 one `session_id` receive a canonical per-file identity so one rollup cannot overwrite the other.
 
-In schema 4, each ingested document is also projected into chunks carrying path, heading,
+In schema 5, sessions, agents, rollups, calls, and transcripts use internal identities derived from
+`project_id` plus the external identifier, with project-scoped constraints and foreign keys. The
+same `session_id`, `agent_id`, `call_id`, or `rollup_key` can exist in separate projects without a
+collision. Every event runs inside its own savepoint; an intermediate failure rolls back the ingest
+row and all projections before the batch continues. Migrations are checksummed and an existing
+database receives a consistent backup before every structural migration.
+
+Each ingested document is also projected into chunks carrying path, heading,
 authority, time, and validity. The Observer feature-probes FTS5 and uses the index when the
 extension is available; otherwise it preserves the same semantics through a lexical fallback.
 Search returns the passage containing the match and its provenance rather than only the beginning
 of the document.
 
 `init` projects `observer-publish` into `SessionStart`, `Stop`, and `SubagentStop` after the primary
-hooks. When the server is unavailable, it writes snapshots to `.brain/observer-outbox/` and SQL
-events to `.brain/observer-sql-outbox/` without blocking the session; a later run retries the
-batches. SQL batches use gzip so complete transcripts larger than 64 MB as plain JSON remain within
+hooks. `SessionStart` only drains the queue; `Stop` reads the changed session alone, and
+`SubagentStop` reads only the affected subagent transcript. `note new` and `change archive` enqueue
+the documents they wrote. Events are coalesced by scope and one lease admits a single publisher.
+When the server is unavailable, `.brain/observer-sql-outbox/` remains durable without blocking the
+session; full-vault scanning is reserved for `observer reconcile`. `doctor` reports queue batches,
+events, bytes, and age. SQL batches use gzip so complete transcripts larger than 64 MB as plain JSON remain within
 the transport limit; the Observer decompresses and validates the body before ingesting it. The
 outbox is temporary transport, not authority.
 
@@ -113,12 +124,12 @@ outbox is temporary transport, not authority.
 
 - `project_not_registered`: run `observer register` before publishing.
 - `host loopback`: replace `0.0.0.0` or a LAN address with `127.0.0.1`.
-- Pending outbox: the service was unavailable; preserve `.brain/observer-outbox/` and
-  `.brain/observer-sql-outbox/`, then rerun the publisher. Also ignore
-  `.brain/observer-sql-state.json` and `.brain/observer-sql-outbox/` in a versioned vault. Do not delete events manually.
+- Pending outbox: the service was unavailable; preserve `.brain/observer-sql-outbox/` and let a
+  later hook drain it or run `observer reconcile`. Also ignore
+  `.brain/observer-sql-state.json`, `.brain/observer-sql-outbox/`, and `.brain/observer-sql-publisher.lock` in a versioned vault. Do not delete events manually.
 - `WENDKEEP_OBSERVER_NODE_UNSUPPORTED`: run the Observer on Node.js 22.13 or newer.
 - If memory or usage is incomplete, check the Sync screen, preserve the outbox, and run
-  `observer memory import` to rebuild the load from the vault.
+  `observer reconcile` to rebuild the load and prove hash parity.
 
 ## Next steps
 

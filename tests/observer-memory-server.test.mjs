@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { rmSync } from 'node:fs';
+import { existsSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
 import { startObserverServer } from '../src/observer-server.mjs';
 import { makeDataDir } from './helpers/observer-fixture.mjs';
 
@@ -86,6 +87,10 @@ test('[req:MEM-API-3] [req:MEM-QUERY-4] API ingere lote, lista árvore, lê docu
     });
     assert.equal(mode.status, 200);
     assert.equal(mode.body.mode, 'container-authority');
+    assert.equal(mode.body.compatibility_noop, true);
+    for (const legacy of ['PROJECTS.json', 'EVENTS.jsonl', 'INDEX.json', 'MEMORY_EVENTS.jsonl', 'MEMORY_INDEX.json']) {
+      assert.equal(existsSync(join(dataDir, legacy)), false, `${legacy} remains migration-only`);
+    }
     const exported = await request(base, '/v1/projects/project-a/memory/export');
     assert.equal(exported.status, 200);
     assert.equal(exported.body.mode, 'container-authority');

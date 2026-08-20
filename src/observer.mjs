@@ -1,11 +1,12 @@
 import { homedir } from 'node:os';
 import { isAbsolute, resolve } from 'node:path';
-import { appendObserverEvent, readObserverIndex, registerObserverProject } from './observer-store.mjs';
+import { readObserverIndexSource } from './observer-store.mjs';
 import { buildProjectSnapshot } from './observer-snapshot.mjs';
 import { compareMemoryParity } from './observer-memory-publish.mjs';
 import { publishObserverSql } from './observer-sql-publish.mjs';
+import { migrateObserverData } from './observer-sql-migrate.mjs';
 import { startObserverServer } from './observer-server.mjs';
-import { ensureObserverDatabase, migrateObserverDatabase, listSqlProjects, OBSERVER_SQL_FILE, OBSERVER_SQL_SCHEMA_VERSION } from './observer-sql-store.mjs';
+import { ensureObserverDatabase, migrateObserverDatabase, listSqlProjects, registerSqlProject, upsertSqlProjectSnapshot, OBSERVER_SQL_FILE, OBSERVER_SQL_SCHEMA_VERSION } from './observer-sql-store.mjs';
 import { resolveProjectVault } from '../packages/vault/src/project-vault.mjs';
 import { observerAuthHeaders, resolveObserverToken } from './observer-auth.mjs';
 
@@ -16,12 +17,15 @@ Uso:
                           [--allow-non-loopback] [--token TOKEN]
   wendkeep observer register --project P [--vault V] [--data-dir D] [--json]
   wendkeep observer publish --project P [--vault V] [--data-dir D] [--json]
+  wendkeep observer reconcile --project P [--vault V] [--data-dir D] [--url U]
+                              [--capture-level metadata|messages|full-transcript] [--json]
   wendkeep observer memory import --project P [--vault V] [--url U] [--token TOKEN]
                                     [--capture-level metadata|messages|full-transcript] [--json]
   wendkeep observer status [--data-dir D] [--json]
 
 O Observer local pode manter snapshots operacionais e uma cópia completa da memória em volume
 Docker. O comando memory import faz a primeira migração de um vault para o container.
+Hooks apenas enfileiram/drenam alterações incrementais; reconcile é a varredura integral explícita.
 `;
 
 function optionValue(argv, name) {
@@ -73,6 +77,19 @@ function databaseSummary(dir) {
   } finally { db.close(); }
 }
 
+function sqlProjectsSummary(dir) {
+  const db = ensureObserverDatabase(dir);
+  try {
+    return listSqlProjects(db).map((project) => ({
+      projectId: project.project_id,
+      projectName: project.project_name,
+      wendkeepVersion: project.wendkeep_version,
+      updatedAt: project.updated_at,
+      authority: 'sqlite',
+    }));
+  } finally { db.close(); }
+}
+
 export async function runObserver(argv = [], { write = (chunk) => process.stdout.write(chunk) } = {}) {
   const [sub] = argv;
   const asJson = argv.includes('--json');
@@ -84,7 +101,8 @@ export async function runObserver(argv = [], { write = (chunk) => process.stdout
   const token = resolveObserverToken(optionValue(argv, '--token'));
 
   if (sub === 'status') {
-    print({ ...summary(readObserverIndex(dir)), database: databaseSummary(dir) }, asJson, write);
+    const legacy = summary(readObserverIndexSource(dir));
+    print({ ...legacy, projects: sqlProjectsSummary(dir), legacy_projects: legacy.projects, database: databaseSummary(dir) }, asJson, write);
     return 0;
   }
 
@@ -131,6 +149,12 @@ export async function runObserver(argv = [], { write = (chunk) => process.stdout
       token,
       captureLevel: optionValue(argv, '--capture-level') || process.env.WENDKEEP_OBSERVER_CAPTURE_LEVEL || 'metadata',
     });
+    const snapshotResponse = await fetch(`${String(url).replace(/\/$/, '')}/v1/projects/${encodeURIComponent(snapshot.project_id)}/snapshot`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(snapshot),
+    });
+    if (!snapshotResponse.ok) throw new Error(`Observer não importou o snapshot: HTTP ${snapshotResponse.status}.`);
     const parity = await compareMemoryParity({
       vaultBase: vault,
       projectId: snapshot.project_id,
@@ -148,24 +172,90 @@ export async function runObserver(argv = [], { write = (chunk) => process.stdout
     return result.ok ? 0 : 1;
   }
 
+  if (sub === 'reconcile') {
+    const root = projectRoot(argv);
+    const vault = vaultBase(argv, root);
+    const snapshot = buildProjectSnapshot({ vaultBase: vault, projectRoot: root });
+    const url = optionValue(argv, '--url') || process.env.WENDKEEP_OBSERVER_URL || '';
+    if (!url) {
+      const db = ensureObserverDatabase(dir);
+      let migration;
+      try {
+        migration = migrateObserverData({
+          dataDir: dir,
+          vaultBase: vault,
+          projectId: snapshot.project_id,
+          projectName: snapshot.project_name,
+          database: db,
+        });
+        upsertSqlProjectSnapshot(db, snapshot);
+      } finally { db.close(); }
+      const result = { ok: migration.rejected === 0 && migration.conflicts === 0, project_id: snapshot.project_id, mode: 'local-sqlite', migration };
+      print(result, asJson, write);
+      return result.ok ? 0 : 1;
+    }
+    const registration = await fetch(`${String(url).replace(/\/$/, '')}/v1/projects/${encodeURIComponent(snapshot.project_id)}`, {
+      method: 'PUT',
+      headers: observerAuthHeaders(token, { 'content-type': 'application/json', accept: 'application/json' }),
+      body: JSON.stringify({
+        project_id: snapshot.project_id,
+        project_name: snapshot.project_name,
+        wendkeep_version: snapshot.wendkeep_version,
+      }),
+    });
+    if (!registration.ok) throw new Error(`Observer não registrou o projeto: HTTP ${registration.status}.`);
+    const sql = await publishObserverSql({
+      vaultBase: vault,
+      projectId: snapshot.project_id,
+      url,
+      token,
+      captureLevel: optionValue(argv, '--capture-level') || process.env.WENDKEEP_OBSERVER_CAPTURE_LEVEL || 'metadata',
+    });
+    const snapshotResponse = await fetch(`${String(url).replace(/\/$/, '')}/v1/projects/${encodeURIComponent(snapshot.project_id)}/snapshot`, {
+      method: 'POST',
+      headers: observerAuthHeaders(token, { 'content-type': 'application/json', accept: 'application/json' }),
+      body: JSON.stringify(snapshot),
+    });
+    if (!snapshotResponse.ok) throw new Error(`Observer não reconciliou o snapshot: HTTP ${snapshotResponse.status}.`);
+    const parity = await compareMemoryParity({ vaultBase: vault, projectId: snapshot.project_id, url, token });
+    const result = { ok: sql.ok && parity.missing === 0 && parity.mismatched === 0, project_id: snapshot.project_id, mode: 'remote-sqlite', sql, parity };
+    print(result, asJson, write);
+    return result.ok ? 0 : 1;
+  }
+
   if (!['register', 'publish'].includes(sub)) throw new Error('observer: subcomando desconhecido: ' + sub);
   const root = projectRoot(argv);
   const vault = vaultBase(argv, root);
   const snapshot = buildProjectSnapshot({ vaultBase: vault, projectRoot: root });
 
   if (sub === 'register') {
-    const result = registerObserverProject(dir, {
-      projectId: snapshot.project_id,
-      projectName: snapshot.project_name,
-      wendkeepVersion: snapshot.wendkeep_version,
-    });
-    if (!result.registered) throw new Error(result.errors.join(' '));
-    print(result, asJson, write);
+    const db = ensureObserverDatabase(dir);
+    let sql;
+    try {
+      sql = registerSqlProject(db, {
+        projectId: snapshot.project_id,
+        projectName: snapshot.project_name,
+        wendkeepVersion: snapshot.wendkeep_version,
+      });
+    } finally { db.close(); }
+    if (!sql.registered) throw new Error(sql.errors.join(' '));
+    print({ ...sql, authority: 'sqlite' }, asJson, write);
     return 0;
   }
 
-  const result = appendObserverEvent(dir, snapshot);
-  if (!result.accepted && !result.duplicate) throw new Error(result.errors.join(' '));
-  print({ ok: true, ...result }, asJson, write);
-  return 0;
+  const db = ensureObserverDatabase(dir);
+  let migration;
+  try {
+    migration = migrateObserverData({
+      dataDir: dir,
+      vaultBase: vault,
+      projectId: snapshot.project_id,
+      projectName: snapshot.project_name,
+      database: db,
+    });
+    upsertSqlProjectSnapshot(db, snapshot);
+  } finally { db.close(); }
+  const result = { ok: migration.rejected === 0 && migration.conflicts === 0, authority: 'sqlite', migration };
+  print(result, asJson, write);
+  return result.ok ? 0 : 1;
 }

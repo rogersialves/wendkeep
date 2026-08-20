@@ -34,6 +34,7 @@ continuam compatíveis com Node.js 18 ou mais recente. Registre explicitamente c
 npx wendkeep observer status --data-dir <diretório> --json
 npx wendkeep observer register --project <projeto> --vault <vault> --data-dir <diretório>
 npx wendkeep observer publish --project <projeto> --vault <vault> --data-dir <diretório>
+npx wendkeep observer reconcile --project <projeto> --vault <vault> --data-dir <diretório> [--url http://127.0.0.1:8787]
 npx wendkeep observer memory import --project <projeto> --vault <vault> --url http://127.0.0.1:8787 --token <token> --json
 npx wendkeep observer serve --host 127.0.0.1 --port 8787 --data-dir <diretório> --token <token>
 ```
@@ -42,7 +43,7 @@ npx wendkeep observer serve --host 127.0.0.1 --port 8787 --data-dir <diretório>
 
 - `--data-dir` escolhe o diretório local de eventos e índice; o padrão é
   `WENDKEEP_OBSERVER_DATA_DIR` ou `~/.wendkeep-observer`.
-- `--project` e `--vault` identificam o projeto nos comandos `register`, `publish` e `memory import`.
+- `--project` e `--vault` identificam o projeto nos comandos `register`, `publish`, `reconcile` e `memory import`.
 - `--host` aceita somente `127.0.0.1`, `localhost` ou `::1`; outros hosts são recusados antes do
   listen.
 - `--token` ou `WENDKEEP_OBSERVER_TOKEN` autentica mutações; `--allow-non-loopback` falha sem token.
@@ -85,8 +86,8 @@ Se o navegador mostrar a tela mas a lista falhar, confirme a saúde em
 
 ## Resultado esperado
 
-`register` grava `project_id`, nome, versão e data de registro. `publish` lê o vault local,
-produz o snapshot e envia eventos idempotentes para o SQLite com o conteúdo integral das sessões,
+`register` grava `project_id`, nome, versão e data de registro. `publish` e `reconcile` fazem a
+varredura integral explícita do vault e enviam eventos idempotentes para o SQLite com o conteúdo integral das sessões,
 decisões, bugs, aprendizados, specs, changes, CORE, DIGEST, SHARED_MEMORY, estado do brain,
 sessões de agentes, rollups de custo e chamadas. Mensagens e transcripts só são enviados nos
 níveis de captura que os habilitam. O container grava tudo em
@@ -98,15 +99,25 @@ reconciliação quando o ledger detalhado não fecha com ele; essa linha não in
 Sessões históricas com o mesmo `session_id` recebem uma identidade canônica por arquivo para
 evitar que um rollup sobrescreva o outro.
 
-No schema 4, cada documento ingerido também é projetado em chunks com caminho, heading,
+No schema 5, sessões, agentes, rollups, chamadas e transcripts usam identidades internas derivadas
+de `project_id` + identificador externo, com constraints e foreign keys escopadas. O mesmo
+`session_id`, `agent_id`, `call_id` ou `rollup_key` pode existir em projetos diferentes sem colisão.
+Cada evento é aplicado em um savepoint próprio; falha intermediária reverte ingest e todas as
+projeções antes de o batch continuar. Migrações têm checksum e toda migração estrutural de uma base
+existente cria backup consistente antes da transação.
+
+Cada documento ingerido também é projetado em chunks com caminho, heading,
 autoridade, data e validade. O Observer faz um feature probe de FTS5 e usa o índice quando a
 extensão está disponível; caso contrário, mantém a mesma semântica por fallback lexical. A busca
 retorna o trecho em que houve o match e sua proveniência, não apenas o começo do documento.
 
 O `init` projeta `observer-publish` para `SessionStart`, `Stop` e `SubagentStop` depois dos hooks
-principais. Sem servidor disponível, ele grava snapshots em `.brain/observer-outbox/` e eventos
-SQL em `.brain/observer-sql-outbox/`, sem bloquear a sessão; uma execução posterior tenta
-reenviar os lotes. Os lotes SQL são enviados com gzip para que transcripts completos maiores que
+principais. `SessionStart` apenas drena a fila; `Stop` lê somente a sessão alterada e
+`SubagentStop` somente o transcript do subagente afetado. `note new` e `change archive` enfileiram
+diretamente os documentos que escreveram. Os eventos são coalescidos por escopo e uma lease garante
+um único publisher. Sem servidor disponível, a outbox `.brain/observer-sql-outbox/` é preservada
+sem bloquear a sessão; a varredura integral fica reservada a `observer reconcile`. O `doctor`
+mostra lotes, eventos, bytes e idade da fila. Os lotes SQL são enviados com gzip para que transcripts completos maiores que
 64 MB em JSON puro continuem dentro do limite do transporte; o Observer descomprime e valida o
 corpo antes de ingerir. O outbox é transporte temporário, não autoridade.
 
@@ -114,12 +125,12 @@ corpo antes de ingerir. O outbox é transporte temporário, não autoridade.
 
 - `project_not_registered`: rode `observer register` antes de publicar.
 - `host loopback`: troque `0.0.0.0` ou endereço LAN por `127.0.0.1`.
-- Outbox pendente: o serviço estava indisponível; preserve `.brain/observer-outbox/` e
-  `.brain/observer-sql-outbox/` e repita o publisher. Adicione também
-  `.brain/observer-sql-state.json` e `.brain/observer-sql-outbox/` ao ignore do Vault. Não apague eventos manualmente.
+- Outbox pendente: o serviço estava indisponível; preserve `.brain/observer-sql-outbox/` e deixe
+  um hook posterior drená-la ou rode `observer reconcile`. Adicione também
+  `.brain/observer-sql-state.json`, `.brain/observer-sql-outbox/` e `.brain/observer-sql-publisher.lock` ao ignore do Vault. Não apague eventos manualmente.
 - `WENDKEEP_OBSERVER_NODE_UNSUPPORTED`: execute o Observer em Node.js 22.13 ou mais recente.
 - Se a memória ou o consumo ficarem incompletos, verifique a tela Sincronização, preserve o
-  outbox e rode `observer memory import` para reconstruir a carga a partir do vault.
+  outbox e rode `observer reconcile` para reconstruir e comprovar paridade por hash.
 
 ## Próximos passos
 
