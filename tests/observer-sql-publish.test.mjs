@@ -5,13 +5,25 @@ import { join } from 'node:path';
 import { gunzipSync } from 'node:zlib';
 import { startObserverServer } from '../src/observer-server.mjs';
 import {
+  buildObserverSqlEventBatch,
   listSqlOutbox,
+  observerSqlRequestTimeoutMs,
   publishObserverSql,
   retryObserverSqlOutbox,
   SQL_EVENT_BATCH_SIZE,
   SQL_EVENT_BATCH_BYTES,
 } from '../src/observer-sql-publish.mjs';
 import { makeDataDir, makeObserverFixture } from './helpers/observer-fixture.mjs';
+
+const TOKEN = 'observer-test-token';
+const MUTATION_HEADERS = { 'content-type': 'application/json', authorization: `Bearer ${TOKEN}` };
+
+test('[req:SQL-OBS-10] timeout de ingestão cresce com o payload e permanece limitado', () => {
+  assert.equal(observerSqlRequestTimeoutMs(0), 15_000);
+  assert.equal(observerSqlRequestTimeoutMs(8 * 1024 * 1024), 15_000);
+  assert.equal(observerSqlRequestTimeoutMs(70 * 1024 * 1024), 46_000);
+  assert.equal(observerSqlRequestTimeoutMs(1024 * 1024 * 1024), 60_000);
+});
 
 function sessionFixture(fixture, transcriptPath) {
   const sessionDir = join(fixture.vaultBase, '02-Sessões/2026/08-AGO/DIA 17');
@@ -48,18 +60,41 @@ function transcriptFixture(path) {
   ].join('\n'));
 }
 
+test('[req:SQL-OBS-SEC] captura padrão omite mensagens, transcript bruto e caminho absoluto', () => {
+  const fixture = makeObserverFixture();
+  const transcriptPath = join(fixture.projectRoot, 'private-transcript.jsonl');
+  transcriptFixture(transcriptPath);
+  sessionFixture(fixture, transcriptPath);
+  try {
+    const batch = buildObserverSqlEventBatch({
+      vaultBase: fixture.vaultBase,
+      projectId: fixture.projectId,
+      input: { session_id: 'live-session', transcript_path: transcriptPath, transcript_id: 'live-transcript' },
+      now: '2026-08-17T11:00:00Z',
+    });
+    assert.equal(batch.events.some((event) => event.kind === 'transcript.upsert' && event.payload.content), false);
+    assert.equal(batch.events.some((event) => event.kind === 'transcript.upsert' && event.payload.coverage === 'complete'), false);
+    const call = batch.events.find((event) => event.kind === 'llm_call');
+    assert.equal(call.payload.prompt_text, '');
+    assert.equal(call.payload.response_text, '');
+    assert.doesNotMatch(JSON.stringify(batch.events), new RegExp(fixture.projectRoot.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  } finally {
+    fixture.cleanup();
+  }
+});
+
 test('[req:SQL-OBS-10] publisher envia lote gzip quando o JSON puro excede 64 MB', async () => {
   const fixture = makeObserverFixture();
   const dataDir = makeDataDir();
   const decisions = join(fixture.vaultBase, '04-Decisões/2026/08-AGO');
   mkdirSync(decisions, { recursive: true });
   writeFileSync(join(decisions, 'ADR-large-transcript.md'), `# Histórico grande\n${'linha de evidência repetida para medir transporte.\n'.repeat(1_400_000)}`);
-  const server = await startObserverServer({ host: '127.0.0.1', port: 0, dataDir });
+  const server = await startObserverServer({ host: '127.0.0.1', port: 0, dataDir, token: TOKEN });
   const url = `http://127.0.0.1:${server.address().port}`;
   try {
     const registration = await fetch(`${url}/v1/projects/${fixture.projectId}`, {
       method: 'PUT',
-      headers: { 'content-type': 'application/json' },
+      headers: MUTATION_HEADERS,
       body: JSON.stringify({ project_id: fixture.projectId, project_name: fixture.projectName }),
     });
     assert.equal(registration.ok, true);
@@ -68,6 +103,7 @@ test('[req:SQL-OBS-10] publisher envia lote gzip quando o JSON puro excede 64 MB
       projectId: fixture.projectId,
       url,
       now: '2026-08-17T11:00:00Z',
+      token: TOKEN,
     });
     assert.equal(result.ok, true);
     assert.equal(result.pending, 0);
@@ -86,12 +122,12 @@ test('[req:SQL-OBS-4] publisher envia rollups, chamada individual e transcript c
   const transcriptPath = join(fixture.projectRoot, 'live-transcript.jsonl');
   transcriptFixture(transcriptPath);
   sessionFixture(fixture, transcriptPath);
-  const server = await startObserverServer({ host: '127.0.0.1', port: 0, dataDir });
+  const server = await startObserverServer({ host: '127.0.0.1', port: 0, dataDir, token: TOKEN });
   const url = `http://127.0.0.1:${server.address().port}`;
   try {
     const registration = await fetch(`${url}/v1/projects/${fixture.projectId}`, {
       method: 'PUT',
-      headers: { 'content-type': 'application/json' },
+      headers: MUTATION_HEADERS,
       body: JSON.stringify({ project_id: fixture.projectId, project_name: fixture.projectName }),
     });
     assert.equal(registration.ok, true);
@@ -101,6 +137,8 @@ test('[req:SQL-OBS-4] publisher envia rollups, chamada individual e transcript c
       url,
       input: { session_id: 'live-session', transcript_path: transcriptPath, transcript_id: 'live-transcript' },
       now: '2026-08-17T11:00:00Z',
+      token: TOKEN,
+      captureLevel: 'full-transcript',
     });
     assert.equal(result.ok, true);
     assert.equal(result.queued, false);
@@ -138,16 +176,16 @@ test('[req:SQL-OBS-8] publisher preserva outbox e faz replay depois da indisponi
     assert.equal(queued.ok, false);
     assert.equal(queued.queued, true);
     assert.equal(listSqlOutbox(fixture.vaultBase).length, 1);
-    const server = await startObserverServer({ host: '127.0.0.1', port: 0, dataDir });
+    const server = await startObserverServer({ host: '127.0.0.1', port: 0, dataDir, token: TOKEN });
     const url = `http://127.0.0.1:${server.address().port}`;
     try {
       const registration = await fetch(`${url}/v1/projects/${fixture.projectId}`, {
         method: 'PUT',
-        headers: { 'content-type': 'application/json' },
+        headers: MUTATION_HEADERS,
         body: JSON.stringify({ project_id: fixture.projectId, project_name: fixture.projectName }),
       });
       assert.equal(registration.ok, true);
-      const replay = await retryObserverSqlOutbox({ vaultBase: fixture.vaultBase, projectId: fixture.projectId, url });
+      const replay = await retryObserverSqlOutbox({ vaultBase: fixture.vaultBase, projectId: fixture.projectId, url, token: TOKEN });
       assert.equal(replay.confirmed, 1);
       assert.equal(replay.pending, 0);
       const summary = await (await fetch(`${url}/v1/projects/${fixture.projectId}/usage/summary`)).json();

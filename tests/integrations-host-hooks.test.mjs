@@ -32,7 +32,7 @@ test('[req:MOD-20] [req:MOD-21] Integrations owns host-hook rules while taxonomy
   }
 
   assert.deepEqual(canonical.CODEX_MATCHER_EVENTS, new Set(['SessionStart', 'PreToolUse']));
-  assert.equal(canonical.hookCommand('session-stop'), 'npx wendkeep hook session-stop');
+  assert.equal(canonical.hookCommand('session-stop'), 'npx --no-install wendkeep hook session-stop');
   assert.equal(
     canonical.hookCommandLocal('change-context'),
     'node "${CLAUDE_PROJECT_DIR}/node_modules/wendkeep/hooks/change-context.mjs"',
@@ -53,7 +53,7 @@ test('[req:MOD-20] [req:MOD-21] Integrations owns host-hook rules while taxonomy
     canonical.codexHookEntry({ name: 'session-stop', timeout: 60, statusMessage: 'checkpoint' }),
     {
       type: 'command',
-      command: 'npx wendkeep hook session-stop',
+      command: 'npx --no-install wendkeep hook session-stop',
       timeoutSec: 60,
       statusMessage: 'checkpoint',
     },

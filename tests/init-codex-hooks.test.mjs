@@ -73,7 +73,7 @@ test('mergeCodexHooks: comando é sempre npx, mesmo com wendkeep instalado local
     }
     const file = mergeCodexHooks(null, { projectPath: proj });
     const ctx = entriesOf(file, 'UserPromptSubmit').find((h) => h.command.includes('change-context'));
-    assert.equal(ctx.command, 'npx wendkeep hook change-context', 'preferLocal é ignorado no Codex');
+    assert.equal(ctx.command, 'npx --no-install wendkeep hook change-context', 'preferLocal é ignorado no Codex');
     assert.equal(ctx.args, undefined, 'sem args — o Codex só lê a string do comando');
     for (const h of allEntries(file)) {
       assert.ok(!h.command.includes('CLAUDE_PROJECT_DIR'), `${h.command} vaza variável do Claude`);
@@ -140,7 +140,7 @@ test('mergeCodexHooks: --force atualiza a entrada gerenciada in-place, sem dupli
   const existing = {
     hooks: {
       Stop: [{ hooks: [
-        { type: 'command', command: 'npx wendkeep hook session-stop', timeoutSec: 5 },
+        { type: 'command', command: 'npx --no-install wendkeep hook session-stop', timeoutSec: 5 },
         { type: 'command', command: 'echo irmao-do-usuario' },
       ] }],
     },
@@ -156,7 +156,7 @@ test('mergeCodexHooks: --force migra o matcher legado do change-guard', () => {
   const existing = {
     hooks: {
       PreToolUse: [{ matcher: 'Bash', hooks: [
-        { type: 'command', command: 'npx wendkeep hook change-guard', timeoutSec: 10 },
+        { type: 'command', command: 'npx --no-install wendkeep hook change-guard', timeoutSec: 10 },
         { type: 'command', command: 'echo irmao-do-usuario' },
       ] }],
     },
@@ -171,7 +171,7 @@ test('mergeCodexHooks: --force migra o matcher legado do change-guard', () => {
 test('mergeCodexHooks: migra a chave legada `timeout` para `timeoutSec` sem duplicar', () => {
   const existing = {
     hooks: {
-      SessionStart: [{ matcher: 'startup', hooks: [{ type: 'command', command: 'npx wendkeep hook session-start', timeout: 30 }] }],
+      SessionStart: [{ matcher: 'startup', hooks: [{ type: 'command', command: 'npx --no-install wendkeep hook session-start', timeout: 30 }] }],
     },
   };
   const file = mergeCodexHooks(existing, {});

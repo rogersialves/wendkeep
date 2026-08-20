@@ -10,6 +10,7 @@ import { makeDataDir, makeObserverFixture } from './helpers/observer-fixture.mjs
 import { registerObserverProject } from '../src/observer-store.mjs';
 
 const HOOK = join(dirname(fileURLToPath(import.meta.url)), '..', 'hooks', 'observer-publish.mjs');
+const TOKEN = 'observer-test-token';
 
 test('[req:OBS-LOCAL-4] publisher grava outbox e não bloqueia quando Observer está indisponível', async () => {
   const fixture = makeObserverFixture();
@@ -30,10 +31,10 @@ test('[req:OBS-LOCAL-4] publisher grava outbox e não bloqueia quando Observer e
   }
 });
 
-test('[req:OBS-LOCAL-4] publisher confirma evento e remove somente outbox aceita sem token', async () => {
+test('[req:OBS-LOCAL-4] publisher autenticado confirma evento e remove somente outbox aceita', async () => {
   const fixture = makeObserverFixture();
   const dataDir = makeDataDir();
-  const server = await startObserverServer({ host: '127.0.0.1', port: 0, dataDir });
+  const server = await startObserverServer({ host: '127.0.0.1', port: 0, dataDir, token: TOKEN });
   const url = `http://127.0.0.1:${server.address().port}`;
   try {
     registerObserverProject(dataDir, { projectId: fixture.projectId, projectName: fixture.projectName });
@@ -41,6 +42,7 @@ test('[req:OBS-LOCAL-4] publisher confirma evento e remove somente outbox aceita
       vaultBase: fixture.vaultBase,
       projectRoot: fixture.projectRoot,
       url,
+      token: TOKEN,
       now: '2026-08-16T12:00:00Z',
     });
     assert.equal(result.ok, true);

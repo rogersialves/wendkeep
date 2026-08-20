@@ -6,7 +6,7 @@
 
 O Observer consolida a observabilidade de vários projetos WendKeep em um serviço local. O volume
 Docker mantém o SQLite `/data/observer.sqlite` como autoridade única para documentos, sessões,
-agentes, uso, chamadas e transcripts completos. O conteúdo fica disponível para navegação e busca
+agentes, uso e chamadas. Transcripts completos são opcionais e exigem captura explícita. O conteúdo fica disponível para navegação e busca
 no próprio container, sem depender do Obsidian para consulta.
 
 ## Quando usar
@@ -24,8 +24,9 @@ pelos hooks e pelo WendKeep local.
 
 ## Pré-requisitos
 
-Tenha os projetos inicializados com WendKeep e registre explicitamente cada projeto antes de
-iniciar o servidor HTTP. No modo local padrão não há token para configurar.
+Tenha Node.js 22.13 ou mais recente para executar o Observer SQL. O Keep Core e os demais comandos
+continuam compatíveis com Node.js 18 ou mais recente. Registre explicitamente cada projeto e defina
+`WENDKEEP_OBSERVER_TOKEN`; leituras no loopback permanecem abertas, mas toda mutação exige Bearer.
 
 ## Sintaxe
 
@@ -33,8 +34,8 @@ iniciar o servidor HTTP. No modo local padrão não há token para configurar.
 npx wendkeep observer status --data-dir <diretório> --json
 npx wendkeep observer register --project <projeto> --vault <vault> --data-dir <diretório>
 npx wendkeep observer publish --project <projeto> --vault <vault> --data-dir <diretório>
-npx wendkeep observer memory import --project <projeto> --vault <vault> --url http://127.0.0.1:8787 --json
-npx wendkeep observer serve --host 127.0.0.1 --port 8787 --data-dir <diretório>
+npx wendkeep observer memory import --project <projeto> --vault <vault> --url http://127.0.0.1:8787 --token <token> --json
+npx wendkeep observer serve --host 127.0.0.1 --port 8787 --data-dir <diretório> --token <token>
 ```
 
 ## Opções e códigos de saída
@@ -44,8 +45,9 @@ npx wendkeep observer serve --host 127.0.0.1 --port 8787 --data-dir <diretório>
 - `--project` e `--vault` identificam o projeto nos comandos `register`, `publish` e `memory import`.
 - `--host` aceita somente `127.0.0.1`, `localhost` ou `::1`; outros hosts são recusados antes do
   listen.
-- as rotas `/v1` ficam abertas no modo local padrão; mantenha `--host 127.0.0.1` e não publique a
-  porta em um endereço de rede.
+- `--token` ou `WENDKEEP_OBSERVER_TOKEN` autentica mutações; `--allow-non-loopback` falha sem token.
+- `WENDKEEP_OBSERVER_CAPTURE_LEVEL` aceita `metadata` (padrão, sem mensagens), `messages` ou
+  `full-transcript`. Caminhos locais absolutos nunca são publicados.
 - Exit `0` indica sucesso; exit `1` indica falha de configuração ou operação; o hook publisher
   também retorna `0` quando o Observer está indisponível.
 
@@ -53,7 +55,8 @@ npx wendkeep observer serve --host 127.0.0.1 --port 8787 --data-dir <diretório>
 
 ```powershell
 npx wendkeep observer register --project C:\GitHub\WendKeep --vault C:\GitHub\WendKeep\.WendKeep-vault --data-dir C:\WendKeepObserver
-npx wendkeep observer serve --host 127.0.0.1 --port 8787 --data-dir C:\WendKeepObserver
+$env:WENDKEEP_OBSERVER_TOKEN = '<token-local-forte>'
+npx wendkeep observer serve --host 127.0.0.1 --port 8787 --data-dir C:\WendKeepObserver --token $env:WENDKEEP_OBSERVER_TOKEN
 $env:WENDKEEP_OBSERVER_URL = 'http://127.0.0.1:8787'
 ```
 
@@ -66,14 +69,14 @@ docker compose -f docker/wendkeep-observer/compose.yaml up -d --build
 ## Painel web local
 
 Com o servidor em execução, abra [http://127.0.0.1:8787/](http://127.0.0.1:8787/) no navegador.
-O painel é servido pelo mesmo processo e abre diretamente, sem formulário ou token. A porta fica
+O painel é servido pelo mesmo processo e abre diretamente para consultas, sem formulário ou token. A porta fica
 presa ao loopback do computador; não coloque o endereço em uma interface de rede.
 
 O painel mostra a lista multi-projeto, versão, saúde, sessão mais recente, change ativa, contagem
 de changes e data da última captura. Ao abrir um projeto, o workspace oferece Overview, Consumo,
 Sessões, Memória, Changes e Sincronização. A aba Consumo mostra custo total, tokens por categoria,
 agentes principais, subagentes, provedores, modelos, tendência diária, cobertura histórica e
-chamadas com prompt, resposta e transcript completo. Os estados de carregamento, vazio, servidor
+chamadas conforme o nível de captura escolhido. Os estados de carregamento, vazio, servidor
 indisponível, conflito, modelo sem tarifa e dados desatualizados ficam visíveis, e a atualização
 pode ser manual ou automática a cada 15 segundos.
 
@@ -85,7 +88,8 @@ Se o navegador mostrar a tela mas a lista falhar, confirme a saúde em
 `register` grava `project_id`, nome, versão e data de registro. `publish` lê o vault local,
 produz o snapshot e envia eventos idempotentes para o SQLite com o conteúdo integral das sessões,
 decisões, bugs, aprendizados, specs, changes, CORE, DIGEST, SHARED_MEMORY, estado do brain,
-sessões de agentes, rollups de custo, chamadas e transcripts. O container grava tudo em
+sessões de agentes, rollups de custo e chamadas. Mensagens e transcripts só são enviados nos
+níveis de captura que os habilitam. O container grava tudo em
 `/data/observer.sqlite`; não monta `C:\GitHub` nem qualquer `.WendKeep-vault`. Markdown é aceito
 somente como conteúdo de uma coluna SQL e volta a existir como arquivo apenas pela exportação
 read-only sob demanda. `memory import` faz a carga inicial e retorna a paridade por arquivo e hash.
@@ -106,7 +110,9 @@ corpo antes de ingerir. O outbox é transporte temporário, não autoridade.
 - `project_not_registered`: rode `observer register` antes de publicar.
 - `host loopback`: troque `0.0.0.0` ou endereço LAN por `127.0.0.1`.
 - Outbox pendente: o serviço estava indisponível; preserve `.brain/observer-outbox/` e
-  `.brain/observer-sql-outbox/` e repita o publisher. Não apague eventos manualmente.
+  `.brain/observer-sql-outbox/` e repita o publisher. Adicione também
+  `.brain/observer-sql-state.json` e `.brain/observer-sql-outbox/` ao ignore do Vault. Não apague eventos manualmente.
+- `WENDKEEP_OBSERVER_NODE_UNSUPPORTED`: execute o Observer em Node.js 22.13 ou mais recente.
 - Se a memória ou o consumo ficarem incompletos, verifique a tela Sincronização, preserve o
   outbox e rode `observer memory import` para reconstruir a carga a partir do vault.
 

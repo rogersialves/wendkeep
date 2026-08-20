@@ -33,7 +33,7 @@ hooks no `config.toml` do projeto não dispara em sessão interativa (openai/cod
 - **Projetados (8)**, de `src/taxonomy.mjs` (`codex: true`): `brain-inject`, `session-start`
   (SessionStart), `session-ensure`, `change-context` (UserPromptSubmit), `session-stop`,
   `change-nag` (Stop), `subagent-stop` (SubagentStop). Chaves de evento PascalCase; comando
-  sempre `npx wendkeep hook <name>` (a forma node-direct emite `${CLAUDE_PROJECT_DIR}`, que
+  sempre `npx --no-install wendkeep hook <name>` (a forma node-direct emite `${CLAUDE_PROJECT_DIR}`, que
   não existe no Codex); timeout na chave `timeoutSec` — `timeout` é ignorado em silêncio e cai
   no default de 600s.
 - `change-guard` é projetado adicionalmente no `PreToolUse`: o adaptador aceita `tool_input`

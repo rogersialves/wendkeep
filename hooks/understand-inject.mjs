@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// understand-inject — SessionStart hook (agent-agnostic, run via `npx wendkeep hook
+// understand-inject — SessionStart hook (agent-agnostic, run via `npx --no-install wendkeep hook
 // understand-inject`). If the Understand-Anything domain graph has been generated
 // (`.understand-anything/knowledge-graph.json` at the project root), inject a cheap
 // slice of it into the session; otherwise stay silent. Never breaks the session.

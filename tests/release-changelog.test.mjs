@@ -12,14 +12,14 @@ import {
   releaseSteps, resolveReleasePlan,
 } from '../scripts/release-plan.mjs';
 
-const AUTO_TAG_WORKFLOW = readFileSync(new URL('../.github/workflows/auto-tag.yml', import.meta.url), 'utf8');
+const TEST_WORKFLOW = readFileSync(new URL('../.github/workflows/test.yml', import.meta.url), 'utf8');
+const RELEASE_WORKFLOW = readFileSync(new URL('../.github/workflows/release.yml', import.meta.url), 'utf8');
 const AGENT_RULES = readFileSync(new URL('../AGENTS.md', import.meta.url), 'utf8');
 const CHANGELOG = readFileSync(new URL('../CHANGELOG.md', import.meta.url), 'utf8');
 const PACKAGE = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
-const AUTO_TAG_PUBLISH_STEP = AUTO_TAG_WORKFLOW.match(
-  /      - name: Publish to npm when the version is new[\s\S]*?(?=\n      - name:|$)/,
+const RELEASE_PUBLISH_STEP = RELEASE_WORKFLOW.match(
+  /      - name: Publish package[\s\S]*?(?=\n      - name:|$)/,
 )?.[0] || '';
-const AUTO_TAG_PUBLISH_GUARD = AUTO_TAG_PUBLISH_STEP.match(/if npm view[\s\S]*?\n\s*fi/)?.[0] || '';
 
 const FIXTURE = `# Changelog
 
@@ -83,12 +83,11 @@ test('extractReleaseNotes: throws when the version is absent', () => {
 
 test('[sensor:release-tests] current release notes are extractable and match the package', () => {
   const release = extractReleaseNotes(CHANGELOG, PACKAGE.version);
-  assert.equal(release.date, '2026-08-17');
-  assert.match(release.notes, /Observer SQL authority/i);
-  assert.match(release.notes, /observer\.sqlite/i);
-  assert.match(release.notes, /Dashboard de Consumo/i);
-  assert.match(release.notes, /outbox local/i);
-  assert.match(release.notes, /summary_only/i);
+  assert.equal(release.date, '2026-08-20');
+  assert.match(release.notes, /Proveniência verificável/i);
+  assert.match(release.notes, /CI verde/i);
+  assert.match(release.notes, /Node\.js 22\.13/i);
+  assert.match(release.notes, /full-transcript/i);
   assert.doesNotMatch(release.notes, /019f[0-9a-f-]+/i);
 });
 
@@ -126,32 +125,34 @@ test('[sensor:release-tests] as notas de 0.68.1 seguem extraíveis depois do bum
   assert.match(release.notes, /walk fresco/i);
 });
 
-test('[sensor:release-tests] [req:CLI-PKG-3] auto-tag declara o necessário para OIDC', () => {
-  const permissions = AUTO_TAG_WORKFLOW.match(/^permissions:\r?\n(?:  [^\r\n]+\r?\n?)+/m)?.[0] || '';
+test('[sensor:release-tests] [req:REL-CI-1] release depende da matriz verde do mesmo SHA', () => {
+  assert.match(TEST_WORKFLOW, /^  release:\r?\n    needs:\s*test$/m);
+  assert.match(TEST_WORKFLOW, /github\.event_name\s*==\s*'push'[\s\S]*github\.ref\s*==\s*'refs\/heads\/main'/);
+  assert.match(TEST_WORKFLOW, /uses:\s*\.\/\.github\/workflows\/release\.yml/);
+  assert.doesNotMatch(RELEASE_WORKFLOW, /^\s{2}push:/m, 'release não pode disparar em paralelo por push/tag');
+  assert.match(RELEASE_WORKFLOW, /^\s{2}workflow_call:\s*$/m);
+});
+
+test('[sensor:release-tests] [req:REL-CI-2] workflow chamado publica antes de criar a tag no SHA testado', () => {
+  const permissions = RELEASE_WORKFLOW.match(/^permissions:\r?\n(?:  [^\r\n]+\r?\n?)+/m)?.[0] || '';
   assert.match(permissions, /id-token:\s*write/);
-  assert.match(AUTO_TAG_WORKFLOW, /registry-url:\s*['"]https:\/\/registry\.npmjs\.org['"]/);
-  assert.match(AUTO_TAG_WORKFLOW, /node-version:\s*['"]2[4-9]['"]/);
-});
-
-test('[sensor:release-tests] [req:CLI-PKG-3] publish precede a criação da tag e é idempotente', () => {
-  const publishAt = AUTO_TAG_WORKFLOW.indexOf('      - name: Publish to npm when the version is new');
-  const tagAt = AUTO_TAG_WORKFLOW.indexOf('      - name: Ensure tag + sync release from CHANGELOG');
+  assert.match(RELEASE_WORKFLOW, /registry-url:\s*['"]https:\/\/registry\.npmjs\.org['"]/);
+  assert.match(RELEASE_WORKFLOW, /node-version:\s*['"]2[4-9]['"]/);
+  const publishAt = RELEASE_WORKFLOW.indexOf('      - name: Publish package');
+  const tagAt = RELEASE_WORKFLOW.indexOf('      - name: Create verified tag');
   assert.ok(publishAt > -1, 'workflow precisa ter um passo real de publish');
-  assert.ok(tagAt > -1, 'workflow precisa ter um passo real de tag/release');
-  assert.ok(publishAt < tagAt, 'publish precisa vir antes do passo de tag/release');
-  assert.match(AUTO_TAG_PUBLISH_STEP, /npm publish/);
-  assert.match(AUTO_TAG_PUBLISH_GUARD, /npm view[\s\S]*--prefer-online/);
-  assert.match(AUTO_TAG_PUBLISH_GUARD, /then[\s\S]*publish ignorado[\s\S]*else[\s\S]*npm publish/);
-  assert.doesNotMatch(AUTO_TAG_PUBLISH_GUARD, /npm publish[^\r\n]*--provenance/);
+  assert.ok(tagAt > -1, 'workflow precisa criar a tag comprovada');
+  assert.ok(publishAt < tagAt, 'publish precisa ocorrer antes da tag');
+  assert.match(RELEASE_PUBLISH_STEP, /npm view[\s\S]*--prefer-online/);
+  assert.match(RELEASE_PUBLISH_STEP, /npm publish/);
+  assert.match(RELEASE_WORKFLOW, /git tag -a "\$TAG" "\$GITHUB_SHA"/);
 });
 
-test('[sensor:release-tests] [req:CLI-PKG-3] dispatch manual só publica na main', () => {
-  const trigger = AUTO_TAG_WORKFLOW.match(/^on:\r?\n[\s\S]*?(?=^permissions:)/m)?.[0] || '';
-  assert.match(trigger, /^  workflow_dispatch:\s*$/m);
-  assert.match(
-    AUTO_TAG_WORKFLOW,
-    /^  tag-and-release:\r?\n    if:\s*github\.ref\s*==\s*['"]refs\/heads\/main['"]/m,
-  );
+test('[sensor:release-tests] [req:REL-CI-3] release verifica proveniência e publica receipt', () => {
+  assert.match(RELEASE_WORKFLOW, /release-provenance\.mjs --require-published --json/);
+  assert.match(RELEASE_WORKFLOW, /release-receipt\.json/);
+  assert.match(RELEASE_WORKFLOW, /actions\/upload-artifact@v4/);
+  assert.match(RELEASE_WORKFLOW, /gh release view "\$TAG" --json url/);
 });
 
 const releaseFacts = (overrides = {}) => ({
@@ -438,28 +439,24 @@ test('[sensor:release-tests] [req:CLI-PKG-2] script em repo sintético: tag dive
   assert.match(output, /outro commit/i);
 });
 
-test('auto-tag: existing tag still refreshes the GitHub Release from CHANGELOG', () => {
-  const tagBranch = AUTO_TAG_WORKFLOW.match(/if git rev-parse[\s\S]*?^\s*fi$/m)?.[0] || '';
+test('release: existing tag still refreshes the GitHub Release from CHANGELOG', () => {
+  const tagBranch = RELEASE_WORKFLOW.match(/if git rev-parse[\s\S]*?^\s*fi$/m)?.[0] || '';
   assert.ok(tagBranch, 'workflow has an explicit existing/new tag branch');
   assert.doesNotMatch(tagBranch, /\bexit\s+0\b/, 'an existing tag must not skip release refresh');
   assert.ok(
-    AUTO_TAG_WORKFLOW.indexOf('scripts/print-release-notes.mjs') < AUTO_TAG_WORKFLOW.indexOf('if git rev-parse'),
-    'release notes are generated before the tag branch',
-  );
-  assert.ok(
-    AUTO_TAG_WORKFLOW.indexOf('gh release edit') > AUTO_TAG_WORKFLOW.indexOf(tagBranch),
+    RELEASE_WORKFLOW.indexOf('gh release edit') > RELEASE_WORKFLOW.indexOf(tagBranch),
     'the existing-tag path reaches release edit',
   );
 });
 
-test('auto-tag: release readback normalizes the extra newline emitted by gh', () => {
-  assert.match(AUTO_TAG_WORKFLOW, /PUBLISHED_RELEASE_NOTES\.md/);
+test('release: release readback normalizes the extra newline emitted by gh', () => {
+  assert.match(RELEASE_WORKFLOW, /PUBLISHED_RELEASE_NOTES\.md/);
   assert.doesNotMatch(
-    AUTO_TAG_WORKFLOW,
+    RELEASE_WORKFLOW,
     /diff -u RELEASE_NOTES\.md PUBLISHED_RELEASE_NOTES\.md/,
     'raw diff rejects an otherwise identical gh body because --jq appends one newline',
   );
-  assert.match(AUTO_TAG_WORKFLOW, /trimEnd\(\)/, 'comparison canonicalizes trailing newlines');
+  assert.match(RELEASE_WORKFLOW, /trimEnd\(\)/, 'comparison canonicalizes trailing newlines');
 });
 
 test('AGENTS: release closure requires updating and reading back notes from CHANGELOG', () => {

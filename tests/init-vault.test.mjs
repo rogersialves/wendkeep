@@ -308,7 +308,7 @@ test('wendkeep init --companions wires plugin layer, UA hook and MCP server', ()
     assert.equal(settings.enabledPlugins['understand-anything@understand-anything'], true);
     assert.ok(settings.extraKnownMarketplaces['context-mode']);
     const ssCmds = (settings.hooks.SessionStart || []).flatMap((g) => (g.hooks || []).map((h) => h.command));
-    assert.ok(ssCmds.includes('npx wendkeep hook understand-inject'), 'UA hook wired');
+    assert.ok(ssCmds.includes('npx --no-install wendkeep hook understand-inject'), 'UA hook wired');
 
     // context-mode is plugin-only (its plugin ships its own MCP; wiring both double-registered
     // it). Under --no-mcp with no MCP companion there is nothing to write to .mcp.json.
@@ -374,10 +374,10 @@ test('init wires .codex/hooks.json so Codex opens a session', () => {
     assert.ok(existsSync(hooksPath), '.codex/hooks.json escrito');
     const file = JSON.parse(readFileSync(hooksPath, 'utf8'));
     const cmds = (ev) => (file.hooks[ev] || []).flatMap((g) => (g.hooks || []).map((h) => h.command));
-    assert.ok(cmds('SessionStart').includes('npx wendkeep hook session-start'), 'session-start wirado');
-    assert.ok(cmds('SessionStart').includes('npx wendkeep hook brain-inject'), 'brain-inject wirado');
-    assert.ok(cmds('UserPromptSubmit').includes('npx wendkeep hook session-ensure'), 'session-ensure wirado');
-    assert.ok(cmds('Stop').includes('npx wendkeep hook session-stop'), 'session-stop wirado');
+    assert.ok(cmds('SessionStart').includes('npx --no-install wendkeep hook session-start'), 'session-start wirado');
+    assert.ok(cmds('SessionStart').includes('npx --no-install wendkeep hook brain-inject'), 'brain-inject wirado');
+    assert.ok(cmds('UserPromptSubmit').includes('npx --no-install wendkeep hook session-ensure'), 'session-ensure wirado');
+    assert.ok(cmds('Stop').includes('npx --no-install wendkeep hook session-stop'), 'session-stop wirado');
 
     // As três armadilhas silenciosas do harness do Codex.
     const wire = JSON.stringify(file);
@@ -414,7 +414,7 @@ test('init preserva um .codex/hooks.json ilegível e escreve o merge no .new', (
     assert.equal(readFileSync(hooksPath, 'utf8'), corrupt, 'arquivo ilegível preservado byte a byte');
     const proposed = JSON.parse(readFileSync(`${hooksPath}.new`, 'utf8'));
     const cmds = (proposed.hooks.SessionStart || []).flatMap((g) => (g.hooks || []).map((h) => h.command));
-    assert.ok(cmds.includes('npx wendkeep hook session-start'), '.new traz o merge proposto');
+    assert.ok(cmds.includes('npx --no-install wendkeep hook session-start'), '.new traz o merge proposto');
     assert.match(r.stdout, /hooks\.json/, 'init avisa sobre o arquivo inválido');
   } finally { rmSync(proj, { recursive: true, force: true }); }
 });

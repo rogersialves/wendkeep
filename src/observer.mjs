@@ -7,15 +7,17 @@ import { publishObserverSql } from './observer-sql-publish.mjs';
 import { startObserverServer } from './observer-server.mjs';
 import { ensureObserverDatabase, migrateObserverDatabase, listSqlProjects, OBSERVER_SQL_FILE, OBSERVER_SQL_SCHEMA_VERSION } from './observer-sql-store.mjs';
 import { resolveProjectVault } from '../packages/vault/src/project-vault.mjs';
+import { observerAuthHeaders, resolveObserverToken } from './observer-auth.mjs';
 
 export const OBSERVER_HELP = `wendkeep observer — Observer local multi-projeto
 
 Uso:
   wendkeep observer serve [--data-dir P] [--host 127.0.0.1] [--port 8787]
-                          [--allow-non-loopback]
+                          [--allow-non-loopback] [--token TOKEN]
   wendkeep observer register --project P [--vault V] [--data-dir D] [--json]
   wendkeep observer publish --project P [--vault V] [--data-dir D] [--json]
-  wendkeep observer memory import --project P [--vault V] [--url U] [--json]
+  wendkeep observer memory import --project P [--vault V] [--url U] [--token TOKEN]
+                                    [--capture-level metadata|messages|full-transcript] [--json]
   wendkeep observer status [--data-dir D] [--json]
 
 O Observer local pode manter snapshots operacionais e uma cópia completa da memória em volume
@@ -79,6 +81,7 @@ export async function runObserver(argv = [], { write = (chunk) => process.stdout
     return 0;
   }
   const dir = dataDir(argv);
+  const token = resolveObserverToken(optionValue(argv, '--token'));
 
   if (sub === 'status') {
     print({ ...summary(readObserverIndex(dir)), database: databaseSummary(dir) }, asJson, write);
@@ -92,6 +95,7 @@ export async function runObserver(argv = [], { write = (chunk) => process.stdout
       host,
       port: Number(optionValue(argv, '--port') || 8787),
       allowNonLoopback: argv.includes('--allow-non-loopback'),
+      token,
     });
     const address = server.address();
     process.stdout.write(`wendkeep observer listening: http://${address.address}:${address.port}\n`);
@@ -106,7 +110,7 @@ export async function runObserver(argv = [], { write = (chunk) => process.stdout
     const snapshot = buildProjectSnapshot({ vaultBase: vault, projectRoot: root });
     const url = optionValue(argv, '--url') || process.env.WENDKEEP_OBSERVER_URL || '';
     if (!url) throw new Error('observer memory import: --url ou WENDKEEP_OBSERVER_URL é obrigatório.');
-    const headers = { 'content-type': 'application/json', accept: 'application/json' };
+    const headers = observerAuthHeaders(token, { 'content-type': 'application/json', accept: 'application/json' });
     const registration = await fetch(
       String(url).replace(/\/$/, '') + '/v1/projects/' + encodeURIComponent(snapshot.project_id),
       {
@@ -124,11 +128,14 @@ export async function runObserver(argv = [], { write = (chunk) => process.stdout
       vaultBase: vault,
       projectId: snapshot.project_id,
       url,
+      token,
+      captureLevel: optionValue(argv, '--capture-level') || process.env.WENDKEEP_OBSERVER_CAPTURE_LEVEL || 'metadata',
     });
     const parity = await compareMemoryParity({
       vaultBase: vault,
       projectId: snapshot.project_id,
       url,
+      token,
     });
     const result = {
       ok: sql.ok && parity.missing === 0 && parity.mismatched === 0,

@@ -1,4 +1,5 @@
 import { createServer } from 'node:http';
+import { createHash, timingSafeEqual } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { gunzipSync } from 'node:zlib';
@@ -50,6 +51,39 @@ const STATIC_ASSETS = new Map([
 
 function loopbackOnly(host) {
   return LOOPBACK_HOSTS.has(String(host || '').toLowerCase());
+}
+
+function safeTokenEqual(actual, expected) {
+  if (!actual || !expected) return false;
+  const left = createHash('sha256').update(String(actual)).digest();
+  const right = createHash('sha256').update(String(expected)).digest();
+  return timingSafeEqual(left, right);
+}
+
+function bearerToken(req) {
+  const match = String(req.headers.authorization || '').match(/^Bearer\s+(.+)$/i);
+  return match?.[1] || '';
+}
+
+function requestHostname(value) {
+  try { return new URL(`http://${String(value || '')}`).hostname.toLowerCase(); }
+  catch { return ''; }
+}
+
+function validateAuthority(req, { loopback }) {
+  const hostname = requestHostname(req.headers.host);
+  if (!hostname || (loopback && !LOOPBACK_HOSTS.has(hostname))) {
+    return { ok: false, status: 421, code: 'invalid_host', message: 'Host não corresponde ao binding do Observer.' };
+  }
+  const origin = String(req.headers.origin || '');
+  if (origin) {
+    let originHostname = '';
+    try { originHostname = new URL(origin).hostname.toLowerCase(); } catch { /* invalid below */ }
+    if (!originHostname || originHostname !== hostname) {
+      return { ok: false, status: 403, code: 'invalid_origin', message: 'Origin não corresponde ao Host do Observer.' };
+    }
+  }
+  return { ok: true };
 }
 
 function json(res, status, body) {
@@ -184,9 +218,15 @@ export async function startObserverServer({
   port = 8787,
   dataDir,
   allowNonLoopback = false,
+  token = process.env.WENDKEEP_OBSERVER_TOKEN || '',
 } = {}) {
   if (!loopbackOnly(host) && !allowNonLoopback) {
     throw new Error(`Observer HTTP aceita somente host loopback; recebido: ${host}`);
+  }
+  if (!loopbackOnly(host) && !token) {
+    const error = new Error('Observer non-loopback exige --token ou WENDKEEP_OBSERVER_TOKEN.');
+    error.code = 'WENDKEEP_OBSERVER_TOKEN_REQUIRED';
+    throw error;
   }
   if (!dataDir) throw new Error('dataDir é obrigatório.');
   const sqlDb = ensureObserverDatabase(dataDir);
@@ -204,6 +244,17 @@ export async function startObserverServer({
   const server = createServer(async (req, res) => {
     try {
       const pathname = new URL(req.url || '/', 'http://127.0.0.1').pathname;
+      const authority = validateAuthority(req, { loopback: loopbackOnly(host) });
+      if (!authority.ok) {
+        errorResponse(res, authority.status, authority.code, authority.message);
+        return;
+      }
+      const authenticated = safeTokenEqual(bearerToken(req), token);
+      const mutating = !['GET', 'HEAD', 'OPTIONS'].includes(String(req.method || '').toUpperCase());
+      if ((mutating || !loopbackOnly(host)) && !authenticated) {
+        errorResponse(res, 401, 'observer_auth_required', 'Bearer token válido é obrigatório para esta operação.');
+        return;
+      }
       if (req.method === 'GET' && pathname === '/healthz') {
         json(res, 200, {
           ok: true,

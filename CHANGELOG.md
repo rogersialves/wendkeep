@@ -4,6 +4,36 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.72.1] — 2026-08-20
+
+### Added
+
+- **Proveniência verificável de release.** A publicação gera um receipt com commit, versão, tag,
+  integridade npm, execução do workflow e GitHub Release, e recusa divergências entre o SHA testado,
+  a tag e o tarball publicado.
+- **Contrato seguro do Observer.** O Keep Core permanece em Node.js 18+, enquanto comandos SQL
+  diagnosticam `WENDKEEP_OBSERVER_NODE_UNSUPPORTED` abaixo do Node.js 22.13. Mutações exigem Bearer,
+  non-loopback exige token e requisições validam Host e Origin.
+- **Níveis de captura.** `metadata` é o padrão sem mensagens; `messages` e `full-transcript` são
+  opt-in. Caminhos absolutos não são publicados e init recomenda ignorar state e outbox SQL.
+
+### Changed
+
+- **Release somente após CI verde.** O workflow publica o SHA aprovado pela matriz Core (Node 18/20)
+  e Observer (Node 22.13/24), cria a tag no mesmo commit e pode reconciliar execuções repetidas.
+- **Dogfooding pelo working tree.** O repositório não depende mais de `wendkeep` em devDependencies;
+  seus hooks chamam `node ./bin/wendkeep.mjs`, enquanto projetos consumidores usam
+  `npx --no-install wendkeep` e o tarball continua testado isoladamente.
+
+### Fixed
+
+- **Identidade de arquivos de memória no Windows.** A revalidação compara o índice do arquivo como
+  inteiro exato e tolera a inconsistência conhecida do serial de volume do libuv antigo, evitando
+  falsos `VAULT_PATH_UNSAFE` no Node.js 22.13 sem relaxar a rejeição de hardlinks ou reparses.
+- **Ingestão SQL grande em runners lentos.** O timeout HTTP cresce com o tamanho bruto do lote até
+  60 segundos, preservando 15 segundos para payloads vazios/pequenos e evitando outbox falsa para
+  lotes gzip válidos acima de 64 MB.
+
 ## [0.72.0] — 2026-08-17
 
 ### Added
@@ -1029,7 +1059,7 @@ All notable changes to **wendkeep** are documented here. Format based on
   enum de eventos de hook do Codex.
 - A projeção Codex tem três diferenças em relação ao formato do `settings.json`, todas
   **silenciosas quando erradas** — daí valerem registro. (1) A chave de timeout é `timeoutSec`,
-  não `timeout`. (2) O comando é sempre `npx wendkeep hook <nome>`, nunca a forma node-direta:
+  não `timeout`. (2) O comando é sempre `npx --no-install wendkeep hook <nome>`, nunca a forma node-direta:
   aquela emite `${CLAUDE_PROJECT_DIR}`, que não existe no Codex, então a flag `preferLocal` é
   ignorada de propósito na projeção. (3) As chaves de evento são PascalCase — o snake_case que
   se vê em `[hooks.state]` no `~/.codex/config.toml` é o rótulo interno do evento, não a chave
@@ -1613,7 +1643,7 @@ they only read + append.
 
 ### Note
 - You do **not** need `wendkeep init` for a routine update: the hooks live in the package
-  (`settings.json` calls `npx wendkeep hook …`), so `npm i -D wendkeep@latest` updates them.
+  (`settings.json` calls `npx --no-install wendkeep hook …`), so `npm i -D wendkeep@latest` updates them.
   Re-run `init` only when a release adds new wiring (the CHANGELOG says so); it's idempotent.
 
 ## [0.26.0] — 2026-07-08
@@ -1793,7 +1823,7 @@ Fix: memory + active-change injection wired by default.
 
 ### Upgrade
 - Existing installs pick it up by re-running `wendkeep init --force` (idempotent — it only adds the
-  missing hook), or by adding `npx wendkeep hook brain-inject` to the SessionStart hooks manually.
+  missing hook), or by adding `npx --no-install wendkeep hook brain-inject` to the SessionStart hooks manually.
 
 ## [0.18.0] — 2026-07-06
 

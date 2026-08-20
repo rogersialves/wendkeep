@@ -1,37 +1,85 @@
 name: release
 
-# Fires on any pushed tag vX.Y.Z and creates (or refreshes) the matching GitHub
-# Release, pulling the body straight from CHANGELOG.md. This is what keeps the
-# releases page in sync with npm: even a bare `git push --tags` produces a release.
-
 on:
-  push:
-    tags:
-      - 'v*'
+  workflow_call:
+  workflow_dispatch:
 
 permissions:
   contents: write
+  id-token: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
-  github-release:
+  release:
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
-      - uses: actions/setup-node@v4
+          ref: ${{ github.sha }}
+      - uses: actions/setup-node@v5
         with:
-          node-version: '20'
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+      - run: npm ci --ignore-scripts
+      - name: Validate release candidate
+        run: node scripts/release-provenance.mjs --json
+      - name: Publish package
+        run: |
+          PKG=$(node -p "require('./package.json').name")
+          VERSION=$(node -p "require('./package.json').version")
+          if npm view "$PKG@$VERSION" version --prefer-online >/dev/null 2>&1; then
+            echo "$PKG@$VERSION já está no registry — publish idempotente"
+          else
+            npm publish
+          fi
+      - name: Create verified tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          TAG="v$VERSION"
+          if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
+            TAG_SHA=$(git rev-list -n 1 "refs/tags/$TAG")
+            test "$TAG_SHA" = "$GITHUB_SHA"
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git tag -a "$TAG" "$GITHUB_SHA" -m "$TAG"
+            git push origin "$TAG"
+          fi
+      - name: Verify published provenance
+        run: |
+          for attempt in 1 2 3 4 5 6 7 8 9 10; do
+            if node scripts/release-provenance.mjs --require-published --json > release-receipt.json; then
+              exit 0
+            fi
+            sleep 6
+          done
+          node scripts/release-provenance.mjs --require-published --json
       - name: Create or update GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.ref_name }}
         run: |
-          VERSION="${TAG#v}"
+          VERSION=$(node -p "require('./package.json').version")
+          TAG="v$VERSION"
           node scripts/print-release-notes.mjs "$VERSION" > RELEASE_NOTES.md
           if gh release view "$TAG" >/dev/null 2>&1; then
-            echo "release $TAG já existe — atualizando notas"
             gh release edit "$TAG" --notes-file RELEASE_NOTES.md
           else
-            gh release create "$TAG" --title "$TAG" --notes-file RELEASE_NOTES.md
+            gh release create "$TAG" --title "$TAG" --notes-file RELEASE_NOTES.md --verify-tag
           fi
+          gh release view "$TAG" --json body --jq .body > PUBLISHED_RELEASE_NOTES.md
+          RELEASE_URL=$(gh release view "$TAG" --json url --jq .url)
+          node -e 'const fs=require("node:fs"); const norm=(path)=>fs.readFileSync(path,"utf8").replace(/\r\n/g,"\n").trimEnd(); if(norm("RELEASE_NOTES.md")!==norm("PUBLISHED_RELEASE_NOTES.md")){throw new Error("GitHub Release diverge do CHANGELOG")}'
+          RECEIPT_RELEASE_URL="$RELEASE_URL" node -e 'const fs=require("node:fs"); const receipt=JSON.parse(fs.readFileSync("release-receipt.json","utf8")); receipt.workflow_run=process.env.GITHUB_SERVER_URL+"/"+process.env.GITHUB_REPOSITORY+"/actions/runs/"+process.env.GITHUB_RUN_ID; receipt.github_release=process.env.RECEIPT_RELEASE_URL; fs.writeFileSync("release-receipt.json",JSON.stringify(receipt,null,2)+"\n")'
+      - name: Upload release receipt
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-receipt-${{ github.sha }}
+          path: release-receipt.json
+          if-no-files-found: error

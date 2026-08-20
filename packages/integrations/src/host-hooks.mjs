@@ -32,7 +32,7 @@ export const SESSION_HOOKS = [
 ];
 
 export function hookCommand(name) {
-  return `npx wendkeep hook ${name}`;
+  return `npx --no-install wendkeep hook ${name}`;
 }
 
 // Forma node-direta do comando de hook: 1 processo (~100-250ms) em vez dos 3 do npx (cold-start

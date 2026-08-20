@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "npx wendkeep hook brain-inject",
+            "command": "node ./bin/wendkeep.mjs hook brain-inject",
             "timeoutSec": 45,
             "statusMessage": "wendkeep: injecting memory + active change"
           }
@@ -17,7 +17,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "npx wendkeep hook session-start",
+            "command": "node ./bin/wendkeep.mjs hook session-start",
             "timeoutSec": 30,
             "statusMessage": "wendkeep: opening Obsidian session"
           }
@@ -28,7 +28,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "npx wendkeep hook observer-publish",
+            "command": "node ./bin/wendkeep.mjs hook observer-publish",
             "timeoutSec": 5,
             "statusMessage": "wendkeep: publishing local observer snapshot"
           }
@@ -40,7 +40,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "npx wendkeep hook session-stop",
+            "command": "node ./bin/wendkeep.mjs hook session-stop",
             "timeoutSec": 60,
             "statusMessage": "wendkeep: writing session checkpoint"
           }
@@ -50,7 +50,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "npx wendkeep hook change-nag",
+            "command": "node ./bin/wendkeep.mjs hook change-nag",
             "timeoutSec": 15,
             "statusMessage": "wendkeep: open tasks check"
           }
@@ -60,7 +60,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "npx wendkeep hook observer-publish",
+            "command": "node ./bin/wendkeep.mjs hook observer-publish",
             "timeoutSec": 5,
             "statusMessage": "wendkeep: publishing local observer snapshot"
           }
@@ -72,7 +72,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "npx wendkeep hook session-ensure",
+            "command": "node ./bin/wendkeep.mjs hook session-ensure",
             "timeoutSec": 30,
             "statusMessage": "wendkeep: ensuring active session"
           }
@@ -82,7 +82,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "npx wendkeep hook change-context",
+            "command": "node ./bin/wendkeep.mjs hook change-context",
             "timeoutSec": 15,
             "statusMessage": "wendkeep: change ping"
           }
@@ -94,7 +94,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "npx wendkeep hook subagent-stop",
+            "command": "node ./bin/wendkeep.mjs hook subagent-stop",
             "timeoutSec": 20,
             "statusMessage": "wendkeep: subagent telemetry"
           }
@@ -104,7 +104,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "npx wendkeep hook observer-publish",
+            "command": "node ./bin/wendkeep.mjs hook observer-publish",
             "timeoutSec": 5,
             "statusMessage": "wendkeep: publishing local observer usage"
           }
@@ -117,7 +117,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "npx wendkeep hook change-guard",
+            "command": "node ./bin/wendkeep.mjs hook change-guard",
             "timeoutSec": 10,
             "statusMessage": "wendkeep: change gate"
           }

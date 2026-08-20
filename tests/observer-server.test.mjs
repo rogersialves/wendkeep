@@ -5,6 +5,9 @@ import { startObserverServer } from '../src/observer-server.mjs';
 import { buildProjectSnapshot } from '../src/observer-snapshot.mjs';
 import { makeDataDir, makeObserverFixture } from './helpers/observer-fixture.mjs';
 
+const TOKEN = 'observer-test-token';
+const MUTATION_HEADERS = { 'content-type': 'application/json', authorization: `Bearer ${TOKEN}` };
+
 async function request(base, path, options = {}) {
   const response = await fetch(`${base}${path}`, options);
   const text = await response.text();
@@ -13,10 +16,10 @@ async function request(base, path, options = {}) {
   return { status: response.status, body };
 }
 
-test('[req:OBS-LOCAL-2] servidor local consulta, registra e publica sem token', async () => {
+test('[req:OBS-LOCAL-2] servidor local permite leitura sem token e exige token para mutações', async () => {
   const dataDir = makeDataDir();
   const fixture = makeObserverFixture();
-  const server = await startObserverServer({ host: '127.0.0.1', port: 0, dataDir });
+  const server = await startObserverServer({ host: '127.0.0.1', port: 0, dataDir, token: TOKEN });
   const base = `http://127.0.0.1:${server.address().port}`;
   try {
     const health = await request(base, '/healthz');
@@ -29,7 +32,7 @@ test('[req:OBS-LOCAL-2] servidor local consulta, registra e publica sem token', 
     assert.equal(health.body.database.ready, true);
     assert.equal(open.status, 200);
 
-    const localHeaders = { 'content-type': 'application/json' };
+    const localHeaders = MUTATION_HEADERS;
     const registered = await request(base, '/v1/projects/project-a', {
       method: 'PUT', headers: localHeaders, body: JSON.stringify({ project_id: 'project-a', project_name: 'Project A' }),
     });
@@ -62,12 +65,12 @@ test('[req:OBS-LOCAL-2] servidor recusa bind não-loopback e JSON inválido', as
     () => startObserverServer({ host: '0.0.0.0', port: 0, dataDir }),
     /loopback/i,
   );
-  const server = await startObserverServer({ host: '127.0.0.1', port: 0, dataDir });
+  const server = await startObserverServer({ host: '127.0.0.1', port: 0, dataDir, token: TOKEN });
   const base = `http://127.0.0.1:${server.address().port}`;
   try {
     const result = await request(base, '/v1/projects/project-a', {
       method: 'PUT',
-      headers: { 'content-type': 'application/json' },
+      headers: MUTATION_HEADERS,
       body: '{invalid',
     });
     assert.equal(result.status, 400);
@@ -75,7 +78,7 @@ test('[req:OBS-LOCAL-2] servidor recusa bind não-loopback e JSON inválido', as
 
     const oversized = await request(base, '/v1/projects/project-a', {
       method: 'PUT',
-      headers: { 'content-type': 'application/json' },
+      headers: MUTATION_HEADERS,
       body: JSON.stringify({ project_id: 'project-a', project_name: 'x'.repeat(40 * 1024) }),
     });
     assert.equal(oversized.status, 413);
@@ -88,7 +91,7 @@ test('[req:OBS-LOCAL-2] servidor recusa bind não-loopback e JSON inválido', as
 
 test('[req:OBS-LOCAL-3] servidor permite bind interno explícito somente quando autorizado', async () => {
   const dataDir = makeDataDir();
-  const server = await startObserverServer({ host: '0.0.0.0', port: 0, dataDir, allowNonLoopback: true });
+  const server = await startObserverServer({ host: '0.0.0.0', port: 0, dataDir, allowNonLoopback: true, token: TOKEN });
   try {
     assert.equal(server.address().address, '0.0.0.0');
   } finally {
@@ -101,9 +104,9 @@ test('[sensor:observer-e2e] [req:OBS-LOCAL-2] [req:OBS-LOCAL-3] dois projetos pe
   const dataDir = makeDataDir();
   const first = makeObserverFixture({ projectId: 'project-a', slug: 'change-a', openTasks: ['A task'] });
   const second = makeObserverFixture({ projectId: 'project-b', slug: 'change-b', openTasks: ['B task'] });
-  const server = await startObserverServer({ host: '127.0.0.1', port: 0, dataDir });
+  const server = await startObserverServer({ host: '127.0.0.1', port: 0, dataDir, token: TOKEN });
   const base = `http://127.0.0.1:${server.address().port}`;
-  const headers = { 'content-type': 'application/json' };
+  const headers = MUTATION_HEADERS;
   try {
     for (const fixture of [first, second]) {
       const registration = await request(base, `/v1/projects/${fixture.projectId}`, {
@@ -129,7 +132,7 @@ test('[sensor:observer-e2e] [req:OBS-LOCAL-2] [req:OBS-LOCAL-3] dois projetos pe
     assert.equal(secondChanges.body.changes[0].slug, 'change-b');
   } finally {
     await server.close();
-    const restarted = await startObserverServer({ host: '127.0.0.1', port: 0, dataDir });
+    const restarted = await startObserverServer({ host: '127.0.0.1', port: 0, dataDir, token: TOKEN });
     try {
       const persisted = await request(`http://127.0.0.1:${restarted.address().port}`, '/v1/projects');
       assert.deepEqual(persisted.body.projects.map((item) => item.projectId), ['project-a', 'project-b']);

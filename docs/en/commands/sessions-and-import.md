@@ -26,11 +26,11 @@ and a vault bound to the correct project.
 ## Syntax
 
 ```bash
-npx wendkeep hook <name>
+npx --no-install wendkeep hook <name>
 npx wendkeep session list
 npx wendkeep session show <id>
 npx wendkeep session use <id>
-npx wendkeep hook session-backfill --session <id> [--write]
+npx --no-install wendkeep hook session-backfill --session <id> [--write]
 npx wendkeep import [options]
 ```
 
@@ -96,8 +96,8 @@ npx wendkeep import [options]
 ```bash
 npx wendkeep session list
 npx wendkeep session show 019abc-session-id
-npx wendkeep hook session-backfill --session 019abc-session-id
-npx wendkeep hook session-backfill --session 019abc-session-id --write
+npx --no-install wendkeep hook session-backfill --session 019abc-session-id
+npx --no-install wendkeep hook session-backfill --session 019abc-session-id --write
 npx wendkeep import --source codex --since 2026-07-01 --dry-run --json
 ```
 

@@ -14,6 +14,7 @@ import {
   deriveMemoryProjection,
   enqueueMemoryEvent,
   hashMemoryValue,
+  memoryFileIdentityMatches,
   prepareMemoryProjection,
   projectMemoryOutbox,
   readMemoryLedger,
@@ -23,6 +24,18 @@ import {
 } from '../hooks/memory-store.mjs';
 
 const PROJECT_ID = 'project-a';
+
+test('[req:OP-10] file identity tolerates only the known Windows volume serial mismatch', () => {
+  const descriptor = { dev: 11n, ino: 9007199254740993n };
+  const sameVolumeIdentity = { dev: 11n, ino: 9007199254740993n };
+  const inconsistentWindowsVolume = { dev: 22n, ino: 9007199254740993n };
+  const replacedFile = { dev: 11n, ino: 9007199254740995n };
+
+  assert.equal(memoryFileIdentityMatches(descriptor, sameVolumeIdentity, { platform: 'linux' }), true);
+  assert.equal(memoryFileIdentityMatches(descriptor, inconsistentWindowsVolume, { platform: 'linux' }), false);
+  assert.equal(memoryFileIdentityMatches(descriptor, inconsistentWindowsVolume, { platform: 'win32' }), true);
+  assert.equal(memoryFileIdentityMatches(descriptor, replacedFile, { platform: 'win32' }), false);
+});
 
 function scratch() {
   const vault = mkdtempSync(join(tmpdir(), 'wk-memory-store-'));

@@ -13,6 +13,8 @@ import { gzipSync } from 'node:zlib';
 import { parseTranscriptContent } from '../packages/integrations/src/transcripts.mjs';
 import { parseSessionCost, } from './cost.mjs';
 import { buildSessionIdentityMap, listMigrationDocuments, parseFrontmatter, sessionEvents } from './observer-sql-migrate.mjs';
+import { observerAuthHeaders } from './observer-auth.mjs';
+import { sanitizeObserverContent, sanitizeObserverMetadata } from './observer-privacy.mjs';
 
 export const SQL_OUTBOX_REL = '.brain/observer-sql-outbox';
 export const SQL_STATE_REL = '.brain/observer-sql-state.json';
@@ -20,6 +22,28 @@ const SQL_SCHEMA_VERSION = 1;
 export const SQL_EVENT_BATCH_SIZE = 64;
 export const SQL_EVENT_BATCH_BYTES = 8 * 1024 * 1024;
 const REQUEST_TIMEOUT_MS = 15000;
+const MAX_REQUEST_TIMEOUT_MS = 60000;
+const REQUEST_TIMEOUT_BYTES_STEP = 1024 * 1024;
+const CAPTURE_LEVELS = new Set(['metadata', 'messages', 'full-transcript']);
+
+export function observerSqlRequestTimeoutMs(rawBytes) {
+  const size = Math.max(0, Number(rawBytes) || 0);
+  const oversizedBytes = Math.max(0, size - SQL_EVENT_BATCH_BYTES);
+  return Math.min(
+    MAX_REQUEST_TIMEOUT_MS,
+    REQUEST_TIMEOUT_MS + Math.ceil(oversizedBytes / REQUEST_TIMEOUT_BYTES_STEP) * 500,
+  );
+}
+
+export function normalizeObserverCaptureLevel(value = process.env.WENDKEEP_OBSERVER_CAPTURE_LEVEL || 'metadata') {
+  const level = String(value || 'metadata').trim().toLowerCase();
+  if (!CAPTURE_LEVELS.has(level)) {
+    const error = new Error(`Nível de captura inválido: ${level}. Use metadata, messages ou full-transcript.`);
+    error.code = 'WENDKEEP_OBSERVER_CAPTURE_LEVEL_INVALID';
+    throw error;
+  }
+  return level;
+}
 
 function text(value, fallback = '') { return String(value ?? fallback); }
 function hash(value) { return createHash('sha256').update(typeof value === 'string' ? value : JSON.stringify(value)).digest('hex'); }
@@ -73,7 +97,9 @@ function tokenPayload(usage = {}) {
 }
 
 function documentEvent({ projectId, logicalPath, content, metadata, revision, occurredAt }) {
-  const contentHash = hash(content);
+  const safeContent = sanitizeObserverContent(content);
+  const safeMetadata = sanitizeObserverMetadata(metadata);
+  const contentHash = hash(safeContent);
   return {
     schema_version: 1,
     event_id: eventId('document', projectId, `${logicalPath}:${revision}:${contentHash}`),
@@ -89,11 +115,11 @@ function documentEvent({ projectId, logicalPath, content, metadata, revision, oc
               : logicalPath.startsWith('07-Specs/') ? 'spec'
                 : logicalPath.startsWith('08-Mudanças/') ? 'change' : 'memory',
       title: basename(logicalPath).replace(/\.md$/i, ''),
-      content,
+      content: safeContent,
       content_hash: contentHash,
       revision,
-      metadata,
-      source_session_id: text(metadata?.session_id),
+      metadata: safeMetadata,
+      source_session_id: text(safeMetadata?.session_id),
     },
   };
 }
@@ -123,7 +149,7 @@ function agentEvent({ projectId, sessionId, agentId, parentAgentId = '', role = 
   };
 }
 
-function transcriptCalls({ projectId, sessionId, agentId, role, provider, modelFallback, transcriptId, content, occurredAt }) {
+function transcriptCalls({ projectId, sessionId, agentId, role, provider, modelFallback, transcriptId, content, occurredAt, includeMessages }) {
   let parsed;
   try { parsed = parseTranscriptContent(content); } catch { return []; }
   return (parsed.turns || []).flatMap((turn, index) => {
@@ -154,8 +180,8 @@ function transcriptCalls({ projectId, sessionId, agentId, role, provider, modelF
         cost_usd: 0,
         cost_status: 'unknown',
         transcript_id: transcriptId,
-        prompt_text: prompt,
-        response_text: response,
+        prompt_text: includeMessages ? prompt : '',
+        response_text: includeMessages ? response : '',
         status: turn.status === 'aborted' ? 'aborted' : 'complete',
         metadata: { tools: turn.tools || [], source: 'transcript-parser' },
       },
@@ -180,7 +206,7 @@ function sourceCandidates({ vaultBase, logicalPath, fm, input }) {
   return candidates;
 }
 
-function completeTranscriptEvents({ projectId, sessionId, mainAgentId, provider, model, source, now }) {
+function completeTranscriptEvents({ projectId, sessionId, mainAgentId, provider, model, source, now, captureLevel }) {
   const content = readFileSync(source.path, 'utf8');
   const agentId = source.role === 'subagent'
     ? `${projectId}:${sessionId}:subagent:${hash(source.path).slice(0, 16)}`
@@ -189,7 +215,7 @@ function completeTranscriptEvents({ projectId, sessionId, mainAgentId, provider,
     ? agentEvent({ projectId, sessionId, agentId, parentAgentId: mainAgentId, role: 'subagent', provider, model, input: source.agentInput, occurredAt: now })
     : null;
   const fingerprint = hash(content);
-  const transcript = {
+  const transcript = captureLevel === 'full-transcript' ? {
     schema_version: 1,
     event_id: eventId('transcript', projectId, `${source.transcriptId}:${fingerprint}`),
     kind: 'transcript.upsert',
@@ -202,10 +228,21 @@ function completeTranscriptEvents({ projectId, sessionId, mainAgentId, provider,
       coverage: 'complete',
       content,
       source: 'hook-transcript',
-      metadata: { original_path: source.path.replaceAll('\\', '/') },
+      metadata: { source_label: basename(source.path), source_hash: hash(normalizePath(source.path)) },
     },
-  };
-  const calls = transcriptCalls({ projectId, sessionId, agentId, role: source.role, provider, modelFallback: model, transcriptId: source.transcriptId, content, occurredAt: now });
+  } : null;
+  const calls = transcriptCalls({
+    projectId,
+    sessionId,
+    agentId,
+    role: source.role,
+    provider,
+    modelFallback: model,
+    transcriptId: source.transcriptId,
+    content,
+    occurredAt: now,
+    includeMessages: captureLevel !== 'metadata',
+  });
   return { events: [agent, transcript, ...calls].filter(Boolean), fingerprint, transcriptId: source.transcriptId };
 }
 
@@ -218,9 +255,10 @@ function dedupeEvents(events) {
   });
 }
 
-export function buildObserverSqlEventBatch({ vaultBase, projectId, input = {}, now = new Date(), state = readState(vaultBase), remoteDocuments = {} } = {}) {
+export function buildObserverSqlEventBatch({ vaultBase, projectId, input = {}, now = new Date(), state = readState(vaultBase), remoteDocuments = {}, captureLevel = process.env.WENDKEEP_OBSERVER_CAPTURE_LEVEL || 'metadata' } = {}) {
   if (!vaultBase || !projectId) throw new Error('vaultBase e projectId são obrigatórios.');
   const occurredAt = isoNow(now);
+  const resolvedCaptureLevel = normalizeObserverCaptureLevel(captureLevel);
   const nextState = { schema_version: SQL_SCHEMA_VERSION, files: { ...(state.files || {}) }, transcripts: { ...(state.transcripts || {}) } };
   const events = [];
   const sessionContexts = [];
@@ -235,7 +273,7 @@ export function buildObserverSqlEventBatch({ vaultBase, projectId, input = {}, n
   let changed = 0;
   for (const file of files) {
     const content = readFileSync(file.absolute, 'utf8');
-    const contentHash = hash(content);
+    const contentHash = hash(sanitizeObserverContent(content));
     const previous = state.files?.[file.logicalPath];
     const remote = remoteDocuments?.[file.logicalPath];
     const baseRevision = Math.max(Number(previous?.revision || 0), Number(remote?.revision || 0));
@@ -263,9 +301,10 @@ export function buildObserverSqlEventBatch({ vaultBase, projectId, input = {}, n
     for (const source of sources) {
       const content = readFileSync(source.path, 'utf8');
       const fingerprint = hash(content);
-      if (state.transcripts?.[source.transcriptId]?.content_hash === fingerprint) continue;
-      const complete = completeTranscriptEvents({ projectId, sessionId, mainAgentId, provider, model, source, now: occurredAt });
-      nextState.transcripts[source.transcriptId] = { content_hash: complete.fingerprint, coverage: 'complete' };
+      const previousTranscript = state.transcripts?.[source.transcriptId];
+      if (previousTranscript?.content_hash === fingerprint && previousTranscript?.coverage === resolvedCaptureLevel) continue;
+      const complete = completeTranscriptEvents({ projectId, sessionId, mainAgentId, provider, model, source, now: occurredAt, captureLevel: resolvedCaptureLevel });
+      nextState.transcripts[source.transcriptId] = { content_hash: complete.fingerprint, coverage: resolvedCaptureLevel };
       const summaryId = complete.transcriptId;
       for (const event of complete.events) {
         if (event.kind === 'agent.upsert' && event.payload.agent_id !== mainAgentId) events.push(event);
@@ -297,14 +336,15 @@ export function listSqlOutbox(vaultBase) {
   });
 }
 
-async function postSqlChunk({ url, projectId, events, fetchImpl = globalThis.fetch }) {
+async function postSqlChunk({ url, projectId, events, fetchImpl = globalThis.fetch, token = '' }) {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-  const wireBody = gzipSync(Buffer.from(JSON.stringify({ events }), 'utf8'));
+  const rawBody = Buffer.from(JSON.stringify({ events }), 'utf8');
+  const timer = setTimeout(() => controller.abort(), observerSqlRequestTimeoutMs(rawBody.byteLength));
+  const wireBody = gzipSync(rawBody);
   try {
     const response = await fetchImpl(`${String(url).replace(/\/$/, '')}/v1/projects/${encodeURIComponent(projectId)}/ingest`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json', 'content-encoding': 'gzip', accept: 'application/json' },
+      headers: observerAuthHeaders(token, { 'content-type': 'application/json', 'content-encoding': 'gzip', accept: 'application/json' }),
       body: wireBody,
       signal: controller.signal,
     });
@@ -314,11 +354,11 @@ async function postSqlChunk({ url, projectId, events, fetchImpl = globalThis.fet
   } finally { clearTimeout(timer); }
 }
 
-async function readRemoteDocuments({ url, projectId, fetchImpl = globalThis.fetch }) {
+async function readRemoteDocuments({ url, projectId, fetchImpl = globalThis.fetch, token = '' }) {
   if (!url) return {};
   try {
     const response = await fetchImpl(`${String(url).replace(/\/$/, '')}/v1/projects/${encodeURIComponent(projectId)}/memory/tree`, {
-      headers: { accept: 'application/json' },
+      headers: observerAuthHeaders(token, { accept: 'application/json' }),
     });
     if (!response.ok) return {};
     const body = await response.json().catch(() => ({}));
@@ -328,7 +368,7 @@ async function readRemoteDocuments({ url, projectId, fetchImpl = globalThis.fetc
   }
 }
 
-async function postSqlBatch({ url, projectId, events, fetchImpl = globalThis.fetch }) {
+async function postSqlBatch({ url, projectId, events, fetchImpl = globalThis.fetch, token = '' }) {
   const aggregate = { accepted: 0, rejected: 0, conflicts: 0, stale: 0, duplicates: 0 };
   let chunk = [];
   let chunkBytes = 0;
@@ -339,6 +379,7 @@ async function postSqlBatch({ url, projectId, events, fetchImpl = globalThis.fet
       projectId,
       events: items,
       fetchImpl,
+      token,
     });
     for (const key of Object.keys(aggregate)) aggregate[key] += Number(response?.[key]) || 0;
   };
@@ -358,7 +399,7 @@ async function postSqlBatch({ url, projectId, events, fetchImpl = globalThis.fet
   return aggregate;
 }
 
-export async function retryObserverSqlOutbox({ vaultBase, projectId, url, fetchImpl = globalThis.fetch } = {}) {
+export async function retryObserverSqlOutbox({ vaultBase, projectId, url, fetchImpl = globalThis.fetch, token = process.env.WENDKEEP_OBSERVER_TOKEN || '' } = {}) {
   const pending = listSqlOutbox(vaultBase);
   if (!url) return { attempted: 0, confirmed: 0, pending: pending.length };
   let attempted = 0;
@@ -366,7 +407,7 @@ export async function retryObserverSqlOutbox({ vaultBase, projectId, url, fetchI
   for (const batch of pending) {
     attempted += 1;
     try {
-      await postSqlBatch({ url, projectId, events: batch.events, fetchImpl });
+      await postSqlBatch({ url, projectId, events: batch.events, fetchImpl, token });
       unlinkSync(batch.path);
       confirmed += 1;
     } catch { break; }
@@ -374,14 +415,14 @@ export async function retryObserverSqlOutbox({ vaultBase, projectId, url, fetchI
   return { attempted, confirmed, pending: listSqlOutbox(vaultBase).length };
 }
 
-export async function publishObserverSql({ vaultBase, projectId, url = process.env.WENDKEEP_OBSERVER_URL || '', input = {}, now = new Date(), fetchImpl = globalThis.fetch } = {}) {
+export async function publishObserverSql({ vaultBase, projectId, url = process.env.WENDKEEP_OBSERVER_URL || '', input = {}, now = new Date(), fetchImpl = globalThis.fetch, token = process.env.WENDKEEP_OBSERVER_TOKEN || '', captureLevel = process.env.WENDKEEP_OBSERVER_CAPTURE_LEVEL || 'metadata' } = {}) {
   if (!vaultBase || !projectId) throw new Error('vaultBase e projectId são obrigatórios.');
-  const replay = await retryObserverSqlOutbox({ vaultBase, projectId, url, fetchImpl });
+  const replay = await retryObserverSqlOutbox({ vaultBase, projectId, url, fetchImpl, token });
   const state = readState(vaultBase);
   const remoteDocuments = Object.keys(state.files || {}).length === 0
-    ? await readRemoteDocuments({ url, projectId, fetchImpl })
+    ? await readRemoteDocuments({ url, projectId, fetchImpl, token })
     : {};
-  const batch = buildObserverSqlEventBatch({ vaultBase, projectId, input, now, state, remoteDocuments });
+  const batch = buildObserverSqlEventBatch({ vaultBase, projectId, input, now, state, remoteDocuments, captureLevel });
   atomicJson(statePath(vaultBase), batch.nextState);
   if (!batch.events.length) return { ok: true, queued: false, scanned: batch.scanned, changed: batch.changed, pending: listSqlOutbox(vaultBase).length, replay };
   if (!url) {
@@ -389,7 +430,7 @@ export async function publishObserverSql({ vaultBase, projectId, url = process.e
     return { ok: false, queued: true, scanned: batch.scanned, changed: batch.changed, pending: listSqlOutbox(vaultBase).length, replay, hookExitCode: 0 };
   }
   try {
-    const response = await postSqlBatch({ url, projectId, events: batch.events, fetchImpl });
+    const response = await postSqlBatch({ url, projectId, events: batch.events, fetchImpl, token });
     return { ok: true, queued: false, scanned: batch.scanned, changed: batch.changed, pending: listSqlOutbox(vaultBase).length, replay, response };
   } catch (error) {
     queueOutbox(vaultBase, { schema_version: SQL_SCHEMA_VERSION, project_id: projectId, events: batch.events });
