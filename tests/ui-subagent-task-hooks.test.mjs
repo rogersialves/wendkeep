@@ -165,9 +165,9 @@ test('[req:OP-7] registry session_file traversal não permite task-log nem decis
 test('the 3 hooks are wired by mergeSettings on their events', () => {
   const cmds = (settings, ev) => (settings.hooks[ev] || []).flatMap((g) => (g.hooks || []).map((h) => h.command));
   const { settings } = mergeSettings(null, { vaultPath: '/v', withMcp: false, companions: [] });
-  assert.ok(cmds(settings, 'PostToolUse').includes('npx wendkeep hook decision-capture'));
-  assert.ok(cmds(settings, 'SubagentStop').includes('npx wendkeep hook subagent-stop'));
-  assert.ok(cmds(settings, 'TaskCompleted').includes('npx wendkeep hook task-log'));
+  assert.ok(cmds(settings, 'PostToolUse').includes('npx --no-install wendkeep hook decision-capture'));
+  assert.ok(cmds(settings, 'SubagentStop').includes('npx --no-install wendkeep hook subagent-stop'));
+  assert.ok(cmds(settings, 'TaskCompleted').includes('npx --no-install wendkeep hook task-log'));
   // decision-capture is scoped to the AskUserQuestion tool
   const g = (settings.hooks.PostToolUse || []).find((x) => (x.hooks || []).some((h) => h.command.includes('decision-capture')));
   assert.equal(g.matcher, 'AskUserQuestion');

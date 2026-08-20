@@ -1,8 +1,8 @@
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, readdirSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { join, basename, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { DatabaseSync } from 'node:sqlite';
 import { decodeTranscript, encodeTranscript } from './observer-transcript-store.mjs';
 
 export const OBSERVER_SQL_FILE = 'observer.sqlite';
@@ -15,6 +15,36 @@ const EVENT_KINDS = new Set([
   'document.upsert', 'document.delete', 'session.upsert', 'agent.upsert',
   'usage.rollup', 'llm_call', 'transcript.upsert',
 ]);
+
+const OBSERVER_SQL_MINIMUM_NODE = '22.13.0';
+const require = createRequire(import.meta.url);
+let DatabaseSync;
+
+export function observerSqlRuntimeSupport(version = process.versions.node) {
+  const current = String(version || '0.0.0');
+  const [major = 0, minor = 0] = current.split('.').map((part) => Number(part) || 0);
+  return {
+    supported: major > 22 || (major === 22 && minor >= 13),
+    minimum: OBSERVER_SQL_MINIMUM_NODE,
+    current,
+  };
+}
+
+function observerSqlRuntimeError(support = observerSqlRuntimeSupport()) {
+  const error = new Error(`Observer SQL requer Node.js >= ${support.minimum}; atual: ${support.current}. O Keep Core continua compatível com Node.js >= 18.`);
+  error.code = 'WENDKEEP_OBSERVER_NODE_UNSUPPORTED';
+  return error;
+}
+
+function observerDatabaseSync() {
+  const support = observerSqlRuntimeSupport();
+  if (!support.supported) throw observerSqlRuntimeError(support);
+  if (!DatabaseSync) {
+    try { ({ DatabaseSync } = require('node:sqlite')); }
+    catch { throw observerSqlRuntimeError(support); }
+  }
+  return DatabaseSync;
+}
 
 function now() { return new Date().toISOString(); }
 
@@ -63,7 +93,8 @@ function migrationFiles() {
 export function openObserverDatabase(dataDir) {
   if (!dataDir) throw new Error('dataDir é obrigatório.');
   mkdirSync(dataDir, { recursive: true });
-  const db = new DatabaseSync(join(dataDir, OBSERVER_SQL_FILE));
+  const SqliteDatabase = observerDatabaseSync();
+  const db = new SqliteDatabase(join(dataDir, OBSERVER_SQL_FILE));
   db.exec('PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000;');
   return db;
 }

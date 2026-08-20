@@ -131,7 +131,7 @@ export const RUNNABLE_HOOKS = [
 // the MOST agent-agnostic mechanism it supports; the Claude Code plugin entry
 // (extraKnownMarketplaces + enabledPlugins) is an additive bonus, never the base.
 //   - mcp:          .mcp.json server entry (works on any MCP-capable agent)
-//   - wendkeepHook: a wendkeep-authored hook (runs via `npx wendkeep hook`, any agent)
+//   - wendkeepHook: a wendkeep-authored hook (runs via `npx --no-install wendkeep hook`, any agent)
 //   - installer:    cross-agent install script (used on non-Claude agents)
 // marketplace/plugin shapes are verified against a real ~/.claude/settings.json.
 export const COMPANIONS = [

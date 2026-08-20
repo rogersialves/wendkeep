@@ -5,6 +5,9 @@ import { rmSync } from 'node:fs';
 import { startObserverServer } from '../src/observer-server.mjs';
 import { makeDataDir } from './helpers/observer-fixture.mjs';
 
+const TOKEN = 'observer-test-token';
+const MUTATION_HEADERS = { 'content-type': 'application/json', authorization: `Bearer ${TOKEN}` };
+
 function memoryEvent({
   projectId = 'project-a',
   eventId = 'memory-a',
@@ -37,9 +40,9 @@ async function request(base, path, options = {}) {
 
 test('[req:MEM-API-3] [req:MEM-QUERY-4] API ingere lote, lista árvore, lê documento completo e busca', async () => {
   const dataDir = makeDataDir();
-  const server = await startObserverServer({ host: '127.0.0.1', port: 0, dataDir });
+  const server = await startObserverServer({ host: '127.0.0.1', port: 0, dataDir, token: TOKEN });
   const base = 'http://127.0.0.1:' + server.address().port;
-  const headers = { 'content-type': 'application/json' };
+  const headers = MUTATION_HEADERS;
   try {
     const registered = await request(base, '/v1/projects/project-a', {
       method: 'PUT',
@@ -95,9 +98,9 @@ test('[req:MEM-API-3] [req:MEM-QUERY-4] API ingere lote, lista árvore, lê docu
 
 test('[req:MEM-API-3] API isola projetos e rejeita caminhos inválidos', async () => {
   const dataDir = makeDataDir();
-  const server = await startObserverServer({ host: '127.0.0.1', port: 0, dataDir });
+  const server = await startObserverServer({ host: '127.0.0.1', port: 0, dataDir, token: TOKEN });
   const base = 'http://127.0.0.1:' + server.address().port;
-  const headers = { 'content-type': 'application/json' };
+  const headers = MUTATION_HEADERS;
   try {
     await request(base, '/v1/projects/project-a', {
       method: 'PUT',

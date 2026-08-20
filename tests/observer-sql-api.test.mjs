@@ -5,6 +5,9 @@ import { startObserverServer } from '../src/observer-server.mjs';
 import { ensureObserverDatabase, registerSqlProject } from '../src/observer-sql-store.mjs';
 import { makeDataDir } from './helpers/observer-fixture.mjs';
 
+const TOKEN = 'observer-test-token';
+const MUTATION_HEADERS = { 'content-type': 'application/json', authorization: `Bearer ${TOKEN}` };
+
 async function request(base, path, options = {}) {
   const response = await fetch(base + path, options);
   const text = await response.text();
@@ -19,9 +22,9 @@ function event(kind, eventId, payload, occurredAt = '2026-08-17T12:00:00.000Z') 
 
 test('[req:SQL-OBS-6] API local ingere eventos e consulta summary, breakdown, calls e transcript', async () => {
   const dataDir = makeDataDir();
-  const server = await startObserverServer({ host: '127.0.0.1', port: 0, dataDir });
+  const server = await startObserverServer({ host: '127.0.0.1', port: 0, dataDir, token: TOKEN });
   const base = `http://127.0.0.1:${server.address().port}`;
-  const headers = { 'content-type': 'application/json' };
+  const headers = MUTATION_HEADERS;
   try {
     const registered = await request(base, '/v1/projects/project-a', {
       method: 'PUT', headers, body: JSON.stringify({ project_id: 'project-a', project_name: 'Project A' }),
@@ -63,9 +66,9 @@ test('[req:SQL-OBS-6] API local ingere eventos e consulta summary, breakdown, ca
 
 test('[req:SQL-OBS-2] API retorna conflito e duplicate sem alterar o evento original', async () => {
   const dataDir = makeDataDir();
-  const server = await startObserverServer({ host: '127.0.0.1', port: 0, dataDir });
+  const server = await startObserverServer({ host: '127.0.0.1', port: 0, dataDir, token: TOKEN });
   const base = `http://127.0.0.1:${server.address().port}`;
-  const headers = { 'content-type': 'application/json' };
+  const headers = MUTATION_HEADERS;
   try {
     await request(base, '/v1/projects/project-a', { method: 'PUT', headers, body: JSON.stringify({ project_id: 'project-a', project_name: 'Project A' }) });
     const first = event('session.upsert', 'api-conflict', { session_id: 'session-a', provider: 'codex', status: 'done' });
@@ -90,9 +93,9 @@ test('[req:SQL-OBS-7] filtros distinguem subagente e changes de projeto somente-
   const db = ensureObserverDatabase(dataDir);
   registerSqlProject(db, { projectId: 'sql-only', projectName: 'SQL Only' });
   db.close();
-  const server = await startObserverServer({ host: '127.0.0.1', port: 0, dataDir });
+  const server = await startObserverServer({ host: '127.0.0.1', port: 0, dataDir, token: TOKEN });
   const base = `http://127.0.0.1:${server.address().port}`;
-  const headers = { 'content-type': 'application/json' };
+  const headers = MUTATION_HEADERS;
   try {
     const events = [
       { ...event('agent.upsert', 'parent-filter-agent', { agent_id: 'agent-a', session_id: 'session-a', role: 'main', agent_name: 'codex' }), project_id: 'sql-only' },

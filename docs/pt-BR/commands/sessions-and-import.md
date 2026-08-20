@@ -26,11 +26,11 @@ Claude/Codex e um vault vinculado ao projeto correto.
 ## Sintaxe
 
 ```bash
-npx wendkeep hook <nome>
+npx --no-install wendkeep hook <nome>
 npx wendkeep session list
 npx wendkeep session show <id>
 npx wendkeep session use <id>
-npx wendkeep hook session-backfill --session <id> [--write]
+npx --no-install wendkeep hook session-backfill --session <id> [--write]
 npx wendkeep import [opções]
 ```
 
@@ -95,8 +95,8 @@ npx wendkeep import [opções]
 ```bash
 npx wendkeep session list
 npx wendkeep session show 019abc-session-id
-npx wendkeep hook session-backfill --session 019abc-session-id
-npx wendkeep hook session-backfill --session 019abc-session-id --write
+npx --no-install wendkeep hook session-backfill --session 019abc-session-id
+npx --no-install wendkeep hook session-backfill --session 019abc-session-id --write
 npx wendkeep import --source codex --since 2026-07-01 --dry-run --json
 ```
 

@@ -17,7 +17,7 @@ import {
   mergeMcpConfig,
 } from '../packages/mcp/src/index.mjs';
 
-const UA_CMD = 'npx wendkeep hook understand-inject';
+const UA_CMD = 'npx --no-install wendkeep hook understand-inject';
 
 test('[req:MOD-17] [req:MOD-18] legacy MCP exports and merge preserve canonical identity and behavior', () => {
   assert.strictEqual(LEGACY_MCP_SERVER_KEY, MCP_SERVER_KEY);
@@ -61,21 +61,21 @@ test('mergeSettings: wira hooks de lifecycle e Observer nos eventos certos, por 
   const guard = settings.hooks.PreToolUse.find((g) => g.hooks.some((h) => h.command.includes('change-guard')));
   assert.equal(guard.matcher, 'Bash|exec_command|apply_patch|mcp__.*', 'guard só em ferramentas cujo payload é coberto');
   // sem instalação local no projeto → forma npx
-  assert.ok(cmdsOf('PreToolUse').some((c) => c === 'npx wendkeep hook change-guard'), 'fallback npx');
+  assert.ok(cmdsOf('PreToolUse').some((c) => c === 'npx --no-install wendkeep hook change-guard'), 'fallback npx');
   const sessionCommands = cmdsOf('SessionStart');
-  assert.ok(sessionCommands.indexOf('npx wendkeep hook observer-publish') > sessionCommands.indexOf('npx wendkeep hook session-start'));
+  assert.ok(sessionCommands.indexOf('npx --no-install wendkeep hook observer-publish') > sessionCommands.indexOf('npx --no-install wendkeep hook session-start'));
   const stopCommands = cmdsOf('Stop');
-  assert.ok(stopCommands.indexOf('npx wendkeep hook observer-publish') > stopCommands.indexOf('npx wendkeep hook session-stop'));
+  assert.ok(stopCommands.indexOf('npx --no-install wendkeep hook observer-publish') > stopCommands.indexOf('npx --no-install wendkeep hook session-stop'));
 });
 
 test('hookCommandFor: node-direto ancorado no projeto quando o pacote existe; senão npx', () => {
   const proj = mkdtempSync(join(tmpdir(), 'wk-hcf-'));
   try {
-    assert.equal(hookCommandFor('change-guard', proj), 'npx wendkeep hook change-guard');
+    assert.equal(hookCommandFor('change-guard', proj), 'npx --no-install wendkeep hook change-guard');
     mkdirSync(join(proj, 'node_modules', 'wendkeep', 'hooks'), { recursive: true });
     writeFileSync(join(proj, 'node_modules', 'wendkeep', 'hooks', 'change-guard.mjs'), '// stub');
     assert.equal(hookCommandFor('change-guard', proj), 'node "${CLAUDE_PROJECT_DIR}/node_modules/wendkeep/hooks/change-guard.mjs"');
-    assert.equal(hookCommandFor('x', ''), 'npx wendkeep hook x', 'sem projeto = npx');
+    assert.equal(hookCommandFor('x', ''), 'npx --no-install wendkeep hook x', 'sem projeto = npx');
   } finally { rmSync(proj, { recursive: true, force: true }); }
 });
 
@@ -134,19 +134,19 @@ test('mergeSettings: wires brain-inject on SessionStart before session-start, by
   const { settings } = mergeSettings(null, { vaultPath: '/v', withMcp: true, companions: [] });
   const groups = settings.hooks.SessionStart || [];
   const cmds = groups.flatMap((g) => (g.hooks || []).map((h) => h.command));
-  const bi = cmds.indexOf('npx wendkeep hook brain-inject');
-  const ss = cmds.indexOf('npx wendkeep hook session-start');
+  const bi = cmds.indexOf('npx --no-install wendkeep hook brain-inject');
+  const ss = cmds.indexOf('npx --no-install wendkeep hook session-start');
   assert.ok(bi >= 0, 'brain-inject wired (memory + active change injection)');
   assert.ok(ss >= 0, 'session-start wired');
   assert.ok(bi < ss, 'brain-inject folds before session-start');
 
   // Re-inject memory after compaction/clear, not only on a cold startup.
-  const biGroup = groups.find((g) => (g.hooks || []).some((h) => h.command === 'npx wendkeep hook brain-inject'));
+  const biGroup = groups.find((g) => (g.hooks || []).some((h) => h.command === 'npx --no-install wendkeep hook brain-inject'));
   assert.equal(biGroup.matcher, 'startup|clear|compact');
 
   // Idempotent: second merge doesn't duplicate it.
   const second = mergeSettings(settings, { vaultPath: '/v', withMcp: true, companions: [] }).settings;
-  const dup = (second.hooks.SessionStart || []).flatMap((g) => g.hooks || []).filter((h) => h.command === 'npx wendkeep hook brain-inject').length;
+  const dup = (second.hooks.SessionStart || []).flatMap((g) => g.hooks || []).filter((h) => h.command === 'npx --no-install wendkeep hook brain-inject').length;
   assert.equal(dup, 1);
 });
 
@@ -240,7 +240,7 @@ test('mergeSettings: dotcontextHookLevel light omits dotcontext PostToolUse (kee
   // dotcontext's per-tool trace hook (Write|Edit|Bash dispatch) is dropped in light mode…
   assert.ok(!post.some((c) => c.includes('@dotcontext/cli')), 'no dotcontext PostToolUse in light mode');
   // …but wendkeep's own decision-capture PostToolUse (AskUserQuestion) is always wired.
-  assert.ok(post.includes('npx wendkeep hook decision-capture'), 'decision-capture still present');
+  assert.ok(post.includes('npx --no-install wendkeep hook decision-capture'), 'decision-capture still present');
   assert.ok((settings.hooks.SessionStart || []).length >= 1, 'SessionStart still present');
 });
 

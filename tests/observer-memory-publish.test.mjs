@@ -12,6 +12,8 @@ import {
 import { registerObserverProject } from '../src/observer-store.mjs';
 import { makeDataDir, makeObserverFixture } from './helpers/observer-fixture.mjs';
 
+const TOKEN = 'observer-test-token';
+
 function seedMemory(fixture) {
   const files = {
     'CORE.md': '# Core WendKeep\n\nRegra canônica do projeto.\n',
@@ -84,7 +86,7 @@ test('[req:MEM-HOOK-5] [req:MEM-RECOVERY-8] publisher faz outbox completo quando
 test('[req:MEM-HOOK-5] reenvio do outbox confirma o conteúdo no container e remove somente o lote aceito', async () => {
   const fixture = makeObserverFixture();
   const dataDir = makeDataDir();
-  const server = await startObserverServer({ host: '127.0.0.1', port: 0, dataDir });
+  const server = await startObserverServer({ host: '127.0.0.1', port: 0, dataDir, token: TOKEN });
   try {
     seedMemory(fixture);
     registerObserverProject(dataDir, { projectId: fixture.projectId, projectName: fixture.projectName });
@@ -99,6 +101,7 @@ test('[req:MEM-HOOK-5] reenvio do outbox confirma o conteúdo no container e rem
       vaultBase: fixture.vaultBase,
       projectId: fixture.projectId,
       url: 'http://127.0.0.1:' + server.address().port,
+      token: TOKEN,
     });
     assert.equal(result.confirmed, 1);
     assert.equal(listMemoryOutbox(fixture.vaultBase).length, 0);

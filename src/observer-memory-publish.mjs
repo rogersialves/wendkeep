@@ -12,6 +12,8 @@ import {
 } from 'node:fs';
 import { join } from 'node:path';
 import { MAX_MEMORY_CONTENT_BYTES } from './observer-memory.mjs';
+import { observerAuthHeaders } from './observer-auth.mjs';
+import { sanitizeObserverContent } from './observer-privacy.mjs';
 
 export const MEMORY_OUTBOX_REL = '.brain/observer-memory-outbox';
 export const MEMORY_STATE_FILE = '.brain/observer-memory-state.json';
@@ -103,7 +105,7 @@ function memoryFiles(vaultBase) {
 
 export function localMemoryManifest(vaultBase) {
   return Object.fromEntries(memoryFiles(vaultBase).map((file) => {
-    const content = readFileSync(file.absolute, 'utf8');
+    const content = sanitizeObserverContent(readFileSync(file.absolute, 'utf8'));
     return [file.logicalPath, {
       logical_path: file.logicalPath,
       content_hash: hash(content),
@@ -159,7 +161,7 @@ export function buildMemoryEventBatch({
   const events = [];
 
   for (const file of currentFiles) {
-    const content = readFileSync(file.absolute, 'utf8');
+    const content = sanitizeObserverContent(readFileSync(file.absolute, 'utf8'));
     if (Buffer.byteLength(content, 'utf8') > MAX_MEMORY_CONTENT_BYTES) {
       throw new Error('arquivo excede o limite de memória: ' + file.logicalPath);
     }
@@ -231,12 +233,12 @@ export function listMemoryOutbox(vaultBase) {
     .map((name) => join(dir, name));
 }
 
-async function postBatch(url, projectId, events, fetchImpl = globalThis.fetch) {
+async function postBatch(url, projectId, events, fetchImpl = globalThis.fetch, token = '') {
   const response = await fetchImpl(
     String(url).replace(/\/$/, '') + '/v1/projects/' + encodeURIComponent(projectId) + '/memory/events',
     {
       method: 'POST',
-      headers: { 'content-type': 'application/json', accept: 'application/json' },
+      headers: observerAuthHeaders(token, { 'content-type': 'application/json', accept: 'application/json' }),
       body: JSON.stringify({ events }),
     },
   );
@@ -249,6 +251,7 @@ export async function retryObserverMemoryOutbox({
   projectId = projectIdFromVault(vaultBase),
   url,
   fetchImpl = globalThis.fetch,
+  token = process.env.WENDKEEP_OBSERVER_TOKEN || '',
 } = {}) {
   const files = listMemoryOutbox(vaultBase);
   if (!url) return { attempted: 0, confirmed: 0, pending: files.length };
@@ -262,7 +265,7 @@ export async function retryObserverMemoryOutbox({
         unlinkSync(path);
         continue;
       }
-      await postBatch(url, projectId, batch.events, fetchImpl);
+      await postBatch(url, projectId, batch.events, fetchImpl, token);
       unlinkSync(path);
       confirmed += 1;
     } catch {
@@ -277,10 +280,11 @@ export async function compareMemoryParity({
   projectId = projectIdFromVault(vaultBase),
   url,
   fetchImpl = globalThis.fetch,
+  token = process.env.WENDKEEP_OBSERVER_TOKEN || '',
 } = {}) {
   const response = await fetchImpl(
     String(url).replace(/\/$/, '') + '/v1/projects/' + encodeURIComponent(projectId) + '/memory/tree',
-    { headers: { accept: 'application/json' } },
+    { headers: observerAuthHeaders(token, { accept: 'application/json' }) },
   );
   if (!response.ok) throw new Error('Observer respondeu HTTP ' + response.status + '.');
   const body = await response.json();
@@ -309,9 +313,10 @@ export async function publishObserverMemory({
   sourceTurnId = '',
   now = new Date(),
   fetchImpl = globalThis.fetch,
+  token = process.env.WENDKEEP_OBSERVER_TOKEN || '',
 } = {}) {
   if (!vaultBase || !projectId) throw new Error('vaultBase e projectId são obrigatórios.');
-  await retryObserverMemoryOutbox({ vaultBase, projectId, url, fetchImpl });
+  await retryObserverMemoryOutbox({ vaultBase, projectId, url, fetchImpl, token });
   const state = readState(vaultBase);
   const batch = buildMemoryEventBatch({ vaultBase, projectId, sourceSessionId, sourceTurnId, now, state });
   if (batch.events.length === 0) {
@@ -324,7 +329,7 @@ export async function publishObserverMemory({
     return { ok: false, queued: true, scanned: batch.scanned, changed: batch.changed, pending: listMemoryOutbox(vaultBase).length, hookExitCode: 0 };
   }
   try {
-    await postBatch(url, projectId, batch.events, fetchImpl);
+    await postBatch(url, projectId, batch.events, fetchImpl, token);
     commitMemoryPublishState(vaultBase, batch.nextState);
     return { ok: true, queued: false, scanned: batch.scanned, changed: batch.changed, pending: listMemoryOutbox(vaultBase).length };
   } catch (error) {

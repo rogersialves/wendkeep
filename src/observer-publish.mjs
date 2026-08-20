@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, unlinkSyn
 import { join } from 'node:path';
 import { buildProjectSnapshot } from './observer-snapshot.mjs';
 import { publishObserverSql } from './observer-sql-publish.mjs';
+import { observerAuthHeaders, resolveObserverToken } from './observer-auth.mjs';
 
 const OUTBOX_REL = join('.brain', 'observer-outbox');
 const REQUEST_TIMEOUT_MS = 500;
@@ -46,15 +47,15 @@ function removeOutbox(vaultBase, eventId) {
   if (existsSync(path)) unlinkSync(path);
 }
 
-async function postSnapshot(url, event) {
+async function postSnapshot(url, event, token) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   try {
     const response = await fetch(`${String(url).replace(/\/$/, '')}/v1/projects/${encodeURIComponent(event.project_id)}/snapshot`, {
       method: 'POST',
-      headers: {
+      headers: observerAuthHeaders(token, {
         'content-type': 'application/json',
-      },
+      }),
       body: JSON.stringify(event),
       signal: controller.signal,
     });
@@ -70,14 +71,14 @@ async function postSnapshot(url, event) {
   }
 }
 
-export async function retryObserverOutbox({ vaultBase, url } = {}) {
+export async function retryObserverOutbox({ vaultBase, url, token = process.env.WENDKEEP_OBSERVER_TOKEN || '' } = {}) {
   if (!url) return { attempted: 0, confirmed: 0, pending: listOutbox(vaultBase).length };
   let attempted = 0;
   let confirmed = 0;
   for (const event of listOutbox(vaultBase)) {
     attempted += 1;
     try {
-      await postSnapshot(url, event);
+      await postSnapshot(url, event, token);
       removeOutbox(vaultBase, event.event_id);
       confirmed += 1;
     } catch { /* preserve the event for a later retry */ }
@@ -91,6 +92,7 @@ export async function publishObserverSnapshot({
   url = process.env.WENDKEEP_OBSERVER_URL || '',
   now = new Date(),
   input = {},
+  token = process.env.WENDKEEP_OBSERVER_TOKEN || '',
 } = {}) {
   try {
     const event = buildProjectSnapshot({ vaultBase, projectRoot, now });
@@ -100,15 +102,16 @@ export async function publishObserverSnapshot({
       url,
       input,
       now,
+      token,
     });
     if (!url) return { ok: sql.ok, skipped: true, queued: sql.queued, hookExitCode: 0, event_id: event.event_id, sql };
 
-    await retryObserverOutbox({ vaultBase, url });
+    await retryObserverOutbox({ vaultBase, url, token });
     // SQL is the live authority. Keep the legacy-shaped `memory` field for
     // older integrations while reporting the real SQL publication separately.
     const memory = { ok: sql.ok, queued: sql.queued, changed: sql.changed, pending: sql.pending, authority: 'sqlite' };
     try {
-      const response = await postSnapshot(url, event);
+      const response = await postSnapshot(url, event, resolveObserverToken(token));
       return {
         ok: true,
         queued: false,
