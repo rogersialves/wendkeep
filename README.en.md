@@ -127,7 +127,7 @@ npx wendkeep init
 6. Install a **color system** into the vault's `.obsidian/`: a CSS snippet that accents notes by type (session/decision/bug/learning, via the `cssclasses` the hooks emit) plus graph color groups by folder. Non-destructive merge into `appearance.json`/`graph.json`; skip with `--no-colors`. Re-apply it any time on an existing vault with `wendkeep theme sync` — Obsidian owns `graph.json` and can drop the color groups (a grey graph); the re-sync restores them without a full re-`init`.
 7. Seed **Shared Project Memory v2** without overwriting existing artifacts: `.brain/CORE.md` (hand-curated canonical truth), `.brain/SHARED_MEMORY.md` (generated operational state), `.brain/MEMORY_EVENTS.jsonl` (append-only ledger), `.brain/MEMORY_CANDIDATES.jsonl` (curation queue), and `.brain/COMPACTION_PROTOCOL.md`. The durable outbox appears under `.brain/memory-outbox/` when events exist; `DIGEST.md` and `index.jsonl` remain deep recall. Everything stays local to the vault.
 8. Seed the **definitions + skills layer**: `.brain/agents/` + `.brain/skills/` (versioned source of truth), including the native process skills `wk-workflow` / `wk-tdd` / `wk-debugging` / `wk-brainstorming` / `wk-planning` / `wk-verify` (some ship templates — e.g. `wk-verify`'s `verdict-template.json` + reviewer prompt). `init` runs `wendkeep sync-defs` for you, delivering the skills to `.claude/skills/` and `.agents/skills/`, and the agent definitions (`.brain/agents/*.toml`) to `.codex/agents/`, plus a managed section in `AGENTS.md` that indexes the skills for Codex; `sync-defs --check` detects stale copies (re-run `sync-defs` after editing `.brain`).
-9. Seed the **change/spec lifecycle**: the `07-Specs/` + `08-Mudanças/` folders and a native `wendkeep.sensors.json` — critical memory validation/health sensors plus one for each of `typecheck` / `test` / `lint` / `build` found in your `package.json`. `memory-health` blocks delivery on corruption, projection divergence, or an active conflict; pending outbox events and ordinary candidates are warnings. Add sensors with `wendkeep sensors add`. Drives `wendkeep change` / `wendkeep verify` — see **Change lifecycle** below.
+9. Seed the **change/spec lifecycle**: the `07-Specs/` + `08-Mudanças/` folders and a native `wendkeep.sensors.json` — critical memory validation/health sensors plus one for each of `typecheck` / `test` / `lint` / `build` found in your `package.json`. `memory-health` blocks delivery on corruption or projection divergence; semantic conflicts degrade only the affected keys and await curation. Pending outbox events and ordinary candidates are warnings. Add sensors with `wendkeep sensors add`. Drives `wendkeep change` / `wendkeep verify` — see **Change lifecycle** below.
 
 ```bash
 npx wendkeep init --vault "~/vaults/work" --project . --yes   # non-interactive (no companions unless you ask)
@@ -257,7 +257,7 @@ deliberate opt-in and runs that command's own validations:
 |---|---|---|
 | `OFF` | LLM-native harness | No Wend router, skill gate, or gates; explicit selection only. |
 | `FLOW` | E → V | Microcontract with Git baseline, allowlist, sensor, and receipt, without a change. |
-| `GUIDE` | P → E → V | Compact guided change. |
+| `GUIDE` | P → E → V | Compact change; no automatic design/spec/ADR when contract impact is none. |
 | `GOVERN` | P → R → E → V | Current a2 loop and compatible fallback. |
 | `ASSURE` | P → R → E → V → C | Governance with confirmation and handoff. |
 
@@ -317,13 +317,25 @@ positive causal turn and sequence that agree in the registry.
 “Small” describes size, not risk. The harness uses this matrix to choose and record a temporary
 route; semantic inference remains in the agent, not Wend Runtime:
 
-| Situation | Suggested profile |
-|---|---|
-| Question, inspection, or diagnosis with no mutation | No profile transition |
-| Local, reversible fix with an allowlist and no contract/spec change | `FLOW` (`E → V`) |
-| Small behavior change that needs a change but not formal Wend Runtime review | `GUIDE` (`P → E → V`) |
-| Normal, ambiguous, public-contract, security, dependency, CI/release, or policy change | `GOVERN` (`P → R → E → V`) |
-| Work requiring explicit confirmation and handoff | `ASSURE` (`P → R → E → V → C`) |
+| Situation | Work kind | Suggested profile | New change |
+|---|---|---|---|
+| Question, inspection, or diagnosis with no mutation | `inspection` | No transition | No |
+| Local, reversible fix with an allowlist and no contract/spec change | `maintenance` | `FLOW` (`E → V`) | No |
+| Small behavior change without formal review | `implementation` | `GUIDE` (`P → E → V`) | Yes, compact |
+| Public contract, security, schema, dependency, CI/release workflow, or policy | `implementation` | `GOVERN`/`ASSURE` | Yes |
+| Merge, push, tag, or publication of approved behavior | `delivery` | `ASSURE` | No |
+| Operational recovery without code/config correction | `recovery` | `FLOW`/`ASSURE` | No |
+
+Work kind, profile, contract impact, and operational risk are independent dimensions. A
+`delivery` records authorized capabilities and an append-only receipt without creating a change,
+spec, or ADR. If delivery requires a code/config edit, it pauses and work returns to
+`implementation`:
+
+```bash
+npx wendkeep delivery start release-0-73-0 --allow git:merge --allow git:push --allow publish --source-change <slug> --source-commit <sha>
+npx wendkeep delivery status release-0-73-0
+npx wendkeep delivery finish release-0-73-0 --target main --ci-url <url> --version 0.73.0 --npm-integrity <sha512> --release-url <url>
+```
 
 If the harness does not record a lease, a small fix remains under the configured profile —
 `GOVERN` by default. `OFF` does not mean “simple task”: it is a persistent human choice that hands
@@ -343,6 +355,11 @@ session projection. Bounded no-follow discovery sees empty/ignored protected ali
 and owner+lease locks validate physical topology. Concurrent promotion elects one owner and supports
 retry through `--change-slug`. Read the complete
 [Operating profiles guide](https://github.com/rogersialves/wendkeep/blob/main/docs/en/commands/operating-profiles.md).
+
+`wendkeep doctor` separates structural errors, workflow attention, repairable debt, and semantic
+ambiguity. Use `--scope core` for Keep Core health, `--scope runtime` for governance, and
+`--strict` in CI/release; `wendkeep sync` validates Core only so work in progress does not become
+an installation failure.
 
 ## Shared Project Memory v2
 
@@ -487,10 +504,10 @@ Beyond capturing sessions, wendkeep is a **harness**: a native, zero‑dependenc
 explore → propose → apply (TDD) → verify → archive
 ```
 
-- **Propose** — `wendkeep change new <slug>` scaffolds `08-Mudanças/<slug>/` (`proposta.md`, `design.md`, `tarefas.md`; `--simple` skips the design). It becomes the global *current* change. When the change declares `spec_impact: required`, you author the delta yourself at `specs/<capability>/spec.md` — there is no placeholder to delete. Multiple changes may remain open: `change list`/`status` and the hooks show every pending one, while commands without `--change` act on the current one alone. `change use <slug>` changes focus and `change continue <archived> <new>` creates an auditable continuation.
+- **Propose** — `wendkeep change new <slug>` scaffolds `08-Mudanças/<slug>/` (`proposta.md`, `design.md`, `tarefas.md`; `--simple` skips the design). `--guide` creates the compact GUIDE contract and omits automatic design/spec/ADR when `contract_impact:none`. It becomes the global *current* change. When the change declares `spec_impact: required`, you author the delta yourself at `specs/<capability>/spec.md` — there is no placeholder to delete. Multiple changes may remain open: `change list`/`status` and the hooks show every pending one, while commands without `--change` act on the current one alone. `change use <slug>` changes focus and `change continue <archived> <new>` creates an auditable continuation.
 - **Apply** — implement each `tarefas.md` task. Mark machine proof with one or more `[sensor:<id>]` tags on the same task: every distinct ID enters the gate once, in declaration order. Also mark satisfied requirements with one or more `[req:<ID>]` tags.
 - **Verify** — `wendkeep verify` runs the sensors your tasks declared (from `wendkeep.sensors.json` at the project root) and writes `evidencia.json`. A red `critical` fails the gate; a red `warning` is advisory. Failures retain only a bounded, sanitized diagnostic; green output is not persisted. `verify --deep` builds a self-contained package with complete effective requirements (living contract + this change's delta), so the independent verifier never needs to reconstruct unarchived requirements from `07-Specs`. Every change needs a `verdict.json` to archive; `verify --deep` writes a trivial one automatically when the change declares no `[req:]`.
-- **Archive** — `wendkeep change archive <slug>` **gates** on the evidence (blocks unless every declared critical sensor is green), promotes each capability's spec delta (`ADDED`/`MODIFIED`/`REMOVED`) into the living `07-Specs/<capability>.md`, moves the change to `_arquivo/`, and mints an ADR in `04-Decisões/`.
+- **Archive** — `wendkeep change archive <slug>` **gates** on the evidence (blocks unless every declared critical sensor is green), promotes each applicable spec delta (`ADDED`/`MODIFIED`/`REMOVED`) into the living `07-Specs/<capability>.md` and moves the change to `_arquivo/`. GOVERN/ASSURE mint an ADR in `04-Decisões/`; compact GUIDE with no contract impact does not mint one automatically.
 
 > The gate blocks unless the scaffold is filled, no task is open, evidence is fresh, and every declared requirement is covered. **`--force` waives exactly one of those — the open-task check — and is the human's call, never the agent's.** An unfilled scaffold, a red critical sensor, stale evidence, an orphan requirement or a missing verdict block regardless.
 

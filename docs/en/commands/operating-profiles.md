@@ -1,4 +1,4 @@
-# Operating profiles and FLOW
+# Operating profiles, work kind, FLOW, and delivery
 
 **English** · [Português](../../pt-BR/commands/operating-profiles.md)
 
@@ -17,6 +17,8 @@ opt-in and runs that command's own validations and gates.
 Use `profile use` for a persistent human selection and `profile route` for the harness to record
 the temporary route for the current implementation. Use `FLOW` for local, reversible
 `spec_impact:none` maintenance that fits an Execute → Validate microcontract without a change.
+Use `delivery` for merge, push, tag, and publication of already-approved behavior: operational
+risk needs authorization and a receipt, not a new change or spec.
 
 ## When not to use
 
@@ -55,6 +57,10 @@ npx wendkeep flow status [<id>]
 npx wendkeep flow show <id> [--session <id>]
 npx wendkeep flow finish <id> [--session <id>]
 npx wendkeep flow promote <id> [--change-slug <slug>] [--session <id>]
+npx wendkeep delivery start [id] --allow <capability> [--source-change <slug>] [--source-commit <sha>]
+npx wendkeep delivery status [id]
+npx wendkeep delivery finish [id] [--target <ref>] [--ci-url <url>] [--version <x.y.z>] [--npm-integrity <sha512>] [--release-url <url>]
+npx wendkeep delivery abandon [id] --reason <text>
 ```
 
 Every FLOW subcommand also accepts `--project <path>`, `--vault <path>`, and `--json`. When
@@ -84,7 +90,7 @@ Harness. The workspaces remain private and are not published as independent npm 
 |---|---|---|
 | `OFF` | LLM-native harness | Automatic governance off; Keep Core and explicit commands available. |
 | `FLOW` | E → V | Microcontract with Git baseline, allowlist, sensors, and receipt, without a change. |
-| `GUIDE` | P → E → V | Compact change; policy recognized for compatible evolution. |
+| `GUIDE` | P → E → V | `change new --guide`; objective, acceptance, areas, tests, and result; no automatic design/spec/ADR for `contract_impact:none`. |
 | `GOVERN` | P → R → E → V | Current a2 loop and conservative fallback. |
 | `ASSURE` | P → R → E → V → C | Governance plus confirmation and handoff. |
 
@@ -164,6 +170,14 @@ ownership to the native LLM harness.
   loser remains active and can retry with `--change-slug`. Retries idempotently resume the same
   promotion instead of creating another change.
   No FLOW command accepts `--force`.
+- Work kind (`inspection`, `maintenance`, `implementation`, `delivery`, `recovery`), profile,
+  `contract_impact`, and `operation_risk` are independent dimensions. `delivery start` captures
+  repo, branch/worktree, SHA, source change, and capabilities in `.brain/runtime/deliveries/`;
+  it creates no `08-Changes` folder, delta, spec, or ADR.
+- `delivery finish` requires a clean worktree, proves that the target contains the source commit,
+  and for `publish` requires CI, version, npm integrity, and GitHub Release evidence. Receipts are
+  append-only in `.brain/runtime/delivery-receipts.jsonl`. If code/config must change, delivery
+  stops with `WENDKEEP_DELIVERY_IMPLEMENTATION_REQUIRED` and work returns to implementation.
 - Exit `0` means a successful query or transition; exit `1` means a policy/red-sensor block; exit
   `2` means invalid profile, session, flow, or arguments, with no partial mutation.
 
@@ -229,13 +243,22 @@ again with an explicit destination:
 npx wendkeep flow promote $flowId --change-slug another-slug
 ```
 
+Deliver an approved version without manufacturing another change:
+
+```bash
+npx wendkeep delivery start release-0-73-0 --source-change proportional-governance --allow git:merge --allow git:push --allow publish
+npx wendkeep delivery status release-0-73-0
+npx wendkeep delivery finish release-0-73-0 --target v0.73.0 --ci-url <run> --version 0.73.0 --npm-integrity <sha512> --release-url <release>
+```
+
 ## Expected result
 
 Changing profile neither creates a new session nor interrupts the Vault. In `OFF`, memory and
 lessons are still injected and Stop still persists the session/memory lifecycle, while automatic
 router, skill gate, change context/warn/nag/guard, and plan capture are inactive. Explicit commands
 remain available and run their own contracts. A completed FLOW leaves a durable, inspectable
-receipt; a promoted FLOW enters the normal change lifecycle.
+receipt; a promoted FLOW enters the normal change lifecycle. Completed delivery leaves a receipt
+without an ADR; compact GUIDE archives its result without artificial spec/design/ADR.
 
 ## Common errors and diagnosis
 
@@ -254,6 +277,8 @@ receipt; a promoted FLOW enters the normal change lifecycle.
   retry `flow finish` or `flow promote`; the idempotent marker prevents duplication.
 - Pre-existing dirt appeared in the diff: it must match the initial fingerprint and must never be
   silently attributed to the FLOW.
+- Delivery without `--allow`, with a dirty worktree, or with incomplete publish evidence: resume
+  the real implementation or provide the receipts; do not create a change only to publish.
 
 ## Next steps
 

@@ -18,12 +18,15 @@ export function changeDirRel(slug, vaultBase) {
   return join(getLocale(vaultBase).folders.changes, slug);
 }
 
-export function renderChangeScaffold({ slug, sessionRel, dateStr, locale = 'pt-BR', simple = false }) {
+export function renderChangeScaffold({ slug, sessionRel, dateStr, locale = 'pt-BR', simple = false, guide = false }) {
   const en = locale === 'en';
   const source = sessionRel ? `\n  - "${wikilinkFromRel(sessionRel)}"` : ' []';
-  const impact = simple ? 'none' : 'pending';
-  const impactReason = simple
-    ? (en ? 'Simple change with no product-contract impact.' : 'Mudança simples sem impacto no contrato do produto.')
+  const compact = simple || guide;
+  const impact = compact ? 'none' : 'pending';
+  const impactReason = compact
+    ? (guide
+      ? (en ? 'Compact GUIDE change with no product-contract impact.' : 'Change GUIDE compacta sem impacto no contrato do produto.')
+      : (en ? 'Simple change with no product-contract impact.' : 'Mudança simples sem impacto no contrato do produto.'))
     : '';
   const proposta = `---
 type: change
@@ -34,14 +37,18 @@ cssclasses:
 tags:
   - mudanca
 source:${source}
-spec_impact: ${impact}
+${guide ? 'work_kind: implementation\nprofile: GUIDE\ncontract_impact: none\n' : ''}spec_impact: ${impact}
 spec_impact_reason: ${JSON.stringify(impactReason)}
 specs: []
 ---
 
 # ${slug}
 
-${en ? '## Why\n\n(reason for the change)\n\n## What changes\n\n(scope of the change)' : '## Por quê\n\n(motivo da mudança)\n\n## O que muda\n\n(escopo da mudança)'}
+${guide
+    ? (en
+      ? '## Objective\n\n(objective)\n\n## Acceptance criteria\n\n- [ ] (acceptance criterion)\n\n## Affected areas\n\n(affected areas)'
+      : '## Objetivo\n\n(objetivo)\n\n## Critérios de aceite\n\n- [ ] (critério de aceite)\n\n## Áreas afetadas\n\n(áreas afetadas)')
+    : (en ? '## Why\n\n(reason for the change)\n\n## What changes\n\n(scope of the change)' : '## Por quê\n\n(motivo da mudança)\n\n## O que muda\n\n(escopo da mudança)')}
 `;
   // Hub backlink: design/tarefas link the change's proposta so no generated artifact is a
   // graph island. Full-path (never basename — proposta/design exist in every change) so the
@@ -54,11 +61,13 @@ ${hubLink}
 
 ${en ? '## Approach\n\n(technical approach)' : '## Abordagem\n\n(abordagem técnica)'}
 `;
-  const tarefas = `# ${slug} — ${en ? 'tasks' : 'tarefas'}
+  const tarefas = `# ${slug} — ${guide ? (en ? 'validation' : 'validação') : (en ? 'tasks' : 'tarefas')}
 
 ${hubLink}
 
-- [ ] 1.1 ${en ? '(first task)' : '(primeira tarefa)'}
+${guide
+    ? `${en ? '## Tests' : '## Testes'}\n\n- [ ] 1.1 ${en ? '(test or validation)' : '(teste ou validação)'}\n\n${en ? '## Result' : '## Resultado'}\n\n${en ? '(result)' : '(resultado)'}`
+    : `- [ ] 1.1 ${en ? '(first task)' : '(primeira tarefa)'}`}
 `;
   const reqHeading = en ? 'Requirement' : 'Requisito';
   const specDelta = `## ADDED Requirements
@@ -76,10 +85,28 @@ ${en ? '(behaviour / scenarios)' : '(comportamento / cenários)'}
 // proposta/design/tarefas still carry these was never actually planned — archiving it mints a
 // bogus ADR and pollutes _arquivo (seen in production). The archive gate blocks on them.
 const SCAFFOLD_MARKERS = [
-  ['proposta.md', ['(motivo da mudança)', '(escopo da mudança)', '(reason for the change)', '(scope of the change)']],
+  ['proposta.md', [
+    '(motivo da mudança)', '(escopo da mudança)', '(reason for the change)', '(scope of the change)',
+    '(objetivo)', '(objective)', '(critério de aceite)', '(acceptance criterion)',
+    '(áreas afetadas)', '(affected areas)',
+  ]],
   ['design.md', ['(abordagem técnica)', '(technical approach)']],
-  ['tarefas.md', ['(primeira tarefa)', '(first task)']],
+  ['tarefas.md', [
+    '(primeira tarefa)', '(first task)', '(teste ou validação)', '(test or validation)',
+    '(resultado)', '(result)',
+  ]],
 ];
+
+export function isGuideCompactChange(dir) {
+  try {
+    const proposal = readFileSync(join(dir, 'proposta.md'), 'utf8');
+    return /^profile:\s*GUIDE\s*$/mi.test(proposal)
+      && /^contract_impact:\s*none\s*$/mi.test(proposal)
+      && /^spec_impact:\s*none\s*$/mi.test(proposal);
+  } catch {
+    return false;
+  }
+}
 
 export function scaffoldPlaceholders(dir) {
   const found = [];
@@ -164,12 +191,13 @@ export function assertChangeScaffoldTargetsSafe(vaultBase, slug, {
   return { dir, rel: changeDirRel(slug, vaultBase) };
 }
 
-export function newChange(vaultBase, slug, { sessionRel = '', dateStr, simple = false }) {
+export function newChange(vaultBase, slug, { sessionRel = '', dateStr, simple = false, guide = false }) {
+  const compact = simple || guide;
   const loc = getLocale(vaultBase);
-  const { dir } = assertChangeScaffoldTargetsSafe(vaultBase, slug, { simple });
+  const { dir } = assertChangeScaffoldTargetsSafe(vaultBase, slug, { simple: compact });
   const existed = existsSync(join(dir, 'proposta.md'));
   mkdirVaultPath(vaultBase, dir, { label: 'destino da change' });
-  const files = renderChangeScaffold({ slug, sessionRel, dateStr, locale: loc.id, simple });
+  const files = renderChangeScaffold({ slug, sessionRel, dateStr, locale: loc.id, simple: compact, guide });
   const write = (name, content) => {
     const f = join(dir, name);
     const checked = assertVaultPathSafe(vaultBase, f, {
@@ -186,7 +214,7 @@ export function newChange(vaultBase, slug, { sessionRel = '', dateStr, simple = 
   // No `specs/exemplo` placeholder: it was pure noise (always hand-deleted). When a change
   // resolves `spec_impact: required`, the author writes `specs/<capability>/spec.md` directly
   // — the delta format lives in the wk-workflow skill (and `renderChangeScaffold().specDelta`).
-  if (!simple) {
+  if (!compact) {
     write('design.md', files.design);
   }
   if (!existed) captureSpecBaseline(vaultBase, dir);
@@ -512,6 +540,7 @@ export function archiveChange(vaultBase, slug, { gate = gateGreen, dateStr, adrN
   const loc = getLocale(vaultBase);
   const chDir = loc.folders.changes;
   const src = join(vaultBase, chDir, slug);
+  const createAdr = !isGuideCompactChange(src);
   const verdict = gate(src);
   if (!verdict.ok) return { ok: false, failing: verdict.failing || [] };
 
@@ -524,14 +553,17 @@ export function archiveChange(vaultBase, slug, { gate = gateGreen, dateStr, adrN
   const adrRel = join(adrDirRel, `ADR-${num}-${slug}.md`);
 
   // Validate every later mutation target before spec promotion can change living state.
-  const [checkedSource, checkedDestination] = assertVaultPathsSafe(vaultBase, [
+  const mutationTargets = [
     { path: src, allowMissing: false, expectedType: 'directory', label: 'change a arquivar' },
     { path: destAbs, expectedType: 'directory', label: 'destino da change arquivada' },
     { path: archiveRoot, expectedType: 'directory', label: 'raiz de changes arquivadas' },
-    { path: join(vaultBase, adrDirRel), expectedType: 'directory', label: 'pasta mensal de ADR' },
-    { path: join(vaultBase, adrRel), expectedType: 'file', label: 'ADR da change arquivada' },
     { path: join(vaultBase, POINTER), expectedType: 'file', label: 'ponteiro CURRENT_CHANGE.md' },
-  ]);
+    ...(createAdr ? [
+      { path: join(vaultBase, adrDirRel), expectedType: 'directory', label: 'pasta mensal de ADR' },
+      { path: join(vaultBase, adrRel), expectedType: 'file', label: 'ADR da change arquivada' },
+    ] : []),
+  ];
+  const [checkedSource, checkedDestination] = assertVaultPathsSafe(vaultBase, mutationTargets);
   assertVaultPathsSafe(vaultBase, [
     { path: join(checkedSource.target, 'proposta.md'), expectedType: 'file', label: 'proposta da change' },
     { path: join(checkedSource.target, 'tarefas.md'), expectedType: 'file', label: 'tarefas da change' },
@@ -597,7 +629,7 @@ export function archiveChange(vaultBase, slug, { gate = gateGreen, dateStr, adrN
 
   // ADR goes in the same dated month folder as session-derived decisions (04-Decisões/ano/MM-MMM/)
   // — not the year root — so all ADRs sit together in the vault's convention.
-  mkdirVaultPath(vaultBase, join(vaultBase, adrDirRel), { label: 'pasta mensal de ADR' });
+  if (createAdr) mkdirVaultPath(vaultBase, join(vaultBase, adrDirRel), { label: 'pasta mensal de ADR' });
   const capLine = promoted.length
     ? `\n\nCapabilities: ${promoted.map((c) => wikilinkFromRel(join(loc.folders.specs, c))).join(', ')}.`
     : '';
@@ -605,7 +637,7 @@ export function archiveChange(vaultBase, slug, { gate = gateGreen, dateStr, adrN
   // Rastro auditável (0.31.0): um archive forçado ou sem prova declarada fica marcado no ADR.
   const flagLines = `${adrFlags.forced ? '\nforced: true' : ''}${adrFlags.trivial ? '\ntrivial: true' : ''}`;
   const forcedNote = adrFlags.forced ? '\n\n> ⚠️ Arquivada com --force — havia tarefa(s) aberta(s) pulada(s) no gate.' : '';
-  writeVaultFileSync(vaultBase, join(vaultBase, adrRel), `---
+  if (createAdr) writeVaultFileSync(vaultBase, join(vaultBase, adrRel), `---
 type: decision
 status: accepted
 date: ${dateStr}${flagLines}
@@ -625,7 +657,7 @@ Mudança ${changeWikilink} concluída e arquivada.${capLine}${reqLine}${forcedNo
   // Only clear the pointer when the archived change IS the active one — archiving some other
   // slug explicitly must not blank the pointer of a different, still-active change.
   if (activeChange(vaultBase) === slug) clearActiveChange(vaultBase);
-  return { ok: true, failing: [], archivedRel: destRel, adrRel, promoted, specWarnings, linksRewritten };
+  return { ok: true, failing: [], archivedRel: destRel, adrRel: createAdr ? adrRel : '', promoted, specWarnings, linksRewritten };
 }
 
 // --- reescrita de wikilinks pós-move (0.35.0) ----------------------------------

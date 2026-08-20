@@ -52,6 +52,7 @@ const DEEP_GUIDES = ['verify.md', 'memory-migration.md', 'retroactive-import.md'
 const GUIDE_FOR_FAMILY = new Map([
   ['wendkeep init', 'getting-started.md'], ['wendkeep sync', 'getting-started.md'],
   ['wendkeep profile', 'operating-profiles.md'], ['wendkeep flow', 'operating-profiles.md'],
+  ['wendkeep delivery', 'operating-profiles.md'],
   ['wendkeep hook', 'sessions-and-import.md'], ['wendkeep doctor', 'maintenance-and-diagnostics.md'],
   ['wendkeep change', 'changes-and-verification.md'], ['wendkeep theme sync', 'maintenance-and-diagnostics.md'],
   ['wendkeep session', 'sessions-and-import.md'], ['wendkeep spec', 'changes-and-verification.md'],
@@ -264,6 +265,8 @@ test('[req:OP-9] DOC-8: perfis, Keep Core e FLOW têm contrato público bilíngu
       'wendkeep profile status', 'wendkeep profile use', 'wendkeep profile route',
       'wendkeep flow start', 'wendkeep flow status', 'wendkeep flow show',
       'wendkeep flow finish', 'wendkeep flow promote',
+      'wendkeep delivery start', 'wendkeep delivery status',
+      'wendkeep delivery finish', 'wendkeep delivery abandon',
     ]) assert.match(docs.guide, new RegExp(command), `${locale}: guia sem ${command}`);
     assert.match(docs.readme, docs.taskLease, `${locale}: README sem lease por solicitação`);
     assert.match(docs.guide, docs.taskLease, `${locale}: guia sem lease por solicitação`);

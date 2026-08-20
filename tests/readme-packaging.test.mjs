@@ -113,7 +113,7 @@ test('a atualização por pnpm resolve e reinstala a versão publicada', () => {
 });
 
 // O que realmente importa: o conteúdo do tarball, e o repo intacto depois.
-test('[req:OP-9] npm pack leva módulos de profile/FLOW, docs bilíngues e restaura o README', () => {
+test('[req:OP-9] npm pack leva módulos de profile/FLOW/delivery, docs bilíngues e restaura o README', () => {
   const outDir = mkdtempSync(join(tmpdir(), 'wk-pack-'));
   const packRoot = join(outDir, 'workspace');
   try {
@@ -160,6 +160,8 @@ test('[req:OP-9] npm pack leva módulos de profile/FLOW, docs bilíngues e resta
     for (const modulePath of [
       'src/profile.mjs',
       'src/flow.mjs',
+      'src/work-kind.mjs',
+      'src/delivery.mjs',
       'hooks/flow-core.mjs',
       'hooks/operating-profile-task-store.mjs',
       'hooks/vault-path-safety.mjs',
@@ -182,6 +184,7 @@ test('[req:OP-9] npm pack leva módulos de profile/FLOW, docs bilíngues e resta
       for (const token of [
         'OFF', 'FLOW', 'GUIDE', 'GOVERN', 'ASSURE', 'Keep Core',
         'wendkeep profile status', 'wendkeep profile route', 'wendkeep flow finish', 'wendkeep flow promote',
+        'wendkeep delivery start', 'wendkeep delivery finish', 'change new --guide',
       ]) assert.match(profiles, new RegExp(token), `guia empacotado ${locale} sem ${token}`);
     }
     const expectedDocs = ['pt-BR', 'en']

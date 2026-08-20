@@ -66,7 +66,7 @@ The persistent profile is selected explicitly; missing or invalid configuration 
 
 Before every implementation, the native LLM harness **MUST run the routing gate**:
 1. Inspect \`wendkeep profile status\`.
-2. Classify the request and choose FLOW, GUIDE, GOVERN, or ASSURE from its scope and risk.
+2. Classify work kind, contract impact, and operation risk independently; then choose the profile.
 3. Register the choice with
    \`wendkeep profile route <FLOW|GUIDE|GOVERN|ASSURE> --session <id> --reason <text>\`.
 4. Re-check \`wendkeep profile status\` and follow the effective profile before editing.
@@ -82,11 +82,14 @@ fallback when configuration is missing or invalid. The lease expires when the re
 Route work by the effective profile:
 - **OFF** — Wend Runtime is disabled and governance belongs to the native LLM harness; Keep Core stays active.
 - **FLOW** — Execute → Validate through \`wendkeep flow start/finish\`, without creating a change.
-- **GUIDE** — Plan → Execute → Validate through a compact change.
+- **GUIDE** — Plan → Execute → Validate through \`change new --guide\`; no automatic spec/design/ADR for contract_impact none.
 - **GOVERN** — the default a2 loop: \`wendkeep change new <slug>\` → review → implement tasks test-first
   (tag proof \`[sensor:id]\` and requirement \`[req:ID]\`) → \`wendkeep verify\` →
   \`wendkeep verify --deep\` + independent read-only verdict → \`wendkeep change archive\`.
 - **ASSURE** — GOVERN plus explicit confirmation and handoff.
+
+Delivery of already-approved behavior uses \`wendkeep delivery start/status/finish/abandon\` with
+ASSURE authorization and an append-only receipt. It does not create a new change, spec, or ADR.
 
 Inspect with \`wendkeep profile status\` / \`wendkeep change status\` /
 \`spec effective --change <slug>\` / \`sensors list\`. Author specs only in

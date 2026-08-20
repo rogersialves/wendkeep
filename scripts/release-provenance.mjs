@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { npmExecutorSpec } from './release-plan.mjs';
 import {
   evaluateReleaseProvenance,
+  packIntegrityInIsolatedCopy,
   packageHasSelfDependency,
 } from '../src/release-provenance.mjs';
 
@@ -32,11 +33,7 @@ function optional(execute) {
 }
 
 function packIntegrity() {
-  const raw = runNpm(['pack', '--dry-run', '--json', '--ignore-scripts']);
-  const start = raw.indexOf('[');
-  const end = raw.lastIndexOf(']');
-  if (start < 0 || end < start) return '';
-  return String(JSON.parse(raw.slice(start, end + 1))[0]?.integrity || '');
+  return packIntegrityInIsolatedCopy(ROOT);
 }
 
 const pkg = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8'));

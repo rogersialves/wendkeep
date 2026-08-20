@@ -23,7 +23,7 @@ Run from the project root or provide `--project` and `--vault` explicitly.
 ## Syntax
 
 ```bash
-npx --no-install wendkeep doctor [--vault <vault>]
+npx --no-install wendkeep doctor [--vault <vault>] [--scope all|core|runtime] [--strict]
 npx --no-install wendkeep memory curate --vault <vault>
 npx --no-install wendkeep sync-defs [--check|--reseed] --vault <vault> --project <root>
 npx --no-install wendkeep theme sync --vault <vault>
@@ -33,7 +33,10 @@ npx --no-install wendkeep --help
 
 ## Options and exit codes
 
-- `doctor` is read-only; exit `0` accepts recoverable warnings, while non-zero means failure.
+- `doctor` is read-only. By default only structural errors produce a non-zero exit; `--strict`
+  also fails on workflow attention, repairable debt, semantic degradation, and warnings.
+- `--scope core` checks the installation, binding, ledger, and Keep Core only. `--scope runtime`
+  checks changes, sensors, and governance only. The default `all` reports both surfaces.
 - `doctor` uses human-readable output with `[integrity]` and `[memory]` sections, friendly
   categories, and a copyable next action. The `vault-health.mjs` hook remains the JSON surface for
   automation; neither surface applies curation.
@@ -44,8 +47,9 @@ npx --no-install wendkeep --help
   IDs, and checkpoint) with outbox, ledger, and SHARED; they do not infer health from revision alone.
 - `revision: 0` after a valid migration, with no v2 attempt, is healthy. A `degraded` attempt whose
   events remain durable in the outbox/ledger is a recoverable warning.
-- An ambiguous attempt, a lost event ID (absent from ledger and outbox), `projected` state found
-  only in the outbox, or a mismatched checkpoint is blocking.
+- An ambiguous publication attempt, a lost event ID (absent from ledger and outbox), `projected`
+  state found only in the outbox, or a mismatched checkpoint is a structural block. Active
+  semantic candidates degrade memory by key and remain available for explicit curation.
 - For session observability, `legacy`, `degraded`, `stale`, and `manifest-unproven` require
   reconciliation or more evidence. Only fresh `none` and fresh `complete` are healthy: frontier,
   checkpoint, root stat, and source manifest must agree.
@@ -63,6 +67,8 @@ Post-update checklist:
 npx --no-install wendkeep --version
 npx --no-install wendkeep sync-defs --check --vault .MyApp-vault --project .
 npx --no-install wendkeep doctor --vault .MyApp-vault
+npx --no-install wendkeep doctor --scope core --vault .MyApp-vault
+npx --no-install wendkeep doctor --scope runtime --strict --vault .MyApp-vault
 npx --no-install wendkeep memory status --gate --vault .MyApp-vault
 npx --no-install wendkeep memory curate --vault .MyApp-vault
 npx --no-install wendkeep memory candidates --active --vault .MyApp-vault
@@ -72,10 +78,11 @@ npx --no-install wendkeep cost rebuild --session <id> --json --vault .MyApp-vaul
 
 ## Expected result
 
-Doctor names sessions, registry, links, notes, prices, derived sections, and memory as healthy or
+Doctor separates structural errors, workflow attention, repairable debt, and semantic ambiguity.
+It names sessions, registry, links, notes, prices, derived sections, and memory as healthy or
 provides a specific diagnostic/repair command. For memory, it distinguishes a valid initial empty
-state, recoverable pending replay, and lost/divergent lifecycle state. It never repairs implicitly
-or echoes private projector-error content into its report. For session observability, it separates
+state, recoverable pending replay, key-scoped conflicts, and lost/divergent lifecycle state. It
+never repairs implicitly or echoes private projector-error content into its report. For session observability, it separates
 fresh `none`/`complete` from legacy, degraded, stale, or manifest-unproven state and gives a
 dry-run path before any write.
 
@@ -87,10 +94,11 @@ dry-run path before any write.
   `npx --no-install wendkeep memory migrate --apply --vault <vault>` with the resolved Vault, but
   migration remains opt-in and must be planned separately.
 - `degraded` plus an intact outbox: warning; preserve the outbox and allow idempotent replay.
-- `ambiguous`, lost publication, or a mismatched checkpoint: blocking; preserve registry, ledger,
+- Ambiguous publication, lost publication, or a mismatched checkpoint: blocking; preserve registry, ledger,
   outbox, and SHARED so `last_memory_attempt` can be correlated before repair.
 - Corrupt bundle: preserve evidence and run `memory status --gate` before `memory repair`.
-- An active semantic conflict requires a human decision: `memory repair` does not choose a winner.
+- An active semantic conflict degrades only the affected memory key and requires a human decision:
+  `memory repair` does not choose a winner.
   Start with the guided menu `memory curate --vault <vault>`. For advanced inspection or a
   non-interactive terminal, list safe IDs with `memory candidates --active --vault <vault>`, review
   the evidence, and then use

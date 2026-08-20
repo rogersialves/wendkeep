@@ -708,20 +708,21 @@ test('[req:DIAG-8] [req:DIAG-12] [req:MEM-HYB-7] active semantic conflicts expla
     ].map((item) => JSON.stringify(item)).join('\n') + '\n');
     const before = byteSnapshot(vault);
     const result = checkMemoryBundle(vault);
-    assert.equal(result.ok, false);
+    assert.equal(result.ok, true);
+    assert.equal(result.status, 'degraded');
     assert.equal(result.metrics.activeConflicts, 2);
     assert.notEqual(result.metrics.semanticCode, 'MEMORY_SEMANTIC_EMPTY_NEUTRAL');
     assert.ok(result.metrics.semanticCounts.candidates >= 2, 'preserved candidates are visible to semantic health');
-    const failure = result.failures.find((item) => /conflitos? ativos?/i.test(item));
-    assert.ok(failure);
-    assert.match(failure, /conflito semântico.*curadoria humana/i);
-    assert.match(failure, /memory repair.*não escolhe vencedor/i);
-    assert.ok(failure.includes(`npx --no-install wendkeep memory curate --vault "${vault}"`));
-    assert.match(failure, /próximo passo/i);
-    assert.match(failure, /outras memórias \(next\.ui\): 2/i);
-    assert.equal((failure.match(/next\.ui/g) || []).length, 1, 'doctor deduplicates repeated keys');
+    const warning = result.warnings.find((item) => /conflitos? ativos?/i.test(item));
+    assert.ok(warning);
+    assert.match(warning, /conflito semântico.*curadoria humana/i);
+    assert.match(warning, /memory repair.*não escolhe vencedor/i);
+    assert.ok(warning.includes(`npx --no-install wendkeep memory curate --vault "${vault}"`));
+    assert.match(warning, /próximo passo/i);
+    assert.match(warning, /outras memórias \(next\.ui\): 2/i);
+    assert.equal((warning.match(/next\.ui/g) || []).length, 1, 'doctor deduplicates repeated keys');
     assert.doesNotMatch(
-      failure,
+      warning,
       /<vault>|<cofre>|private-review|private-discard|private-later|private-full-event|private-event-payload/,
     );
     assert.deepEqual(byteSnapshot(vault), before);

@@ -84,11 +84,20 @@ test('extractReleaseNotes: throws when the version is absent', () => {
 test('[sensor:release-tests] current release notes are extractable and match the package', () => {
   const release = extractReleaseNotes(CHANGELOG, PACKAGE.version);
   assert.equal(release.date, '2026-08-20');
+  assert.match(release.notes, /Work kind independente/i);
+  assert.match(release.notes, /Delivery com autorização/i);
+  assert.match(release.notes, /GUIDE realmente compacta/i);
+  assert.match(release.notes, /Doctor proporcional/i);
+  assert.match(release.notes, /Proveniência preserva lifecycle scripts/i);
+  assert.doesNotMatch(release.notes, /019f[0-9a-f-]+/i);
+});
+
+test('[sensor:release-tests] 0.72.1 provenance and Observer hardening notes remain extractable', () => {
+  const release = extractReleaseNotes(CHANGELOG, '0.72.1');
   assert.match(release.notes, /Proveniência verificável/i);
   assert.match(release.notes, /CI verde/i);
   assert.match(release.notes, /Node\.js 22\.13/i);
   assert.match(release.notes, /full-transcript/i);
-  assert.doesNotMatch(release.notes, /019f[0-9a-f-]+/i);
 });
 
 test('[sensor:release-tests] 0.71.0 dashboard notes remain extractable after the local-open fix', () => {

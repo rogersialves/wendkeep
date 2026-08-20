@@ -1,10 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import {
+  existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   evaluateReleaseProvenance,
+  packIntegrityInIsolatedCopy,
+  parsePackIntegrity,
   packageHasSelfDependency,
 } from '../src/release-provenance.mjs';
 
@@ -81,4 +86,48 @@ test('[req:REL-PROV-5] verificação pós-publicação falha se o registry ainda
   const result = evaluateReleaseProvenance(provenance({ publishedIntegrity: '' }));
   assert.equal(result.ok, false);
   assert.equal(result.code, 'published_artifact_missing');
+});
+
+test('[req:REL-PROV-6] parser tolera logs de lifecycle antes do JSON do npm pack', () => {
+  assert.equal(
+    parsePackIntegrity('prepack log\n[{"integrity":"sha512-packed"}]\npostpack log'),
+    'sha512-packed',
+  );
+});
+
+test('[req:REL-PROV-6] integridade executa lifecycle scripts numa cópia e preserva a origem', () => {
+  const root = mkdtempSync(join(tmpdir(), 'wk-provenance-lifecycle-'));
+  try {
+    writeFileSync(join(root, 'README.md'), 'working tree\n');
+    writeFileSync(join(root, 'pack.mjs'), `
+import { writeFileSync } from 'node:fs';
+writeFileSync('README.md', process.argv[2] === 'pre' ? 'published artifact\\n' : 'working tree\\n');
+`);
+    writeFileSync(join(root, 'package.json'), JSON.stringify({
+      name: 'wk-provenance-fixture',
+      version: '1.0.0',
+      files: ['README.md'],
+      scripts: { prepack: 'node pack.mjs pre', postpack: 'node pack.mjs post' },
+    }, null, 2));
+    writeFileSync(join(root, '.wendkeep.json'), '{"vault":".private-vault"}\n');
+    mkdirSync(join(root, '.private-vault'));
+    writeFileSync(join(root, '.private-vault', 'secret.txt'), 'must not be copied\n');
+
+    const isolated = packIntegrityInIsolatedCopy(root, {
+      execute(command, args, options) {
+        assert.match(command, /^npm(?:\.cmd)?$/);
+        assert.deepEqual(args, ['pack', '--dry-run', '--json']);
+        assert.notEqual(options.cwd, root, 'empacotamento acontece na cópia');
+        assert.equal(existsSync(join(options.cwd, '.private-vault')), false, 'vault vinculado não entra na cópia');
+        const pkg = JSON.parse(readFileSync(join(options.cwd, 'package.json'), 'utf8'));
+        assert.match(pkg.scripts.prepack, /pack\.mjs pre/);
+        writeFileSync(join(options.cwd, 'README.md'), 'published artifact\n');
+        return '[{"integrity":"sha512-lifecycle"}]';
+      },
+    });
+    assert.equal(isolated, 'sha512-lifecycle');
+    assert.equal(readFileSync(join(root, 'README.md'), 'utf8'), 'working tree\n');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });

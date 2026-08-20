@@ -7,7 +7,7 @@ import { checkSyncDefs } from './sync-defs.mjs';
 import { resolveProjectVault } from './project-vault.mjs';
 
 const healthStatusLabel = (status) => ({
-  healthy: 'saudável', warning: 'atenção', blocked: 'bloqueada', legacy: 'legado',
+  healthy: 'saudável', warning: 'atenção', degraded: 'degradada', blocked: 'bloqueada', legacy: 'legado',
 }[status] || status || 'desconhecido');
 
 const metricValue = (value) => value === null || value === undefined || value === '' ? 'n/a' : value;
@@ -55,6 +55,8 @@ export function runDoctor(argv) {
   let vault;
   let project;
   let session = '';
+  let scope = 'all';
+  let strict = false;
   for (let i = 0; i < argv.length; i += 1) {
     const a = argv[i];
     if (a === '--vault') vault = argv[++i];
@@ -63,6 +65,13 @@ export function runDoctor(argv) {
     else if (a.startsWith('--project=')) project = a.slice(10);
     else if (a === '--session') session = argv[++i] || '';
     else if (a.startsWith('--session=')) session = a.slice(10);
+    else if (a === '--scope') scope = argv[++i] || '';
+    else if (a.startsWith('--scope=')) scope = a.slice(8);
+    else if (a === '--strict') strict = true;
+  }
+  if (!['all', 'core', 'runtime'].includes(scope)) {
+    process.stderr.write('wendkeep doctor: --scope deve ser all, core ou runtime\n');
+    return 2;
   }
 
   const projectRoot = resolve(project || process.cwd());
@@ -97,18 +106,29 @@ export function runDoctor(argv) {
       memoryStatus: 'blocked',
     };
   }
-  process.stdout.write(`${renderVaultHealthLines(health).join('\n')}\n`);
+  if (scope !== 'runtime') process.stdout.write(`${renderVaultHealthLines(health).join('\n')}\n`);
   const healthStatus = health.ok ? 0 : 1;
 
+  if (scope === 'core') {
+    const strictDebt = strict && (
+      (health.warnings || []).length > 0
+      || !['healthy'].includes(health.memoryStatus)
+    );
+    process.stdout.write(`\n[core] ${healthStatus ? 'erro estrutural' : health.memoryStatus === 'degraded' ? 'saudável com memória degradada' : 'saudável'}\n`);
+    return healthStatus || strictDebt ? 1 : 0;
+  }
+
   // 2. Harness integrity (Wave B).
-  const { errors, warnings } = checkHarness(vaultBase, projectRoot);
+  const { errors, warnings, attention, repairable } = checkHarness(vaultBase, projectRoot);
   const defs = checkSyncDefs(vaultBase, projectRoot);
   if (!defs.ok) {
-    warnings.push(...defs.issues.map((issue) => `defs: ${issue}`));
-    warnings.push('defs stale — rode `wendkeep sync-defs --reseed` e reinicie Claude Code/Codex');
+    repairable.push(...defs.issues.map((issue) => `defs: ${issue}`));
+    repairable.push('defs stale — rode `wendkeep sync-defs --reseed` e reinicie Claude Code/Codex');
   }
-  process.stdout.write(`\n[harness] ${errors.length} erro(s), ${warnings.length} aviso(s)\n`);
+  process.stdout.write(`\n[runtime] ${errors.length} erro(s) estrutural(is), ${attention.length} atenção(ões), ${repairable.length} reparável(is), ${warnings.length} aviso(s)\n`);
   for (const e of errors) process.stdout.write(`  ✗ ${e}\n`);
+  for (const item of attention) process.stdout.write(`  ! ${item}\n`);
+  for (const item of repairable) process.stdout.write(`  → ${item}\n`);
   for (const w of warnings) process.stdout.write(`  ! ${w}\n`);
 
   // 3. Link/graph health — órfãos que o grafo do Obsidian mostraria, com o comando de reparo.
@@ -125,13 +145,16 @@ export function runDoctor(argv) {
   process.stdout.write(`\n${renderStackedFrontmatterLines(vaultBase, stacked).join('\n')}\n`);
 
   // 3c. Modelo fora de pricing.json fecha a sessão com custo zero, sem erro — só aparece aqui.
-  process.stdout.write(`\n${renderUnpricedModelLines(checkUnpricedModels(vaultBase)).join('\n')}\n`);
+  const unpriced = checkUnpricedModels(vaultBase);
+  process.stdout.write(`\n${renderUnpricedModelLines(unpriced).join('\n')}\n`);
 
   // 3d. Seções derivadas do corpo que ficaram para trás do Encerramento (notas pré-0.53.0).
-  process.stdout.write(`\n${renderStaleDerivedSectionLines(checkStaleDerivedSections(vaultBase)).join('\n')}\n`);
+  const staleDerived = checkStaleDerivedSections(vaultBase);
+  process.stdout.write(`\n${renderStaleDerivedSectionLines(staleDerived).join('\n')}\n`);
 
   // 3e. Observabilidade materializada: schema vigente não basta sem frontier + manifest frescos.
-  process.stdout.write(`\n${renderSessionObservabilityLines(checkSessionObservability(vaultBase)).join('\n')}\n`);
+  const observability = checkSessionObservability(vaultBase);
+  process.stdout.write(`\n${renderSessionObservabilityLines(observability).join('\n')}\n`);
 
   // 4. Sessão: não mente "inativa" quando há atividade recente (workflow/subagente em background).
   const act = checkSessionActivity(vaultBase);
@@ -146,5 +169,19 @@ export function runDoctor(argv) {
 
   // Devolve o código em vez de sair: `wendkeep sync` encadeia este comando, e um
   // process.exit aqui mataria a cadeia. Quem faz o exit é o bin.
-  return healthStatus !== 0 || errors.length ? 1 : 0;
+  const strictDebt = strict && (
+    (scope !== 'runtime' && (health.warnings || []).length)
+    || (scope !== 'runtime' && health.memoryStatus !== 'healthy')
+    || attention.length
+    || repairable.length
+    || warnings.length
+    || links.derivedOrphans
+    || links.artifactOrphans
+    || links.graphColors === false
+    || stacked.count
+    || (unpriced.models || unpriced.items || []).length
+    || (staleDerived.notes || staleDerived.items || []).length
+    || !observability.ok
+  );
+  return (scope !== 'runtime' && healthStatus !== 0) || errors.length || strictDebt ? 1 : 0;
 }

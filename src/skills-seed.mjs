@@ -27,9 +27,14 @@ pode persistir \`profile use OFF\` explicitamente.
 
 - **FLOW:** ajuste local, reversível e de escopo fechado, sem contrato/spec, segurança,
   dependência, CI/release ou policy.
-- **GUIDE:** mudança compacta de comportamento que precisa de change/spec, sem revisão formal.
+- **GUIDE:** implementação compacta com change, sem spec/design/ADR automáticos quando contract_impact é none.
 - **GOVERN:** escolha conservadora em caso de dúvida ou risco e para superfícies sensíveis.
 - **ASSURE:** GOVERN quando confirmação explícita e handoff fazem parte do contrato.
+
+Classifique também o work kind: inspection, maintenance, implementation, delivery ou recovery.
+Risco operacional e impacto de contrato são independentes. Merge, push, tag e publish de código
+já aprovado usam delivery + ASSURE sem criar outra change; registre com delivery start e conclua
+com delivery finish para gerar receipt.
 
 O harness da LLM faz essa classificação semântica; o Wend Runtime valida e aplica a lease.
 Se não houver uma sessão causal identificada ou o comando falhar, não fabrique estado: use o
@@ -39,6 +44,7 @@ perfil efetivo já injetado e trate \`GOVERN\` como fallback conservador quando 
 Antes de editar, leia o **perfil efetivo** injetado pelo WendKeep e siga somente sua rota:
 - \`OFF\`: não imponha processo Wend; a governança pertence ao **harness nativo da LLM**.
 - \`FLOW\`: inicie o microcontrato com \`wendkeep flow start\` antes de editar os paths permitidos.
+- \`delivery\`: inicie \`wendkeep delivery start\` antes das operações autorizadas; não crie change.
 - \`GUIDE\`, \`GOVERN\` ou \`ASSURE\`: não edite código antes de Propose / \`wendkeep change new\`.
 Este gate nunca transforma \`OFF\` ou \`FLOW\` silenciosamente em \`GOVERN\`.
 </HARD-GATE>
@@ -47,14 +53,16 @@ Este gate nunca transforma \`OFF\` ou \`FLOW\` silenciosamente em \`GOVERN\`.
 
 - **OFF — LLM nativa:** Wend Runtime desligado; esta skill devolve a execução ao harness nativo.
 - **FLOW — E → V:** \`flow start\` → implementar com wk-tdd → \`flow finish\`; sem change/ADR/verdict.
-- **GUIDE — P → E → V:** change compacta, sem revisão formal obrigatória.
+- **GUIDE — P → E → V:** change new --guide, sem design/spec/ADR automáticos quando não há impacto de contrato.
 - **GOVERN — P → R → E → V:** loop a2 atual, com design/revisão; é o padrão conservador.
 - **ASSURE — P → R → E → V → C:** GOVERN acrescido de confirmação e handoff explícitos.
 
 ## Passos para GUIDE, GOVERN e ASSURE
 
 1. **Explore** — entenda o problema antes de propor. Leia o código/contexto relevante.
-2. **Propose** — \`wendkeep change new <slug>\`. Isso cria \`08-Mudanças/<slug>/\` com:
+2. **Propose** — GUIDE usa \`wendkeep change new <slug> --guide\`; GOVERN/ASSURE usam
+   \`wendkeep change new <slug>\`. O GUIDE compacto exige objetivo, critérios de aceite, áreas
+   afetadas, testes e resultado. GOVERN/ASSURE criam \`08-Mudanças/<slug>/\` com:
    - \`proposta.md\` — *por quê* e *o que muda* (o WHAT).
    - \`design.md\` — a abordagem técnica.
    - \`tarefas.md\` — a lista de tarefas \`- [ ] N.N descrição\`.
@@ -83,7 +91,7 @@ Este gate nunca transforma \`OFF\` ou \`FLOW\` silenciosamente em \`GOVERN\`.
    \`[req:]\`) recebe verdict automático — pula este passe.
 6. **Archive** — \`wendkeep change archive <slug>\`. O *gate* exige sensores verdes **E**
    \`verdict.json\` cobrindo os \`[req:]\`. Passando, promove os deltas pro \`07-Specs\`,
-   move a change pro \`_arquivo\` e gera um ADR em \`04-Decisões/\`.
+   move a change pro \`_arquivo\`; GUIDE com contract_impact none não gera ADR automático.
 
 ## Regras
 
@@ -296,9 +304,14 @@ persist it explicitly through \`profile use OFF\`.
 
 - **FLOW:** a local, reversible, bounded adjustment with no contract/spec, security, dependency,
   CI/release, or policy impact.
-- **GUIDE:** a compact behavior change that needs a change/spec but no formal review.
+- **GUIDE:** compact implementation with a change, but no automatic spec/design/ADR when contract impact is none.
 - **GOVERN:** the conservative choice when uncertain or risky, and for sensitive surfaces.
 - **ASSURE:** GOVERN when explicit confirmation and handoff are part of the contract.
+
+Also classify work kind as inspection, maintenance, implementation, delivery, or recovery.
+Operational risk and contract impact are independent. Merge, push, tag, and publish for
+already-approved code use delivery + ASSURE without another change; use delivery start and
+delivery finish to produce a receipt.
 
 The LLM harness owns semantic classification; Wend Runtime validates and applies the lease. If
 there is no causally identified session or the command fails, do not fabricate state: use the
@@ -308,6 +321,7 @@ already injected effective profile, with \`GOVERN\` as the conservative configur
 Before editing, read the injected **effective profile** and follow only its route:
 - \`OFF\`: impose no Wend process; governance belongs to the **native LLM harness**.
 - \`FLOW\`: start the microcontract with \`wendkeep flow start\` before editing allowed paths.
+- \`delivery\`: run \`wendkeep delivery start\` before authorized operations; do not create a change.
 - \`GUIDE\`, \`GOVERN\`, or \`ASSURE\`: do not edit code before Propose / \`wendkeep change new\`.
 This gate never silently turns \`OFF\` or \`FLOW\` into \`GOVERN\`.
 </HARD-GATE>
@@ -316,15 +330,16 @@ This gate never silently turns \`OFF\` or \`FLOW\` into \`GOVERN\`.
 
 - **OFF — native LLM:** Wend Runtime is disabled; this skill returns execution to the native harness.
 - **FLOW — E → V:** \`flow start\` → implement with wk-tdd → \`flow finish\`; no change/ADR/verdict.
-- **GUIDE — P → E → V:** a compact change with no mandatory formal review.
+- **GUIDE — P → E → V:** change new --guide, with no automatic design/spec/ADR when contract impact is none.
 - **GOVERN — P → R → E → V:** the current a2 loop with design/review; the conservative default.
 - **ASSURE — P → R → E → V → C:** GOVERN plus explicit confirmation and handoff.
 
 ## Steps for GUIDE, GOVERN, and ASSURE
 
 1. **Explore** — understand the problem before proposing.
-2. **Propose** — \`wendkeep change new <slug>\` scaffolds \`08-Changes/<slug>/\`
-   (proposta/design/tarefas + a \`specs/\` delta). The change becomes *current* through global
+2. **Propose** — GUIDE uses \`wendkeep change new <slug> --guide\`; GOVERN/ASSURE use
+   \`wendkeep change new <slug>\`. Compact GUIDE requires objective, acceptance criteria,
+   affected areas, tests, and result. The change becomes *current* through global
    \`.brain/CURRENT_CHANGE.md\`. Multiple changes may stay open; hooks and \`change list/status\`
    show every pending task, while commands without \`--change\` use only the current change.
    Before implementation, resolve \`spec_impact\`: \`required\` needs the capability listed in
@@ -341,7 +356,8 @@ This gate never silently turns \`OFF\` or \`FLOW\` into \`GOVERN\`.
 5. **Verify deep** — the **wk-verify** skill (fresh, author≠verifier) writes \`verdict.json\`.
    A trivial change (no \`[req:]\`) gets an auto verdict.
 6. **Archive** — \`wendkeep change archive <slug>\`. The gate needs green sensors AND a
-   verdict AND no open tasks. It promotes the delta into \`07-Specs\` and mints an ADR.
+   verdict AND no open tasks. It promotes the delta into \`07-Specs\`; compact GUIDE does not
+   mint an automatic ADR.
 
 ## Rules
 - Multiple changes may stay open. \`CURRENT_CHANGE.md\` marks one current change without hiding

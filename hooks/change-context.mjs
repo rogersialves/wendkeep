@@ -14,6 +14,7 @@ import {
   profileSentinelId,
   resolveHookOperatingProfile,
 } from './operating-profile-runtime.mjs';
+import { activeDelivery } from '../src/delivery.mjs';
 
 // Conservador de propósito: verbos de tarefa comuns (pt+en) + tamanho mínimo. Falso-negativo
 // custa só o nudge; falso-positivo em pergunta curta viraria ruído.
@@ -29,6 +30,16 @@ export function buildChangePing(vaultBase, sessionId, prompt = '', changeSlug = 
   const policy = hookProfilePolicy(profile);
   if (!policy.harness) return null;
   const sentinelId = profileSentinelId(sessionId, profile);
+  const delivery = activeDelivery(vaultBase);
+  if (delivery) {
+    const hash = `delivery:${delivery.id}`;
+    if (readSentinel(vaultBase, 'ctx', sentinelId) === hash) return null;
+    writeSentinel(vaultBase, 'ctx', sentinelId, hash);
+    return {
+      context: `<active_delivery>Delivery ${delivery.id} ativa; capabilities: ${delivery.route.operation_risk.join(', ')}. Risco operacional autorizado sem nova change/spec.</active_delivery>`,
+      hash,
+    };
+  }
   const st = changeCtxState(vaultBase);
   if (st) {
     if (readSentinel(vaultBase, 'ctx', sentinelId) === st.hash) return null;

@@ -504,7 +504,7 @@ export function checkMemoryBundle(vaultBase, { registry } = {}) {
       ? '1 conflito ativo'
       : `${activeConflicts.length} conflitos ativos`;
     const purposes = groupConflictPurposes(activeConflicts).join('; ');
-    failures.push(`${label} (${purposes}). Existem versões concorrentes e nenhum dado foi escolhido automaticamente. Conflito semântico exige curadoria humana; memory repair não escolhe vencedor. Próximo passo: ${memoryCurateCommand(vaultBase)}. Inventário avançado: ${memoryCandidatesCommand(vaultBase)}.`);
+    warnings.push(`${label} (${purposes}). Existem versões concorrentes e nenhum dado foi escolhido automaticamente. Conflito semântico degrada somente as chaves afetadas e exige curadoria humana; memory repair não escolhe vencedor. Próximo passo: ${memoryCurateCommand(vaultBase)}. Inventário avançado: ${memoryCandidatesCommand(vaultBase)}.`);
   }
   if (outbox.count) warnings.push(`${outbox.count} evento(s) pendente(s) na outbox; execute o projector quando seguro.`);
   if (ordinaryCandidates.length) warnings.push(`${ordinaryCandidates.length} candidate(s) aguardando curadoria humana.`);
@@ -514,7 +514,7 @@ export function checkMemoryBundle(vaultBase, { registry } = {}) {
   const semantic = bundle.semantic || {};
   return {
     ok,
-    status: ok ? (warnings.length ? 'warning' : 'healthy') : 'blocked',
+    status: ok ? (activeConflicts.length ? 'degraded' : warnings.length ? 'warning' : 'healthy') : 'blocked',
     failures,
     warnings,
     metrics: {

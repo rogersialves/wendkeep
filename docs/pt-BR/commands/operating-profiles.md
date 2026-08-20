@@ -1,4 +1,4 @@
-# Perfis de Operação e FLOW
+# Perfis de Operação, work kind, FLOW e delivery
 
 **PT-BR** · [English](../../en/commands/operating-profiles.md)
 
@@ -17,6 +17,8 @@ deliberado e executa as validações e gates próprios daquele comando.
 Use `profile use` para uma seleção humana persistente e `profile route` para o harness registrar a
 rota temporária da implementação atual. Use `FLOW` para manutenção local, reversível e com
 `spec_impact:none` que caiba num microcontrato Executar → Validar, sem change.
+Use `delivery` para merge, push, tag e publicação de comportamento já aprovado: risco operacional
+exige autorização/receipt, não uma nova change ou spec.
 
 ## Quando não usar
 
@@ -55,6 +57,10 @@ npx wendkeep flow status [<id>]
 npx wendkeep flow show <id> [--session <id>]
 npx wendkeep flow finish <id> [--session <id>]
 npx wendkeep flow promote <id> [--change-slug <slug>] [--session <id>]
+npx wendkeep delivery start [id] --allow <capability> [--source-change <slug>] [--source-commit <sha>]
+npx wendkeep delivery status [id]
+npx wendkeep delivery finish [id] [--target <ref>] [--ci-url <url>] [--version <x.y.z>] [--npm-integrity <sha512>] [--release-url <url>]
+npx wendkeep delivery abandon [id] --reason <texto>
 ```
 
 Todos os subcomandos FLOW também aceitam `--project <path>`, `--vault <path>` e `--json`.
@@ -85,7 +91,7 @@ independentes.
 |---|---|---|
 | `OFF` | harness nativo da LLM | Governança automática desligada; Keep Core e comandos explícitos disponíveis. |
 | `FLOW` | E → V | Microcontrato com baseline Git, allowlist, sensores e recibo, sem change. |
-| `GUIDE` | P → E → V | Change compacta; política reconhecida para evolução compatível. |
+| `GUIDE` | P → E → V | `change new --guide`; objetivo, aceite, áreas, testes e resultado; sem design/spec/ADR automático quando `contract_impact:none`. |
 | `GOVERN` | P → R → E → V | Loop a2 atual e fallback conservador. |
 | `ASSURE` | P → R → E → V → C | Governança acrescida de confirmação e handoff. |
 
@@ -163,6 +169,14 @@ harness nativo da LLM.
   dono; contrato, reserva, attempts, recibo e origem permanecem semanticamente vinculados. O
   perdedor permanece ativo e pode repetir com `--change-slug`. Retries retomam idempotentemente a
   mesma promoção em vez de criar outra change. Não existe `--force` no FLOW.
+- Work kind (`inspection`, `maintenance`, `implementation`, `delivery`, `recovery`), perfil,
+  `contract_impact` e `operation_risk` são dimensões independentes. `delivery start` captura repo,
+  branch/worktree, SHA, change de origem e capabilities em `.brain/runtime/deliveries/`; não cria
+  pasta em `08-Mudanças`, delta, spec ou ADR.
+- `delivery finish` exige working tree limpa, comprova que o target contém o commit de origem e,
+  para capability `publish`, exige CI, versão, integridade npm e GitHub Release. O receipt é
+  append-only em `.brain/runtime/delivery-receipts.jsonl`. Se código/config precisar mudar, a
+  delivery para com `WENDKEEP_DELIVERY_IMPLEMENTATION_REQUIRED` e o trabalho volta a implementation.
 - Exit `0` indica consulta ou transição concluída; exit `1` indica política/sensor vermelho; exit
   `2` indica perfil, sessão, flow ou argumentos inválidos, sem mutação parcial.
 
@@ -228,13 +242,22 @@ novamente com um destino explícito:
 npx wendkeep flow promote $flowId --change-slug outro-slug
 ```
 
+Entregar uma versão já aprovada sem fabricar outra change:
+
+```bash
+npx wendkeep delivery start release-0-73-0 --source-change governanca-proporcional --allow git:merge --allow git:push --allow publish
+npx wendkeep delivery status release-0-73-0
+npx wendkeep delivery finish release-0-73-0 --target v0.73.0 --ci-url <run> --version 0.73.0 --npm-integrity <sha512> --release-url <release>
+```
+
 ## Resultado esperado
 
 Trocar o perfil não cria outra sessão nem interrompe o Vault. Em `OFF`, a memória e as lessons
 continuam injetadas e o Stop continua persistindo sessão/memória, mas router, skill gate,
 change context/warn/nag/guard e captura de plano automáticos ficam inativos. Os comandos explícitos
 continuam disponíveis e executam seus próprios contratos. Um FLOW concluído deixa recibo durável e
-consultável; um FLOW promovido passa a seguir o lifecycle normal de change.
+consultável; um FLOW promovido passa a seguir o lifecycle normal de change. Uma delivery concluída
+deixa receipt sem gerar ADR; GUIDE compacto arquiva o resultado sem spec/design/ADR artificiais.
 
 ## Erros comuns e diagnóstico
 
@@ -253,6 +276,8 @@ consultável; um FLOW promovido passa a seguir o lifecycle normal de change.
   repita `flow finish` ou `flow promote`; o marcador idempotente impede duplicação.
 - Sujeira anterior apareceu no diff: ela deve coincidir com o fingerprint inicial e nunca pode ser
   atribuída silenciosamente ao FLOW.
+- Delivery sem `--allow`, working tree suja ou evidência de publish incompleta: retome a
+  implementation real ou forneça os receipts; não crie uma change apenas para publicar.
 
 ## Próximos passos
 

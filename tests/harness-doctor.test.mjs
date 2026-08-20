@@ -1,9 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { checkHarness } from '../hooks/harness-doctor.mjs';
+
+const BIN = join(dirname(fileURLToPath(import.meta.url)), '..', 'bin', 'wendkeep.mjs');
 
 test('checkHarness: flags invalid sensors.json and a broken active pointer', () => {
   const vault = mkdtempSync(join(tmpdir(), 'wk-doc-'));
@@ -49,6 +53,36 @@ test('checkHarness diagnostica spec_impact pendente na change ativa', () => {
     writeFileSync(join(vault, '08-Mudanças', 'x', '.spec-impact-v1'), '1\n');
     writeFileSync(join(vault, '08-Mudanças', 'x', 'proposta.md'), '---\nspec_impact: pending\nspec_impact_reason: ""\nspecs: []\n---\n');
     const r = checkHarness(vault, proj);
-    assert.ok(r.errors.some((e) => /spec_impact.*pending/i.test(e)));
+    assert.ok(!r.errors.some((e) => /spec_impact.*pending/i.test(e)));
+    assert.ok(r.attention.some((e) => /spec_impact.*pending/i.test(e)));
   } finally { rmSync(vault, { recursive: true, force: true }); rmSync(proj, { recursive: true, force: true }); }
+});
+
+test('doctor runtime tolera trabalho em andamento por padrão e --strict o promove a falha', () => {
+  const vault = mkdtempSync(join(tmpdir(), 'wk-doc-runtime-'));
+  const project = mkdtempSync(join(tmpdir(), 'wk-doc-runtimep-'));
+  try {
+    mkdirSync(join(vault, '.brain'), { recursive: true });
+    mkdirSync(join(vault, '08-Mudanças', 'x'), { recursive: true });
+    writeFileSync(join(project, 'package.json'), '{"name":"doctor-runtime"}\n');
+    writeFileSync(join(vault, '.brain', 'CURRENT_CHANGE.md'), 'change: x\n');
+    writeFileSync(join(vault, '08-Mudanças', 'x', '.spec-impact-v1'), '1\n');
+    writeFileSync(join(vault, '08-Mudanças', 'x', 'proposta.md'), '---\nspec_impact: pending\nspec_impact_reason: ""\nspecs: []\n---\n');
+    writeFileSync(join(vault, '08-Mudanças', 'x', 'tarefas.md'), '- [ ] 1.1 implementar\n');
+
+    const normal = spawnSync(process.execPath, [
+      BIN, 'doctor', '--scope', 'runtime', '--project', project, '--vault', vault,
+    ], { cwd: project, encoding: 'utf8' });
+    assert.equal(normal.status, 0, normal.stderr || normal.stdout);
+    assert.match(normal.stdout, /\[runtime\].*atenção/);
+    assert.doesNotMatch(normal.stdout, /\[integridade\]|\[memória\]/);
+
+    const strict = spawnSync(process.execPath, [
+      BIN, 'doctor', '--scope', 'runtime', '--strict', '--project', project, '--vault', vault,
+    ], { cwd: project, encoding: 'utf8' });
+    assert.equal(strict.status, 1, strict.stderr || strict.stdout);
+  } finally {
+    rmSync(vault, { recursive: true, force: true });
+    rmSync(project, { recursive: true, force: true });
+  }
 });

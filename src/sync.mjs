@@ -81,11 +81,11 @@ export async function runSync(argv) {
   // código é propagado sem ser tratado como falha da cadeia.
   step(3, 'doctor');
   const { runDoctor } = await import('./doctor.mjs');
-  const doctorCode = runDoctor(['--vault', vaultBase, '--project', projectPath]);
+  const doctorCode = runDoctor(['--vault', vaultBase, '--project', projectPath, '--scope', 'core']);
 
   // Nunca afirmar "tudo em dia": o doctor sai 0 mesmo tendo listado órfãos, seções
   // desatualizadas ou modelos sem preço — essas checagens não são fatais. Uma linha final
   // otimista contradiria o relatório logo acima dela.
-  process.stdout.write(`\nwendkeep sync: 3 passo(s) concluído(s)${doctorCode ? ' — doctor reportou erros' : ' — veja o relatório do doctor acima'}\n`);
+  process.stdout.write(`\nwendkeep sync: ${doctorCode ? 'falhou — Keep Core comprometido' : 'concluído — Keep Core saudável'}\n`);
   return doctorCode;
 }
