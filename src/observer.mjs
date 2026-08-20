@@ -147,6 +147,7 @@ export async function runObserver(argv = [], { write = (chunk) => process.stdout
       projectId: snapshot.project_id,
       url,
       token,
+      forceFull: true,
       captureLevel: optionValue(argv, '--capture-level') || process.env.WENDKEEP_OBSERVER_CAPTURE_LEVEL || 'metadata',
     });
     const snapshotResponse = await fetch(`${String(url).replace(/\/$/, '')}/v1/projects/${encodeURIComponent(snapshot.project_id)}/snapshot`, {
@@ -209,6 +210,7 @@ export async function runObserver(argv = [], { write = (chunk) => process.stdout
       projectId: snapshot.project_id,
       url,
       token,
+      forceFull: true,
       captureLevel: optionValue(argv, '--capture-level') || process.env.WENDKEEP_OBSERVER_CAPTURE_LEVEL || 'metadata',
     });
     const snapshotResponse = await fetch(`${String(url).replace(/\/$/, '')}/v1/projects/${encodeURIComponent(snapshot.project_id)}/snapshot`, {

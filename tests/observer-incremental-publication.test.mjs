@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, utimesSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { performance } from 'node:perf_hooks';
 import {
@@ -9,7 +9,9 @@ import {
   enqueueObserverSqlBatch,
   inspectObserverSqlOutbox,
   listSqlOutbox,
+  observerSqlRequestTimeoutMs,
   retryObserverSqlOutbox,
+  SQL_LEASE_STALE_MS,
 } from '../src/observer-sql-publish.mjs';
 import { makeObserverFixture } from './helpers/observer-fixture.mjs';
 
@@ -153,5 +155,66 @@ test('[req:SQL-INCR-4] only one publisher lease drains an outbox', async () => {
     const completed = await first;
     assert.equal(completed.confirmed, 1);
     assert.equal(listSqlOutbox(fixture.vaultBase).length, 0);
+  } finally { fixture.cleanup(); }
+});
+
+test('[req:SQL-INCR-3] coalescing preserves every operational entity in one session', () => {
+  const fixture = makeObserverFixture();
+  try {
+    const base = {
+      schema_version: 1,
+      project_id: fixture.projectId,
+      occurred_at: '2026-08-20T12:00:00Z',
+    };
+    const events = [
+      { ...base, event_id: 'call-event-1', kind: 'llm_call', payload: { session_id: 'same-session', call_id: 'call-1' } },
+      { ...base, event_id: 'call-event-2', kind: 'llm_call', payload: { session_id: 'same-session', call_id: 'call-2' } },
+      { ...base, event_id: 'agent-event-1', kind: 'agent.upsert', payload: { session_id: 'same-session', agent_id: 'agent-1' } },
+      { ...base, event_id: 'agent-event-2', kind: 'agent.upsert', payload: { session_id: 'same-session', agent_id: 'agent-2' } },
+      { ...base, event_id: 'rollup-event-1', kind: 'usage.rollup', payload: { session_id: 'same-session', rollup_key: 'rollup-1' } },
+      { ...base, event_id: 'rollup-event-2', kind: 'usage.rollup', payload: { session_id: 'same-session', rollup_key: 'rollup-2' } },
+      { ...base, event_id: 'transcript-event-1', kind: 'transcript.upsert', payload: { session_id: 'same-session', transcript_id: 'transcript-1' } },
+      { ...base, event_id: 'transcript-event-2', kind: 'transcript.upsert', payload: { session_id: 'same-session', transcript_id: 'transcript-2' } },
+    ];
+    enqueueObserverSqlBatch(fixture.vaultBase, {
+      schema_version: 1, project_id: fixture.projectId, events,
+    }, { scope: 'session:same-session' });
+    const pending = listSqlOutbox(fixture.vaultBase);
+    assert.equal(pending.length, 1);
+    assert.deepEqual(new Set(pending[0].events.map((event) => event.event_id)), new Set(events.map((event) => event.event_id)));
+  } finally { fixture.cleanup(); }
+});
+
+test('[req:SQL-INCR-4] a live batch lease outlives the maximum request timeout', () => {
+  const fixture = makeObserverFixture();
+  try {
+    const event = {
+      schema_version: 1,
+      event_id: 'lease-event-1',
+      kind: 'document.upsert',
+      project_id: fixture.projectId,
+      occurred_at: '2026-08-20T12:00:00Z',
+      payload: { logical_path: 'CORE.md', revision: 1 },
+    };
+    enqueueObserverSqlBatch(fixture.vaultBase, {
+      schema_version: 1, project_id: fixture.projectId, events: [event],
+    }, { scope: 'lease-duration' });
+    const livePath = listSqlOutbox(fixture.vaultBase)[0].path;
+    const lockPath = `${livePath}.lock`;
+    mkdirSync(lockPath);
+    writeFileSync(join(lockPath, 'owner.json'), JSON.stringify({ token: 'still-live' }));
+    const sixtyOneSecondsAgo = new Date(Date.now() - 61_000);
+    utimesSync(lockPath, sixtyOneSecondsAgo, sixtyOneSecondsAgo);
+
+    const fallback = enqueueObserverSqlBatch(fixture.vaultBase, {
+      schema_version: 1,
+      project_id: fixture.projectId,
+      events: [{ ...event, event_id: 'lease-event-2', payload: { logical_path: 'DIGEST.md', revision: 1 } }],
+    }, { scope: 'lease-duration' });
+
+    assert.ok(SQL_LEASE_STALE_MS > observerSqlRequestTimeoutMs(1024 * 1024 * 1024));
+    assert.equal(fallback.coalesced, false);
+    assert.equal(existsSync(lockPath), true);
+    assert.equal(JSON.parse(readFileSync(join(lockPath, 'owner.json'), 'utf8')).token, 'still-live');
   } finally { fixture.cleanup(); }
 });

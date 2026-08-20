@@ -26,6 +26,7 @@ export const SQL_EVENT_BATCH_SIZE = 64;
 export const SQL_EVENT_BATCH_BYTES = 8 * 1024 * 1024;
 const REQUEST_TIMEOUT_MS = 15000;
 const MAX_REQUEST_TIMEOUT_MS = 120000;
+export const SQL_LEASE_STALE_MS = MAX_REQUEST_TIMEOUT_MS + 30000;
 const REQUEST_TIMEOUT_BYTES_STEP = 1024 * 1024;
 const CAPTURE_LEVELS = new Set(['metadata', 'messages', 'full-transcript']);
 
@@ -262,7 +263,7 @@ function dedupeEvents(events) {
   });
 }
 
-export function buildObserverSqlEventBatch({ vaultBase, projectId, input = {}, now = new Date(), state = readState(vaultBase), remoteDocuments = {}, captureLevel = process.env.WENDKEEP_OBSERVER_CAPTURE_LEVEL || 'metadata' } = {}) {
+export function buildObserverSqlEventBatch({ vaultBase, projectId, input = {}, now = new Date(), state = readState(vaultBase), remoteDocuments = {}, captureLevel = process.env.WENDKEEP_OBSERVER_CAPTURE_LEVEL || 'metadata', forceFull = false } = {}) {
   if (!vaultBase || !projectId) throw new Error('vaultBase e projectId são obrigatórios.');
   const occurredAt = isoNow(now);
   const resolvedCaptureLevel = normalizeObserverCaptureLevel(captureLevel);
@@ -289,7 +290,7 @@ export function buildObserverSqlEventBatch({ vaultBase, projectId, input = {}, n
     nextState.files[file.logicalPath] = { content_hash: contentHash, revision: revision || 1 };
     const fm = parseFrontmatter(content);
     if (fm.type === 'session') sessionContexts.push({ file, content, fm, contentHash, revision: revision || 1, sessionId: sessionIdentity.get(file.logicalPath) });
-    if (previous?.content_hash === contentHash) continue;
+    if (!forceFull && previous?.content_hash === contentHash) continue;
     changed += 1;
     events.push(documentEvent({ projectId, logicalPath: file.logicalPath, content, metadata: fm, revision: revision || 1, occurredAt }));
     if (fm.type === 'session') {
@@ -309,7 +310,7 @@ export function buildObserverSqlEventBatch({ vaultBase, projectId, input = {}, n
       const content = readFileSync(source.path, 'utf8');
       const fingerprint = hash(content);
       const previousTranscript = state.transcripts?.[source.transcriptId];
-      if (previousTranscript?.content_hash === fingerprint && previousTranscript?.coverage === resolvedCaptureLevel) continue;
+      if (!forceFull && previousTranscript?.content_hash === fingerprint && previousTranscript?.coverage === resolvedCaptureLevel) continue;
       const complete = completeTranscriptEvents({ projectId, sessionId, mainAgentId, provider, model, source, now: occurredAt, captureLevel: resolvedCaptureLevel });
       nextState.transcripts[source.transcriptId] = { content_hash: complete.fingerprint, coverage: resolvedCaptureLevel };
       const summaryId = complete.transcriptId;
@@ -467,11 +468,20 @@ function queueOutbox(vaultBase, batch) {
 
 function eventCoalesceKey(event) {
   const payload = event.payload || {};
+  const entityFields = {
+    'document.upsert': ['logical_path'],
+    'document.delete': ['logical_path'],
+    'session.upsert': ['session_id'],
+    'agent.upsert': ['agent_id'],
+    'usage.rollup': ['rollup_key'],
+    llm_call: ['call_id'],
+    'transcript.upsert': ['transcript_id'],
+  }[event.kind] || [];
+  const entityId = entityFields.map((field) => payload[field]).find(Boolean) || event.event_id;
   return [
     event.project_id,
     event.kind,
-    payload.logical_path || payload.session_id || payload.agent_id || payload.rollup_key
-      || payload.call_id || payload.transcript_id || event.event_id,
+    entityId,
   ].join('\u001f');
 }
 
@@ -480,15 +490,17 @@ function waitSync(milliseconds) { Atomics.wait(WAIT_ARRAY, 0, 0, milliseconds); 
 
 function acquireBatchFileLease(path, waitMs = 0) {
   const lock = `${path}.lock`;
+  const token = `${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
   const deadline = Date.now() + Math.max(0, waitMs);
   do {
     try {
       mkdirSync(lock);
-      return lock;
+      atomicJson(join(lock, 'owner.json'), { token, pid: process.pid, acquired_at: new Date().toISOString() });
+      return { path: lock, token };
     } catch (error) {
       if (error?.code !== 'EEXIST') throw error;
       try {
-        if (Date.now() - statSync(lock).mtimeMs > 60_000) {
+        if (Date.now() - statSync(lock).mtimeMs > SQL_LEASE_STALE_MS) {
           const stale = `${lock}.stale-${process.pid}-${Date.now()}`;
           renameSync(lock, stale);
           rmSync(stale, { recursive: true, force: true });
@@ -502,8 +514,10 @@ function acquireBatchFileLease(path, waitMs = 0) {
   return null;
 }
 
-function releaseBatchFileLease(lock) {
-  if (lock) rmSync(lock, { recursive: true, force: true });
+function releaseBatchFileLease(lease) {
+  if (!lease) return;
+  const owner = readJson(join(lease.path, 'owner.json'), {});
+  if (owner.token === lease.token) rmSync(lease.path, { recursive: true, force: true });
 }
 
 /** Queue a precise writer batch and replace older pending state for the same logical scope. */
@@ -625,7 +639,7 @@ function acquirePublisherLease(vaultBase, currentTime = Date.now()) {
     if (error?.code !== 'EEXIST') throw error;
     let age = 0;
     try { age = currentTime - statSync(path).mtimeMs; } catch { return null; }
-    if (age <= 60_000) return null;
+    if (age <= SQL_LEASE_STALE_MS) return null;
     const stale = `${path}.stale-${token}`;
     try {
       renameSync(path, stale);
@@ -770,14 +784,14 @@ export async function publishObserverSqlIncremental({
   };
 }
 
-export async function publishObserverSql({ vaultBase, projectId, url = process.env.WENDKEEP_OBSERVER_URL || '', input = {}, now = new Date(), fetchImpl = globalThis.fetch, token = process.env.WENDKEEP_OBSERVER_TOKEN || '', captureLevel = process.env.WENDKEEP_OBSERVER_CAPTURE_LEVEL || 'metadata' } = {}) {
+export async function publishObserverSql({ vaultBase, projectId, url = process.env.WENDKEEP_OBSERVER_URL || '', input = {}, now = new Date(), fetchImpl = globalThis.fetch, token = process.env.WENDKEEP_OBSERVER_TOKEN || '', captureLevel = process.env.WENDKEEP_OBSERVER_CAPTURE_LEVEL || 'metadata', forceFull = false } = {}) {
   if (!vaultBase || !projectId) throw new Error('vaultBase e projectId são obrigatórios.');
   const replay = await retryObserverSqlOutbox({ vaultBase, projectId, url, fetchImpl, token });
   const state = readState(vaultBase);
-  const remoteDocuments = Object.keys(state.files || {}).length === 0
+  const remoteDocuments = forceFull || Object.keys(state.files || {}).length === 0
     ? await readRemoteDocuments({ url, projectId, fetchImpl, token })
     : {};
-  const batch = buildObserverSqlEventBatch({ vaultBase, projectId, input, now, state, remoteDocuments, captureLevel });
+  const batch = buildObserverSqlEventBatch({ vaultBase, projectId, input, now, state, remoteDocuments, captureLevel, forceFull });
   if (!batch.events.length) {
     atomicJson(statePath(vaultBase), batch.nextState);
     return { ok: true, queued: false, scanned: batch.scanned, changed: batch.changed, pending: listSqlOutbox(vaultBase).length, replay };
