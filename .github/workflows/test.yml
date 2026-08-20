@@ -1,8 +1,6 @@
 name: test
 
 on:
-  push:
-    branches: [main]
   pull_request:
 
 jobs:
@@ -31,12 +29,3 @@ jobs:
       - if: matrix.scope == 'full'
         run: npm test
       - run: npm run check
-
-  release:
-    needs: test
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    permissions:
-      contents: write
-      id-token: write
-    uses: ./.github/workflows/auto-tag.yml
-    secrets: inherit
