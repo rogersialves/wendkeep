@@ -114,9 +114,12 @@ function readCheckedMemoryFile(vaultBase, path, encoding, label, { allowMissing 
 
 function assertOpenedMemoryFile(vaultBase, path, fd, label) {
   const checked = checkedMemoryFile(vaultBase, path, label, { allowMissing: false });
-  const descriptor = fstatSync(fd);
-  const target = statSync(checked.target);
-  if (!descriptor.isFile() || descriptor.nlink > 1 || target.nlink > 1
+  // Windows file identities can exceed Number's safe integer range. Node 22.13 may
+  // round stat(path) and fstat(fd) differently for the same file, so compare the
+  // exact bigint values and keep nlink as the independent hardlink guard.
+  const descriptor = fstatSync(fd, { bigint: true });
+  const target = statSync(checked.target, { bigint: true });
+  if (!descriptor.isFile() || descriptor.nlink > 1n || target.nlink > 1n
       || descriptor.dev !== target.dev || descriptor.ino !== target.ino) {
     throw unsafeMemoryPath(`${label} mudou de inode ou possui hardlink antes da mutação: ${checked.target}`);
   }

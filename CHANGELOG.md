@@ -25,6 +25,12 @@ All notable changes to **wendkeep** are documented here. Format based on
   seus hooks chamam `node ./bin/wendkeep.mjs`, enquanto projetos consumidores usam
   `npx --no-install wendkeep` e o tarball continua testado isoladamente.
 
+### Fixed
+
+- **Identidade de arquivos de memória no Windows.** A revalidação de descritor e caminho compara
+  `dev`/`ino` como inteiros exatos, evitando falsos `VAULT_PATH_UNSAFE` no Node.js 22.13 sem
+  relaxar a rejeição de hardlinks.
+
 ## [0.72.0] — 2026-08-17
 
 ### Added
