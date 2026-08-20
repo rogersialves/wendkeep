@@ -112,6 +112,16 @@ function readCheckedMemoryFile(vaultBase, path, encoding, label, { allowMissing 
   return readFileSync(checked.target, encoding);
 }
 
+export function memoryFileIdentityMatches(descriptor, target, {
+  platform = process.platform,
+} = {}) {
+  if (descriptor.ino !== target.ino) return false;
+  // libuv before 1.51 can report an inconsistent Windows volume serial number
+  // between stat(path) and fstat(fd). The inode is still the file index; path
+  // containment/reparse checks and nlink validation remain independent guards.
+  return platform === 'win32' || descriptor.dev === target.dev;
+}
+
 function assertOpenedMemoryFile(vaultBase, path, fd, label) {
   const checked = checkedMemoryFile(vaultBase, path, label, { allowMissing: false });
   // Windows file identities can exceed Number's safe integer range. Node 22.13 may
@@ -120,7 +130,7 @@ function assertOpenedMemoryFile(vaultBase, path, fd, label) {
   const descriptor = fstatSync(fd, { bigint: true });
   const target = statSync(checked.target, { bigint: true });
   if (!descriptor.isFile() || descriptor.nlink > 1n || target.nlink > 1n
-      || descriptor.dev !== target.dev || descriptor.ino !== target.ino) {
+      || !memoryFileIdentityMatches(descriptor, target)) {
     throw unsafeMemoryPath(`${label} mudou de inode ou possui hardlink antes da mutação: ${checked.target}`);
   }
   return checked.target;

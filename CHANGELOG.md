@@ -27,9 +27,9 @@ All notable changes to **wendkeep** are documented here. Format based on
 
 ### Fixed
 
-- **Identidade de arquivos de memória no Windows.** A revalidação de descritor e caminho compara
-  `dev`/`ino` como inteiros exatos, evitando falsos `VAULT_PATH_UNSAFE` no Node.js 22.13 sem
-  relaxar a rejeição de hardlinks.
+- **Identidade de arquivos de memória no Windows.** A revalidação compara o índice do arquivo como
+  inteiro exato e tolera a inconsistência conhecida do serial de volume do libuv antigo, evitando
+  falsos `VAULT_PATH_UNSAFE` no Node.js 22.13 sem relaxar a rejeição de hardlinks ou reparses.
 
 ## [0.72.0] — 2026-08-17
 
