@@ -92,8 +92,13 @@ agent sessions, cost rollups, and calls. Messages and transcripts are only sent 
 that explicitly enable them. The container stores everything in
 `/data/observer.sqlite`; it does not mount `C:\GitHub` or any `.WendKeep-vault`. Markdown is only
 the text held in SQL and is recreated as files only by an explicit read-only export.
-`memory import` performs the initial load and returns file/hash parity. During migration, the
-cost/token total recorded in frontmatter is preserved through an explicit reconciliation row when
+`memory import` performs the initial load and returns file/hash parity. The remote recovery
+commands `observer reconcile --url` and `observer memory import` do not use the
+incremental cursor to decide what to omit: they regenerate documents, sessions, usage, calls, and
+transcripts. The cursor still supplies the local revision baseline and the remote tree, when
+available, supplies the highest known baseline; a transient read failure never lowers the locally
+persisted revision. During migration, the cost/token total recorded in frontmatter is preserved
+through an explicit reconciliation row when
 the detailed ledger does not add up; that row does not invent calls. Historical sessions sharing
 one `session_id` receive a canonical per-file identity so one rollup cannot overwrite the other.
 

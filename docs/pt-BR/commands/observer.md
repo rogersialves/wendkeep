@@ -94,6 +94,11 @@ níveis de captura que os habilitam. O container grava tudo em
 `/data/observer.sqlite`; não monta `C:\GitHub` nem qualquer `.WendKeep-vault`. Markdown é aceito
 somente como conteúdo de uma coluna SQL e volta a existir como arquivo apenas pela exportação
 read-only sob demanda. `memory import` faz a carga inicial e retorna a paridade por arquivo e hash.
+Na recuperação remota, `observer reconcile --url` e `observer memory import` não usam o cursor
+incremental para decidir o que omitir: regeneram documentos, sessões, consumo, chamadas e
+transcripts. O cursor continua fornecendo o baseline local de revisão e a árvore remota, quando
+disponível, fornece o maior baseline conhecido; uma falha temporária nessa leitura nunca reduz a
+revisão persistida localmente.
 Na migração, o total de custo/token registrado no frontmatter é preservado por uma linha de
 reconciliação quando o ledger detalhado não fecha com ele; essa linha não inventa chamadas.
 Sessões históricas com o mesmo `session_id` recebem uma identidade canônica por arquivo para

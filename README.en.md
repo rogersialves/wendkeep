@@ -88,7 +88,7 @@ Decisions, dead ends, the reason you chose X over Y — gone next session. The p
 | **Cost** — what it all cost | Per‑model, cache‑aware token pricing per session — plus `cost --trend` with a run‑rate projection across the whole vault; research previews without a final rate remain unestimated. |
 | **Multi‑agent** — one vault, both agents | `init` wires the session hooks into `.claude/settings.json` *and* `.codex/hooks.json`, and every note is tagged with the agent that wrote it: Claude Code is detected from its environment, anything else is recorded as Codex. One shared graph, whichever agent you are in. |
 | **Local‑first** — no cloud, no account | Everything is plain Markdown on your disk. An optional MCP server (`@bitbonsai/mcpvault`) lets the agent read/write the vault. |
-| **Local Observer** — many projects, one view | `wendkeep observer` keeps documents, FTS5 chunks, sessions, agents, tokens, costs, calls, and transcripts in SQLite. Identities and foreign keys are project-scoped; each event is atomic. Hooks publish only what changed, while `observer reconcile` reserves full scans for explicit recovery. |
+| **Local Observer** — many projects, one view | `wendkeep observer` keeps documents, FTS5 chunks, sessions, agents, tokens, costs, calls, and transcripts in SQLite. Identities and foreign keys are project-scoped; each event is atomic. Hooks publish only what changed; `observer reconcile --url` ignores the incremental cursor to regenerate the complete projection while preserving local/remote revision baselines. |
 
 During historical migration, the Observer preserves differences between frontmatter totals and the
 ledger as explicit reconciliation rows, and disambiguates duplicate `session_id` values per file

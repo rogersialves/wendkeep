@@ -263,7 +263,7 @@ function dedupeEvents(events) {
   });
 }
 
-export function buildObserverSqlEventBatch({ vaultBase, projectId, input = {}, now = new Date(), state = readState(vaultBase), remoteDocuments = {}, captureLevel = process.env.WENDKEEP_OBSERVER_CAPTURE_LEVEL || 'metadata' } = {}) {
+export function buildObserverSqlEventBatch({ vaultBase, projectId, input = {}, now = new Date(), state = readState(vaultBase), remoteDocuments = {}, captureLevel = process.env.WENDKEEP_OBSERVER_CAPTURE_LEVEL || 'metadata', forceFull = false } = {}) {
   if (!vaultBase || !projectId) throw new Error('vaultBase e projectId são obrigatórios.');
   const occurredAt = isoNow(now);
   const resolvedCaptureLevel = normalizeObserverCaptureLevel(captureLevel);
@@ -290,7 +290,7 @@ export function buildObserverSqlEventBatch({ vaultBase, projectId, input = {}, n
     nextState.files[file.logicalPath] = { content_hash: contentHash, revision: revision || 1 };
     const fm = parseFrontmatter(content);
     if (fm.type === 'session') sessionContexts.push({ file, content, fm, contentHash, revision: revision || 1, sessionId: sessionIdentity.get(file.logicalPath) });
-    if (previous?.content_hash === contentHash) continue;
+    if (!forceFull && previous?.content_hash === contentHash) continue;
     changed += 1;
     events.push(documentEvent({ projectId, logicalPath: file.logicalPath, content, metadata: fm, revision: revision || 1, occurredAt }));
     if (fm.type === 'session') {
@@ -310,7 +310,7 @@ export function buildObserverSqlEventBatch({ vaultBase, projectId, input = {}, n
       const content = readFileSync(source.path, 'utf8');
       const fingerprint = hash(content);
       const previousTranscript = state.transcripts?.[source.transcriptId];
-      if (previousTranscript?.content_hash === fingerprint && previousTranscript?.coverage === resolvedCaptureLevel) continue;
+      if (!forceFull && previousTranscript?.content_hash === fingerprint && previousTranscript?.coverage === resolvedCaptureLevel) continue;
       const complete = completeTranscriptEvents({ projectId, sessionId, mainAgentId, provider, model, source, now: occurredAt, captureLevel: resolvedCaptureLevel });
       nextState.transcripts[source.transcriptId] = { content_hash: complete.fingerprint, coverage: resolvedCaptureLevel };
       const summaryId = complete.transcriptId;
@@ -787,14 +787,11 @@ export async function publishObserverSqlIncremental({
 export async function publishObserverSql({ vaultBase, projectId, url = process.env.WENDKEEP_OBSERVER_URL || '', input = {}, now = new Date(), fetchImpl = globalThis.fetch, token = process.env.WENDKEEP_OBSERVER_TOKEN || '', captureLevel = process.env.WENDKEEP_OBSERVER_CAPTURE_LEVEL || 'metadata', forceFull = false } = {}) {
   if (!vaultBase || !projectId) throw new Error('vaultBase e projectId são obrigatórios.');
   const replay = await retryObserverSqlOutbox({ vaultBase, projectId, url, fetchImpl, token });
-  const persistedState = readState(vaultBase);
-  const state = forceFull
-    ? { schema_version: SQL_SCHEMA_VERSION, files: {}, transcripts: {} }
-    : persistedState;
+  const state = readState(vaultBase);
   const remoteDocuments = forceFull || Object.keys(state.files || {}).length === 0
     ? await readRemoteDocuments({ url, projectId, fetchImpl, token })
     : {};
-  const batch = buildObserverSqlEventBatch({ vaultBase, projectId, input, now, state, remoteDocuments, captureLevel });
+  const batch = buildObserverSqlEventBatch({ vaultBase, projectId, input, now, state, remoteDocuments, captureLevel, forceFull });
   if (!batch.events.length) {
     atomicJson(statePath(vaultBase), batch.nextState);
     return { ok: true, queued: false, scanned: batch.scanned, changed: batch.changed, pending: listSqlOutbox(vaultBase).length, replay };
