@@ -99,6 +99,16 @@
             "statusMessage": "wendkeep: subagent telemetry"
           }
         ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "npx wendkeep hook observer-publish",
+            "timeoutSec": 5,
+            "statusMessage": "wendkeep: publishing local observer usage"
+          }
+        ]
       }
     ],
     "PreToolUse": [

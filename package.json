@@ -71,6 +71,6 @@
   },
   "devDependencies": {
     "acorn": "^8.18.0",
-    "wendkeep": "^0.69.0"
+    "wendkeep": "^0.72.0"
   }
 }
