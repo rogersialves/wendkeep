@@ -4,6 +4,18 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.75.1] — 2026-08-20
+
+### Fixed
+
+- **Coalescência sem perda.** A outbox seleciona o identificador próprio de cada tipo de evento;
+  chamadas, agentes, rollups e transcripts distintos da mesma sessão não disputam mais a mesma chave.
+- **Reconciliação realmente integral.** `observer reconcile --url` e `observer memory import`
+  ignoram o cursor incremental local, consultam as revisões remotas e regeneram documentos,
+  consumo, chamadas e transcripts mesmo após restauração ou troca do Observer.
+- **Leases compatíveis com o transporte.** Locks de batch e publisher permanecem válidos além do
+  timeout máximo de request e só podem ser liberados pelo proprietário que os adquiriu.
+
 ## [0.75.0] — 2026-08-20
 
 ### Added

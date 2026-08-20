@@ -83,6 +83,45 @@ test('[req:SQL-OBS-SEC] captura padrão omite mensagens, transcript bruto e cami
   }
 });
 
+test('[req:SQL-INCR-5] forced reconciliation rebuilds operational rows despite a complete local cursor', async () => {
+  const fixture = makeObserverFixture();
+  const transcriptPath = join(fixture.projectRoot, 'reconcile-transcript.jsonl');
+  transcriptFixture(transcriptPath);
+  sessionFixture(fixture, transcriptPath);
+  try {
+    const input = { session_id: 'live-session', transcript_path: transcriptPath, transcript_id: 'live-transcript' };
+    const baseline = buildObserverSqlEventBatch({
+      vaultBase: fixture.vaultBase,
+      projectId: fixture.projectId,
+      input,
+      captureLevel: 'full-transcript',
+      now: '2026-08-20T12:00:00Z',
+    });
+    writeFileSync(join(fixture.vaultBase, '.brain', 'observer-sql-state.json'), `${JSON.stringify(baseline.nextState, null, 2)}\n`);
+    const posted = [];
+    const result = await publishObserverSql({
+      vaultBase: fixture.vaultBase,
+      projectId: fixture.projectId,
+      url: 'http://observer.test',
+      input,
+      captureLevel: 'full-transcript',
+      forceFull: true,
+      now: '2026-08-20T12:01:00Z',
+      fetchImpl: async (url, init = {}) => {
+        if (!init.method) return { ok: true, status: 200, json: async () => ({ documents: [] }) };
+        const body = JSON.parse(gunzipSync(init.body).toString('utf8'));
+        posted.push(...body.events);
+        return { ok: true, status: 201, json: async () => ({ accepted: body.events.length }) };
+      },
+    });
+    assert.equal(result.ok, true);
+    assert.ok(posted.some((event) => event.kind === 'document.upsert'));
+    assert.ok(posted.some((event) => event.kind === 'usage.rollup'));
+    assert.ok(posted.some((event) => event.kind === 'llm_call'));
+    assert.ok(posted.some((event) => event.kind === 'transcript.upsert' && event.payload.coverage === 'complete'));
+  } finally { fixture.cleanup(); }
+});
+
 test('[req:SQL-OBS-10] publisher envia lote gzip quando o JSON puro excede 64 MB', async () => {
   const fixture = makeObserverFixture();
   const dataDir = makeDataDir();
