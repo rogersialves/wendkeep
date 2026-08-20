@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Atomic release: publish to npm, tag, and push — so the tag always exists on
-// origin. Creating the GitHub Release itself is left to .github/workflows/release.yml
+// origin. Creating the GitHub Release itself is left to .github/workflows/auto-tag.yml
 // (fires on the tag push), which keeps a single source of truth and means even a
 // bare `git push --tags` produces a release.
 //
@@ -110,6 +110,6 @@ executeRelease(commands, {
 
 console.log(
   `\n✔ ${tag} publicado e pushado.` +
-    `\n  A GitHub Release é criada pelo workflow release.yml no push da tag.` +
+    `\n  A GitHub Release é criada pelo workflow auto-tag.yml após a CI verde da main.` +
     (DRY ? '\n  (dry-run: nada foi executado)\n' : '\n')
 );

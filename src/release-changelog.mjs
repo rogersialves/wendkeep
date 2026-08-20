@@ -1,5 +1,5 @@
 // Pure helper: extract a single version's release notes from a Keep-a-Changelog
-// file. Reused by scripts/release.mjs and .github/workflows/release.yml so the
+// file. Reused by scripts/release.mjs and .github/workflows/auto-tag.yml so the
 // GitHub Release body always matches the committed CHANGELOG.
 
 const HEADER_RE = /^##\s*\[([^\]]+)\]\s*[—–-]\s*(.+?)\s*$/;

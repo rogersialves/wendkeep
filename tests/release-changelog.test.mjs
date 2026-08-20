@@ -13,7 +13,7 @@ import {
 } from '../scripts/release-plan.mjs';
 
 const TEST_WORKFLOW = readFileSync(new URL('../.github/workflows/test.yml', import.meta.url), 'utf8');
-const RELEASE_WORKFLOW = readFileSync(new URL('../.github/workflows/release.yml', import.meta.url), 'utf8');
+const RELEASE_WORKFLOW = readFileSync(new URL('../.github/workflows/auto-tag.yml', import.meta.url), 'utf8');
 const AGENT_RULES = readFileSync(new URL('../AGENTS.md', import.meta.url), 'utf8');
 const CHANGELOG = readFileSync(new URL('../CHANGELOG.md', import.meta.url), 'utf8');
 const PACKAGE = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
@@ -128,7 +128,7 @@ test('[sensor:release-tests] as notas de 0.68.1 seguem extraíveis depois do bum
 test('[sensor:release-tests] [req:REL-CI-1] release depende da matriz verde do mesmo SHA', () => {
   assert.match(TEST_WORKFLOW, /^  release:\r?\n    needs:\s*test$/m);
   assert.match(TEST_WORKFLOW, /github\.event_name\s*==\s*'push'[\s\S]*github\.ref\s*==\s*'refs\/heads\/main'/);
-  assert.match(TEST_WORKFLOW, /uses:\s*\.\/\.github\/workflows\/release\.yml/);
+  assert.match(TEST_WORKFLOW, /uses:\s*\.\/\.github\/workflows\/auto-tag\.yml/);
   assert.doesNotMatch(RELEASE_WORKFLOW, /^\s{2}push:/m, 'release não pode disparar em paralelo por push/tag');
   assert.match(RELEASE_WORKFLOW, /^\s{2}workflow_call:\s*$/m);
 });
