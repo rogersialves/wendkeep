@@ -651,23 +651,36 @@ export function readSqlTree(db, projectId, prefix = '') {
   return { schema_version: OBSERVER_SQL_SCHEMA_VERSION, project_id: projectId, prefix, documents: rows };
 }
 
-export function searchSqlDocuments(db, projectId, query = '') {
+export function searchSqlDocuments(db, projectId, query = '', { forceLexical = false } = {}) {
   requireProject(db, projectId);
   const terms = recallTerms(query);
   if (!terms.length) return [];
-  const fts = observerFts5Support(db);
+  const fts = forceLexical
+    ? { supported: false, engine: 'lexical-fallback' }
+    : observerFts5Support(db);
+  const columns = `c.chunk_id, c.project_id, c.logical_path, c.title, c.heading,
+    c.entity_type, c.change_slug, c.session_id, c.work_session_id, c.authority,
+    c.observed_at, c.validity, c.content_hash AS chunk_content_hash, c.ordinal, c.content,
+    d.content_hash, d.revision, d.captured_at, d.source_session_id`;
   let rows;
   if (fts.supported) {
     const expression = [...new Set(terms)]
       .map((term) => `"${term.replaceAll('"', '""')}"`)
       .join(' OR ');
-    rows = db.prepare(`SELECT c.* FROM evidence_chunks_fts f
+    rows = db.prepare(`SELECT ${columns} FROM evidence_chunks_fts f
       JOIN document_chunks c ON c.chunk_id = f.chunk_id
-      WHERE evidence_chunks_fts MATCH ? AND c.project_id = ?
+      JOIN documents d ON d.project_id = c.project_id AND d.logical_path = c.logical_path
+      WHERE evidence_chunks_fts MATCH ? AND c.project_id = ? AND d.deleted_at IS NULL
       ORDER BY bm25(evidence_chunks_fts, 0, 0, 1.5, 3.0, 2.5, 1.0), c.observed_at DESC
       LIMIT 200`).all(expression, projectId);
   } else {
-    rows = db.prepare('SELECT * FROM document_chunks WHERE project_id = ? ORDER BY observed_at DESC LIMIT 2000').all(projectId);
+    // FTS5 may be unavailable in a valid Observer runtime. Rank the complete project corpus
+    // instead of truncating by recency before matching, which would make old exact evidence
+    // permanently unreachable.
+    rows = db.prepare(`SELECT ${columns} FROM document_chunks c
+      JOIN documents d ON d.project_id = c.project_id AND d.logical_path = c.logical_path
+      WHERE c.project_id = ? AND d.deleted_at IS NULL
+      ORDER BY c.observed_at DESC, c.logical_path, c.ordinal`).all(projectId);
   }
   return recallEvidence(rows, query, { topK: 5 });
 }

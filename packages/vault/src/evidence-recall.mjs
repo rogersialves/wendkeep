@@ -23,7 +23,7 @@ export function normalizeRecallText(value) {
 }
 
 export function recallTerms(value) {
-  return normalizeRecallText(value).match(/[\p{L}\p{N}][\p{L}\p{N}._-]*/gu)
+  return normalizeRecallText(value).match(/[\p{L}\p{N}]+(?:[._-][\p{L}\p{N}]+)*/gu)
     ?.filter((term) => term.length > 1 && !STOP_WORDS.has(term)) || [];
 }
 

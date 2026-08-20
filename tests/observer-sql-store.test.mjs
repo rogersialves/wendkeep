@@ -152,6 +152,66 @@ test('[req:RECALL-6] Observer indexes chunks, probes FTS5 and returns the matchi
     assert.equal(results[0].logical_path, '04-Decisões/ADR-0099-evidence.md');
     assert.equal(results[0].authority, 'verified');
     assert.equal(results[0].validity, 'active');
+    assert.equal(results[0].revision, 1);
+    assert.match(results[0].content_hash, /^[a-f0-9]{64}$/);
+    assert.match(results[0].chunk_content_hash, /^[a-f0-9]{64}$/);
+  } finally {
+    db.close();
+    rmSync(dataDir, { recursive: true, force: true });
+  }
+});
+
+test('[req:RECALL-6] lexical fallback searches beyond 2,000 chunks and preserves document revision', () => {
+  const dataDir = makeDataDir();
+  const db = ensureObserverDatabase(dataDir);
+  try {
+    registerSqlProject(db, { projectId: 'project-a', projectName: 'A' });
+    const logicalPath = '02-Sessions/large-history.md';
+    const content = '# Histórico extenso\n';
+    const contentHash = createHash('sha256').update(content).digest('hex');
+    ingestObserverEvents(db, {
+      projectId: 'project-a',
+      events: [event('document.upsert', 'large-history-document', 'project-a', {
+        logical_path: logicalPath,
+        entity_type: 'session',
+        content,
+        content_hash: contentHash,
+        revision: 7,
+      })],
+    });
+    db.prepare('DELETE FROM document_chunks WHERE project_id = ? AND logical_path = ?')
+      .run('project-a', logicalPath);
+    if (observerFts5Support(db).supported) {
+      db.prepare('DELETE FROM evidence_chunks_fts WHERE project_id = ? AND logical_path = ?')
+        .run('project-a', logicalPath);
+    }
+    const insert = db.prepare(`INSERT INTO document_chunks(
+      chunk_id, project_id, logical_path, title, heading, entity_type, authority,
+      observed_at, validity, content_hash, ordinal, content
+    ) VALUES (?, 'project-a', ?, 'Histórico', 'Passagem', 'session', 'verified',
+      '2026-08-20T12:00:00.000Z', 'active', ?, ?, ?)`);
+    db.exec('BEGIN');
+    try {
+      for (let ordinal = 0; ordinal < 2001; ordinal += 1) {
+        const passage = ordinal === 2000
+          ? 'A evidência antiga exclusiva usa o marcador needle-historico.'
+          : `Ruído histórico ${ordinal}.`;
+        insert.run(
+          `fallback-${ordinal}`, logicalPath,
+          createHash('sha256').update(passage).digest('hex'), ordinal, passage,
+        );
+      }
+      db.exec('COMMIT');
+    } catch (error) {
+      db.exec('ROLLBACK');
+      throw error;
+    }
+
+    const results = searchSqlDocuments(db, 'project-a', 'needle-historico', { forceLexical: true });
+    assert.equal(results[0].ordinal, 2000);
+    assert.match(results[0].excerpt, /needle-historico/);
+    assert.equal(results[0].revision, 7);
+    assert.equal(results[0].content_hash, contentHash);
   } finally {
     db.close();
     rmSync(dataDir, { recursive: true, force: true });
