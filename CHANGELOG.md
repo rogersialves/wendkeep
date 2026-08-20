@@ -33,9 +33,9 @@ All notable changes to **wendkeep** are documented here. Format based on
 - **Ingestão SQL grande em runners lentos.** O timeout HTTP cresce com o tamanho bruto do lote até
   60 segundos, preservando 15 segundos para payloads vazios/pequenos e evitando outbox falsa para
   lotes gzip válidos acima de 64 MB.
-- **Trusted Publisher preservado após o gate de CI.** O workflow reutilizável mantém o nome
-  `auto-tag.yml` já autorizado no npm, mas só é chamado pelo job de release depois que toda a
-  matriz da `main` fica verde.
+- **Trusted Publisher preservado após o gate de CI.** `auto-tag.yml`, o workflow já autorizado no
+  npm, passa a executar a matriz da `main` e mantém o publish em um job com `needs: test`;
+  `test.yml` fica exclusivo para pull requests.
 
 ## [0.72.0] — 2026-08-17
 

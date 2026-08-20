@@ -126,14 +126,14 @@ test('[sensor:release-tests] as notas de 0.68.1 seguem extraíveis depois do bum
 });
 
 test('[sensor:release-tests] [req:REL-CI-1] release depende da matriz verde do mesmo SHA', () => {
-  assert.match(TEST_WORKFLOW, /^  release:\r?\n    needs:\s*test$/m);
-  assert.match(TEST_WORKFLOW, /github\.event_name\s*==\s*'push'[\s\S]*github\.ref\s*==\s*'refs\/heads\/main'/);
-  assert.match(TEST_WORKFLOW, /uses:\s*\.\/\.github\/workflows\/auto-tag\.yml/);
-  assert.doesNotMatch(RELEASE_WORKFLOW, /^\s{2}push:/m, 'release não pode disparar em paralelo por push/tag');
-  assert.match(RELEASE_WORKFLOW, /^\s{2}workflow_call:\s*$/m);
+  assert.match(RELEASE_WORKFLOW, /^  release:\r?\n    needs:\s*test$/m);
+  assert.match(RELEASE_WORKFLOW, /^  push:\r?\n    branches:\s*\[main\]$/m);
+  assert.match(RELEASE_WORKFLOW, /^  test:\r?\n    strategy:/m);
+  assert.doesNotMatch(TEST_WORKFLOW, /^\s{2}push:/m, 'test.yml fica exclusivo para pull requests');
+  assert.match(TEST_WORKFLOW, /^\s{2}pull_request:\s*$/m);
 });
 
-test('[sensor:release-tests] [req:REL-CI-2] workflow chamado publica antes de criar a tag no SHA testado', () => {
+test('[sensor:release-tests] [req:REL-CI-2] workflow confiável publica antes de criar a tag no SHA testado', () => {
   const permissions = RELEASE_WORKFLOW.match(/^permissions:\r?\n(?:  [^\r\n]+\r?\n?)+/m)?.[0] || '';
   assert.match(permissions, /id-token:\s*write/);
   assert.match(RELEASE_WORKFLOW, /registry-url:\s*['"]https:\/\/registry\.npmjs\.org['"]/);
