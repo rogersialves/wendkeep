@@ -16,6 +16,7 @@ import {
   relinkChanges,
   backfillArtifactLinks,
   scaffoldPlaceholders,
+  isGuideCompactChange,
 } from '../hooks/change-core.mjs';
 import { evaluateGate, requiredSensors } from '../hooks/sensors-core.mjs';
 import { buildEffectiveRequirementPackage, evaluateVerdict, formatOrphanReqs, tasksHashOf, parseSpecsList, parseDelta, parseRequirements, applyDelta, validateSpecImpact } from '../hooks/spec-core.mjs';
@@ -61,7 +62,9 @@ export function runChange(argv) {
     // G2: link the active session into the proposta's source: (graph edge proposta->sessão).
     let sessionRel = '';
     try { sessionRel = readControl(vaultBase).session_file || ''; } catch { /* sem control */ }
-    const r = newChange(vaultBase, slug, { dateStr: today(), simple: rest.includes('--simple'), sessionRel });
+    const r = newChange(vaultBase, slug, {
+      dateStr: today(), simple: rest.includes('--simple'), guide: rest.includes('--guide'), sessionRel,
+    });
     process.stdout.write(`change ${r.created ? 'created' : 'exists'}: ${r.rel} (active)\n`);
     process.exit(0);
   }
@@ -97,7 +100,7 @@ export function runChange(argv) {
     let sessionRel = '';
     try { sessionRel = readControl(vaultBase).session_file || ''; } catch { /* no control */ }
     const r = continueChange(vaultBase, archivedSlug, newSlug, {
-      dateStr: today(), simple: rest.includes('--simple'), sessionRel,
+      dateStr: today(), simple: rest.includes('--simple'), guide: rest.includes('--guide'), sessionRel,
     });
     if (!r.ok) { process.stderr.write(`wendkeep change continue: ${r.error}\n`); process.exit(2); }
     process.stdout.write(`change created: ${r.rel} (continues ${r.archived}; active)\n`);
@@ -287,13 +290,16 @@ export function runChange(argv) {
     try { tasks = parseTasks(readFileSync(join(vaultBase, getLocale(vaultBase).folders.changes, slug, 'tarefas.md'), 'utf8')); } catch { /* sem tarefas */ }
     const forced = rest.includes('--force') && tasks.some((t) => !t.done);
     const trivial = !tasks.some((t) => t.req) && !tasks.some((t) => t.sensor);
-    if (trivial) process.stderr.write('aviso: change trivial (sem [req:]/[sensor:]) — ADR marcado trivial: true\n');
+    const compactGuide = isGuideCompactChange(join(vaultBase, getLocale(vaultBase).folders.changes, slug));
+    if (trivial) process.stderr.write(compactGuide
+      ? 'aviso: GUIDE compacta sem [req:]/[sensor:] — resultado permanece auditável no archive, sem ADR automático\n'
+      : 'aviso: change trivial (sem [req:]/[sensor:]) — ADR marcado trivial: true\n');
     const r = archiveChange(vaultBase, slug, { dateStr: today(), adrNum: getNextAdrNumber(vaultBase), gate, adrFlags: { forced, trivial } });
     if (!r.ok) {
       process.stderr.write(`change archive BLOCKED (gate): ${r.failing.join('; ')}\n`);
       process.exit(1);
     }
-    process.stdout.write(`archived: ${r.archivedRel}; ADR: ${r.adrRel}\n`);
+    process.stdout.write(`archived: ${r.archivedRel}${r.adrRel ? `; ADR: ${r.adrRel}` : '; GUIDE compacta: sem ADR'}\n`);
     if (r.promoted && r.promoted.length) process.stdout.write(`specs promovidas: ${r.promoted.join(', ')}\n`);
     if (r.specWarnings && r.specWarnings.length) for (const w of r.specWarnings) process.stderr.write(`  aviso spec: ${w}\n`);
     process.exit(0);

@@ -4,6 +4,36 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.73.0] — 2026-08-20
+
+### Added
+
+- **Work kind independente do perfil.** `inspection`, `maintenance`, `implementation`, `delivery`
+  e `recovery` passam a ser classificados separadamente de perfil, impacto de contrato e risco
+  operacional.
+- **Delivery com autorização e receipt.** `delivery start/status/finish/abandon` captura repositório,
+  branch/worktree, SHA, change de origem e capabilities; comprova target, CI, versão, tag,
+  integridade npm e GitHub Release quando aplicável, sem criar change, spec ou ADR.
+- **GUIDE realmente compacta.** `change new --guide` gera somente objetivo, critérios de aceite,
+  áreas afetadas, testes e resultado. Sem impacto de contrato, seu archive não fabrica design,
+  delta de spec ou ADR.
+
+### Changed
+
+- **Doctor proporcional.** O diagnóstico separa erro estrutural, atenção de workflow, dívida
+  reparável e ambiguidade semântica. `--scope core|runtime` isola as superfícies e `--strict`
+  promove pendências a falha para CI/release.
+- **Sync valida somente o Keep Core.** Trabalho em andamento no Wend Runtime deixa de transformar
+  uma instalação saudável em falha; a conclusão informa separadamente a saúde do Core.
+- **Conflitos semânticos degradam por chave.** Candidates ativos aguardam curadoria sem bloquear o
+  bundle inteiro; corrupção de ledger, boundary, identidade ou projeção continua falhando fechada.
+
+### Fixed
+
+- **Proveniência preserva lifecycle scripts.** A comparação de integridade executa `npm pack`
+  normalmente em uma cópia isolada, mantendo `prepack`/`postpack` e impedindo que a verificação
+  altere o working tree de origem.
+
 ## [0.72.1] — 2026-08-20
 
 ### Added

@@ -82,6 +82,7 @@ import {
   setTaskDone,
   healSpecBacklinks,
   backfillArtifactLinks,
+  isGuideCompactChange,
 } from '../hooks/change-core.mjs';
 
 test('setTaskDone: toggles the exact task id; false when id missing', () => {
@@ -124,6 +125,37 @@ test('newChange --simple: only proposta + tarefas, no design/specs (auto-sizing)
     const proposta = readFileSync(join(dir, 'proposta.md'), 'utf8');
     assert.match(proposta, /spec_impact: none/);
     assert.match(proposta, /spec_impact_reason: ".+"/);
+  } finally { rmSync(vault, { recursive: true, force: true }); }
+});
+
+test('newChange --guide: scaffold compacto declara impacto e não cria design/spec', () => {
+  const vault = mkdtempSync(join(tmpdir(), 'wk-guide-'));
+  mkdirSync(join(vault, '.brain'), { recursive: true });
+  try {
+    newChange(vault, 'compacta', { dateStr: '2026-08-20', guide: true });
+    const dir = join(vault, '08-Mudanças', 'compacta');
+    const proposta = readFileSync(join(dir, 'proposta.md'), 'utf8');
+    const tarefas = readFileSync(join(dir, 'tarefas.md'), 'utf8');
+    assert.match(proposta, /profile: GUIDE/);
+    assert.match(proposta, /contract_impact: none/);
+    assert.match(proposta, /## Objetivo[\s\S]+## Critérios de aceite[\s\S]+## Áreas afetadas/);
+    assert.match(tarefas, /## Testes[\s\S]+## Resultado/);
+    assert.equal(existsSync(join(dir, 'design.md')), false);
+    assert.equal(existsSync(join(dir, 'specs')), false);
+    assert.equal(isGuideCompactChange(dir), true);
+  } finally { rmSync(vault, { recursive: true, force: true }); }
+});
+
+test('archiveChange: GUIDE compacta arquiva evidência sem criar ADR', () => {
+  const vault = mkdtempSync(join(tmpdir(), 'wk-guide-archive-'));
+  mkdirSync(join(vault, '.brain'), { recursive: true });
+  try {
+    newChange(vault, 'compacta', { dateStr: '2026-08-20', guide: true });
+    const result = archiveChange(vault, 'compacta', { dateStr: '2026-08-20', adrNum: 1 });
+    assert.equal(result.ok, true);
+    assert.equal(result.adrRel, '');
+    assert.equal(existsSync(join(vault, '04-Decisões')), false);
+    assert.equal(existsSync(join(vault, '08-Mudanças', '_arquivo', '2026-08-20-compacta', 'proposta.md')), true);
   } finally { rmSync(vault, { recursive: true, force: true }); }
 });
 

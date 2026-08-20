@@ -25,7 +25,7 @@ Initialize the project, keep the vault healthy, and provide a valid `wendkeep.se
 ## Syntax
 
 ```bash
-npx wendkeep change new <slug>
+npx wendkeep change new <slug> [--simple|--guide]
 npx wendkeep change status [slug]
 npx wendkeep spec effective --change <slug>
 npx wendkeep sensors list
@@ -35,8 +35,10 @@ npx wendkeep change archive <slug>
 
 ## Options and exit codes
 
-- `wendkeep change new <slug> [--simple]` creates a change; `--simple` only skips design, is not
-  `FLOW`, and preserves the legacy lifecycle/ADR contract.
+- `wendkeep change new <slug> [--simple|--guide]` creates a change. `--simple` only skips design,
+  is not `FLOW`, and preserves the legacy lifecycle/ADR contract. `--guide` creates the compact
+  GUIDE contract (objective, acceptance, areas, tests, and result), with no automatic
+  design/spec/ADR when `contract_impact:none`.
 - `change use`, `list`, `show`, `status`, `diff`, `done`, and `undone` inspect or update work
   without archiving it.
 - `change continue <archived> <new>` starts follow-up work without inheriting stale proof.
@@ -52,6 +54,7 @@ npx wendkeep change archive <slug>
 
 ```bash
 npx wendkeep change new tenant-login
+npx wendkeep change new internal-adjustment --guide
 npx wendkeep spec effective --change tenant-login
 npx wendkeep change done 1.1 --change tenant-login
 npx wendkeep verify --change tenant-login
@@ -67,8 +70,10 @@ npx wendkeep sensors add api-contracts "npm run test:contracts" --severity criti
 
 ## Expected result
 
-An archived change promotes its delta into the living spec, preserves proposal/design/tasks/proof,
-and mints an ADR. Archive passes only with closed tasks, green required sensors, and a fresh verdict.
+An archived change promotes its delta into the living spec when applicable and preserves proposal,
+tasks/proof, and design when present. GOVERN/ASSURE mint an ADR; compact GUIDE with no contract
+impact does not mint one automatically. Archive passes only with closed tasks, green required
+sensors, and a fresh verdict.
 
 ## Tool-scope fence
 

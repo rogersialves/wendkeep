@@ -104,6 +104,7 @@ test('sync propaga o código do doctor sem tratar como falha da cadeia', () => {
 
     assert.ok(r.stdout.includes('[3/3]'), 'o doctor rodou');
     assert.ok(r.status === 0 || r.status === 1, 'e o código dele é o do comando');
+    assert.match(r.stdout, /\[core\]/);
   } finally {
     rmSync(project, { recursive: true, force: true });
   }
@@ -220,7 +221,7 @@ test('sync não afirma que está tudo em dia por cima de um doctor com pendênci
   try {
     const r = spawnWk(['sync', '--project', project, '--yes'], { cwd: project });
     assert.doesNotMatch(r.stdout, /tudo em dia/, 'não contradiz o relatório acima');
-    assert.match(r.stdout, /wendkeep sync: 3 passo\(s\) concluído\(s\)/);
+    assert.match(r.stdout, /wendkeep sync: (?:concluído|falhou)/);
   } finally {
     rmSync(project, { recursive: true, force: true });
   }

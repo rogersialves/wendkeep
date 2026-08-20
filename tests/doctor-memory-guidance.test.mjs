@@ -291,7 +291,7 @@ test('[req:DIAG-11] human renderer and JSON hook agree on ok, failures, warnings
     ]) {
       assert.ok(human.includes(String(value)), `missing metric value: ${value}`);
     }
-    assert.match(human, /\[memória\] bloqueada/i);
+    assert.match(human, /\[memória\] degradada/i);
   } finally {
     rmSync(project, { recursive: true, force: true });
   }

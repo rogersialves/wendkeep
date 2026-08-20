@@ -18,9 +18,14 @@ pode persistir `profile use OFF` explicitamente.
 
 - **FLOW:** ajuste local, reversível e de escopo fechado, sem contrato/spec, segurança,
   dependência, CI/release ou policy.
-- **GUIDE:** mudança compacta de comportamento que precisa de change/spec, sem revisão formal.
+- **GUIDE:** implementação compacta com change, sem spec/design/ADR automáticos quando contract_impact é none.
 - **GOVERN:** escolha conservadora em caso de dúvida ou risco e para superfícies sensíveis.
 - **ASSURE:** GOVERN quando confirmação explícita e handoff fazem parte do contrato.
+
+Classifique também o work kind: inspection, maintenance, implementation, delivery ou recovery.
+Risco operacional e impacto de contrato são independentes. Merge, push, tag e publish de código
+já aprovado usam delivery + ASSURE sem criar outra change; registre com delivery start e conclua
+com delivery finish para gerar receipt.
 
 O harness da LLM faz essa classificação semântica; o Wend Runtime valida e aplica a lease.
 Se não houver uma sessão causal identificada ou o comando falhar, não fabrique estado: use o
@@ -30,6 +35,7 @@ perfil efetivo já injetado e trate `GOVERN` como fallback conservador quando el
 Antes de editar, leia o **perfil efetivo** injetado pelo WendKeep e siga somente sua rota:
 - `OFF`: não imponha processo Wend; a governança pertence ao **harness nativo da LLM**.
 - `FLOW`: inicie o microcontrato com `wendkeep flow start` antes de editar os paths permitidos.
+- `delivery`: inicie `wendkeep delivery start` antes das operações autorizadas; não crie change.
 - `GUIDE`, `GOVERN` ou `ASSURE`: não edite código antes de Propose / `wendkeep change new`.
 Este gate nunca transforma `OFF` ou `FLOW` silenciosamente em `GOVERN`.
 </HARD-GATE>
@@ -38,14 +44,16 @@ Este gate nunca transforma `OFF` ou `FLOW` silenciosamente em `GOVERN`.
 
 - **OFF — LLM nativa:** Wend Runtime desligado; esta skill devolve a execução ao harness nativo.
 - **FLOW — E → V:** `flow start` → implementar com wk-tdd → `flow finish`; sem change/ADR/verdict.
-- **GUIDE — P → E → V:** change compacta, sem revisão formal obrigatória.
+- **GUIDE — P → E → V:** change new --guide, sem design/spec/ADR automáticos quando não há impacto de contrato.
 - **GOVERN — P → R → E → V:** loop a2 atual, com design/revisão; é o padrão conservador.
 - **ASSURE — P → R → E → V → C:** GOVERN acrescido de confirmação e handoff explícitos.
 
 ## Passos para GUIDE, GOVERN e ASSURE
 
 1. **Explore** — entenda o problema antes de propor. Leia o código/contexto relevante.
-2. **Propose** — `wendkeep change new <slug>`. Isso cria `08-Mudanças/<slug>/` com:
+2. **Propose** — GUIDE usa `wendkeep change new <slug> --guide`; GOVERN/ASSURE usam
+   `wendkeep change new <slug>`. O GUIDE compacto exige objetivo, critérios de aceite, áreas
+   afetadas, testes e resultado. GOVERN/ASSURE criam `08-Mudanças/<slug>/` com:
    - `proposta.md` — *por quê* e *o que muda* (o WHAT).
    - `design.md` — a abordagem técnica.
    - `tarefas.md` — a lista de tarefas `- [ ] N.N descrição`.
@@ -74,7 +82,7 @@ Este gate nunca transforma `OFF` ou `FLOW` silenciosamente em `GOVERN`.
    `[req:]`) recebe verdict automático — pula este passe.
 6. **Archive** — `wendkeep change archive <slug>`. O *gate* exige sensores verdes **E**
    `verdict.json` cobrindo os `[req:]`. Passando, promove os deltas pro `07-Specs`,
-   move a change pro `_arquivo` e gera um ADR em `04-Decisões/`.
+   move a change pro `_arquivo`; GUIDE com contract_impact none não gera ADR automático.
 
 ## Regras
 

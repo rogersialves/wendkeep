@@ -48,9 +48,9 @@ Usage:
                            package first (npm i -D wendkeep@latest); a running process
                            cannot replace itself. · --vault P · --profile <name> · --yes.
 
-  wendkeep doctor [--vault P]  Run a vault health check.
+  wendkeep doctor [--vault P]  Health check. --scope core|runtime · --strict for CI/release.
   wendkeep observer <sub>     Local multi-project Observer: serve | register | publish | status.
-  wendkeep change <sub>        Change lifecycle: new [--simple] | use | bind <slug> --session <id> | continue | list | show |
+  wendkeep change <sub>        Change lifecycle: new [--simple|--guide] | use | bind <slug> --session <id> | continue | list | show |
                            status | done <id> | undone <id> | diff | archive [--force] | abandon | relink | backlink.
                            archive exige verdict (rode verify --deep); abandon descarta sem ADR.
                            backlink [--apply]: injeta o backlink pro proposta em design/tarefas/spec órfãos (open + _arquivo).
@@ -62,6 +62,8 @@ Usage:
                            the project default. The Vault/session/memory core is always active.
   wendkeep flow <sub>          Low-ceremony E -> V contract: start | status | show | finish | promote.
                            FLOW records scope, sensors and a receipt without creating a change.
+  wendkeep delivery <sub>      Operational delivery: start | status | finish | abandon.
+                           Records authorization and an append-only receipt; never creates a change/spec/ADR.
   wendkeep spec <sub>          Specs: list | show | effective [--change] [--json] | migrate | rebase.
   wendkeep sensors <sub>       list | add <id> "<command>" [--severity --type --report].
   wendkeep cost [opts]         Aggregate AI-coding spend across the vault's sessions.
@@ -184,6 +186,9 @@ async function main(argv) {
     if (cmd === 'flow') {
       const { FLOW_HELP } = await import('../../../src/flow.mjs');
       process.stdout.write(FLOW_HELP);
+    } else if (cmd === 'delivery') {
+      const { DELIVERY_HELP } = await import('../../../src/delivery.mjs');
+      process.stdout.write(DELIVERY_HELP);
     } else if (cmd === 'profile') {
       const { PROFILE_HELP } = await import('../../../src/profile.mjs');
       process.stdout.write(PROFILE_HELP);
@@ -271,6 +276,11 @@ async function main(argv) {
     case 'flow': {
       const { runFlow } = await import('../../../src/flow.mjs');
       process.exit(await runFlow(rest));
+      break;
+    }
+    case 'delivery': {
+      const { runDelivery } = await import('../../../src/delivery.mjs');
+      process.exit(runDelivery(rest));
       break;
     }
     case 'theme': {

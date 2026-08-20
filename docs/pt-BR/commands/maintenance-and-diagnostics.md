@@ -23,7 +23,7 @@ Execute na raiz do projeto ou informe `--project`/`--vault` explicitamente.
 ## Sintaxe
 
 ```bash
-npx --no-install wendkeep doctor [--vault <cofre>]
+npx --no-install wendkeep doctor [--vault <cofre>] [--scope all|core|runtime] [--strict]
 npx --no-install wendkeep memory curate --vault <cofre>
 npx --no-install wendkeep sync-defs [--check|--reseed] --vault <cofre> --project <raiz>
 npx --no-install wendkeep theme sync --vault <cofre>
@@ -33,7 +33,10 @@ npx --no-install wendkeep --help
 
 ## Opções e códigos de saída
 
-- `doctor` é read-only; exit `0` aceita warnings recuperáveis e exit não zero indica falha.
+- `doctor` é read-only. Por padrão, exit não zero indica erro estrutural; `--strict` também torna
+  atenção de workflow, dívida reparável e memória degradada apropriadas para gate de CI/release.
+- `--scope core` verifica somente instalação, identidade, sessão e memória; `sync` usa esse escopo
+  e não falha por change ainda em andamento. `--scope runtime` isola harness/governança.
 - O `doctor` usa saída em formato humano, com blocos `[integridade]` e `[memória]`, categorias
   amigáveis e uma próxima ação copiável. O hook `vault-health.mjs` continua sendo a superfície JSON
   para automações; nenhum dos dois aplica curadoria.
@@ -44,8 +47,9 @@ npx --no-install wendkeep --help
   event IDs e checkpoint) com outbox, ledger e SHARED; não inferem saúde só pela revision atual.
 - `revision: 0` após migração válida, sem attempt v2, é saudável. Attempt `degraded` cujos eventos
   continuam duráveis na outbox/ledger é warning recuperável.
-- Attempt ambíguo, event ID perdido (ausente de ledger e outbox), estado `projected` apenas na
-  outbox ou checkpoint divergente são falhas bloqueantes.
+- Conflito semântico é `degraded` e omite somente as chaves afetadas; não bloqueia o Core. Attempt
+  causal ambíguo, event ID perdido, ledger corrompido, boundary insegura ou checkpoint divergente
+  continuam sendo falhas estruturais bloqueantes.
 - Para observabilidade de sessão, `legacy`, `degraded`, `stale` e `manifest-unproven` exigem
   reconciliação ou evidência adicional. Somente `none` fresco e `complete` fresco são saudáveis:
   frontier, checkpoint, root stat e source manifest precisam concordar.
@@ -63,6 +67,8 @@ Checklist pós-atualização:
 npx --no-install wendkeep --version
 npx --no-install wendkeep sync-defs --check --vault .MeuApp-vault --project .
 npx --no-install wendkeep doctor --vault .MeuApp-vault
+npx --no-install wendkeep doctor --scope core --vault .MeuApp-vault
+npx --no-install wendkeep doctor --scope runtime --strict --vault .MeuApp-vault
 npx --no-install wendkeep memory status --gate --vault .MeuApp-vault
 npx --no-install wendkeep memory curate --vault .MeuApp-vault
 npx --no-install wendkeep memory candidates --active --vault .MeuApp-vault
@@ -72,7 +78,8 @@ npx --no-install wendkeep cost rebuild --session <id> --json --vault .MeuApp-vau
 
 ## Resultado esperado
 
-O doctor nomeia sessões, registry, links, notas, preços, derivadas e memória como saudáveis ou
+O doctor separa `structural error`, `workflow attention`, `repairable debt` e `semantic ambiguity`,
+e nomeia sessões, registry, links, notas, preços, derivadas e memória como saudáveis ou
 fornece um comando específico de diagnóstico/reparo. Na memória, ele distingue vazio inicial
 válido, replay pendente recuperável e lifecycle perdido/divergente. Nenhum reparo é aplicado
 implicitamente nem o conteúdo privado do erro do projector é reproduzido no relatório. Na

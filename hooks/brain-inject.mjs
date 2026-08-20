@@ -29,9 +29,9 @@ function processRouter(localeId) {
   if (localeId === 'en') {
     return [
       '<wk_process>',
-      'Spec-driven process (mandatory for any non-trivial task): INVOKE the wk-workflow Skill BEFORE editing any file.',
-      '1. Plan: invoke the wk-brainstorming Skill (approved design) → wk-planning (task plan).',
-      '2. Record: `wendkeep change new <slug>` and FILL proposta/design/tasks. Resolve `spec_impact`: `required` needs `specs/<capability>/spec.md` + [req:ID]; `none` needs a reason. Never leave pending/placeholders.',
+      'Proportional process: INVOKE the wk-workflow Skill BEFORE editing any file.',
+      '1. Classify work kind independently from profile: inspection, maintenance, implementation, delivery, or recovery.',
+      '2. Delivery of approved code uses `wendkeep delivery start/finish` and a receipt, without a new change/spec. For implementation, use wk-brainstorming + wk-planning, declare spec_impact, then select FLOW, `wendkeep change new --guide`, or GOVERN/ASSURE according to contract impact.',
       '3. Implement: wk-tdd per task; tick `- [x]` as you finish. Something broke? wk-debugging.',
       '4. Close: `wendkeep verify` (+ `--deep` + the wk-verify Skill) → `wendkeep change archive`.',
       'NEVER `archive --force` on your own — a red gate means pending work; --force is the user\'s call, not yours. Dead end? `wendkeep change abandon`.',
@@ -40,9 +40,9 @@ function processRouter(localeId) {
   }
   return [
     '<wk_process>',
-    'Processo spec-driven (obrigatório em tarefa não-trivial): INVOQUE a Skill wk-workflow ANTES de editar qualquer arquivo.',
-    '1. Planejar: invoque a Skill wk-brainstorming (design aprovado) → wk-planning (plano de tarefas).',
-    '2. Registrar: `wendkeep change new <slug>` e PREENCHA proposta/design/tarefas. Resolva `spec_impact`: `required` exige `specs/<capability>/spec.md` + [req:ID]; `none` exige justificativa. Nunca deixe pending/placeholders.',
+    'Processo proporcional: INVOQUE a Skill wk-workflow ANTES de editar qualquer arquivo.',
+    '1. Classifique work kind independentemente do perfil: inspection, maintenance, implementation, delivery ou recovery.',
+    '2. Entrega de código aprovado usa `wendkeep delivery start/finish` e receipt, sem nova change/spec. Em implementation, use wk-brainstorming + wk-planning, declare spec_impact e escolha FLOW, `wendkeep change new --guide` ou GOVERN/ASSURE conforme impacto de contrato.',
     '3. Implementar: wk-tdd por tarefa; marque `- [x]` ao concluir. Quebrou algo? wk-debugging.',
     '4. Fechar: `wendkeep verify` (+ `--deep` + Skill wk-verify) → `wendkeep change archive`.',
     'PROIBIDO `archive --force` por conta própria — gate vermelho significa trabalho pendente; --force é decisão do usuário, não sua. Beco sem saída? `wendkeep change abandon`.',

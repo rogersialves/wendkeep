@@ -12,6 +12,7 @@ import {
   profileSentinelId,
   resolveHookOperatingProfile,
 } from './operating-profile-runtime.mjs';
+import { activeDelivery } from '../src/delivery.mjs';
 
 const CODE_EXT = /\.(ts|tsx|js|jsx|mjs|cjs|py|prisma|sql|go|rs|java|cs)$/i;
 
@@ -32,6 +33,7 @@ export function warnDecision(filePath, {
   if (!policy.requiresChange) return null;
   if (!filePath || !isCodeFile(filePath)) return null;
   if (activeChange(vaultBase)) return null;
+  if (activeDelivery(vaultBase)) return null;
   const abs = norm(isAbsolute(filePath) ? filePath : resolve(cwd, filePath));
   // Dentro do vault (NTFS é case-insensitive) ou em dirs de config de agente: não é código do projeto.
   if (abs.toLowerCase().startsWith(`${norm(resolve(vaultBase)).toLowerCase()}/`)) return null;

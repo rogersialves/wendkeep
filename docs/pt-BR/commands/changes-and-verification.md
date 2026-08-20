@@ -25,7 +25,7 @@ Tenha o projeto inicializado, um vault saudável e `wendkeep.sensors.json` váli
 ## Sintaxe
 
 ```bash
-npx wendkeep change new <slug>
+npx wendkeep change new <slug> [--simple|--guide]
 npx wendkeep change status [slug]
 npx wendkeep spec effective --change <slug>
 npx wendkeep sensors list
@@ -35,8 +35,10 @@ npx wendkeep change archive <slug>
 
 ## Opções e códigos de saída
 
-- `wendkeep change new <slug> [--simple]` cria uma change; `--simple` só pula o design, não é nem
-  equivale a `FLOW` e preserva o lifecycle/ADR legado.
+- `wendkeep change new <slug> [--simple|--guide]` cria uma change. `--simple` só pula o design,
+  não equivale a `FLOW` e preserva o lifecycle/ADR legado. `--guide` cria o contrato GUIDE
+  compacto (objetivo, aceite, áreas, testes e resultado), sem design/spec/ADR automático quando
+  `contract_impact:none`.
 - `change use`, `list`, `show`, `status`, `diff`, `done` e `undone` inspecionam ou atualizam o
   trabalho sem arquivar.
 - `change continue <arquivada> <nova>` abre continuação sem herdar evidência antiga.
@@ -52,6 +54,7 @@ npx wendkeep change archive <slug>
 
 ```bash
 npx wendkeep change new login-tenant
+npx wendkeep change new ajuste-interno --guide
 npx wendkeep spec effective --change login-tenant
 npx wendkeep change done 1.1 --change login-tenant
 npx wendkeep verify --change login-tenant
@@ -67,8 +70,10 @@ npx wendkeep sensors add api-contracts "npm run test:contracts" --severity criti
 
 ## Resultado esperado
 
-A change arquivada move seu delta para o spec vivo, preserva proposta/design/tarefas/evidência e
-gera um ADR. O archive só passa com tarefas fechadas, sensores exigidos verdes e verdict atual.
+A change arquivada move seu delta para o spec vivo quando aplicável e preserva proposta,
+tarefas/evidência e design quando existente. GOVERN/ASSURE geram ADR; GUIDE compacta sem impacto
+de contrato não gera ADR automático. O archive só passa com tarefas fechadas, sensores exigidos
+verdes e verdict atual.
 
 ## Cerca de escopo para ferramentas
 

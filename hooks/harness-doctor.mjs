@@ -102,6 +102,8 @@ export function checkHarness(vaultBase, projectRoot) {
   const CHANGES_DIR = loc.folders.changes;
   const errors = [];
   const warnings = [];
+  const attention = [];
+  const repairable = [];
 
   // 1. wendkeep.sensors.json well-formed.
   const sensorsPath = join(projectRoot, 'wendkeep.sensors.json');
@@ -114,7 +116,7 @@ export function checkHarness(vaultBase, projectRoot) {
   }
 
   const specState = checkSpecsState(vaultBase);
-  if (specState.missing) warnings.push('SPECS_STATE ausente — rode `wendkeep spec migrate`; 07-Specs deve ser gerado/read-only');
+  if (specState.missing) repairable.push('SPECS_STATE ausente — rode `wendkeep spec migrate`; 07-Specs deve ser gerado/read-only');
   else if (!specState.ok) errors.push(`07-Specs alterado fora do WendKeep: ${specState.changed.join(', ')} — mova a alteração para 08-Mudanças/<change>/specs`);
 
   // 2/3. Changes: malformed dirs; the active change's deltas add to knownReqs.
@@ -127,12 +129,18 @@ export function checkHarness(vaultBase, projectRoot) {
     try { entries = readdirSync(dir); } catch { continue; } // a file, not a change dir
     if (!entries.includes('proposta.md')) { errors.push(`change sem proposta.md: ${name}`); continue; }
     const impact = validateSpecImpact(dir);
-    errors.push(...impact.errors.map((e) => `${name}: ${e}`));
-    warnings.push(...impact.warnings.map((w) => `${name}: ${w}`));
+    for (const error of impact.errors) {
+      const rendered = `${name}: ${error}`;
+      if (/spec_impact pending/i.test(error)) attention.push(rendered);
+      else errors.push(rendered);
+    }
+    attention.push(...impact.warnings.map((w) => `${name}: ${w}`));
     let tasks = [];
     let tarefasMd = '';
     try { tarefasMd = readFileSync(join(dir, 'tarefas.md'), 'utf8'); tasks = parseTasks(tarefasMd); } catch { /* sem tarefas */ }
     const reqIds = [...new Set(tasks.flatMap((t) => t.reqs ?? []))];
+    const openTasks = tasks.filter((task) => !task.done);
+    if (openTasks.length) attention.push(`${name}: ${openTasks.length} tarefa(s) aberta(s)`);
     const effective = buildEffectiveRequirementPackage(vaultBase, dir, reqIds);
     errors.push(...effective.errors.map((e) => `${name}: spec efetiva inválida: ${e}`));
     if (effective.missing.length) errors.push(`req órfão em ${name}: ${effective.missing.map((id) => `[req:${id}]`).join(', ')} não existe na spec efetiva`);
@@ -140,7 +148,7 @@ export function checkHarness(vaultBase, projectRoot) {
     try { verdict = JSON.parse(readFileSync(join(dir, 'verdict.json'), 'utf8')); } catch { /* sem verdict */ }
     if (verdict && reqIds.length) {
       const v = evaluateVerdict(verdict, reqIds, { tasksHash: tasksHashOf(tarefasMd), effectiveSpecHash: effective.hash });
-      if (!v.ok) warnings.push(`verdict stale/incompleto em ${name}${v.missing.length ? `: falta cobrir ${v.missing.join(', ')}` : ''}`);
+      if (!v.ok) attention.push(`verdict stale/incompleto em ${name}${v.missing.length ? `: falta cobrir ${v.missing.join(', ')}` : ''}`);
     }
   }
 
@@ -152,7 +160,7 @@ export function checkHarness(vaultBase, projectRoot) {
     }
   }
 
-  return { errors, warnings };
+  return { errors, warnings, attention, repairable };
 }
 
 // --- diagnóstico de links do grafo (read-only, reusa os reparos em dry-run) -----
