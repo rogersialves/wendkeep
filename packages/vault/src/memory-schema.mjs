@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { MEMORY_SCOPE_TYPES, normalizeMemoryScope } from './memory-scope.mjs';
 
 export const SHARED_LIMITS = Object.freeze({ lines: 48, bytes: 6144, lineChars: 320 });
 
@@ -107,6 +108,11 @@ export function validateMemoryEvent(event, { projectId } = {}) {
   if (projectId !== undefined && !eventBelongsToVault(event, projectId)) {
     errors.push(`project_id não pertence ao vault esperado (${projectId}).`);
   }
+  if (event.scope !== undefined) {
+    if (!normalizeMemoryScope(event.scope, { projectId: event.project_id || projectId || '' })) {
+      errors.push(`scope deve conter type (${MEMORY_SCOPE_TYPES.join('|')}) e id não vazio compatível com o projeto.`);
+    }
+  }
 
   if (event.candidate_decision !== undefined) {
     const decision = event.candidate_decision;
@@ -133,7 +139,7 @@ export function validateMemoryEvent(event, { projectId } = {}) {
     }
   }
 
-  for (const field of ['value', 'evidence']) sanitizedField(event, field, errors);
+  for (const field of ['value', 'evidence', 'scope']) sanitizedField(event, field, errors);
   return { ok: errors.length === 0, errors, warnings };
 }
 
@@ -161,6 +167,7 @@ function hashProjection(events) {
     operation: event.operation,
     value: sanitizeMemoryText(event.value),
     authority: event.authority,
+    scope: event.scope,
     observed_at: event.observed_at,
     evidence: Array.isArray(event.evidence) ? event.evidence.map(sanitizeMemoryText) : [],
   }));
@@ -173,7 +180,10 @@ function eventLine(event) {
     ? event.evidence.map(sanitizeMemoryText).join(', ')
     : 'none';
   const source = sanitizeMemoryText(event.source_turn_id || event.canonical_session_id || event.activation_id || 'unknown');
-  const line = `- [${sanitizeMemoryText(event.event_id)}] ${value} · authority:${sanitizeMemoryText(event.authority)} · source:${source} · as_of:${sanitizeMemoryText(event.observed_at)} · evidence:${evidence}`;
+  const scope = event.scope?.type && event.scope?.id
+    ? ` · scope:${sanitizeMemoryText(event.scope.type)}:${sanitizeMemoryText(event.scope.id)}`
+    : '';
+  const line = `- [${sanitizeMemoryText(event.event_id)}] ${value} · authority:${sanitizeMemoryText(event.authority)}${scope} · source:${source} · as_of:${sanitizeMemoryText(event.observed_at)} · evidence:${evidence}`;
   return line.length <= SHARED_LIMITS.lineChars
     ? line
     : `${line.slice(0, SHARED_LIMITS.lineChars - 1).trimEnd()}…`;

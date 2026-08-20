@@ -14,6 +14,7 @@ const WIRED = [
   ['SessionStart', 'session-start'],
   ['SessionStart', 'observer-publish'],
   ['UserPromptSubmit', 'session-ensure'],
+  ['UserPromptSubmit', 'evidence-context'],
   ['UserPromptSubmit', 'change-context'],
   ['Stop', 'session-stop'],
   ['Stop', 'observer-publish'],

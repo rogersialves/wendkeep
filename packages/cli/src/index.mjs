@@ -104,7 +104,7 @@ Usage:
   wendkeep lesson add "t" "l"   Record a project-local lesson (injected at SessionStart).
   wendkeep memory curate         Guide one semantic conflict at a time in an interactive terminal.
                            Every promote/reject requires confirmation; --vault P.
-  wendkeep memory <sub>          Shared memory v2: status | candidates [--active] | curate | migrate [--apply] | repair |
+  wendkeep memory <sub>          Shared memory v2: status | candidates [--active] | curate | migrate [--apply] | rescope [--apply] | repair |
                            recover-attempt <session> [--apply] |
                            reconcile <session> --by-session <session> --reason <text> [--apply] |
                            promote <candidate> [--event <event-id>] | reject <candidate>. --vault P.

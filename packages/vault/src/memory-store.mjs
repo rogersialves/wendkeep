@@ -15,6 +15,12 @@ import {
   validateMemoryEvent,
 } from './memory-schema.mjs';
 import {
+  effectiveMemoryScope,
+  isRegisterMemoryKey,
+  memoryRecordKey,
+  sameMemoryScope,
+} from './memory-scope.mjs';
+import {
   assertVaultPathSafe, assertVaultPathsSafe, mkdirVaultPath, unlinkVaultFile,
   VAULT_LOCK_BUSY, withVaultPathLock, writeVaultFileAtomic,
 } from './vault-path-safety.mjs';
@@ -376,6 +382,7 @@ function sameCompleteCausalLineage(left, right) {
 }
 
 function comparable(left, right) {
+  if (left?.project_id !== right?.project_id || !sameMemoryScope(left, right)) return false;
   if (sameCausalActivation(left, right)) return true;
   const leftSupersedes = left.supersedes_event_id || left.supersedes;
   const rightSupersedes = right.supersedes_event_id || right.supersedes;
@@ -387,7 +394,7 @@ function comparable(left, right) {
 function conflictGroupKey(event) {
   if (event.operation !== 'replace') return null;
   if (!Number.isInteger(event.base_revision) || typeof event.base_value_hash !== 'string') return null;
-  return `${event.memory_key}\u0000${event.base_revision}\u0000${event.base_value_hash}`;
+  return `${memoryRecordKey(event)}\u0000${event.base_revision}\u0000${event.base_value_hash}`;
 }
 
 function candidateId(reason, memoryKey, eventIds) {
@@ -421,6 +428,7 @@ function blockedByCoreCandidate(event, coreValue) {
     reason: 'blocked_by_core',
     status: 'blocked_by_core',
     memory_key: event.memory_key,
+    ...(event.scope ? { scope: effectiveMemoryScope(event), record_key: memoryRecordKey(event) } : {}),
     event_ids: [event.event_id],
     proposed_value: event.value,
     core_value: coreValue,
@@ -442,6 +450,10 @@ function conflictCandidate(memoryKey, events, currentEvent = null) {
     candidate_id: candidateId('conflict', memoryKey, eventIds),
     reason: 'conflict',
     memory_key: memoryKey,
+    ...((ordered[0] || currentEvent)?.scope ? {
+      scope: effectiveMemoryScope(ordered[0] || currentEvent || {}),
+      record_key: memoryRecordKey(ordered[0] || currentEvent || { memory_key: memoryKey }),
+    } : {}),
     event_ids: eventIds,
     values: eventIds.map((id) => byId.get(id).value),
     base_revision: ordered[0]?.base_revision ?? currentEvent?.revision ?? 0,
@@ -459,6 +471,7 @@ function conflictReviewEvent(candidate, candidateCount = 1) {
     event_id: `mem-review-${candidate.candidate_id}`,
     project_id: source.project_id || '',
     memory_key: candidate.memory_key,
+    scope: candidate.scope,
     operation: 'assert',
     value: `[revisão pendente: ${memoryKey}; candidates: ${candidateCount}; events: ${eventCount}]`,
     authority: 'candidate',
@@ -508,7 +521,9 @@ function isCausallyOlder(event, current) {
   if (sameCausalActivation(event, current)) {
     return Number(event.turn_sequence) < Number(current.turn_sequence);
   }
-  if (Number.isInteger(event.activation_epoch) && Number.isInteger(current.activation_epoch)
+  if (event.canonical_session_id && event.canonical_session_id === current.canonical_session_id
+      && sameMemoryScope(event, current)
+      && Number.isInteger(event.activation_epoch) && Number.isInteger(current.activation_epoch)
       && event.activation_epoch !== current.activation_epoch) {
     return event.activation_epoch < current.activation_epoch;
   }
@@ -516,6 +531,30 @@ function isCausallyOlder(event, current) {
   const currentEffective = Date.parse(current.effective_at || '');
   return Number.isFinite(eventEffective) && Number.isFinite(currentEffective)
     && eventEffective < currentEffective;
+}
+
+const AUTHORITY_RANK = Object.freeze({ candidate: 0, reported: 1, verified: 2 });
+
+function sameRegisterLineage(left, right) {
+  return Boolean(left?.canonical_session_id)
+    && left.canonical_session_id === right?.canonical_session_id
+    && left.project_id === right?.project_id
+    && sameMemoryScope(left, right);
+}
+
+/** Positive means `incoming` is a safe successor; null means human comparison is required. */
+function registerPrecedence(incoming, current) {
+  if (!incoming?.scope || !current?.scope
+      || !isRegisterMemoryKey(incoming?.memory_key) || !sameRegisterLineage(incoming, current)) return null;
+  const epoch = Number(incoming.activation_epoch ?? -1) - Number(current.activation_epoch ?? -1);
+  if (epoch) return epoch;
+  const turn = Number(incoming.turn_sequence ?? -1) - Number(current.turn_sequence ?? -1);
+  if (turn) return turn;
+  const authority = (AUTHORITY_RANK[incoming.authority] ?? -1) - (AUTHORITY_RANK[current.authority] ?? -1);
+  if (authority) return authority;
+  const observed = String(incoming.observed_at || '').localeCompare(String(current.observed_at || ''));
+  if (observed) return observed;
+  return String(incoming.event_id || '').localeCompare(String(current.event_id || ''));
 }
 
 /**
@@ -537,7 +576,21 @@ export function reduceMemoryEvents(inputEvents = [], {
     }
     if (!existing) unique.set(event.event_id, event);
   }
-  const events = [...unique.values()].sort(eventOrder);
+  const rescopeTargets = new Set(
+    [...unique.values()].flatMap((item) => [
+      item.rescopes_event_id,
+      ...(Array.isArray(item.rescopes_event_ids) ? item.rescopes_event_ids : []),
+    ]).filter(Boolean),
+  );
+  const projectIds = new Set([...unique.values()].map((item) => item.project_id).filter(Boolean));
+  if (projectIds.size > 1) {
+    const error = new TypeError('Memory reducer cannot compare events from different projects.');
+    error.code = 'MEMORY_PROJECT_MIXED';
+    throw error;
+  }
+  const events = [...unique.values()]
+    .filter((item) => !rescopeTargets.has(item.event_id))
+    .sort(eventOrder);
   const candidateDecisions = new Map();
   for (const item of events) {
     const decision = item.candidate_decision;
@@ -604,7 +657,8 @@ export function reduceMemoryEvents(inputEvents = [], {
       continue;
     }
 
-    const current = records.get(item.memory_key);
+    const recordKey = memoryRecordKey(item);
+    const current = records.get(recordKey);
     const currentSource = current?.source;
     if (isCausallyOlder(item, currentSource)) {
       superseded.push({ event_id: item.event_id, by_event_id: currentSource.event_id });
@@ -613,10 +667,12 @@ export function reduceMemoryEvents(inputEvents = [], {
 
     if (item.operation === 'assert') {
       if (current && hashMemoryValue(current.value) !== hashMemoryValue(item.value)) {
-        if (sameCausalActivation(item, currentSource)
-            && Number(item.turn_sequence) > Number(currentSource.turn_sequence)) {
-          records.set(item.memory_key, { value: item.value, revision: current.revision + 1, source: item });
-          tombstones.delete(item.memory_key);
+        const precedence = registerPrecedence(item, currentSource);
+        if ((sameCausalActivation(item, currentSource)
+              && Number(item.turn_sequence) > Number(currentSource.turn_sequence))
+            || precedence > 0) {
+          records.set(recordKey, { value: item.value, revision: current.revision + 1, source: item });
+          tombstones.delete(recordKey);
           superseded.push({ event_id: currentSource.event_id, by_event_id: item.event_id });
           revision += 1;
           appliedEventIds.push(item.event_id);
@@ -628,8 +684,8 @@ export function reduceMemoryEvents(inputEvents = [], {
         continue;
       }
       if (!current) {
-        records.set(item.memory_key, { value: item.value, revision: 1, source: item });
-        tombstones.delete(item.memory_key);
+        records.set(recordKey, { value: item.value, revision: 1, source: item });
+        tombstones.delete(recordKey);
         revision += 1;
       }
       appliedEventIds.push(item.event_id);
@@ -642,8 +698,8 @@ export function reduceMemoryEvents(inputEvents = [], {
       const byHash = new Map(oldValues.map((value) => [hashMemoryValue(value), value]));
       additions.forEach((value) => byHash.set(hashMemoryValue(value), value));
       const value = [...byHash.entries()].sort(([left], [right]) => left.localeCompare(right)).map(([, entry]) => entry);
-      records.set(item.memory_key, { value, revision: (current?.revision || 0) + 1, source: item });
-      tombstones.delete(item.memory_key);
+      records.set(recordKey, { value, revision: (current?.revision || 0) + 1, source: item });
+      tombstones.delete(recordKey);
       revision += 1;
       appliedEventIds.push(item.event_id);
       continue;
@@ -664,13 +720,13 @@ export function reduceMemoryEvents(inputEvents = [], {
       if (item.value !== null && item.value !== undefined && Array.isArray(current.value)) {
         const removalHash = hashMemoryValue(item.value);
         const value = current.value.filter((entry) => hashMemoryValue(entry) !== removalHash);
-        records.set(item.memory_key, { value, revision: current.revision + 1, source: item });
-        tombstones.set(`${item.memory_key}:${removalHash}`, {
+        records.set(recordKey, { value, revision: current.revision + 1, source: item });
+        tombstones.set(`${recordKey}:${removalHash}`, {
           event_id: item.event_id, removed_event_id: current.source.event_id, value_hash: removalHash,
         });
       } else {
-        records.delete(item.memory_key);
-        tombstones.set(item.memory_key, {
+        records.delete(recordKey);
+        tombstones.set(recordKey, {
           event_id: item.event_id,
           removed_event_id: current.source.event_id,
           value_hash: hashMemoryValue(current.value),
@@ -691,8 +747,8 @@ export function reduceMemoryEvents(inputEvents = [], {
       candidates.push(conflictCandidate(item.memory_key, current ? [currentEventFromRecord(current), item] : [item]));
       continue;
     }
-    records.set(item.memory_key, { value: item.value, revision: current.revision + 1, source: item });
-    tombstones.delete(item.memory_key);
+    records.set(recordKey, { value: item.value, revision: current.revision + 1, source: item });
+    tombstones.delete(recordKey);
     const explicitlySupersededIds = new Set(
       Array.isArray(item.supersedes)
         ? item.supersedes
@@ -732,16 +788,16 @@ export function reduceMemoryEvents(inputEvents = [], {
       advanced = false;
       for (const pending of deferredAsserts) {
         if (resolvedCandidateIds.has(pending.candidate.candidate_id)) continue;
-        const current = records.get(pending.event.memory_key);
+        const current = records.get(memoryRecordKey(pending.event));
         const currentSource = current?.source;
         if (!sameCompleteCausalLineage(pending.event, currentSource)) continue;
         if (pending.event.turn_sequence > currentSource.turn_sequence) {
-          records.set(pending.event.memory_key, {
+          records.set(memoryRecordKey(pending.event), {
             value: pending.event.value,
             revision: current.revision + 1,
             source: pending.event,
           });
-          tombstones.delete(pending.event.memory_key);
+          tombstones.delete(memoryRecordKey(pending.event));
           superseded.push({ event_id: currentSource.event_id, by_event_id: pending.event.event_id });
           revision += 1;
           appliedEventIds.push(pending.event.event_id);
@@ -762,7 +818,7 @@ export function reduceMemoryEvents(inputEvents = [], {
     .map((candidate) => {
       const pending = pendingByCandidateId.get(candidate.candidate_id);
       if (!pending) return candidate;
-      const finalSource = currentEventFromRecord(records.get(candidate.memory_key));
+      const finalSource = currentEventFromRecord(records.get(candidate.record_key || candidate.memory_key));
       const previousSource = candidate.events?.find(
         (event) => event.event_id !== pending.event.event_id,
       );
@@ -791,10 +847,16 @@ export function reduceMemoryEvents(inputEvents = [], {
   superseded.sort((left, right) => left.event_id.localeCompare(right.event_id));
   const eventCursor = events.at(-1)?.event_id || 'none';
   const stateHash = hashMemoryValue({ state, tombstones: tombstoneObject });
+  const ambiguousRecordKeys = new Set(
+    unresolvedCandidates.map((candidate) => candidate.record_key || candidate.memory_key),
+  );
   const activeEvents = [
-    ...Object.entries(recordObject).map(([memoryKey, record]) => ({
+    ...Object.entries(recordObject)
+      .filter(([recordKey]) => !ambiguousRecordKeys.has(recordKey))
+      .map(([recordKey, record]) => ({
       ...record.source,
-      memory_key: memoryKey,
+      memory_key: record.source.memory_key,
+      projection_key: recordKey,
       operation: 'assert',
       value: record.value,
     })),

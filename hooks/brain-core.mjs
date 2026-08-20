@@ -5,6 +5,7 @@ import { basename, join } from 'node:path';
 import { ensureDir, stripYamlQuotes, toVaultRelative } from './obsidian-common.mjs';
 import { getLocale } from './locale.mjs';
 import { sanitizeMemoryText } from './memory-schema.mjs';
+import { buildEvidenceIndex } from './evidence-recall.mjs';
 
 export function brainDir(vaultBase) {
   return join(vaultBase, '.brain');
@@ -85,6 +86,7 @@ export function buildBrainIndex(vaultBase) {
   ensureDir(brainDir(vaultBase));
   const out = rows.map((r) => JSON.stringify(r)).join('\n') + (rows.length ? '\n' : '');
   writeFileSync(join(brainDir(vaultBase), 'index.jsonl'), out, 'utf8');
+  buildEvidenceIndex(vaultBase);
   return rows;
 }
 

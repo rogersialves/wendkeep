@@ -30,6 +30,7 @@ Informe o vault explicitamente em automações. Preserve backups e evidências a
 npx wendkeep memory status [--gate] --vault <cofre>
 npx wendkeep memory curate --vault <cofre>
 npx wendkeep memory candidates [--active] --vault <cofre>
+npx wendkeep memory rescope [--apply] --vault <cofre>
 npx wendkeep memory repair --vault <cofre>
 npx wendkeep memory recover-attempt <sessão> [--apply] --vault <cofre>
 npx wendkeep memory reconcile <sessão-ambígua> --by-session <sessão-sucessora> --reason <motivo> [--apply] --vault <cofre>
@@ -51,7 +52,7 @@ npx wendkeep validate-memory --vault <cofre-v2>
   não-TTY/terminal não interativo, ele retorna exit `2` sem alterar bytes e orienta usar o fallback
   avançado `memory candidates --active`.
 - `memory candidates` é read-only e imprime JSON determinístico com somente `candidate_id`,
-  `reason`, `status`, `memory_key` e `event_ids`; não expõe valores nem conteúdo da memória e não
+  `reason`, `status`, `memory_key`, escopo quando presente e `event_ids`; não expõe valores nem conteúdo da memória e não
   cria lock nem altera o bundle. `--active` omite candidates terminais (`resolved`, `rejected` e
   `superseded`). Status ausente é normalizado para `active`.
 - Em `memory candidates`, exit `0` indica inventário válido (inclusive vazio ou com conflitos),
@@ -95,6 +96,18 @@ npx wendkeep validate-memory --vault <cofre-v2>
   do attempt exato, salva backup do registry e limita a mutação ao attempt ambíguo e à sucessora.
   O replay é CORE-aware, usa cursor físico do ledger no checkpoint e não reescreve ledger, CORE ou
   notas, nem consome a outbox. Repetir a mesma decisão aplicada é idempotente.
+- `memory rescope` é dry-run por padrão e lista somente IDs, chaves e escopos planejados. Com
+  `--apply`, anexa eventos explícitos de projeto, work session, change, branch ou worktree e mantém
+  os bytes históricos como prefixo do ledger. Candidates ambíguos não são migrados nem recebem
+  vencedor; uma repetição retorna `unchanged`.
+- Registradores como `git.local-head`, `handoff.latest`, `quality.latest-*` e
+  `change.<slug>.status` só competem dentro do mesmo escopo. Resolução automática ainda exige o
+  mesmo projeto e linhagem causal; decisões, constraints e blockers incompatíveis permanecem sob
+  curadoria. Uma chave ambígua é omitida de SHARED sem remover CORE ou chaves independentes.
+- `.brain/EVIDENCE_INDEX.jsonl` divide documentos por headings e blocos e registra arquivo,
+  heading, tipo, change, sessão, work session, autoridade, data, validade e hash. `/brain-recall`
+  e o hook `UserPromptSubmit` usam BM25, frase exata, pesos por campo, autoridade, validade,
+  recência limitada e diversidade para retornar o trecho do match com proveniência.
 - Toda rota de memória valida a topologia física de `.brain`, ledger, outbox, CORE, SHARED,
   candidates, registry, notas, backups, temporários e sidecars antes de ler ou escrever. Junction,
   symlink, reparse point ou hardlink falham fechados sem tocar bytes externos. Locks publicam owner
@@ -134,6 +147,8 @@ npx wendkeep validate-memory --vault <cofre-v2>
 npx wendkeep memory status --gate --vault .MeuApp-vault
 npx wendkeep memory curate --vault .MeuApp-vault
 npx wendkeep memory candidates --active --vault .MeuApp-vault
+npx wendkeep memory rescope --vault .MeuApp-vault
+npx wendkeep memory rescope --apply --vault .MeuApp-vault
 npx wendkeep memory recover-attempt sessao-123 --vault .MeuApp-vault
 npx wendkeep memory recover-attempt sessao-123 --apply --vault .MeuApp-vault
 npx wendkeep memory reconcile antiga --by-session atual --reason "entrega continuada" --vault .MeuApp-vault

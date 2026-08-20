@@ -2396,6 +2396,36 @@ test('wendkeep memory roteia migrate dry-run/apply e expõe o comando no help', 
   } finally { rmSync(vault, { recursive: true, force: true }); }
 });
 
+test('wendkeep memory rescope é append-only, não vaza valores no dry-run e é idempotente', () => {
+  const vault = fixture();
+  const event = memoryEvent('mem-cli-rescope', 'conteúdo privado que não deve aparecer', 1);
+  writeMemoryProjection(vault, [event]);
+  const ledgerPath = join(vault, '.brain', 'MEMORY_EVENTS.jsonl');
+  const before = readFileSync(ledgerPath, 'utf8');
+  try {
+    const dry = spawnSync(process.execPath, [BIN, 'memory', 'rescope', '--vault', vault], { encoding: 'utf8' });
+    assert.equal(dry.status, 0, dry.stderr);
+    assert.match(dry.stdout, /dry-run/);
+    assert.match(dry.stdout, /work_session/);
+    assert.doesNotMatch(dry.stdout, /conteúdo privado/);
+    assert.equal(readFileSync(ledgerPath, 'utf8'), before);
+
+    const apply = spawnSync(process.execPath, [BIN, 'memory', 'rescope', '--apply', '--vault', vault], { encoding: 'utf8' });
+    assert.equal(apply.status, 0, apply.stderr);
+    assert.match(apply.stdout, /migrated/);
+    const after = readFileSync(ledgerPath, 'utf8');
+    assert.ok(after.startsWith(before), 'os bytes legados permanecem como prefixo exato');
+
+    const retry = spawnSync(process.execPath, [BIN, 'memory', 'rescope', '--apply', '--vault', vault], { encoding: 'utf8' });
+    assert.equal(retry.status, 0, retry.stderr);
+    assert.match(retry.stdout, /unchanged/);
+    assert.equal(readFileSync(ledgerPath, 'utf8'), after);
+
+    const help = spawnSync(process.execPath, [BIN, '--help'], { encoding: 'utf8' });
+    assert.match(help.stdout, /rescope \[--apply\]/);
+  } finally { rmSync(vault, { recursive: true, force: true }); }
+});
+
 test('[req:OP-10] CLI reconcile é dry-run por padrão e só aplica com autorização completa', () => {
   const vault = fixture();
   const brain = join(vault, '.brain');

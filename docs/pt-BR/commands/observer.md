@@ -98,6 +98,11 @@ reconciliação quando o ledger detalhado não fecha com ele; essa linha não in
 Sessões históricas com o mesmo `session_id` recebem uma identidade canônica por arquivo para
 evitar que um rollup sobrescreva o outro.
 
+No schema 4, cada documento ingerido também é projetado em chunks com caminho, heading,
+autoridade, data e validade. O Observer faz um feature probe de FTS5 e usa o índice quando a
+extensão está disponível; caso contrário, mantém a mesma semântica por fallback lexical. A busca
+retorna o trecho em que houve o match e sua proveniência, não apenas o começo do documento.
+
 O `init` projeta `observer-publish` para `SessionStart`, `Stop` e `SubagentStop` depois dos hooks
 principais. Sem servidor disponível, ele grava snapshots em `.brain/observer-outbox/` e eventos
 SQL em `.brain/observer-sql-outbox/`, sem bloquear a sessão; uma execução posterior tenta
@@ -140,7 +145,8 @@ corte. As telas do Observer não concluem, arquivam, reparam ou promovem estado.
   chamadas e transcripts.
 - `GET /v1/projects/:project_id/memory/tree` — árvore e metadados dos documentos.
 - `GET /v1/projects/:project_id/memory/document?path=...` — conteúdo Markdown integral.
-- `GET /v1/projects/:project_id/memory/search?q=...` — busca no caminho e no corpo.
+- `GET /v1/projects/:project_id/memory/search?q=...` — busca ranqueada por chunks, com trecho do
+  match e proveniência; usa fallback lexical quando FTS5 não está disponível.
 - `GET /v1/projects/:project_id/sync` — modo, contagem, conflitos e último evento.
 - `PUT /v1/projects/:project_id/sync` — compatibilidade de configuração; a autoridade continua SQL.
 - `GET /v1/projects/:project_id/memory/export` — exportação read-only com conteúdo completo.

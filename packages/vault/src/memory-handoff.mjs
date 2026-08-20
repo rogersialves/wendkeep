@@ -1,8 +1,10 @@
 import { createHash } from 'node:crypto';
+import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { basename, join, relative } from 'node:path';
 
 import { sanitizeMemoryText } from './memory-schema.mjs';
+import { scopeForMemoryKey } from './memory-scope.mjs';
 
 const SHARED_HANDOFF_FIELDS = Object.freeze([
   ['objective', 'objective.current'],
@@ -43,6 +45,10 @@ export function normalizeSharedHandoff(shared) {
   const normalized = {};
   const workSessionId = sanitizeMemoryText(shared.work_session_id ?? shared.workSessionId ?? '').trim();
   if (workSessionId) normalized.work_session_id = workSessionId;
+  for (const field of ['branch', 'worktree_id', 'repository_id', 'change_slug', 'tasks_hash', 'spec_hash']) {
+    const value = sanitizeMemoryText(shared[field] ?? '').trim();
+    if (value) normalized[field] = value;
+  }
 
   for (const [field] of SHARED_HANDOFF_FIELDS) {
     if (!Object.hasOwn(shared, field)) continue;
@@ -53,7 +59,7 @@ export function normalizeSharedHandoff(shared) {
   return Object.keys(normalized).length ? normalized : null;
 }
 
-function eventId(context, memoryKey, value) {
+function eventId(context, memoryKey, value, scope = null) {
   const digest = createHash('sha256')
     .update(JSON.stringify([
       context.projectId,
@@ -61,6 +67,7 @@ function eventId(context, memoryKey, value) {
       context.activation?.id,
       context.turn?.id,
       memoryKey,
+      scope,
       canonicalValue(value),
     ]))
     .digest('hex')
@@ -68,13 +75,15 @@ function eventId(context, memoryKey, value) {
   return `mem-${digest}`;
 }
 
-function makeEvent(context, { memoryKey, value, authority, evidence }) {
+function makeEvent(context, { memoryKey, value, authority, evidence, scopeContext = {} }) {
   const cleanValue = sanitizeValue(value);
+  const scope = scopeForMemoryKey(memoryKey, { ...context, ...scopeContext });
   const event = {
     v: 1,
-    event_id: eventId(context, memoryKey, cleanValue),
+    event_id: eventId(context, memoryKey, cleanValue, scope),
     project_id: String(context.projectId || ''),
     memory_key: memoryKey,
+    scope,
     operation: 'assert',
     value: cleanValue,
     authority,
@@ -118,6 +127,26 @@ function nextActionFrom(summary) {
   return id && text ? { id, summary: text } : null;
 }
 
+function gitScope(cwd = process.cwd(), spawn = spawnSync) {
+  const run = (args) => {
+    const result = spawn('git', args, { cwd, encoding: 'utf8', windowsHide: true });
+    return result.status === 0 ? String(result.stdout || '').trim() : '';
+  };
+  try {
+    const branch = run(['branch', '--show-current']) || `detached:${run(['rev-parse', '--short=12', 'HEAD'])}`;
+    const gitDir = run(['rev-parse', '--absolute-git-dir']);
+    const remote = run(['remote', 'get-url', 'origin']) || run(['rev-parse', '--show-toplevel']);
+    if (!branch || !gitDir || !remote) return null;
+    return {
+      branch,
+      worktree_id: createHash('sha256').update(gitDir).digest('hex').slice(0, 16),
+      repository_id: createHash('sha256').update(remote).digest('hex').slice(0, 16),
+    };
+  } catch {
+    return null;
+  }
+}
+
 export function collectLifecycleEvidence(vaultBase, { changeSlug = '', summary = '', noteRel = '' } = {}) {
   const evidence = {};
   const slug = String(changeSlug || '').trim();
@@ -159,11 +188,13 @@ export function collectLifecycleEvidence(vaultBase, { changeSlug = '', summary =
   if (nextAction) evidence.nextAction = nextAction;
   const commit = String(summary || '').match(/\b[0-9a-f]{40}\b/i)?.[0];
   if (commit) {
+    const scope = gitScope();
     evidence.git = {
       commit: commit.toLowerCase(),
       pushed: !/(?:nenhum|sem)\s+push/i.test(String(summary || '')),
       verified: false,
       path: noteRel,
+      ...(scope || {}),
     };
   }
   return evidence;
@@ -184,6 +215,14 @@ export function buildSessionMemoryEvents({
   const context = {
     projectId, identity, activation, turn, observedAt,
     workSessionId: normalizedShared?.work_session_id || '',
+    canonicalSessionId: identity?.canonicalConversationId || '',
+    activation_id: activation?.id || '',
+    branch: normalizedShared?.branch || '',
+    worktreeId: normalizedShared?.worktree_id || '',
+    repositoryId: normalizedShared?.repository_id || '',
+    changeSlug: normalizedShared?.change_slug || evidence.change?.slug || '',
+    tasksHash: normalizedShared?.tasks_hash || '',
+    specHash: normalizedShared?.spec_hash || '',
   };
   const events = [];
 
@@ -195,6 +234,7 @@ export function buildSessionMemoryEvents({
         value: normalizedShared[field],
         authority: 'reported',
         evidence: [noteRel],
+        scopeContext: { changeSlug: evidence.change?.slug || normalizedShared?.change_slug },
       }));
     }
   }
@@ -214,6 +254,7 @@ export function buildSessionMemoryEvents({
       value: { status: evidence.change.status, adr: evidence.change.adr },
       authority: 'verified',
       evidence: [evidence.change.path || evidence.change.adr],
+      scopeContext: { changeSlug: evidence.change.slug },
     }));
   }
 
@@ -227,6 +268,11 @@ export function buildSessionMemoryEvents({
       },
       authority: 'verified',
       evidence: [evidence.verdict.path],
+      scopeContext: {
+        changeSlug: evidence.change?.slug || normalizedShared?.change_slug,
+        tasksHash: evidence.verdict.tasks_hash || normalizedShared?.tasks_hash,
+        specHash: evidence.verdict.spec_hash || normalizedShared?.spec_hash,
+      },
     }));
   }
 
@@ -236,6 +282,10 @@ export function buildSessionMemoryEvents({
       value: [...new Set(evidence.sensors.map(String))].sort(),
       authority: 'verified',
       evidence: evidence.sensors,
+      scopeContext: {
+        changeSlug: evidence.change?.slug || normalizedShared?.change_slug,
+        tasksHash: evidence.sensors_tasks_hash || normalizedShared?.tasks_hash,
+      },
     }));
   }
 
@@ -249,6 +299,11 @@ export function buildSessionMemoryEvents({
       },
       authority: evidence.git.verified === false ? 'reported' : 'verified',
       evidence: [evidence.git.path || evidence.git.commit],
+      scopeContext: {
+        branch: evidence.git.branch || normalizedShared?.branch,
+        worktreeId: evidence.git.worktree_id || normalizedShared?.worktree_id,
+        repositoryId: evidence.git.repository_id || normalizedShared?.repository_id,
+      },
     }));
   }
 

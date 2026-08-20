@@ -84,11 +84,11 @@ Decisions, dead ends, the reason you chose X over Y — gone next session. The p
 |---|---|
 | **Capture** — every turn, on disk | `SessionStart` / `Stop` hooks write each session to a dated Markdown note: prompts, iterations, files touched, wikilinks. |
 | **Derive** — decisions, bugs, learnings | Pulled from the transcript into their own notes, backlinked to the session. Your history becomes navigable, not archival. |
-| **Recall** — injected back | Canonical `CORE` + operational `SHARED_MEMORY`, with explicit budgets, are injected on `startup`, `/clear`, and `/compact`; `DIGEST` remains a deep-recall index and legacy fallback. |
+| **Recall** — injected back | Canonical `CORE` + operational `SHARED_MEMORY` enter on `startup`, `/clear`, and `/compact`; on every prompt, the local chunk index selects a few passages with source, authority, and validity under an explicit budget. |
 | **Cost** — what it all cost | Per‑model, cache‑aware token pricing per session — plus `cost --trend` with a run‑rate projection across the whole vault; research previews without a final rate remain unestimated. |
 | **Multi‑agent** — one vault, both agents | `init` wires the session hooks into `.claude/settings.json` *and* `.codex/hooks.json`, and every note is tagged with the agent that wrote it: Claude Code is detected from its environment, anything else is recorded as Codex. One shared graph, whichever agent you are in. |
 | **Local‑first** — no cloud, no account | Everything is plain Markdown on your disk. An optional MCP server (`@bitbonsai/mcpvault`) lets the agent read/write the vault. |
-| **Local Observer** — many projects, one view | `wendkeep observer` keeps documents, sessions, agents, tokens, costs, calls, and transcripts in the Docker volume SQLite database; every project gets a **Consumption** tab in the read-only dashboard at `http://127.0.0.1:8787/`, loopback has no token, and unavailable hooks use a gzip outbox without blocking the session, including large transcripts. |
+| **Local Observer** — many projects, one view | `wendkeep observer` keeps documents, FTS5 chunks, sessions, agents, tokens, costs, calls, and transcripts in SQLite; search returns the matching passage with provenance and falls back to the local lexical ranker when FTS5 is unavailable. |
 
 During historical migration, the Observer preserves differences between frontmatter totals and the
 ledger as explicit reconciliation rows, and disambiguates duplicate `session_id` values per file
@@ -100,7 +100,7 @@ The Codex scope guard treats `commit`, `push`, `pull`, `merge`, `publish`, and d
 operations as independent capabilities, including inside compound commands.
 
 - Node.js ≥ 18
-- An AI coding agent with hooks. `init` wires **Claude Code** and **Codex** automatically — Codex gets eight compatible hooks, including the scoped `PreToolUse` guard, and enumerates them untrusted, so approve its “Hooks need review” prompt once at startup (see [Notes & roadmap](#notes--roadmap))
+- An AI coding agent with hooks. `init` wires **Claude Code** and **Codex** automatically — Codex gets twelve compatible hooks, including per-prompt recall and the scoped `PreToolUse` guard, and enumerates them untrusted, so approve its “Hooks need review” prompt once at startup (see [Notes & roadmap](#notes--roadmap))
 - Obsidian (to view the graph) — optional but the point
 
 ## Install & set up
@@ -115,7 +115,7 @@ npx wendkeep init
 
 1. Create the vault folder taxonomy and a templated `README.md` (default vault: `<project>/.<project-name>-vault`, e.g. `.MyApp-vault`; override with `--vault`).
 2. Write a provider-neutral **`.wendkeep.json`** binding at the project root and a matching `.brain/PROJECT.json` marker in the vault, then merge the session hooks into **`.claude/settings.json`**. The binding is provider-neutral by design: any agent resolves the same vault from its session `cwd`, with no machine-global environment variable. Older registrations already in `.claude/settings.json` are adopted automatically.
-3. Wire the Codex hooks in **`.codex/hooks.json`** — eleven compatible entries: `brain-inject` + `session-start` + `observer-publish` on `SessionStart`, `session-ensure` + `change-context` on `UserPromptSubmit`, `session-stop` + `observer-publish` + `change-nag` on `Stop`, `subagent-stop` + `observer-publish` on `SubagentStop`, and `change-guard` on `PreToolUse` for `Bash`, `exec_command`, `apply_patch`, and mutable MCP tools, always in the `npx wendkeep hook <name>` form. `observer-publish` keeps the sanitized index projection and also sends the local SQL authority with documents, consumption, and transcripts; it does not replace the local lifecycle. The guard accepts object, raw-string, and argv Codex payloads; before a mutation it compares the session with the project, Git root, remote, branch, and worktree, denying missing or divergent targets. The other four stay out because Codex offers no equivalent payload, tool, or event: `change-warn` (no reliable `tool_input.file_path`), `plan-capture` (no `ExitPlanMode`), `decision-capture` (`AskUserQuestion` is Claude-only), and `task-log` (`TaskCompleted` is not in Codex's event enum). Codex scope blocks use `permissionDecision: "deny"`; `ask` is never emitted in `PreToolUse`. The merge remains non-destructive, preserves third-party hooks, and migrates legacy `timeout` to `timeoutSec`. **Codex enumerates every hook as untrusted and runs none until you approve the “Hooks need review” prompt at startup — `init` cannot pre-approve them**.
+3. Wire the Codex hooks in **`.codex/hooks.json`** — twelve compatible entries: `brain-inject` + `session-start` + `observer-publish` on `SessionStart`, `session-ensure` + `evidence-context` + `change-context` on `UserPromptSubmit`, `session-stop` + `observer-publish` + `change-nag` on `Stop`, `subagent-stop` + `observer-publish` on `SubagentStop`, and `change-guard` on `PreToolUse` for `Bash`, `exec_command`, `apply_patch`, and mutable MCP tools, always in the `npx wendkeep hook <name>` form. `observer-publish` keeps the sanitized index projection and also sends the local SQL authority with documents, consumption, and transcripts; it does not replace the local lifecycle. The guard accepts object, raw-string, and argv Codex payloads; before a mutation it compares the session with the project, Git root, remote, branch, and worktree, denying missing or divergent targets. The other four stay out because Codex offers no equivalent payload, tool, or event: `change-warn` (no reliable `tool_input.file_path`), `plan-capture` (no `ExitPlanMode`), `decision-capture` (`AskUserQuestion` is Claude-only), and `task-log` (`TaskCompleted` is not in Codex's event enum). Codex scope blocks use `permissionDecision: "deny"`; `ask` is never emitted in `PreToolUse`. The merge remains non-destructive, preserves third-party hooks, and migrates legacy `timeout` to `timeoutSec`. **Codex enumerates every hook as untrusted and runs none until you approve the “Hooks need review” prompt at startup — `init` cannot pre-approve them**.
 4. Add the **`wendkeep-vault`** MCP server to `.mcp.json` so the agent can read/write the vault. Skip with `--no-mcp` — e.g. when the agent already has a vault MCP. (`--no-mcp` skips *only wendkeep's own* MCP; companion MCPs still follow `--companions`.)
 5. Offer to pin **companion** plugins/MCP (multi-choice; **none** pre-checked — wendkeep is a neutral harness and presumes no third-party plugin). Each is wired the most agent-agnostic way it supports:
    - **`context-mode`** — context optimizer + FTS5 memory, wired as a Claude Code plugin. It ships its own MCP server, so wendkeep deliberately adds no `.mcp.json` entry (registering both cold-started two servers at once). On non-Claude agents, add the MCP by hand: `npx -y context-mode`.
@@ -125,7 +125,7 @@ npx wendkeep init
 
    Control with `--companions <csv>` or `--no-companions`. The Claude Code plugin layer (`extraKnownMarketplaces` + `enabledPlugins`) is wired as a bonus where the companion has one.
 6. Install a **color system** into the vault's `.obsidian/`: a CSS snippet that accents notes by type (session/decision/bug/learning, via the `cssclasses` the hooks emit) plus graph color groups by folder. Non-destructive merge into `appearance.json`/`graph.json`; skip with `--no-colors`. Re-apply it any time on an existing vault with `wendkeep theme sync` — Obsidian owns `graph.json` and can drop the color groups (a grey graph); the re-sync restores them without a full re-`init`.
-7. Seed **Shared Project Memory v2** without overwriting existing artifacts: `.brain/CORE.md` (hand-curated canonical truth), `.brain/SHARED_MEMORY.md` (generated operational state), `.brain/MEMORY_EVENTS.jsonl` (append-only ledger), `.brain/MEMORY_CANDIDATES.jsonl` (curation queue), and `.brain/COMPACTION_PROTOCOL.md`. The durable outbox appears under `.brain/memory-outbox/` when events exist; `DIGEST.md` and `index.jsonl` remain deep recall. Everything stays local to the vault.
+7. Seed **Shared Project Memory v2** without overwriting existing artifacts: `.brain/CORE.md`, `.brain/SHARED_MEMORY.md`, `.brain/MEMORY_EVENTS.jsonl`, `.brain/MEMORY_CANDIDATES.jsonl`, and `.brain/COMPACTION_PROTOCOL.md`. The durable outbox appears under `.brain/memory-outbox/`; `EVIDENCE_INDEX.jsonl` is rebuilt locally from chunks while `DIGEST.md`/`index.jsonl` remain compatible. Everything stays in the vault.
 8. Seed the **definitions + skills layer**: `.brain/agents/` + `.brain/skills/` (versioned source of truth), including the native process skills `wk-workflow` / `wk-tdd` / `wk-debugging` / `wk-brainstorming` / `wk-planning` / `wk-verify` (some ship templates — e.g. `wk-verify`'s `verdict-template.json` + reviewer prompt). `init` runs `wendkeep sync-defs` for you, delivering the skills to `.claude/skills/` and `.agents/skills/`, and the agent definitions (`.brain/agents/*.toml`) to `.codex/agents/`, plus a managed section in `AGENTS.md` that indexes the skills for Codex; `sync-defs --check` detects stale copies (re-run `sync-defs` after editing `.brain`).
 9. Seed the **change/spec lifecycle**: the `07-Specs/` + `08-Mudanças/` folders and a native `wendkeep.sensors.json` — critical memory validation/health sensors plus one for each of `typecheck` / `test` / `lint` / `build` found in your `package.json`. `memory-health` blocks delivery on corruption or projection divergence; semantic conflicts degrade only the affected keys and await curation. Pending outbox events and ordinary candidates are warnings. Add sensors with `wendkeep sensors add`. Drives `wendkeep change` / `wendkeep verify` — see **Change lifecycle** below.
 
@@ -332,9 +332,9 @@ spec, or ADR. If delivery requires a code/config edit, it pauses and work return
 `implementation`:
 
 ```bash
-npx wendkeep delivery start release-0-73-0 --allow git:merge --allow git:push --allow publish --source-change <slug> --source-commit <sha>
-npx wendkeep delivery status release-0-73-0
-npx wendkeep delivery finish release-0-73-0 --target main --ci-url <url> --version 0.73.0 --npm-integrity <sha512> --release-url <url>
+npx wendkeep delivery start release-0-74-0 --allow git:merge --allow git:push --allow publish --source-change <slug> --source-commit <sha>
+npx wendkeep delivery status release-0-74-0
+npx wendkeep delivery finish release-0-74-0 --target main --ci-url <url> --version 0.74.0 --npm-integrity <sha512> --release-url <url>
 ```
 
 If the harness does not record a lease, a small fix remains under the configured profile —
@@ -369,6 +369,8 @@ Hot memory now separates human authorship, operational state, and evidence:
 - **`SHARED_MEMORY.md` is generated operational state.** The `Stop` hook turns the session handoff into sanitized events; the projector deterministically reduces the ledger and publishes a verifiable revision, cursor, and hash. Facts are `verified` only with local evidence; unsupported reports remain `reported`, and disagreements become candidates for human judgment.
 - **`MEMORY_EVENTS.jsonl` is the append-only authority.** `Stop` makes events durable in the outbox before acknowledging the attempt; the projector runs outside the registry lock and retries reuse the same IDs. Repeating an identical `event_id`/payload is a no-op; reusing the ID with different bytes is observable corruption.
 - **`MEMORY_CANDIDATES.jsonl` is the curation queue.** Conflicts and legacy content are never silently promoted. `promote` and `reject` record the decision as a new event; promotion preserves the selected event's JSON type, session, activation/epoch, and source turn.
+- **Registers are scoped.** `git.local-head`, handoffs, verdicts, and change status carry project, work-session, change, branch, or worktree scope. Two branches do not create a global conflict; only events in the same scope and causal lineage may advance automatically.
+- **`EVIDENCE_INDEX.jsonl` is local recall.** Markdown is chunked by headings and blocks without requiring the Observer. Ranking combines BM25, exact phrases, field weights, authority, validity, bounded recency, and source diversity; `UserPromptSubmit` injects only relevant passages with provenance.
 
 Artifacts stay under `.brain/` only. Sanitization strips secrets, tokens, local paths, transcripts, and harness payloads both before persistence and before injection. Events carry a `project_id`, and one vault never accepts another project's events.
 
@@ -390,6 +392,8 @@ Codex uses `session_id`/`turn_id` plus transcript order, with no artificial caus
 npx --no-install wendkeep memory status --gate --vault .MyApp-vault
 npx --no-install wendkeep memory migrate --vault .MyApp-vault          # preview, zero writes
 npx --no-install wendkeep memory migrate --apply --vault .MyApp-vault  # backup + candidates + v2 bundle
+npx --no-install wendkeep memory rescope --vault .MyApp-vault          # preview without values
+npx --no-install wendkeep memory rescope --apply --vault .MyApp-vault  # append-only and idempotent
 ```
 
 ### Health and recovery

@@ -30,6 +30,7 @@ Pass the vault explicitly in automation. Preserve backups and evidence before re
 npx wendkeep memory status [--gate] --vault <vault>
 npx wendkeep memory curate --vault <vault>
 npx wendkeep memory candidates [--active] --vault <vault>
+npx wendkeep memory rescope [--apply] --vault <vault>
 npx wendkeep memory repair --vault <vault>
 npx wendkeep memory recover-attempt <session> [--apply] --vault <vault>
 npx wendkeep memory reconcile <ambiguous-session> --by-session <successor-session> --reason <reason> [--apply] --vault <vault>
@@ -51,7 +52,7 @@ npx wendkeep validate-memory --vault <v2-vault>
   non-TTY environment it exits `2` without changing bytes and recommends the advanced fallback
   `memory candidates --active`.
 - `memory candidates` is read-only and prints deterministic JSON containing only `candidate_id`,
-  `reason`, `status`, `memory_key`, and `event_ids`; it does not expose memory values or content and
+  `reason`, `status`, `memory_key`, scope when present, and `event_ids`; it does not expose memory values or content and
   does not create a lock or mutate the bundle. `--active` omits terminal candidates (`resolved`,
   `rejected`, and `superseded`). A missing status is normalized to `active`.
 - For `memory candidates`, exit `0` means a valid inventory (including empty or conflicted), exit
@@ -95,6 +96,18 @@ npx wendkeep validate-memory --vault <v2-vault>
   and its successor. Replay is CORE-aware, checkpoints use the physical ledger cursor, and the
   command neither rewrites ledger/CORE/notes nor consumes the outbox. Retrying the same applied
   decision is idempotent.
+- `memory rescope` is a dry run by default and lists only planned IDs, keys, and scopes. With
+  `--apply`, it appends explicit project, work-session, change, branch, or worktree events while
+  preserving historic bytes as the ledger prefix. Ambiguous candidates are neither migrated nor
+  assigned a winner; retry returns `unchanged`.
+- Registers such as `git.local-head`, `handoff.latest`, `quality.latest-*`, and
+  `change.<slug>.status` compete only inside the same scope. Automatic resolution still requires
+  the same project and causal lineage; incompatible decisions, constraints, and blockers remain
+  human-curated. An ambiguous key is omitted from SHARED without removing CORE or independent keys.
+- `.brain/EVIDENCE_INDEX.jsonl` chunks documents by heading and block and records file, heading,
+  type, change, session, work session, authority, date, validity, and hash. `/brain-recall` and the
+  `UserPromptSubmit` hook use BM25, exact phrase, field weights, authority, validity, bounded
+  recency, and diversity to return the matching passage with provenance.
 - Every memory path validates the physical topology of `.brain`, ledger, outbox, CORE, SHARED,
   candidates, registry, notes, backups, temporary files, and sidecars before reading or writing.
   Junctions, symlinks, reparse points, or hardlinks fail closed without touching external bytes.
@@ -136,6 +149,8 @@ npx wendkeep validate-memory --vault <v2-vault>
 npx wendkeep memory status --gate --vault .MyApp-vault
 npx wendkeep memory curate --vault .MyApp-vault
 npx wendkeep memory candidates --active --vault .MyApp-vault
+npx wendkeep memory rescope --vault .MyApp-vault
+npx wendkeep memory rescope --apply --vault .MyApp-vault
 npx wendkeep memory recover-attempt session-123 --vault .MyApp-vault
 npx wendkeep memory recover-attempt session-123 --apply --vault .MyApp-vault
 npx wendkeep memory reconcile old --by-session current --reason "delivery continued" --vault .MyApp-vault

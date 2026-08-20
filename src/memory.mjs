@@ -20,6 +20,7 @@ import {
 } from './validate-memory.mjs';
 import { validateCore } from './validate-core.mjs';
 import { checkMemoryBundle } from '../hooks/vault-health.mjs';
+import { scopeForMemoryKey } from '../hooks/memory-scope.mjs';
 
 const BRAIN = '.brain';
 const LEDGER = 'MEMORY_EVENTS.jsonl';
@@ -229,6 +230,92 @@ export function migrateMemory(vault, {
   }
 }
 
+function rescopeEventId(sourceEventId, scope) {
+  return `mem-rescope-${hash(`${sourceEventId}\0${scope.type}\0${scope.id}`).slice(0, 24)}`;
+}
+
+/** Plan an append-only migration without choosing a winner for ambiguous keys. */
+export function planScopedMemoryMigration(vault) {
+  const ledger = readMemoryLedger(vault);
+  if (ledger.status !== 'ok') throw new Error('Ledger corrompido; execute memory repair antes do rescope.');
+  const projection = deriveMemoryProjection(vault, ledger.events);
+  const ambiguous = new Set(projection.candidates.map((candidate) => candidate.record_key || candidate.memory_key));
+  const existingIds = new Set(ledger.events.map((event) => event.event_id));
+  const planned = [];
+
+  for (const [recordKey, record] of Object.entries(projection.records)) {
+    if (ambiguous.has(recordKey) || record.source?.scope) continue;
+    const source = record.source;
+    const sameLegacyKey = ledger.events.filter((event) => (
+      !event.scope && event.memory_key === source.memory_key && !event.rescopes_event_id
+    ));
+    const scope = scopeForMemoryKey(source.memory_key, {
+      ...source,
+      projectId: source.project_id,
+      workSessionId: source.work_session_id,
+      branch: source.value?.branch || source.value?.branch_name,
+      worktreeId: source.value?.worktree_id,
+      repositoryId: source.value?.repository_id,
+    });
+    const eventId = rescopeEventId(source.event_id, scope);
+    if (existingIds.has(eventId)) continue;
+    planned.push({
+      v: 1,
+      event_id: eventId,
+      project_id: source.project_id,
+      memory_key: source.memory_key,
+      scope,
+      operation: 'assert',
+      value: record.value,
+      authority: source.authority,
+      canonical_session_id: source.canonical_session_id || 'memory-rescope',
+      activation_id: source.activation_id || 'memory-rescope',
+      activation_epoch: Number.isInteger(source.activation_epoch) ? source.activation_epoch : 0,
+      turn_sequence: Number.isInteger(source.turn_sequence) ? source.turn_sequence : 0,
+      source_turn_id: source.source_turn_id || 'memory-rescope',
+      observed_at: source.observed_at || new Date(0).toISOString(),
+      evidence: [...new Set([...(source.evidence || []), `memory-rescope:${source.event_id}`])],
+      rescopes_event_id: source.event_id,
+      rescopes_event_ids: sameLegacyKey.map((event) => event.event_id).sort(),
+    });
+  }
+
+  return {
+    status: 'dry-run',
+    ledger_events: ledger.events.length,
+    planned: planned.length,
+    ambiguous: projection.candidates.length,
+    events: planned,
+  };
+}
+
+export function rescopeMemoryEvents(vault, { apply = false } = {}) {
+  projectId(vault);
+  const plan = planScopedMemoryMigration(vault);
+  if (!apply) {
+    return {
+      status: 'dry-run',
+      ledger_events: plan.ledger_events,
+      planned: plan.planned,
+      ambiguous: plan.ambiguous,
+      scopes: plan.events.map((event) => ({
+        event_id: event.event_id, memory_key: event.memory_key, scope: event.scope,
+      })),
+    };
+  }
+  if (!plan.events.length) {
+    return { status: 'unchanged', migrated: 0, ambiguous: plan.ambiguous };
+  }
+  for (const event of plan.events) enqueueMemoryEvent(vault, event);
+  const projection = projectMemoryOutbox(vault);
+  return {
+    status: projection.status === 'projected' ? 'migrated' : projection.status,
+    migrated: plan.events.length,
+    ambiguous: plan.ambiguous,
+    checkpoint: projection.checkpoint || null,
+  };
+}
+
 function readCandidates(vault) {
   const path = brainPath(vault, CANDIDATES);
   const checked = checkedVaultFile(vault, path, 'MEMORY_CANDIDATES.jsonl');
@@ -266,6 +353,7 @@ function sanitizedCandidate(candidate, index) {
     reason: candidate.reason,
     status: candidate.status || 'active',
     memory_key: candidate.memory_key,
+    ...(candidate.scope ? { scope: candidate.scope } : {}),
     event_ids: [...eventIds].sort(lexicalCompare),
   };
 }
@@ -328,6 +416,7 @@ export function listMemoryCandidatesForCuration(vault) {
         reason: safe.reason,
         status: safe.status,
         memory_key: safe.memory_key,
+        ...(safe.scope ? { scope: safe.scope } : {}),
         events: safe.event_ids.map((eventId) => sanitizedCurationEvent(candidate, eventId, index)),
       };
     })
@@ -388,7 +477,7 @@ function promotedSupersedes(vault, candidate, selected) {
   const ledger = readMemoryLedger(vault);
   if (ledger.status !== 'ok') throw new Error('Ledger de memória inválido durante a promoção.');
   const projection = deriveMemoryProjection(vault, ledger.events);
-  const current = projection.records?.[candidate.memory_key]?.source;
+  const current = projection.records?.[candidate.record_key || candidate.memory_key]?.source;
   if (!current?.event_id) return [...memberIds].sort();
   if (memberIds.has(current.event_id)) {
     projection.superseded
@@ -572,6 +661,9 @@ export function decideMemoryCandidate(vault, {
     event_id: `cli-${action}-${hash(`${candidateId}\0${selected?.event_id || ''}`).slice(0, 20)}`,
     project_id: projectId(vault),
     memory_key: action === 'promote' ? candidate.memory_key : `candidate.decision.${candidateId}`,
+    scope: action === 'promote'
+      ? (candidate.scope || selected?.scope || { type: 'project', id: projectId(vault) })
+      : { type: 'project', id: projectId(vault) },
     operation: action === 'promote' && selected ? 'replace' : 'assert',
     value: action === 'promote' ? promotedMemoryValue(selectedValue) : 'rejected',
     authority: 'verified',
@@ -2087,6 +2179,7 @@ export function runMemory(argv) {
       result = listMemoryCandidates(vault, { activeOnly: candidatesArgs.activeOnly });
     }
     else if (sub === 'migrate') result = migrateMemory(vault, { apply: argv.includes('--apply') });
+    else if (sub === 'rescope') result = rescopeMemoryEvents(vault, { apply: argv.includes('--apply') });
     else if (sub === 'repair') result = repairMemory(vault);
     else if (sub === 'reconcile') {
       result = reconcileMemory(vault, {
@@ -2109,7 +2202,7 @@ export function runMemory(argv) {
         action: sub, candidateId: positional, ...(eventId ? { eventId } : {}),
       });
     }
-    else { process.stderr.write('wendkeep memory: use status | candidates [--active] | migrate [--apply] | repair | recover-attempt <session> [--apply] | reconcile <session> --by-session <session> --reason <text> [--apply] | promote <candidate> [--event <event-id>] | reject <candidate>.\n'); process.exitCode = 2; return; }
+    else { process.stderr.write('wendkeep memory: use status | candidates [--active] | curate | migrate [--apply] | rescope [--apply] | repair | recover-attempt <session> [--apply] | reconcile <session> --by-session <session> --reason <text> [--apply] | promote <candidate> [--event <event-id>] | reject <candidate>.\n'); process.exitCode = 2; return; }
     process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
     if (sub === 'status' && argv.includes('--gate')) process.exitCode = result.status === 'blocked' ? 1 : 0;
     else if (sub === 'reconcile' && reconcileArgs.apply) process.exitCode = result.health?.status === 'blocked' ? 1 : 0;

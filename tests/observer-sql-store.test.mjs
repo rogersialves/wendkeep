@@ -10,6 +10,9 @@ import {
   readUsageCalls,
   readUsageSummary,
   registerSqlProject,
+  observerFts5Support,
+  rebuildSqlEvidenceIndex,
+  searchSqlDocuments,
 } from '../src/observer-sql-store.mjs';
 import { makeDataDir } from './helpers/observer-fixture.mjs';
 
@@ -117,6 +120,125 @@ test('[req:SQL-OBS-3] republicação do mesmo documento por outro evento é stal
     });
     assert.equal(conflict.conflicts, 1);
     assert.equal(conflict.rejected, 0);
+  } finally {
+    db.close();
+    rmSync(dataDir, { recursive: true, force: true });
+  }
+});
+
+test('[req:RECALL-6] Observer indexes chunks, probes FTS5 and returns the matching evidence passage', () => {
+  const dataDir = makeDataDir();
+  const db = ensureObserverDatabase(dataDir);
+  try {
+    registerSqlProject(db, { projectId: 'project-a', projectName: 'Projeto A' });
+    const content = '# Observer\n\n## Introdução\n\nTexto genérico que não é a resposta.\n\n## Decisão de indexação\n\nO feature probe FTS5 ativa busca lexical com proveniência verificável.\n';
+    const accepted = ingestObserverEvents(db, {
+      projectId: 'project-a',
+      events: [event('document.upsert', 'evidence-document', 'project-a', {
+        logical_path: '04-Decisões/ADR-0099-evidence.md',
+        entity_type: 'decision',
+        content,
+        revision: 1,
+        metadata: { authority: 'verified', validity: 'active', change_slug: 'evidence-recall' },
+      })],
+    });
+    assert.equal(accepted.accepted, 1);
+    assert.ok(db.prepare('SELECT COUNT(*) AS count FROM document_chunks WHERE project_id = ?').get('project-a').count >= 2);
+    const support = observerFts5Support(db);
+    assert.ok(['fts5', 'lexical-fallback'].includes(support.engine));
+    const results = searchSqlDocuments(db, 'project-a', 'feature probe FTS5');
+    assert.equal(results[0].heading, 'Decisão de indexação');
+    assert.match(results[0].excerpt, /feature probe FTS5 ativa/);
+    assert.equal(results[0].logical_path, '04-Decisões/ADR-0099-evidence.md');
+    assert.equal(results[0].authority, 'verified');
+    assert.equal(results[0].validity, 'active');
+    assert.equal(results[0].revision, 1);
+    assert.match(results[0].content_hash, /^[a-f0-9]{64}$/);
+    assert.match(results[0].chunk_content_hash, /^[a-f0-9]{64}$/);
+  } finally {
+    db.close();
+    rmSync(dataDir, { recursive: true, force: true });
+  }
+});
+
+test('[req:RECALL-6] lexical fallback searches beyond 2,000 chunks and preserves document revision', () => {
+  const dataDir = makeDataDir();
+  const db = ensureObserverDatabase(dataDir);
+  try {
+    registerSqlProject(db, { projectId: 'project-a', projectName: 'A' });
+    const logicalPath = '02-Sessions/large-history.md';
+    const content = '# Histórico extenso\n';
+    const contentHash = createHash('sha256').update(content).digest('hex');
+    ingestObserverEvents(db, {
+      projectId: 'project-a',
+      events: [event('document.upsert', 'large-history-document', 'project-a', {
+        logical_path: logicalPath,
+        entity_type: 'session',
+        content,
+        content_hash: contentHash,
+        revision: 7,
+      })],
+    });
+    db.prepare('DELETE FROM document_chunks WHERE project_id = ? AND logical_path = ?')
+      .run('project-a', logicalPath);
+    if (observerFts5Support(db).supported) {
+      db.prepare('DELETE FROM evidence_chunks_fts WHERE project_id = ? AND logical_path = ?')
+        .run('project-a', logicalPath);
+    }
+    const insert = db.prepare(`INSERT INTO document_chunks(
+      chunk_id, project_id, logical_path, title, heading, entity_type, authority,
+      observed_at, validity, content_hash, ordinal, content
+    ) VALUES (?, 'project-a', ?, 'Histórico', 'Passagem', 'session', 'verified',
+      '2026-08-20T12:00:00.000Z', 'active', ?, ?, ?)`);
+    db.exec('BEGIN');
+    try {
+      for (let ordinal = 0; ordinal < 2001; ordinal += 1) {
+        const passage = ordinal === 2000
+          ? 'A evidência antiga exclusiva usa o marcador needle-historico.'
+          : `Ruído histórico ${ordinal}.`;
+        insert.run(
+          `fallback-${ordinal}`, logicalPath,
+          createHash('sha256').update(passage).digest('hex'), ordinal, passage,
+        );
+      }
+      db.exec('COMMIT');
+    } catch (error) {
+      db.exec('ROLLBACK');
+      throw error;
+    }
+
+    const results = searchSqlDocuments(db, 'project-a', 'needle-historico', { forceLexical: true });
+    assert.equal(results[0].ordinal, 2000);
+    assert.match(results[0].excerpt, /needle-historico/);
+    assert.equal(results[0].revision, 7);
+    assert.equal(results[0].content_hash, contentHash);
+  } finally {
+    db.close();
+    rmSync(dataDir, { recursive: true, force: true });
+  }
+});
+
+test('[req:RECALL-6] enabling FTS5 later backfills chunks created under lexical fallback', () => {
+  const dataDir = makeDataDir();
+  const db = ensureObserverDatabase(dataDir);
+  try {
+    registerSqlProject(db, { projectId: 'project-a', projectName: 'A' });
+    ingestObserverEvents(db, {
+      projectId: 'project-a',
+      events: [event('document.upsert', 'fts-late-document', 'project-a', {
+        logical_path: '04-Decisions/ADR-002.md',
+        entity_type: 'decision',
+        content: '# ADR\n\n## Evidência tardia\n\nO índice recupera a passagem depois do feature probe.\n',
+        revision: 1,
+      })],
+    });
+    const support = observerFts5Support(db);
+    if (support.supported) {
+      db.exec('DELETE FROM evidence_chunks_fts');
+      const rebuilt = rebuildSqlEvidenceIndex(db, { missingOnly: true });
+      assert.equal(rebuilt.fts.rebuilt, true);
+      assert.match(searchSqlDocuments(db, 'project-a', 'feature probe')[0].excerpt, /passagem depois/);
+    }
   } finally {
     db.close();
     rmSync(dataDir, { recursive: true, force: true });

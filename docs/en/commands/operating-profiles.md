@@ -248,7 +248,7 @@ Deliver an approved version without manufacturing another change:
 ```bash
 npx wendkeep delivery start release-0-73-0 --source-change proportional-governance --allow git:merge --allow git:push --allow publish
 npx wendkeep delivery status release-0-73-0
-npx wendkeep delivery finish release-0-73-0 --target v0.73.0 --ci-url <run> --version 0.73.0 --npm-integrity <sha512> --release-url <release>
+npx wendkeep delivery finish release-0-74-0 --target v0.74.0 --ci-url <run> --version 0.74.0 --npm-integrity <sha512> --release-url <release>
 ```
 
 ## Expected result

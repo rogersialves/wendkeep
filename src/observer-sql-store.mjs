@@ -4,9 +4,12 @@ import { createRequire } from 'node:module';
 import { join, basename, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { decodeTranscript, encodeTranscript } from './observer-transcript-store.mjs';
+import {
+  chunkMarkdownDocument, recallEvidence, recallTerms,
+} from '../packages/vault/src/evidence-recall.mjs';
 
 export const OBSERVER_SQL_FILE = 'observer.sqlite';
-export const OBSERVER_SQL_SCHEMA_VERSION = 3;
+export const OBSERVER_SQL_SCHEMA_VERSION = 4;
 export const OBSERVER_EVENT_SCHEMA_VERSION = 1;
 
 const SCHEMA_DIR = fileURLToPath(new URL('../schema/observer/', import.meta.url));
@@ -117,10 +120,104 @@ export function migrateObserverDatabase(db) {
       throw error;
     }
   }
+  rebuildSqlEvidenceIndex(db, { missingOnly: true });
   return {
     version: Number(db.prepare('SELECT COALESCE(MAX(version), 0) AS version FROM schema_migrations').get().version || 0),
     applied: db.prepare('SELECT version, name, applied_at FROM schema_migrations ORDER BY version').all(),
   };
+}
+
+export function observerFts5Support(db) {
+  try {
+    db.exec(`CREATE VIRTUAL TABLE IF NOT EXISTS evidence_chunks_fts USING fts5(
+      chunk_id UNINDEXED,
+      project_id UNINDEXED,
+      logical_path,
+      title,
+      heading,
+      content,
+      tokenize = 'unicode61 remove_diacritics 2'
+    )`);
+    return { supported: true, engine: 'fts5' };
+  } catch (error) {
+    return { supported: false, engine: 'lexical-fallback', reason: text(error?.message || error) };
+  }
+}
+
+function synchronizeSqlFts(db) {
+  const support = observerFts5Support(db);
+  if (!support.supported) return support;
+  const chunks = Number(db.prepare('SELECT COUNT(*) AS count FROM document_chunks').get().count || 0);
+  const indexed = Number(db.prepare('SELECT COUNT(*) AS count FROM evidence_chunks_fts').get().count || 0);
+  if (chunks === indexed) return support;
+  db.exec(`DELETE FROM evidence_chunks_fts;
+    INSERT INTO evidence_chunks_fts(chunk_id, project_id, logical_path, title, heading, content)
+    SELECT chunk_id, project_id, logical_path, title, heading, content
+    FROM document_chunks;`);
+  return { ...support, rebuilt: true, chunks };
+}
+
+function writeSqlDocumentChunks(db, {
+  projectId, logicalPath, content, metadata = {}, entityType = 'document', capturedAt = '',
+} = {}) {
+  const chunks = chunkMarkdownDocument({
+    projectId,
+    logicalPath,
+    content,
+    metadata: { ...metadata, observed_at: metadata.observed_at || capturedAt },
+    entityType,
+  });
+  db.prepare('DELETE FROM document_chunks WHERE project_id = ? AND logical_path = ?').run(projectId, logicalPath);
+  const fts = observerFts5Support(db);
+  if (fts.supported) {
+    db.prepare('DELETE FROM evidence_chunks_fts WHERE project_id = ? AND logical_path = ?').run(projectId, logicalPath);
+  }
+  const insert = db.prepare(`INSERT INTO document_chunks(
+    chunk_id, project_id, logical_path, title, heading, entity_type, change_slug,
+    session_id, work_session_id, authority, observed_at, validity, content_hash, ordinal, content
+  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+  const insertFts = fts.supported
+    ? db.prepare('INSERT INTO evidence_chunks_fts(chunk_id, project_id, logical_path, title, heading, content) VALUES (?, ?, ?, ?, ?, ?)')
+    : null;
+  for (const chunk of chunks) {
+    insert.run(
+      chunk.chunk_id, chunk.project_id, chunk.logical_path, chunk.title, chunk.heading,
+      chunk.entity_type, chunk.change_slug, chunk.session_id, chunk.work_session_id,
+      chunk.authority, chunk.observed_at, chunk.validity, chunk.content_hash,
+      chunk.ordinal, chunk.content,
+    );
+    insertFts?.run(chunk.chunk_id, chunk.project_id, chunk.logical_path, chunk.title, chunk.heading, chunk.content);
+  }
+  return { chunks: chunks.length, fts };
+}
+
+export function rebuildSqlEvidenceIndex(db, { missingOnly = false } = {}) {
+  const table = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'document_chunks'").get();
+  if (!table) return { documents: 0, chunks: 0, fts: { supported: false, engine: 'unavailable' } };
+  const documents = db.prepare(`SELECT d.project_id, d.logical_path, d.content, d.metadata_json, d.entity_type, d.captured_at
+    FROM documents d
+    WHERE d.deleted_at IS NULL
+      AND (? = 0 OR NOT EXISTS (
+        SELECT 1 FROM document_chunks c
+        WHERE c.project_id = d.project_id AND c.logical_path = d.logical_path
+      ))
+    ORDER BY d.project_id, d.logical_path`).all(missingOnly ? 1 : 0);
+  let chunks = 0;
+  let fts = observerFts5Support(db);
+  for (const document of documents) {
+    const result = writeSqlDocumentChunks(db, {
+      projectId: document.project_id,
+      logicalPath: document.logical_path,
+      content: document.content,
+      metadata: parseJson(document.metadata_json),
+      entityType: document.entity_type,
+      capturedAt: document.captured_at,
+    });
+    chunks += result.chunks;
+    fts = result.fts;
+  }
+  fts = synchronizeSqlFts(db);
+  return { documents: documents.length, chunks, fts };
 }
 
 export function ensureObserverDatabase(dataDir) {
@@ -266,6 +363,14 @@ function applyDocument(db, event) {
     VALUES (?, ?, ?, ?, 'upsert', ?, ?, ?, ?, ?, ?)
   `).run(event.event_id, event.project_id, text(p.entity_type || p.entityType, 'memory'), logicalPath, revision, contentHash,
     text(p.source_session_id || p.sourceSessionId), text(p.source_turn_id || p.sourceTurnId), event.occurred_at, json(p));
+  writeSqlDocumentChunks(db, {
+    projectId: event.project_id,
+    logicalPath,
+    content,
+    metadata: p.metadata,
+    entityType: text(p.entity_type || p.entityType, 'memory'),
+    capturedAt: text(p.captured_at || event.occurred_at),
+  });
   return { stale: false };
 }
 
@@ -279,6 +384,10 @@ function applyDocumentDelete(db, event) {
     VALUES (?, ?, ?, ?, 'delete', ?, '', ?, ?, ?, ?)
   `).run(event.event_id, event.project_id, text(event.payload.entity_type || event.payload.entityType, 'memory'), logicalPath,
     integer(event.payload.revision, 1), text(event.payload.source_session_id || event.payload.sourceSessionId), text(event.payload.source_turn_id || event.payload.sourceTurnId), event.occurred_at, json(event.payload));
+  db.prepare('DELETE FROM document_chunks WHERE project_id = ? AND logical_path = ?').run(event.project_id, logicalPath);
+  if (observerFts5Support(db).supported) {
+    db.prepare('DELETE FROM evidence_chunks_fts WHERE project_id = ? AND logical_path = ?').run(event.project_id, logicalPath);
+  }
   return { stale: false };
 }
 
@@ -542,11 +651,38 @@ export function readSqlTree(db, projectId, prefix = '') {
   return { schema_version: OBSERVER_SQL_SCHEMA_VERSION, project_id: projectId, prefix, documents: rows };
 }
 
-export function searchSqlDocuments(db, projectId, query = '') {
+export function searchSqlDocuments(db, projectId, query = '', { forceLexical = false } = {}) {
   requireProject(db, projectId);
-  const q = `%${text(query).replace(/[%_]/g, '\\$&')}%`;
-  const rows = db.prepare(`SELECT logical_path, entity_type, title, content_hash, revision, captured_at, source_session_id, content FROM documents WHERE project_id = ? AND deleted_at IS NULL AND (logical_path LIKE ? ESCAPE '\\' OR title LIKE ? ESCAPE '\\' OR content LIKE ? ESCAPE '\\') ORDER BY captured_at DESC, logical_path LIMIT 100`).all(projectId, q, q, q);
-  return rows.map((row) => ({ ...row, excerpt: row.content.slice(0, 240) }));
+  const terms = recallTerms(query);
+  if (!terms.length) return [];
+  const fts = forceLexical
+    ? { supported: false, engine: 'lexical-fallback' }
+    : observerFts5Support(db);
+  const columns = `c.chunk_id, c.project_id, c.logical_path, c.title, c.heading,
+    c.entity_type, c.change_slug, c.session_id, c.work_session_id, c.authority,
+    c.observed_at, c.validity, c.content_hash AS chunk_content_hash, c.ordinal, c.content,
+    d.content_hash, d.revision, d.captured_at, d.source_session_id`;
+  let rows;
+  if (fts.supported) {
+    const expression = [...new Set(terms)]
+      .map((term) => `"${term.replaceAll('"', '""')}"`)
+      .join(' OR ');
+    rows = db.prepare(`SELECT ${columns} FROM evidence_chunks_fts f
+      JOIN document_chunks c ON c.chunk_id = f.chunk_id
+      JOIN documents d ON d.project_id = c.project_id AND d.logical_path = c.logical_path
+      WHERE evidence_chunks_fts MATCH ? AND c.project_id = ? AND d.deleted_at IS NULL
+      ORDER BY bm25(evidence_chunks_fts, 0, 0, 1.5, 3.0, 2.5, 1.0), c.observed_at DESC
+      LIMIT 200`).all(expression, projectId);
+  } else {
+    // FTS5 may be unavailable in a valid Observer runtime. Rank the complete project corpus
+    // instead of truncating by recency before matching, which would make old exact evidence
+    // permanently unreachable.
+    rows = db.prepare(`SELECT ${columns} FROM document_chunks c
+      JOIN documents d ON d.project_id = c.project_id AND d.logical_path = c.logical_path
+      WHERE c.project_id = ? AND d.deleted_at IS NULL
+      ORDER BY c.observed_at DESC, c.logical_path, c.ordinal`).all(projectId);
+  }
+  return recallEvidence(rows, query, { topK: 5 });
 }
 
 export function readSqlSync(db, projectId) {

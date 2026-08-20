@@ -96,6 +96,12 @@ cost/token total recorded in frontmatter is preserved through an explicit reconc
 the detailed ledger does not add up; that row does not invent calls. Historical sessions sharing
 one `session_id` receive a canonical per-file identity so one rollup cannot overwrite the other.
 
+In schema 4, each ingested document is also projected into chunks carrying path, heading,
+authority, time, and validity. The Observer feature-probes FTS5 and uses the index when the
+extension is available; otherwise it preserves the same semantics through a lexical fallback.
+Search returns the passage containing the match and its provenance rather than only the beginning
+of the document.
+
 `init` projects `observer-publish` into `SessionStart`, `Stop`, and `SubagentStop` after the primary
 hooks. When the server is unavailable, it writes snapshots to `.brain/observer-outbox/` and SQL
 events to `.brain/observer-sql-outbox/` without blocking the session; a later run retries the
@@ -139,7 +145,8 @@ complete, archive, repair, or promote state.
   rollups, calls, and transcripts.
 - `GET /v1/projects/:project_id/memory/tree` — document tree and metadata.
 - `GET /v1/projects/:project_id/memory/document?path=...` — complete Markdown content.
-- `GET /v1/projects/:project_id/memory/search?q=...` — path and body search.
+- `GET /v1/projects/:project_id/memory/search?q=...` — ranked chunk search with matching passage
+  and provenance; uses a lexical fallback when FTS5 is unavailable.
 - `GET /v1/projects/:project_id/sync` — mode, counts, conflicts, and latest event.
 - `PUT /v1/projects/:project_id/sync` — compatibility configuration; SQL remains authoritative.
 - `GET /v1/projects/:project_id/memory/export` — read-only export with complete content.

@@ -4,6 +4,37 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.74.0] — 2026-08-20
+
+### Added
+
+- **Registradores de memória escopados.** Eventos novos declaram escopo de projeto, work session,
+  change, branch ou worktree. HEADs de branches paralelas coexistem, enquanto decisões,
+  constraints e blockers realmente incompatíveis continuam sob curadoria humana.
+- **Migração append-only de escopo.** `memory rescope` mostra uma prévia sem valores e
+  `memory rescope --apply` anexa eventos de reescopo sem reescrever o ledger histórico; retry é
+  idempotente e candidates ambíguos não recebem vencedor automático.
+- **Recall baseado em evidências.** O índice `.brain/EVIDENCE_INDEX.jsonl` divide Markdown por
+  headings, parágrafos, decisões, tarefas, requisitos e evidências, preservando origem, heading,
+  autoridade, validade, sessão, work session, change e hash.
+- **Context broker por prompt.** `UserPromptSubmit` consulta o índice local, aplica ranking lexical
+  BM25 com frase exata, peso por campo, autoridade, validade, recência limitada e diversidade, e
+  injeta somente os melhores trechos dentro de um budget explícito.
+- **FTS5 no Observer.** O schema SQL 4 mantém chunks por projeto, faz feature probe de FTS5 e usa o
+  mesmo ranking/proveniência do Keep Core com fallback lexical quando a extensão não está disponível.
+
+### Changed
+
+- **Ambiguidade fica isolada.** Uma chave conflitante é omitida da projeção operacional e recebe
+  marcador de revisão; CORE e registros independentes continuam disponíveis.
+- **`/brain-recall` retorna passagens.** Resultados agora apontam para o trecho do match e incluem
+  arquivo, heading, autoridade, data e validade, em vez de retornar somente nomes de sessões.
+
+### Performance
+
+- Documentos excepcionalmente grandes usam amostragem distribuída limitada a 4 MiB no índice de
+  chunks, preservando o transporte gzip e evitando trabalho proporcional a transcripts gigantes.
+
 ## [0.73.0] — 2026-08-20
 
 ### Added
