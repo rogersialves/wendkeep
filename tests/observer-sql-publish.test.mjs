@@ -21,8 +21,8 @@ const MUTATION_HEADERS = { 'content-type': 'application/json', authorization: `B
 test('[req:SQL-OBS-10] timeout de ingestão cresce com o payload e permanece limitado', () => {
   assert.equal(observerSqlRequestTimeoutMs(0), 15_000);
   assert.equal(observerSqlRequestTimeoutMs(8 * 1024 * 1024), 15_000);
-  assert.equal(observerSqlRequestTimeoutMs(70 * 1024 * 1024), 46_000);
-  assert.equal(observerSqlRequestTimeoutMs(1024 * 1024 * 1024), 60_000);
+  assert.equal(observerSqlRequestTimeoutMs(70 * 1024 * 1024), 77_000);
+  assert.equal(observerSqlRequestTimeoutMs(1024 * 1024 * 1024), 120_000);
 });
 
 function sessionFixture(fixture, transcriptPath) {

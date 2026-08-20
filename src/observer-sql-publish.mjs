@@ -22,7 +22,7 @@ const SQL_SCHEMA_VERSION = 1;
 export const SQL_EVENT_BATCH_SIZE = 64;
 export const SQL_EVENT_BATCH_BYTES = 8 * 1024 * 1024;
 const REQUEST_TIMEOUT_MS = 15000;
-const MAX_REQUEST_TIMEOUT_MS = 60000;
+const MAX_REQUEST_TIMEOUT_MS = 120000;
 const REQUEST_TIMEOUT_BYTES_STEP = 1024 * 1024;
 const CAPTURE_LEVELS = new Set(['metadata', 'messages', 'full-transcript']);
 
@@ -31,7 +31,7 @@ export function observerSqlRequestTimeoutMs(rawBytes) {
   const oversizedBytes = Math.max(0, size - SQL_EVENT_BATCH_BYTES);
   return Math.min(
     MAX_REQUEST_TIMEOUT_MS,
-    REQUEST_TIMEOUT_MS + Math.ceil(oversizedBytes / REQUEST_TIMEOUT_BYTES_STEP) * 500,
+    REQUEST_TIMEOUT_MS + Math.ceil(oversizedBytes / REQUEST_TIMEOUT_BYTES_STEP) * 1000,
   );
 }
 

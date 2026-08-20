@@ -31,7 +31,7 @@ All notable changes to **wendkeep** are documented here. Format based on
   inteiro exato e tolera a inconsistência conhecida do serial de volume do libuv antigo, evitando
   falsos `VAULT_PATH_UNSAFE` no Node.js 22.13 sem relaxar a rejeição de hardlinks ou reparses.
 - **Ingestão SQL grande em runners lentos.** O timeout HTTP cresce com o tamanho bruto do lote até
-  60 segundos, preservando 15 segundos para payloads vazios/pequenos e evitando outbox falsa para
+  120 segundos, preservando 15 segundos para payloads vazios/pequenos e evitando outbox falsa para
   lotes gzip válidos acima de 64 MB.
 - **Trusted Publisher preservado após o gate de CI.** `auto-tag.yml`, o workflow já autorizado no
   npm, passa a executar a matriz da `main` e mantém o publish em um job com `needs: test`;
