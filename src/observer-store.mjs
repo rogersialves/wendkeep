@@ -86,8 +86,7 @@ function newer(left, right) {
   return leftTime > rightTime || (leftTime === rightTime && String(left?.event_id).localeCompare(String(right?.event_id)) > 0);
 }
 
-export function rebuildObserverIndex(dataDir) {
-  ensureDataDir(dataDir);
+function deriveObserverIndex(dataDir) {
   const byProject = new Map();
   for (const event of readEvents(dataDir)) {
     const current = byProject.get(event.project_id);
@@ -106,13 +105,26 @@ export function rebuildObserverIndex(dataDir) {
     const item = byProject.get(event.project_id);
     if (item) item.eventCount += 1;
   }
-  const index = {
+  return {
     schema_version: OBSERVER_DATA_SCHEMA_VERSION,
     generated_at: new Date().toISOString(),
     projects: [...byProject.values()].sort((a, b) => a.projectId.localeCompare(b.projectId)),
   };
+}
+
+export function rebuildObserverIndex(dataDir) {
+  ensureDataDir(dataDir);
+  const index = deriveObserverIndex(dataDir);
   atomicJson(join(dataDir, OBSERVER_INDEX_FILE), index);
   return index;
+}
+
+/** Read a legacy source without creating or refreshing legacy authority files. */
+export function readObserverIndexSource(dataDir) {
+  ensureDataDir(dataDir);
+  const index = readJson(join(dataDir, OBSERVER_INDEX_FILE), null);
+  if (index?.schema_version === OBSERVER_DATA_SCHEMA_VERSION && Array.isArray(index.projects)) return index;
+  return deriveObserverIndex(dataDir);
 }
 
 export function readObserverIndex(dataDir) {

@@ -4,17 +4,11 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { gunzipSync } from 'node:zlib';
 import {
-  appendObserverEvent,
-  getObserverProject,
   listRegisteredObserverProjects,
-  readObserverIndex,
-  registerObserverProject,
+  readObserverIndexSource,
 } from './observer-store.mjs';
 import { MAX_SNAPSHOT_BYTES, validateObserverSnapshot } from './observer-snapshot.mjs';
-import {
-  setMemoryMode,
-  validateMemoryEvent,
-} from './observer-memory.mjs';
+import { validateMemoryEvent } from './observer-memory.mjs';
 import {
   OBSERVER_SQL_FILE,
   OBSERVER_SQL_SCHEMA_VERSION,
@@ -22,6 +16,8 @@ import {
   ingestObserverEvents,
   migrateObserverDatabase,
   readSqlProject,
+  readSqlProjectOverview,
+  readSqlProjectSnapshot,
   listSqlProjects,
   readSqlDocument,
   readSqlSync,
@@ -33,6 +29,7 @@ import {
   readUsageCalls,
   readUsageSummary,
   registerSqlProject,
+  upsertSqlProjectSnapshot,
 } from './observer-sql-store.mjs';
 import { migrateObserverContainerData } from './observer-sql-migrate.mjs';
 
@@ -182,8 +179,8 @@ function ensureSqlProjectRegistration(dataDir, sqlDb, projectId) {
   } catch (error) {
     if (error?.code !== 'project_not_registered') throw error;
   }
-  const legacy = getObserverProject(dataDir, projectId)
-    || listRegisteredObserverProjects(dataDir).find((item) => item.projectId === projectId);
+  const legacy = listRegisteredObserverProjects(dataDir).find((item) => item.projectId === projectId)
+    || readObserverIndexSource(dataDir).projects.find((item) => item.projectId === projectId);
   if (!legacy) return false;
   registerSqlProject(sqlDb, {
     projectId: legacy.projectId,
@@ -234,13 +231,16 @@ export async function startObserverServer({
   const legacyMigration = migrateObserverContainerData(dataDir, { database: sqlDb });
   const registered = [
     ...listRegisteredObserverProjects(dataDir),
-    ...readObserverIndex(dataDir).projects.map((item) => ({
+    ...readObserverIndexSource(dataDir).projects.map((item) => ({
       projectId: item.projectId,
       projectName: item.projectName,
       wendkeepVersion: item.snapshot?.wendkeep_version || '',
     })),
   ];
   for (const project of registered) registerSqlProject(sqlDb, project);
+  for (const project of readObserverIndexSource(dataDir).projects) {
+    if (project.snapshot) upsertSqlProjectSnapshot(sqlDb, project.snapshot);
+  }
   const server = createServer(async (req, res) => {
     try {
       const pathname = new URL(req.url || '/', 'http://127.0.0.1').pathname;
@@ -286,21 +286,11 @@ export async function startObserverServer({
       }
 
       if (parts.length === 2 && req.method === 'GET') {
-        const index = readObserverIndex(dataDir);
-        const legacy = new Map(index.projects.map(({ snapshot, ...summary }) => [summary.projectId, summary]));
-        for (const project of listSqlProjects(sqlDb)) {
-          const current = legacy.get(project.project_id) || {};
-          legacy.set(project.project_id, {
-            ...current,
-            projectId: project.project_id,
-            projectName: current.projectName || project.project_name,
-            wendkeepVersion: current.wendkeepVersion || project.wendkeep_version,
-            registeredAt: current.registeredAt || project.registered_at,
-          });
-        }
         json(res, 200, {
-          schema_version: index.schema_version,
-          projects: [...legacy.values()].sort((a, b) => a.projectId.localeCompare(b.projectId)),
+          schema_version: 1,
+          projects: listSqlProjects(sqlDb)
+            .map((project) => readSqlProjectOverview(sqlDb, project.project_id))
+            .sort((a, b) => a.projectId.localeCompare(b.projectId)),
         });
         return;
       }
@@ -386,11 +376,11 @@ export async function startObserverServer({
           return;
         }
         const body = parseJson(await readBody(req));
-        try {
-          json(res, 200, setMemoryMode(dataDir, projectId, body.mode));
-        } catch (error) {
-          errorResponse(res, 400, error?.code || 'invalid_memory_mode', error?.message || 'modo inválido.');
+        if (body.mode && body.mode !== 'container-authority') {
+          errorResponse(res, 409, 'sql_authority_fixed', 'O Observer SQL é a autoridade única; modos legados são somente fonte de migração.');
+          return;
         }
+        json(res, 200, { ...readSqlSync(sqlDb, projectId), mode: 'container-authority', compatibility_noop: true });
         return;
       }
 
@@ -449,19 +439,8 @@ export async function startObserverServer({
       }
 
       if (parts.length === 3 && req.method === 'GET') {
-        let project = getObserverProject(dataDir, projectId);
-        if (!project) {
-          try {
-            const sqlProject = readSqlProject(sqlDb, projectId);
-            project = {
-              projectId: sqlProject.project_id,
-              projectName: sqlProject.project_name,
-              wendkeepVersion: sqlProject.wendkeep_version,
-              registeredAt: sqlProject.registered_at,
-              eventCount: 0,
-            };
-          } catch { /* handled as not found below */ }
-        }
+        let project;
+        try { project = readSqlProjectOverview(sqlDb, projectId); } catch { /* handled below */ }
         if (!project) {
           errorResponse(res, 404, 'project_not_found', `projeto não encontrado: ${projectId}`);
           return;
@@ -476,7 +455,7 @@ export async function startObserverServer({
           errorResponse(res, 400, 'project_mismatch', 'project_id do corpo não corresponde à rota.');
           return;
         }
-        const result = registerObserverProject(dataDir, {
+        const result = registerSqlProject(sqlDb, {
           projectId,
           projectName: body.project_name,
           wendkeepVersion: body.wendkeep_version,
@@ -485,30 +464,23 @@ export async function startObserverServer({
           errorResponse(res, 400, 'invalid_project', result.errors.join(' '));
           return;
         }
-        registerSqlProject(sqlDb, {
-          projectId,
-          projectName: body.project_name,
-          wendkeepVersion: body.wendkeep_version,
+        json(res, 201, {
+          projectId: result.project.project_id,
+          projectName: result.project.project_name,
+          wendkeepVersion: result.project.wendkeep_version,
+          registeredAt: result.project.registered_at,
         });
-        json(res, 201, result.project);
         return;
       }
 
       if (parts.length === 4 && parts[3] === 'changes' && req.method === 'GET') {
-        const project = getObserverProject(dataDir, projectId);
-        if (!project) {
-          let sqlProject;
-          try { sqlProject = readSqlProject(sqlDb, projectId); } catch (error) {
-            if (error?.code !== 'project_not_registered') throw error;
-          }
-          if (!sqlProject) {
-            errorResponse(res, 404, 'project_not_found', `projeto não encontrado: ${projectId}`);
-            return;
-          }
-          json(res, 200, { project_id: projectId, changes: [] });
+        let snapshot;
+        try { snapshot = readSqlProjectSnapshot(sqlDb, projectId); } catch (error) {
+          if (error?.code !== 'project_not_registered') throw error;
+          errorResponse(res, 404, 'project_not_found', `projeto não encontrado: ${projectId}`);
           return;
         }
-        json(res, 200, { project_id: projectId, changes: project.snapshot?.changes || [] });
+        json(res, 200, { project_id: projectId, changes: snapshot?.changes || [] });
         return;
       }
 
@@ -519,14 +491,17 @@ export async function startObserverServer({
           errorResponse(res, 400, 'invalid_snapshot', validation.errors.join(' '));
           return;
         }
-        const result = appendObserverEvent(dataDir, body);
+        const result = upsertSqlProjectSnapshot(sqlDb, body);
         if (!result.accepted && result.duplicate) {
           json(res, 200, { accepted: false, duplicate: true, event_id: body.event_id });
           return;
         }
         if (!result.accepted) {
-          const unregistered = result.errors.some((item) => /não registrado/.test(item));
-          errorResponse(res, unregistered ? 409 : 400, unregistered ? 'project_not_registered' : 'invalid_event', result.errors.join(' '));
+          if (result.stale) {
+            json(res, 200, { accepted: false, stale: true, event_id: body.event_id });
+            return;
+          }
+          errorResponse(res, 400, 'invalid_event', 'snapshot não aceito.');
           return;
         }
         json(res, 201, { accepted: true, duplicate: false, event_id: body.event_id });

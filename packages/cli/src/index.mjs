@@ -49,7 +49,7 @@ Usage:
                            cannot replace itself. · --vault P · --profile <name> · --yes.
 
   wendkeep doctor [--vault P]  Health check. --scope core|runtime · --strict for CI/release.
-  wendkeep observer <sub>     Local multi-project Observer: serve | register | publish | status.
+  wendkeep observer <sub>     Local multi-project Observer: serve | register | publish | reconcile | status.
   wendkeep change <sub>        Change lifecycle: new [--simple|--guide] | use | bind <slug> --session <id> | continue | list | show |
                            status | done <id> | undone <id> | diff | archive [--force] | abandon | relink | backlink.
                            archive exige verdict (rode verify --deep); abandon descarta sem ADR.

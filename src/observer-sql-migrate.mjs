@@ -41,7 +41,7 @@ function walk(root, relativeRoot, out) {
   for (const entry of readdirSync(root, { withFileTypes: true })) {
     const logicalPath = relativeRoot ? `${relativeRoot}/${entry.name}` : entry.name;
     if (entry.name.endsWith('.tmp') || entry.name.endsWith('.lock')
-      || ['observer-memory-outbox', 'observer-outbox', 'observer-sql-outbox', 'observer-sql-state.json', 'observer-memory-state.json'].includes(entry.name)) continue;
+      || ['observer-memory-outbox', 'observer-outbox', 'observer-sql-outbox', 'observer-sql-state.json', 'observer-sql-publisher.lock', 'observer-memory-state.json'].includes(entry.name)) continue;
     const absolute = join(root, entry.name);
     if (entry.isDirectory()) walk(absolute, logicalPath, out);
     else if (entry.isFile()) out.push({ absolute, logicalPath });

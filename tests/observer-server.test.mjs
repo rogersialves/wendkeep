@@ -37,6 +37,8 @@ test('[req:OBS-LOCAL-2] servidor local permite leitura sem token e exige token p
       method: 'PUT', headers: localHeaders, body: JSON.stringify({ project_id: 'project-a', project_name: 'Project A' }),
     });
     assert.equal(registered.status, 201);
+    assert.equal(registered.body.projectId, 'project-a');
+    assert.equal((await request(base, '/v1/projects/missing/changes')).status, 404);
     const snapshot = buildProjectSnapshot({ vaultBase: fixture.vaultBase, projectRoot: fixture.projectRoot, now: '2026-08-16T12:00:00Z' });
     const published = await request(base, '/v1/projects/project-a/snapshot', {
       method: 'POST', headers: localHeaders, body: JSON.stringify(snapshot),

@@ -1,8 +1,8 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { buildProjectSnapshot } from './observer-snapshot.mjs';
-import { publishObserverSql } from './observer-sql-publish.mjs';
+import { publishObserverSqlIncremental } from './observer-sql-publish.mjs';
 import { observerAuthHeaders, resolveObserverToken } from './observer-auth.mjs';
+import { readProjectForValidation } from '../packages/vault/src/validate-memory.mjs';
 
 const OUTBOX_REL = join('.brain', 'observer-outbox');
 const REQUEST_TIMEOUT_MS = 500;
@@ -88,51 +88,26 @@ export async function retryObserverOutbox({ vaultBase, url, token = process.env.
 
 export async function publishObserverSnapshot({
   vaultBase,
-  projectRoot,
   url = process.env.WENDKEEP_OBSERVER_URL || '',
   now = new Date(),
   input = {},
   token = process.env.WENDKEEP_OBSERVER_TOKEN || '',
 } = {}) {
   try {
-    const event = buildProjectSnapshot({ vaultBase, projectRoot, now });
-    const sql = await publishObserverSql({
+    const project = readProjectForValidation(vaultBase);
+    if (!project.ok || !project.projectId) throw new Error(project.errors?.join(' ') || 'PROJECT.json inválido.');
+    const sql = await publishObserverSqlIncremental({
       vaultBase,
-      projectId: event.project_id,
+      projectId: project.projectId,
       url,
       input,
       now,
       token,
     });
-    if (!url) return { ok: sql.ok, skipped: true, queued: sql.queued, hookExitCode: 0, event_id: event.event_id, sql };
-
-    await retryObserverOutbox({ vaultBase, url, token });
-    // SQL is the live authority. Keep the legacy-shaped `memory` field for
-    // older integrations while reporting the real SQL publication separately.
+    // SQLite is the only live authority. The legacy snapshot store remains
+    // readable solely as a migration source for pre-SQL installations.
     const memory = { ok: sql.ok, queued: sql.queued, changed: sql.changed, pending: sql.pending, authority: 'sqlite' };
-    try {
-      const response = await postSnapshot(url, event, resolveObserverToken(token));
-      return {
-        ok: true,
-        queued: false,
-        hookExitCode: 0,
-        event_id: event.event_id,
-        duplicate: response.duplicate === true,
-        memory,
-        sql,
-      };
-    } catch (error) {
-      queueOutbox(vaultBase, event);
-      return {
-        ok: false,
-        queued: true,
-        hookExitCode: 0,
-        event_id: event.event_id,
-        error: error.message,
-        memory,
-        sql,
-      };
-    }
+    return { ok: sql.ok, queued: sql.queued, hookExitCode: 0, memory, sql };
   } catch (error) {
     return { ok: false, queued: false, hookExitCode: 0, error: error.message };
   }

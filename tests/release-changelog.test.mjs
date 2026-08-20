@@ -84,6 +84,16 @@ test('extractReleaseNotes: throws when the version is absent', () => {
 test('[sensor:release-tests] current release notes are extractable and match the package', () => {
   const release = extractReleaseNotes(CHANGELOG, PACKAGE.version);
   assert.equal(release.date, '2026-08-20');
+  assert.match(release.notes, /Identidades SQL escopadas por projeto/i);
+  assert.match(release.notes, /Ingest atômico por evento/i);
+  assert.match(release.notes, /Reconciliação explícita/i);
+  assert.match(release.notes, /Publicação incremental nos hooks/i);
+  assert.match(release.notes, /Outbox observável/i);
+  assert.doesNotMatch(release.notes, /019f[0-9a-f-]+/i);
+});
+
+test('[sensor:release-tests] 0.74.0 scoped memory and recall notes remain extractable', () => {
+  const release = extractReleaseNotes(CHANGELOG, '0.74.0');
   assert.match(release.notes, /Registradores de memória escopados/i);
   assert.match(release.notes, /Migração append-only de escopo/i);
   assert.match(release.notes, /Recall baseado em evidências/i);

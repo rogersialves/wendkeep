@@ -1,6 +1,6 @@
 {
   "name": "wendkeep",
-  "version": "0.74.0",
+  "version": "0.75.0",
   "description": "Vault-first persistent memory for AI coding agents, with an optional profile-aware governance runtime: OFF, FLOW, GUIDE, GOVERN, or ASSURE. Local-first and agent-agnostic (Claude Code, Codex, Cursor…).",
   "type": "module",
   "workspaces": [

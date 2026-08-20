@@ -9,7 +9,7 @@ import {
 } from '../packages/vault/src/evidence-recall.mjs';
 
 export const OBSERVER_SQL_FILE = 'observer.sqlite';
-export const OBSERVER_SQL_SCHEMA_VERSION = 4;
+export const OBSERVER_SQL_SCHEMA_VERSION = 5;
 export const OBSERVER_EVENT_SCHEMA_VERSION = 1;
 
 const SCHEMA_DIR = fileURLToPath(new URL('../schema/observer/', import.meta.url));
@@ -22,6 +22,7 @@ const EVENT_KINDS = new Set([
 const OBSERVER_SQL_MINIMUM_NODE = '22.13.0';
 const require = createRequire(import.meta.url);
 let DatabaseSync;
+const DATABASE_PATHS = new WeakMap();
 
 export function observerSqlRuntimeSupport(version = process.versions.node) {
   const current = String(version || '0.0.0');
@@ -74,6 +75,10 @@ function hash(value) {
   return createHash('sha256').update(typeof value === 'string' ? value : json(value)).digest('hex');
 }
 
+function scopedIdentity(projectId, externalId) {
+  return `${projectId}\u001f${externalId}`;
+}
+
 function validProjectId(value) { return typeof value === 'string' && PROJECT_ID_RE.test(value); }
 
 function requireProject(db, projectId) {
@@ -97,7 +102,9 @@ export function openObserverDatabase(dataDir) {
   if (!dataDir) throw new Error('dataDir é obrigatório.');
   mkdirSync(dataDir, { recursive: true });
   const SqliteDatabase = observerDatabaseSync();
-  const db = new SqliteDatabase(join(dataDir, OBSERVER_SQL_FILE));
+  const databasePath = join(dataDir, OBSERVER_SQL_FILE);
+  const db = new SqliteDatabase(databasePath);
+  DATABASE_PATHS.set(db, databasePath);
   db.exec('PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000;');
   return db;
 }
@@ -105,15 +112,39 @@ export function openObserverDatabase(dataDir) {
 export function migrateObserverDatabase(db) {
   if (!db) throw new Error('db é obrigatório.');
   db.exec('CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at TEXT NOT NULL)');
-  const applied = new Set(db.prepare('SELECT version FROM schema_migrations').all().map((row) => Number(row.version)));
+  const migrationColumns = db.prepare('PRAGMA table_info(schema_migrations)').all().map((row) => row.name);
+  if (!migrationColumns.includes('checksum')) db.exec("ALTER TABLE schema_migrations ADD COLUMN checksum TEXT NOT NULL DEFAULT ''");
+  const appliedRows = db.prepare('SELECT version, name, checksum FROM schema_migrations ORDER BY version').all();
+  const applied = new Map(appliedRows.map((row) => [Number(row.version), row]));
+  const backups = [];
   for (const file of migrationFiles()) {
     const version = Number(file.split('-')[0]);
-    if (applied.has(version)) continue;
     const sql = readFileSync(join(SCHEMA_DIR, file), 'utf8');
+    const checksum = hash(sql);
+    const previous = applied.get(version);
+    if (previous) {
+      if (previous.name !== file || (previous.checksum && previous.checksum !== checksum)) {
+        const error = new Error(`Checksum da migração ${version} não corresponde ao arquivo ${file}.`);
+        error.code = 'WENDKEEP_OBSERVER_MIGRATION_CHECKSUM_MISMATCH';
+        throw error;
+      }
+      if (!previous.checksum) {
+        db.prepare('UPDATE schema_migrations SET checksum = ? WHERE version = ?').run(checksum, version);
+      }
+      continue;
+    }
+    if (/^\s*--\s*wendkeep:structural\b/m.test(sql) && applied.size > 0) {
+      const databasePath = DATABASE_PATHS.get(db);
+      if (!databasePath) throw new Error('Caminho do Observer desconhecido para backup estrutural.');
+      const backupPath = `${databasePath}.pre-${String(version).padStart(3, '0')}-${Date.now()}.bak`;
+      const escaped = backupPath.replaceAll("'", "''");
+      db.exec(`VACUUM INTO '${escaped}'`);
+      backups.push(backupPath);
+    }
     db.exec('BEGIN IMMEDIATE');
     try {
       db.exec(sql);
-      db.prepare('INSERT INTO schema_migrations(version, name, applied_at) VALUES (?, ?, ?)').run(version, file, now());
+      db.prepare('INSERT INTO schema_migrations(version, name, applied_at, checksum) VALUES (?, ?, ?, ?)').run(version, file, now(), checksum);
       db.exec('COMMIT');
     } catch (error) {
       db.exec('ROLLBACK');
@@ -123,7 +154,8 @@ export function migrateObserverDatabase(db) {
   rebuildSqlEvidenceIndex(db, { missingOnly: true });
   return {
     version: Number(db.prepare('SELECT COALESCE(MAX(version), 0) AS version FROM schema_migrations').get().version || 0),
-    applied: db.prepare('SELECT version, name, applied_at FROM schema_migrations ORDER BY version').all(),
+    applied: db.prepare('SELECT version, name, applied_at, checksum FROM schema_migrations ORDER BY version').all(),
+    backups,
   };
 }
 
@@ -268,9 +300,9 @@ function ensureSession(db, projectId, payload) {
   const sessionId = text(payload.session_id || payload.sessionId);
   if (!sessionId) throw new Error('session_id ausente.');
   db.prepare(`
-    INSERT INTO sessions(session_id, project_id, provider, status, summary, change_slug, started_at, ended_at, updated_at, metadata_json)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(session_id) DO UPDATE SET
+    INSERT INTO sessions(session_pk, session_id, project_id, provider, status, summary, change_slug, started_at, ended_at, updated_at, metadata_json)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(project_id, session_id) DO UPDATE SET
       provider = CASE WHEN excluded.provider <> '' THEN excluded.provider ELSE sessions.provider END,
       status = CASE WHEN excluded.status <> '' THEN excluded.status ELSE sessions.status END,
       summary = CASE WHEN excluded.summary <> '' THEN excluded.summary ELSE sessions.summary END,
@@ -280,7 +312,7 @@ function ensureSession(db, projectId, payload) {
       updated_at = excluded.updated_at,
       metadata_json = CASE WHEN excluded.metadata_json <> '{}' THEN excluded.metadata_json ELSE sessions.metadata_json END
   `).run(
-    sessionId, projectId, text(payload.provider), text(payload.status, 'unknown'), text(payload.summary), text(payload.change_slug || payload.changeSlug),
+    scopedIdentity(projectId, sessionId), sessionId, projectId, text(payload.provider), text(payload.status, 'unknown'), text(payload.summary), text(payload.change_slug || payload.changeSlug),
     payload.started_at || payload.startedAt || null, payload.ended_at || payload.endedAt || null, now(), json(payload.metadata),
   );
   return sessionId;
@@ -291,9 +323,9 @@ function ensureAgent(db, projectId, payload) {
   if (!agentId) throw new Error('agent_id ausente.');
   const sessionId = ensureSession(db, projectId, payload);
   db.prepare(`
-    INSERT INTO agent_runs(agent_id, project_id, session_id, parent_agent_id, role, agent_name, agent_type, workflow, status, model, effort, started_at, ended_at, metadata_json)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(agent_id) DO UPDATE SET
+    INSERT INTO agent_runs(agent_pk, agent_id, project_id, session_id, parent_agent_id, role, agent_name, agent_type, workflow, status, model, effort, started_at, ended_at, metadata_json)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(project_id, agent_id) DO UPDATE SET
       parent_agent_id = COALESCE(excluded.parent_agent_id, agent_runs.parent_agent_id),
       role = excluded.role,
       agent_name = CASE WHEN excluded.agent_name <> '' THEN excluded.agent_name ELSE agent_runs.agent_name END,
@@ -306,7 +338,7 @@ function ensureAgent(db, projectId, payload) {
       ended_at = COALESCE(excluded.ended_at, agent_runs.ended_at),
       metadata_json = CASE WHEN excluded.metadata_json <> '{}' THEN excluded.metadata_json ELSE agent_runs.metadata_json END
   `).run(
-    agentId, projectId, sessionId, payload.parent_agent_id || payload.parentAgentId || null, text(payload.role, 'main'),
+    scopedIdentity(projectId, agentId), agentId, projectId, sessionId, payload.parent_agent_id || payload.parentAgentId || null, text(payload.role, 'main'),
     text(payload.agent_name || payload.agentName), text(payload.agent_type || payload.agentType), text(payload.workflow),
     text(payload.status, 'unknown'), text(payload.model), text(payload.effort), payload.started_at || null, payload.ended_at || null, json(payload.metadata),
   );
@@ -398,19 +430,19 @@ function applyUsageRollup(db, event) {
   const [input, cacheWrite, cacheRead, output, reasoning, total] = tokenFields(p.tokens);
   const rollupKey = text(p.rollup_key || p.rollupKey) || [event.project_id, sessionId, agentId, p.model_provider || p.modelProvider || '', p.model || '', p.effort || ''].join(':');
   const revision = integer(p.revision, 1);
-  const current = db.prepare('SELECT revision FROM usage_rollups WHERE rollup_key = ?').get(rollupKey);
+  const current = db.prepare('SELECT revision FROM usage_rollups WHERE project_id = ? AND rollup_key = ?').get(event.project_id, rollupKey);
   if (current && revision < Number(current.revision)) return { stale: true };
   db.prepare(`
-    INSERT INTO usage_rollups(rollup_key, project_id, session_id, agent_id, role, provider, model_provider, model, effort, calls, tokens_input, tokens_cache_write, tokens_cache_read, tokens_output, tokens_reasoning, tokens_total, cost_usd, cost_status, pricing_source, pricing_version, wasted_usd, revision, occurred_at, source_event_id, metadata_json)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(rollup_key) DO UPDATE SET
+    INSERT INTO usage_rollups(rollup_pk, rollup_key, project_id, session_id, agent_id, role, provider, model_provider, model, effort, calls, tokens_input, tokens_cache_write, tokens_cache_read, tokens_output, tokens_reasoning, tokens_total, cost_usd, cost_status, pricing_source, pricing_version, wasted_usd, revision, occurred_at, source_event_id, metadata_json)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(project_id, rollup_key) DO UPDATE SET
       calls = excluded.calls, tokens_input = excluded.tokens_input, tokens_cache_write = excluded.tokens_cache_write,
       tokens_cache_read = excluded.tokens_cache_read, tokens_output = excluded.tokens_output, tokens_reasoning = excluded.tokens_reasoning,
       tokens_total = excluded.tokens_total, cost_usd = excluded.cost_usd, cost_status = excluded.cost_status,
       pricing_source = excluded.pricing_source, pricing_version = excluded.pricing_version, wasted_usd = excluded.wasted_usd,
       revision = excluded.revision, occurred_at = excluded.occurred_at, source_event_id = excluded.source_event_id, metadata_json = excluded.metadata_json
   `).run(
-    rollupKey, event.project_id, sessionId, agentId, text(p.role, 'main'), text(p.provider), text(p.model_provider || p.modelProvider), text(p.model), text(p.effort),
+    scopedIdentity(event.project_id, rollupKey), rollupKey, event.project_id, sessionId, agentId, text(p.role, 'main'), text(p.provider), text(p.model_provider || p.modelProvider), text(p.model), text(p.effort),
     integer(p.calls), input, cacheWrite, cacheRead, output, reasoning, total, number(p.cost_usd ?? p.costUsd), text(p.cost_status || p.costStatus, 'unknown'),
     text(p.pricing_source || p.pricingSource), text(p.pricing_version || p.pricingVersion), number(p.wasted_usd ?? p.wastedUsd), revision, event.occurred_at, event.event_id, json(p.metadata),
   );
@@ -423,17 +455,17 @@ function applyCall(db, event) {
   const agentId = ensureAgent(db, event.project_id, p);
   const callId = text(p.call_id || p.callId);
   if (!callId) throw new Error('call_id ausente.');
-  if (db.prepare('SELECT call_id FROM llm_calls WHERE call_id = ?').get(callId)) {
+  if (db.prepare('SELECT call_id FROM llm_calls WHERE project_id = ? AND call_id = ?').get(event.project_id, callId)) {
     const error = new Error(`call_id já existe: ${callId}`);
     error.code = 'call_conflict';
     throw error;
   }
   const [input, cacheWrite, cacheRead, output, reasoning, total] = tokenFields(p.tokens);
   db.prepare(`
-    INSERT INTO llm_calls(call_id, project_id, session_id, agent_id, role, provider, model_provider, model, effort, sequence, occurred_at, tokens_input, tokens_cache_write, tokens_cache_read, tokens_output, tokens_reasoning, tokens_total, cost_usd, cost_status, transcript_id, prompt_text, response_text, status, metadata_json)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO llm_calls(call_pk, call_id, project_id, session_id, agent_id, role, provider, model_provider, model, effort, sequence, occurred_at, tokens_input, tokens_cache_write, tokens_cache_read, tokens_output, tokens_reasoning, tokens_total, cost_usd, cost_status, transcript_id, prompt_text, response_text, status, metadata_json)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
-    callId, event.project_id, sessionId, agentId, text(p.role, 'main'), text(p.provider), text(p.model_provider || p.modelProvider), text(p.model), text(p.effort), integer(p.sequence),
+    scopedIdentity(event.project_id, callId), callId, event.project_id, sessionId, agentId, text(p.role, 'main'), text(p.provider), text(p.model_provider || p.modelProvider), text(p.model), text(p.effort), integer(p.sequence),
     text(p.occurred_at || event.occurred_at), input, cacheWrite, cacheRead, output, reasoning, total, number(p.cost_usd ?? p.costUsd), text(p.cost_status || p.costStatus, 'unknown'),
     p.transcript_id || p.transcriptId || null, text(p.prompt_text || p.promptText || p.prompt), text(p.response_text || p.responseText || p.response), text(p.status, 'complete'), json(p.metadata),
   );
@@ -448,14 +480,14 @@ function applyTranscript(db, event) {
   if (!transcriptId) throw new Error('transcript_id ausente.');
   const encoded = encodeTranscript(p.content);
   db.prepare(`
-    INSERT INTO transcripts(transcript_id, project_id, session_id, agent_id, coverage, codec, content_gzip, content_sha256, original_bytes, compressed_bytes, source, occurred_at, metadata_json)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(transcript_id) DO UPDATE SET
+    INSERT INTO transcripts(transcript_pk, transcript_id, project_id, session_id, agent_id, coverage, codec, content_gzip, content_sha256, original_bytes, compressed_bytes, source, occurred_at, metadata_json)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(project_id, transcript_id) DO UPDATE SET
       coverage = excluded.coverage, codec = excluded.codec, content_gzip = excluded.content_gzip,
       content_sha256 = excluded.content_sha256, original_bytes = excluded.original_bytes, compressed_bytes = excluded.compressed_bytes,
       source = excluded.source, occurred_at = excluded.occurred_at, metadata_json = excluded.metadata_json
   `).run(
-    transcriptId, event.project_id, sessionId, agentId, text(p.coverage, 'complete'), encoded.codec, encoded.content_gzip, encoded.content_sha256,
+    scopedIdentity(event.project_id, transcriptId), transcriptId, event.project_id, sessionId, agentId, text(p.coverage, 'complete'), encoded.codec, encoded.content_gzip, encoded.content_sha256,
     encoded.original_bytes, encoded.compressed_bytes, text(p.source), event.occurred_at, json(p.metadata),
   );
   return { stale: false };
@@ -501,6 +533,8 @@ export function ingestObserverEvents(db, { projectId, events = [] } = {}) {
       }
       continue;
     }
+    db.exec('SAVEPOINT ingest_one');
+    let savepointOpen = true;
     try {
       db.prepare('INSERT INTO ingest_events(event_id, project_id, kind, payload_hash, payload_json, occurred_at, ingested_at, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
         .run(event.event_id, projectId, event.kind, payloadHash, json(event.payload), event.occurred_at, now(), 'accepted');
@@ -513,8 +547,12 @@ export function ingestObserverEvents(db, { projectId, events = [] } = {}) {
         result.accepted += 1;
         result.results.push({ accepted: true, event_id: event.event_id });
       }
+      db.exec('RELEASE ingest_one');
+      savepointOpen = false;
     } catch (error) {
-      db.prepare('DELETE FROM ingest_events WHERE event_id = ?').run(event.event_id);
+      if (savepointOpen) {
+        try { db.exec('ROLLBACK TO ingest_one'); } finally { db.exec('RELEASE ingest_one'); }
+      }
       if (error?.code === 'call_conflict' || error?.code === 'document_conflict') {
         result.conflicts += 1;
         result.results.push({ accepted: false, conflict: true, event_id: event.event_id, errors: [error.message] });
@@ -702,6 +740,48 @@ export function exportSqlMemoryBundle(db, projectId) {
 export function readSqlProject(db, projectId) {
   requireProject(db, projectId);
   return db.prepare('SELECT * FROM projects WHERE project_id = ?').get(projectId);
+}
+
+export function upsertSqlProjectSnapshot(db, snapshot) {
+  const projectId = text(snapshot?.project_id || snapshot?.projectId);
+  requireProject(db, projectId);
+  const eventId = text(snapshot?.event_id);
+  const capturedAt = text(snapshot?.captured_at);
+  if (!eventId || !capturedAt || Number.isNaN(Date.parse(capturedAt))) throw new Error('snapshot SQL inválido.');
+  const current = db.prepare('SELECT event_id, captured_at FROM project_snapshots WHERE project_id = ?').get(projectId);
+  if (current?.event_id === eventId) return { accepted: false, duplicate: true, event_id: eventId };
+  if (current && (current.captured_at > capturedAt
+    || (current.captured_at === capturedAt && current.event_id >= eventId))) {
+    return { accepted: false, stale: true, event_id: eventId };
+  }
+  db.prepare(`INSERT INTO project_snapshots(project_id, event_id, captured_at, snapshot_json)
+    VALUES (?, ?, ?, ?)
+    ON CONFLICT(project_id) DO UPDATE SET
+      event_id = excluded.event_id,
+      captured_at = excluded.captured_at,
+      snapshot_json = excluded.snapshot_json`).run(projectId, eventId, capturedAt, json(snapshot));
+  return { accepted: true, duplicate: false, event_id: eventId };
+}
+
+export function readSqlProjectSnapshot(db, projectId) {
+  requireProject(db, projectId);
+  const row = db.prepare('SELECT snapshot_json FROM project_snapshots WHERE project_id = ?').get(projectId);
+  return row ? parseJson(row.snapshot_json, null) : null;
+}
+
+export function readSqlProjectOverview(db, projectId) {
+  const project = readSqlProject(db, projectId);
+  const snapshot = readSqlProjectSnapshot(db, projectId);
+  const events = db.prepare('SELECT COUNT(*) AS count FROM ingest_events WHERE project_id = ?').get(projectId);
+  return {
+    projectId: project.project_id,
+    projectName: project.project_name,
+    wendkeepVersion: project.wendkeep_version,
+    registeredAt: project.registered_at,
+    updatedAt: project.updated_at,
+    eventCount: integer(events.count),
+    snapshot,
+  };
 }
 
 export function listSqlProjects(db) {
