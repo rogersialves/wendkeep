@@ -30,6 +30,9 @@ All notable changes to **wendkeep** are documented here. Format based on
 - **Identidade de arquivos de memória no Windows.** A revalidação compara o índice do arquivo como
   inteiro exato e tolera a inconsistência conhecida do serial de volume do libuv antigo, evitando
   falsos `VAULT_PATH_UNSAFE` no Node.js 22.13 sem relaxar a rejeição de hardlinks ou reparses.
+- **Ingestão SQL grande em runners lentos.** O timeout HTTP cresce com o tamanho bruto do lote até
+  60 segundos, preservando 15 segundos para payloads vazios/pequenos e evitando outbox falsa para
+  lotes gzip válidos acima de 64 MB.
 
 ## [0.72.0] — 2026-08-17
 

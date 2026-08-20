@@ -7,6 +7,7 @@ import { startObserverServer } from '../src/observer-server.mjs';
 import {
   buildObserverSqlEventBatch,
   listSqlOutbox,
+  observerSqlRequestTimeoutMs,
   publishObserverSql,
   retryObserverSqlOutbox,
   SQL_EVENT_BATCH_SIZE,
@@ -16,6 +17,13 @@ import { makeDataDir, makeObserverFixture } from './helpers/observer-fixture.mjs
 
 const TOKEN = 'observer-test-token';
 const MUTATION_HEADERS = { 'content-type': 'application/json', authorization: `Bearer ${TOKEN}` };
+
+test('[req:SQL-OBS-10] timeout de ingestão cresce com o payload e permanece limitado', () => {
+  assert.equal(observerSqlRequestTimeoutMs(0), 15_000);
+  assert.equal(observerSqlRequestTimeoutMs(8 * 1024 * 1024), 15_000);
+  assert.equal(observerSqlRequestTimeoutMs(70 * 1024 * 1024), 46_000);
+  assert.equal(observerSqlRequestTimeoutMs(1024 * 1024 * 1024), 60_000);
+});
 
 function sessionFixture(fixture, transcriptPath) {
   const sessionDir = join(fixture.vaultBase, '02-Sessões/2026/08-AGO/DIA 17');
