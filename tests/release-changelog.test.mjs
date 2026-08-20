@@ -84,11 +84,11 @@ test('extractReleaseNotes: throws when the version is absent', () => {
 test('[sensor:release-tests] current release notes are extractable and match the package', () => {
   const release = extractReleaseNotes(CHANGELOG, PACKAGE.version);
   assert.equal(release.date, '2026-08-20');
-  assert.match(release.notes, /Work kind independente/i);
-  assert.match(release.notes, /Delivery com autorização/i);
-  assert.match(release.notes, /GUIDE realmente compacta/i);
-  assert.match(release.notes, /Doctor proporcional/i);
-  assert.match(release.notes, /Proveniência preserva lifecycle scripts/i);
+  assert.match(release.notes, /Registradores de memória escopados/i);
+  assert.match(release.notes, /Migração append-only de escopo/i);
+  assert.match(release.notes, /Recall baseado em evidências/i);
+  assert.match(release.notes, /Context broker por prompt/i);
+  assert.match(release.notes, /FTS5 no Observer/i);
   assert.doesNotMatch(release.notes, /019f[0-9a-f-]+/i);
 });
 

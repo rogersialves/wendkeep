@@ -10,6 +10,9 @@ import {
   readUsageCalls,
   readUsageSummary,
   registerSqlProject,
+  observerFts5Support,
+  rebuildSqlEvidenceIndex,
+  searchSqlDocuments,
 } from '../src/observer-sql-store.mjs';
 import { makeDataDir } from './helpers/observer-fixture.mjs';
 
@@ -117,6 +120,65 @@ test('[req:SQL-OBS-3] republicação do mesmo documento por outro evento é stal
     });
     assert.equal(conflict.conflicts, 1);
     assert.equal(conflict.rejected, 0);
+  } finally {
+    db.close();
+    rmSync(dataDir, { recursive: true, force: true });
+  }
+});
+
+test('[req:RECALL-6] Observer indexes chunks, probes FTS5 and returns the matching evidence passage', () => {
+  const dataDir = makeDataDir();
+  const db = ensureObserverDatabase(dataDir);
+  try {
+    registerSqlProject(db, { projectId: 'project-a', projectName: 'Projeto A' });
+    const content = '# Observer\n\n## Introdução\n\nTexto genérico que não é a resposta.\n\n## Decisão de indexação\n\nO feature probe FTS5 ativa busca lexical com proveniência verificável.\n';
+    const accepted = ingestObserverEvents(db, {
+      projectId: 'project-a',
+      events: [event('document.upsert', 'evidence-document', 'project-a', {
+        logical_path: '04-Decisões/ADR-0099-evidence.md',
+        entity_type: 'decision',
+        content,
+        revision: 1,
+        metadata: { authority: 'verified', validity: 'active', change_slug: 'evidence-recall' },
+      })],
+    });
+    assert.equal(accepted.accepted, 1);
+    assert.ok(db.prepare('SELECT COUNT(*) AS count FROM document_chunks WHERE project_id = ?').get('project-a').count >= 2);
+    const support = observerFts5Support(db);
+    assert.ok(['fts5', 'lexical-fallback'].includes(support.engine));
+    const results = searchSqlDocuments(db, 'project-a', 'feature probe FTS5');
+    assert.equal(results[0].heading, 'Decisão de indexação');
+    assert.match(results[0].excerpt, /feature probe FTS5 ativa/);
+    assert.equal(results[0].logical_path, '04-Decisões/ADR-0099-evidence.md');
+    assert.equal(results[0].authority, 'verified');
+    assert.equal(results[0].validity, 'active');
+  } finally {
+    db.close();
+    rmSync(dataDir, { recursive: true, force: true });
+  }
+});
+
+test('[req:RECALL-6] enabling FTS5 later backfills chunks created under lexical fallback', () => {
+  const dataDir = makeDataDir();
+  const db = ensureObserverDatabase(dataDir);
+  try {
+    registerSqlProject(db, { projectId: 'project-a', projectName: 'A' });
+    ingestObserverEvents(db, {
+      projectId: 'project-a',
+      events: [event('document.upsert', 'fts-late-document', 'project-a', {
+        logical_path: '04-Decisions/ADR-002.md',
+        entity_type: 'decision',
+        content: '# ADR\n\n## Evidência tardia\n\nO índice recupera a passagem depois do feature probe.\n',
+        revision: 1,
+      })],
+    });
+    const support = observerFts5Support(db);
+    if (support.supported) {
+      db.exec('DELETE FROM evidence_chunks_fts');
+      const rebuilt = rebuildSqlEvidenceIndex(db, { missingOnly: true });
+      assert.equal(rebuilt.fts.rebuilt, true);
+      assert.match(searchSqlDocuments(db, 'project-a', 'feature probe')[0].excerpt, /passagem depois/);
+    }
   } finally {
     db.close();
     rmSync(dataDir, { recursive: true, force: true });

@@ -1,5 +1,5 @@
 <!-- wendkeep:skills:start -->
-<!-- wendkeep-version: 0.73.0; skills-sha256: 416206a455a3834f8d025f7a2827796b6a0e9c2b3f45cb45adb110a06cea0eee -->
+<!-- wendkeep-version: 0.74.0; skills-sha256: 416206a455a3834f8d025f7a2827796b6a0e9c2b3f45cb45adb110a06cea0eee -->
 ## wendkeep — Keep Core & operating profiles
 
 This project uses the [wendkeep](https://github.com/rogersialves/wendkeep) harness. **Keep Core is always active**

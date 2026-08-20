@@ -4,10 +4,12 @@
 import { pathToFileURL } from 'node:url';
 import { getVaultBase } from './obsidian-common.mjs';
 import { loadIndex } from './brain-core.mjs';
+import { loadEvidenceIndex, recallEvidence } from './evidence-recall.mjs';
 
 export { loadIndex };
 
 export function scoreRows(rows, query, topK = 5) {
+  if (rows.some((row) => row?.chunk_id)) return recallEvidence(rows, query, { topK });
   const terms = String(query).toLowerCase().split(/\s+/).filter(Boolean);
   if (!terms.length) return [];
   return rows
@@ -27,6 +29,8 @@ export function scoreRows(rows, query, topK = 5) {
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const vaultBase = getVaultBase();
-  const hits = scoreRows(loadIndex(vaultBase), process.argv.slice(2).join(' '));
+  const query = process.argv.slice(2).join(' ');
+  const evidence = loadEvidenceIndex(vaultBase);
+  const hits = evidence.length ? recallEvidence(evidence, query, { topK: 5 }) : scoreRows(loadIndex(vaultBase), query);
   process.stdout.write(JSON.stringify(hits, null, 2) + '\n');
 }

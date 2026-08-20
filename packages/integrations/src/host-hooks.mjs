@@ -19,6 +19,7 @@ export const SESSION_HOOKS = [
   { event: 'Stop', matcher: null, name: 'session-stop', timeout: 60, codex: true, statusMessage: 'wendkeep: writing session checkpoint' },
   { event: 'Stop', matcher: null, name: 'observer-publish', timeout: 5, order: 20, codex: true, statusMessage: 'wendkeep: publishing local observer snapshot' },
   { event: 'UserPromptSubmit', matcher: null, name: 'session-ensure', timeout: 30, codex: true, statusMessage: 'wendkeep: ensuring active session' },
+  { event: 'UserPromptSubmit', matcher: null, name: 'evidence-context', timeout: 10, order: 5, codex: true, statusMessage: 'wendkeep: retrieving relevant evidence' },
   // Capture an interactive decision (AskUserQuestion) — options + the user's choice — into 04-Decisões.
   // codex: AskUserQuestion is a Claude-only tool; there is nothing to match on.
   { event: 'PostToolUse', matcher: 'AskUserQuestion', name: 'decision-capture', timeout: 15, statusMessage: 'wendkeep: recording decision' },
