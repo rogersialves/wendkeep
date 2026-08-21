@@ -193,13 +193,14 @@ test('[req:WT-1] root por junction para fora do repositório falha antes de cria
     writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`, 'utf8');
     git(fixture.main, ['add', '.wendkeep.json']);
     git(fixture.main, ['commit', '-m', 'configure linked worktree root']);
+    const statusBefore = git(fixture.main, ['status', '--short']);
 
     assert.throws(
       () => createManagedWorktree({ startDir: fixture.main, slug: 'escape', open: 'none' }),
       (error) => error?.code === 'WENDKEEP_WORKTREE_PATH_SYMLINK_ESCAPE',
     );
     assert.equal(existsSync(join(outside, 'escape')), false);
-    assert.equal(git(fixture.main, ['status', '--short']), '');
+    assert.equal(git(fixture.main, ['status', '--short']), statusBefore);
   } finally {
     rmSync(fixture.root, { recursive: true, force: true });
   }
