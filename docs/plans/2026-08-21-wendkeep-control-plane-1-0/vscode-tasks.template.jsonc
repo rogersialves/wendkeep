@@ -1,0 +1,114 @@
+{
+  // Copie este arquivo para .vscode/tasks.json na sua máquina.
+  // .vscode/ permanece local/ignorado no repositório WendKeep.
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "WendKeep: Bootstrap worktree",
+      "type": "shell",
+      "command": "mkdir -p \"${workspaceFolder}/.worktrees\" && git -C \"${workspaceFolder}\" worktree add \".worktrees/${input:slug}\" -b \"wk/${input:slug}\" main",
+      "windows": {
+        "command": "powershell -NoProfile -ExecutionPolicy Bypass -Command \"New-Item -ItemType Directory -Force '${workspaceFolder}/.worktrees' | Out-Null; git -C '${workspaceFolder}' worktree add '.worktrees/${input:slug}' -b 'wk/${input:slug}' main; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }\""
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "WendKeep: Open worktree in new VS Code window",
+      "type": "process",
+      "command": "code",
+      "args": [
+        "-n",
+        "${workspaceFolder}/.worktrees/${input:slug}"
+      ],
+      "problemMatcher": []
+    },
+    {
+      "label": "WendKeep: Bootstrap + open worktree",
+      "dependsOrder": "sequence",
+      "dependsOn": [
+        "WendKeep: Bootstrap worktree",
+        "WendKeep: Open worktree in new VS Code window"
+      ],
+      "problemMatcher": []
+    },
+    {
+      "label": "WendKeep: List worktrees",
+      "type": "process",
+      "command": "git",
+      "args": [
+        "-C",
+        "${workspaceFolder}",
+        "worktree",
+        "list",
+        "--porcelain"
+      ],
+      "problemMatcher": []
+    },
+    {
+      "label": "WendKeep: Doctor",
+      "type": "process",
+      "command": "node",
+      "args": [
+        "${workspaceFolder}/bin/wendkeep.mjs",
+        "doctor",
+        "--project",
+        "${workspaceFolder}"
+      ],
+      "problemMatcher": []
+    },
+    {
+      "label": "WendKeep: Native create worktree (after #70)",
+      "type": "process",
+      "command": "node",
+      "args": [
+        "${workspaceFolder}/bin/wendkeep.mjs",
+        "worktree",
+        "create",
+        "${input:slug}",
+        "--open",
+        "vscode"
+      ],
+      "problemMatcher": []
+    },
+    {
+      "label": "WendKeep: Native cleanup merged worktree (after #72)",
+      "type": "process",
+      "command": "node",
+      "args": [
+        "${workspaceFolder}/bin/wendkeep.mjs",
+        "worktree",
+        "finish",
+        "${input:slug}",
+        "--pr",
+        "${input:pr}"
+      ],
+      "problemMatcher": []
+    },
+    {
+      "label": "WendKeep: Preview cleanup of all merged worktrees (after #72)",
+      "type": "process",
+      "command": "node",
+      "args": [
+        "${workspaceFolder}/bin/wendkeep.mjs",
+        "worktree",
+        "cleanup",
+        "--merged",
+        "--dry-run"
+      ],
+      "problemMatcher": []
+    }
+  ],
+  "inputs": [
+    {
+      "id": "slug",
+      "type": "promptString",
+      "description": "Slug da issue/worktree, sem wk/",
+      "default": "worktree-manager"
+    },
+    {
+      "id": "pr",
+      "type": "promptString",
+      "description": "Número ou URL do PR comprovadamente merged"
+    }
+  ]
+}
