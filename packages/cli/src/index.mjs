@@ -102,8 +102,9 @@ Usage:
                            in session notes from the linked derived notes — the body used to lag
                            behind the closing block. Dry-run by default · --apply · --json.
   wendkeep lesson add "t" "l"   Record a project-local lesson (injected at SessionStart).
-  wendkeep memory curate         Guide one semantic conflict at a time in an interactive terminal.
-                           Every promote/reject requires confirmation; --vault P.
+  wendkeep memory curate         Guide actionable semantic conflicts in an interactive terminal.
+                           --all includes historical handoffs and enables confirmed safe batch close;
+                           every promote/reject requires confirmation. --vault P.
   wendkeep memory <sub>          Shared memory v2: status | candidates [--active] | curate | migrate [--apply] | rescope [--apply] | repair |
                            recover-attempt <session> [--apply] |
                            reconcile <session> --by-session <session> --reason <text> [--apply] |

@@ -21,10 +21,18 @@ const TEXT = {
     observed: 'registrado em',
     newer: 'mais recente',
     actions: '[1-N] Manter uma versão · [P] Pular · [R] Encerrar sem vencedor · [D] Detalhes · [Q] Sair',
+    historicalAction: '[H] Encerrar todos os handoffs históricos recomendados',
+    terminalContext: 'sessão encerrada',
+    activeContext: 'sessão ativa',
+    changeContext: (slug) => `change: ${slug}`,
+    safeRecommendation: 'Recomendação segura: encerrar sem vencedor; as evidências permanecem no ledger.',
+    historicalOmitted: (count) => `${count} handoff(s) histórico(s) reparável(is) foram omitidos. Use --all para revisar ou encerrar em lote.`,
+    confirmHistorical: (count) => `Encerrar ${count} handoff(s) histórico(s) sem vencedor? Cada decisão será auditada. [s/N] `,
+    historicalClosed: (count) => `${count} handoff(s) histórico(s) encerrado(s) com decisão auditada.`,
     choose: '> ',
     confirmPromote: (number) => `Manter a versão ${number}? Essa decisão será gravada agora. [s/N] `,
     confirmReject: 'Encerrar este conflito sem escolher uma versão? Essa decisão será gravada agora. [s/N] ',
-    invalid: 'Opção inválida. Escolha um número exibido, P, R, D ou Q.',
+    invalid: 'Opção inválida. Escolha um número exibido, P, R, D, H ou Q.',
     declined: 'Decisão não confirmada; nenhum byte foi alterado.',
     promoted: 'Versão promovida e decisão auditada.',
     rejected: 'Conflito encerrado sem promover uma versão.',
@@ -47,10 +55,18 @@ const TEXT = {
     observed: 'recorded at',
     newer: 'newest timestamp',
     actions: '[1-N] Keep one version · [P] Skip · [R] Close without a winner · [D] Details · [Q] Quit',
+    historicalAction: '[H] Close every safely recommended historical handoff',
+    terminalContext: 'closed session',
+    activeContext: 'active session',
+    changeContext: (slug) => `change: ${slug}`,
+    safeRecommendation: 'Safe recommendation: close without a winner; evidence remains in the ledger.',
+    historicalOmitted: (count) => `${count} repairable historical handoff(s) were omitted. Use --all to review or close them in a batch.`,
+    confirmHistorical: (count) => `Close ${count} historical handoff(s) without a winner? Every decision will be audited. [y/N] `,
+    historicalClosed: (count) => `${count} historical handoff(s) closed with audited decisions.`,
     choose: '> ',
     confirmPromote: (number) => `Keep version ${number}? This decision will be written now. [y/N] `,
     confirmReject: 'Close this conflict without choosing a version? This decision will be written now. [y/N] ',
-    invalid: 'Invalid option. Choose a displayed number, P, R, D, or Q.',
+    invalid: 'Invalid option. Choose a displayed number, P, R, D, H, or Q.',
     declined: 'Decision not confirmed; no bytes were changed.',
     promoted: 'Version promoted and decision audited.',
     rejected: 'Conflict closed without promoting a version.',
@@ -125,13 +141,24 @@ export function renderMemoryConflict(candidate, {
     const source = text.sourceKinds[event.source] || text.sourceKinds.unknown;
     lines.push(`[${eventIndex + 1}] ${text.source}: ${source}${recent}`);
     if (event.observed_at) lines.push(`    ${text.observed}: ${event.observed_at}`);
+    const context = [
+      event.session_status === 'active' ? text.activeContext
+        : event.session_status ? text.terminalContext : '',
+      event.change_slug ? text.changeContext(event.change_slug) : '',
+    ].filter(Boolean);
+    if (context.length) lines.push(`    ${context.join(' · ')}`);
     lines.push(`    ${event.preview}`);
   });
+  if (candidate.classification === 'historical'
+      && candidate.recommended_action === 'reject') {
+    lines.push('', text.safeRecommendation);
+  }
   if (details) {
     lines.push('', `${text.details}:`, `  candidate: ${candidate.candidate_id}`);
     candidate.events.forEach((event) => lines.push(`  event: ${event.event_id}`));
   }
   lines.push('', text.actions);
+  if (candidate.classification === 'historical') lines.push(text.historicalAction);
   return `${lines.join('\n')}\n`;
 }
 
@@ -141,6 +168,7 @@ export async function runGuidedMemoryCuration(vault, {
   loadCandidates = listMemoryCandidatesForCuration,
   decide = decideMemoryCandidate,
   locale = 'pt-BR',
+  omittedHistorical = 0,
 } = {}) {
   if (typeof ask !== 'function' || typeof write !== 'function') {
     throw new TypeError('runGuidedMemoryCuration requer ask e write.');
@@ -167,6 +195,7 @@ export async function runGuidedMemoryCuration(vault, {
     if (first) {
       sessionTotal = loaded.length;
       write(`${text.title}\n${text.intro(loaded.length)}\n`);
+      if (omittedHistorical) write(`${text.historicalOmitted(omittedHistorical)}\n`);
       if (loaded.length) write(`${text.categories}\n${groupLines(loaded, id).join('\n')}\n`);
       first = false;
     }
@@ -205,6 +234,56 @@ export async function runGuidedMemoryCuration(vault, {
       write(renderMemoryConflict(candidate, {
         locale: id, index: progressIndex, total: progressTotal, details: true,
       }));
+      continue;
+    }
+    if (answer === 'h') {
+      const historicalCount = loaded.filter((item) => (
+        item.classification === 'historical' && item.recommended_action === 'reject'
+      )).length;
+      if (!historicalCount) {
+        write(`${text.invalid}\n`);
+        continue;
+      }
+      const confirmation = await ask(text.confirmHistorical(historicalCount));
+      if (!isAffirmative(confirmation)) {
+        write(`${text.declined}\n`);
+        continue;
+      }
+      let closed = 0;
+      const batchIds = new Set();
+      while (true) {
+        let refreshed;
+        try {
+          refreshed = loadCandidates(vault);
+        } catch {
+          write(`${text.blocked}\n`);
+          return { status: 'blocked', decisions, skipped };
+        }
+        const next = refreshed.find((item) => (
+          item.classification === 'historical' && item.recommended_action === 'reject'
+        ));
+        if (!next) break;
+        if (batchIds.has(next.candidate_id)) {
+          write(`${text.blocked}\n`);
+          return { status: 'blocked', decisions, skipped };
+        }
+        batchIds.add(next.candidate_id);
+        let batchResult;
+        try {
+          batchResult = decide(vault, { action: 'reject', candidateId: next.candidate_id });
+        } catch {
+          write(`${text.blocked}\n`);
+          return { status: 'blocked', decisions, skipped };
+        }
+        if (batchResult?.status !== 'rejected') {
+          write(`${text.blocked}\n`);
+          return { status: 'blocked', decisions, skipped };
+        }
+        decisions += 1;
+        closed += 1;
+        decidedIds.add(next.candidate_id);
+      }
+      write(`${text.historicalClosed(closed)}\n`);
       continue;
     }
 
@@ -260,11 +339,18 @@ function usageError(message) {
 export function parseMemoryCurateArgs(argv) {
   let vault = '';
   let seenVault = false;
+  let includeHistorical = false;
   for (let index = 0; index < argv.length; index += 1) {
     const token = argv[index];
     if (!token.startsWith('--')) throw usageError(`argumento posicional inesperado: ${token}.`);
     const equalAt = token.indexOf('=');
     const name = equalAt >= 0 ? token.slice(0, equalAt) : token;
+    if (name === '--all') {
+      if (equalAt >= 0) throw usageError('--all não aceita valor.');
+      if (includeHistorical) throw usageError('--all duplicado.');
+      includeHistorical = true;
+      continue;
+    }
     if (name !== '--vault') throw usageError(`opção desconhecida: ${name}.`);
     if (seenVault) throw usageError('--vault duplicado.');
     const value = equalAt >= 0 ? token.slice(equalAt + 1) : argv[index + 1];
@@ -275,7 +361,7 @@ export function parseMemoryCurateArgs(argv) {
     seenVault = true;
     if (equalAt < 0) index += 1;
   }
-  return { vault };
+  return { vault, ...(includeHistorical ? { includeHistorical: true } : {}) };
 }
 
 export async function runMemoryCurateCli(argv, {
@@ -313,8 +399,16 @@ export async function runMemoryCurateCli(argv, {
 
   const rl = createInterface({ input, output });
   try {
+    const allCandidates = listMemoryCandidatesForCuration(vault, { includeHistorical: true });
+    const omittedHistorical = args.includeHistorical
+      ? 0
+      : allCandidates.filter((item) => item.classification === 'historical').length;
     const result = await runGuidedMemoryCuration(vault, {
       locale: getLocale(vault).id,
+      omittedHistorical,
+      loadCandidates: (base) => listMemoryCandidatesForCuration(base, {
+        includeHistorical: Boolean(args.includeHistorical),
+      }),
       ask: (question) => rl.question(question),
       write: (value) => output.write(String(value)),
     });

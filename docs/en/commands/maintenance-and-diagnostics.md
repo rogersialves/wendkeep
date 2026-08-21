@@ -104,6 +104,10 @@ dry-run path before any write.
   the evidence, and then use
   `memory promote <candidate-id> --event <event-id> --vault <vault>` to select an event or
   `memory reject <candidate-id> --vault <vault>` to keep the current operational value.
+- Historical handoffs from closed sessions are repairable debt, not actionable conflicts. Run
+  `memory rescope --vault <vault>` first and review the dry run, then apply with `--apply`. If debt
+  remains, `memory curate --all --vault <vault>` shows context and offers `H` to batch-close safe
+  recommendations only, always after confirmation.
 - `legacy`/`degraded`/`stale`/`manifest-unproven` observability: run
   `npx --no-install wendkeep cost rebuild --session <id> --json --vault <vault>`, review diagnostics,
   and only then authorize the second variant with `--apply`.

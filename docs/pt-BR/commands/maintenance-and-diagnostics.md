@@ -102,6 +102,10 @@ ou sem manifest comprovado e oferece um caminho dry-run antes de qualquer escrit
   liste os IDs seguros com `memory candidates --active --vault <cofre>`, revise a evidência e use
   `memory promote <candidate-id> --event <event-id> --vault <cofre>` para selecionar um evento ou
   `memory reject <candidate-id> --vault <cofre>` para manter o valor operacional atual.
+- Handoffs históricos de sessões encerradas são dívida reparável, não conflito acionável. Rode
+  primeiro `memory rescope --vault <cofre>` e revise o dry-run; aplique com `--apply`. Se restar
+  dívida, `memory curate --all --vault <cofre>` mostra o contexto e oferece `H` para encerrar em
+  lote somente as recomendações seguras, sempre com confirmação.
 - Observabilidade `legacy`/`degraded`/`stale`/`manifest-unproven`: rode
   `npx --no-install wendkeep cost rebuild --session <id> --json --vault <cofre>`, revise diagnostics
   e só então autorize a segunda variante com `--apply`.

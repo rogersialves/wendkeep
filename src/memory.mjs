@@ -21,6 +21,10 @@ import {
 import { validateCore } from './validate-core.mjs';
 import { checkMemoryBundle } from '../hooks/vault-health.mjs';
 import { scopeForMemoryKey } from '../hooks/memory-scope.mjs';
+import {
+  candidateSessionContext,
+  classifyMemoryCandidate,
+} from '../packages/vault/src/memory-candidate-policy.mjs';
 
 const BRAIN = '.brain';
 const LEDGER = 'MEMORY_EVENTS.jsonl';
@@ -241,7 +245,40 @@ export function planScopedMemoryMigration(vault) {
   const projection = deriveMemoryProjection(vault, ledger.events);
   const ambiguous = new Set(projection.candidates.map((candidate) => candidate.record_key || candidate.memory_key));
   const existingIds = new Set(ledger.events.map((event) => event.event_id));
+  const alreadyRescopedSourceIds = new Set(ledger.events.flatMap((event) => [
+    event.rescopes_event_id,
+    ...(Array.isArray(event.rescopes_event_ids) ? event.rescopes_event_ids : []),
+  ]).filter(Boolean));
   const planned = [];
+  const plannedSourceIds = new Set();
+
+  const appendRescope = (source, scope, rescopesEventIds = [source.event_id]) => {
+    const eventId = rescopeEventId(source.event_id, scope);
+    if (existingIds.has(eventId) || alreadyRescopedSourceIds.has(source.event_id)
+        || plannedSourceIds.has(source.event_id)) return false;
+    planned.push({
+      v: 1,
+      event_id: eventId,
+      project_id: source.project_id,
+      memory_key: source.memory_key,
+      scope,
+      operation: 'assert',
+      value: source.value,
+      authority: source.authority,
+      canonical_session_id: source.canonical_session_id || 'memory-rescope',
+      activation_id: source.activation_id || 'memory-rescope',
+      activation_epoch: Number.isInteger(source.activation_epoch) ? source.activation_epoch : 0,
+      turn_sequence: Number.isInteger(source.turn_sequence) ? source.turn_sequence : 0,
+      source_turn_id: source.source_turn_id || 'memory-rescope',
+      observed_at: source.observed_at || new Date(0).toISOString(),
+      evidence: [...new Set([...(source.evidence || []), `memory-rescope:${source.event_id}`])],
+      ...(source.work_session_id ? { work_session_id: source.work_session_id } : {}),
+      rescopes_event_id: source.event_id,
+      rescopes_event_ids: [...new Set(rescopesEventIds)].sort(),
+    });
+    plannedSourceIds.add(source.event_id);
+    return true;
+  };
 
   for (const [recordKey, record] of Object.entries(projection.records)) {
     if (ambiguous.has(recordKey) || record.source?.scope) continue;
@@ -259,25 +296,34 @@ export function planScopedMemoryMigration(vault) {
     });
     const eventId = rescopeEventId(source.event_id, scope);
     if (existingIds.has(eventId)) continue;
-    planned.push({
-      v: 1,
-      event_id: eventId,
-      project_id: source.project_id,
-      memory_key: source.memory_key,
+    appendRescope(
+      { ...source, value: record.value },
       scope,
-      operation: 'assert',
-      value: record.value,
-      authority: source.authority,
-      canonical_session_id: source.canonical_session_id || 'memory-rescope',
-      activation_id: source.activation_id || 'memory-rescope',
-      activation_epoch: Number.isInteger(source.activation_epoch) ? source.activation_epoch : 0,
-      turn_sequence: Number.isInteger(source.turn_sequence) ? source.turn_sequence : 0,
-      source_turn_id: source.source_turn_id || 'memory-rescope',
-      observed_at: source.observed_at || new Date(0).toISOString(),
-      evidence: [...new Set([...(source.evidence || []), `memory-rescope:${source.event_id}`])],
-      rescopes_event_id: source.event_id,
-      rescopes_event_ids: sameLegacyKey.map((event) => event.event_id).sort(),
-    });
+      sameLegacyKey.map((event) => event.event_id),
+    );
+  }
+
+  let rescopableConflicts = 0;
+  for (const candidate of projection.candidates) {
+    if (candidate.reason !== 'conflict' || candidate.memory_key !== 'handoff.latest') continue;
+    const sources = Array.isArray(candidate.events) ? candidate.events : [];
+    if (!sources.length || sources.some((source) => (
+      source.scope || (!source.work_session_id && !source.canonical_session_id)
+    ))) continue;
+
+    const scopedSources = sources.map((source) => ({
+      source,
+      scope: scopeForMemoryKey(source.memory_key, {
+        ...source,
+        projectId: source.project_id,
+        workSessionId: source.work_session_id,
+      }),
+    }));
+    if (scopedSources.some(({ scope }) => scope.type !== 'work_session'
+        || scope.id.startsWith('legacy:'))) continue;
+
+    rescopableConflicts += 1;
+    for (const { source, scope } of scopedSources) appendRescope(source, scope);
   }
 
   return {
@@ -285,6 +331,7 @@ export function planScopedMemoryMigration(vault) {
     ledger_events: ledger.events.length,
     planned: planned.length,
     ambiguous: projection.candidates.length,
+    rescopable_conflicts: rescopableConflicts,
     events: planned,
   };
 }
@@ -298,13 +345,18 @@ export function rescopeMemoryEvents(vault, { apply = false } = {}) {
       ledger_events: plan.ledger_events,
       planned: plan.planned,
       ambiguous: plan.ambiguous,
+      rescopable_conflicts: plan.rescopable_conflicts,
       scopes: plan.events.map((event) => ({
         event_id: event.event_id, memory_key: event.memory_key, scope: event.scope,
       })),
     };
   }
   if (!plan.events.length) {
-    return { status: 'unchanged', migrated: 0, ambiguous: plan.ambiguous };
+    return {
+      status: 'unchanged', migrated: 0, ambiguous: plan.ambiguous,
+      rescopable_conflicts: plan.rescopable_conflicts,
+      remaining_ambiguous: plan.ambiguous,
+    };
   }
   for (const event of plan.events) enqueueMemoryEvent(vault, event);
   const projection = projectMemoryOutbox(vault);
@@ -312,6 +364,10 @@ export function rescopeMemoryEvents(vault, { apply = false } = {}) {
     status: projection.status === 'projected' ? 'migrated' : projection.status,
     migrated: plan.events.length,
     ambiguous: plan.ambiguous,
+    rescopable_conflicts: plan.rescopable_conflicts,
+    remaining_ambiguous: Number.isInteger(projection.candidates)
+      ? projection.candidates
+      : plan.ambiguous,
     checkpoint: projection.checkpoint || null,
   };
 }
@@ -377,7 +433,7 @@ function curationPreview(value) {
     : `${visible.slice(0, CURATION_PREVIEW_CHARS - 1).trimEnd()}…`;
 }
 
-function sanitizedCurationEvent(candidate, eventId, candidateIndex) {
+function sanitizedCurationEvent(candidate, eventId, candidateIndex, registry) {
   const events = Array.isArray(candidate.events) ? candidate.events : [];
   const event = events.find((item) => item?.event_id === eventId);
   if (!event || typeof event !== 'object' || Array.isArray(event)) {
@@ -397,15 +453,24 @@ function sanitizedCurationEvent(candidate, eventId, candidateIndex) {
     observed_at: sanitizeMemoryText(event.observed_at || event.effective_at || ''),
     source: sanitizeMemoryText(source),
     preview: curationPreview(event.value),
+    ...Object.fromEntries(Object.entries(candidateSessionContext(event, registry))
+      .map(([key, value]) => [key, sanitizeMemoryText(value)])),
   };
 }
 
-export function listMemoryCandidatesForCuration(vault) {
+export function listMemoryCandidatesForCuration(vault, { includeHistorical = false } = {}) {
+  const registry = readSessionRegistry(vault);
   return readCandidates(vault)
-    .map((candidate, index) => ({ candidate, index, safe: sanitizedCandidate(candidate, index) }))
+    .map((candidate, index) => ({
+      candidate,
+      index,
+      safe: sanitizedCandidate(candidate, index),
+      policy: classifyMemoryCandidate(candidate, registry),
+    }))
     .filter(({ safe }) => safe.reason === 'conflict'
       && !TERMINAL_CANDIDATE_STATUSES.has(safe.status))
-    .map(({ candidate, index, safe }) => {
+    .filter(({ policy }) => includeHistorical || policy.classification !== 'historical')
+    .map(({ candidate, index, safe, policy }) => {
       if (!safe.event_ids.length) {
         throw new Error(
           `MEMORY_CANDIDATES.jsonl: candidate ${index + 1} sem eventos elegíveis.`,
@@ -416,8 +481,12 @@ export function listMemoryCandidatesForCuration(vault) {
         reason: safe.reason,
         status: safe.status,
         memory_key: safe.memory_key,
+        classification: policy.classification,
+        ...(policy.recommended_action ? { recommended_action: policy.recommended_action } : {}),
         ...(safe.scope ? { scope: safe.scope } : {}),
-        events: safe.event_ids.map((eventId) => sanitizedCurationEvent(candidate, eventId, index)),
+        events: safe.event_ids.map(
+          (eventId) => sanitizedCurationEvent(candidate, eventId, index, registry),
+        ),
       };
     })
     .sort((left, right) => lexicalCompare(left.memory_key, right.memory_key)

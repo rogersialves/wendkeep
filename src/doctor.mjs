@@ -39,7 +39,8 @@ export function renderVaultHealthLines(result) {
   lines.push(
     `[memória] ${healthStatusLabel(result.memoryStatus)} — schema: ${metricValue(memory.schemaVersion)} · revisão: ${metricValue(memory.revision)} · cursor: ${metricValue(memory.eventCursor)} · hash: ${metricValue(memory.stateHash)}`,
   );
-  lines.push(`  ledger: ${metricValue(memory.ledgerEvents)} evento(s) · outbox: ${metricValue(memory.pendingOutbox)} · candidates: ${metricValue(memory.candidates)} · conflitos: ${metricValue(memory.activeConflicts)}`);
+  const repairableHandoffs = Number(memory.repairableHandoffs || 0);
+  lines.push(`  ledger: ${metricValue(memory.ledgerEvents)} evento(s) · outbox: ${metricValue(memory.pendingOutbox)} · candidates: ${metricValue(memory.candidates)} · conflitos: ${metricValue(memory.activeConflicts)}${repairableHandoffs ? ` · handoffs reparáveis: ${repairableHandoffs}` : ''}`);
   const semanticKeys = memory.semanticActiveKeys || [];
   const semanticProjected = memory.semanticProjectedKeys || [];
   const semanticMissing = memory.semanticMissingKeys || [];

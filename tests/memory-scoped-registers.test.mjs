@@ -133,6 +133,74 @@ test('[req:MEM-SCOPE-4] rescope migration is dry-run first, append-only and idem
   }
 });
 
+test('[req:MEM-HANDOFF-1] rescope separates ambiguous legacy handoffs by proven session without choosing a winner', () => {
+  const left = event('legacy-handoff-session-a', 'handoff.latest', 'resume A');
+  delete left.scope;
+  const right = event('legacy-handoff-session-b', 'handoff.latest', 'resume B', {
+    canonical_session_id: 'session-b',
+    activation_id: 'activation-b',
+    observed_at: '2026-08-20T12:01:00.000Z',
+  });
+  delete right.scope;
+  const vault = vaultFixture([left, right]);
+  try {
+    const ledgerPath = join(vault, '.brain', 'MEMORY_EVENTS.jsonl');
+    const before = readFileSync(ledgerPath, 'utf8');
+    const dry = planScopedMemoryMigration(vault);
+
+    assert.equal(dry.rescopable_conflicts, 1);
+    assert.equal(dry.planned, 2);
+    assert.deepEqual(
+      new Set(dry.events.map((item) => `${item.scope.type}:${item.scope.id}`)),
+      new Set(['work_session:session-a', 'work_session:session-b']),
+    );
+    assert.equal(readFileSync(ledgerPath, 'utf8'), before, 'dry-run is byte-for-byte read-only');
+
+    const applied = rescopeMemoryEvents(vault, { apply: true });
+    assert.equal(applied.status, 'migrated');
+    assert.equal(applied.remaining_ambiguous, 0);
+    const after = readFileSync(ledgerPath, 'utf8');
+    assert.ok(after.startsWith(before), 'legacy ledger bytes remain an exact prefix');
+    const reduced = reduceMemoryEvents(after.trim().split('\n').map(JSON.parse));
+    assert.equal(reduced.candidates.length, 0);
+    assert.deepEqual(
+      new Set(Object.keys(reduced.state)),
+      new Set([
+        'handoff.latest@work_session:session-a',
+        'handoff.latest@work_session:session-b',
+      ]),
+    );
+    assert.equal(rescopeMemoryEvents(vault, { apply: true }).status, 'unchanged');
+  } finally {
+    rmSync(vault, { recursive: true, force: true });
+  }
+});
+
+test('[req:MEM-HANDOFF-1] rescope preserves a real ambiguity inside the same work session', () => {
+  const left = event('legacy-work-a-left', 'handoff.latest', 'resume left', {
+    work_session_id: 'work-a',
+  });
+  delete left.scope;
+  const right = event('legacy-work-a-right', 'handoff.latest', 'resume right', {
+    canonical_session_id: 'session-b',
+    activation_id: 'activation-b',
+    work_session_id: 'work-a',
+  });
+  delete right.scope;
+  const vault = vaultFixture([left, right]);
+  try {
+    const dry = planScopedMemoryMigration(vault);
+    assert.equal(dry.rescopable_conflicts, 1);
+    assert.equal(dry.planned, 2);
+
+    const applied = rescopeMemoryEvents(vault, { apply: true });
+    assert.equal(applied.status, 'migrated');
+    assert.equal(applied.remaining_ambiguous, 1);
+  } finally {
+    rmSync(vault, { recursive: true, force: true });
+  }
+});
+
 test('[req:MEM-SCOPE-5] automatic resolution never compares different projects', () => {
   assert.throws(() => reduceMemoryEvents([
     event('project-a-head', 'git.local-head', { commit: 'a' }, {
