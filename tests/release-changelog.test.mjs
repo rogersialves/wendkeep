@@ -84,6 +84,13 @@ test('extractReleaseNotes: throws when the version is absent', () => {
 test('[sensor:release-tests] current release notes are extractable and match the package', () => {
   const release = extractReleaseNotes(CHANGELOG, PACKAGE.version);
   assert.equal(release.date, '2026-08-20');
+  assert.match(release.notes, /Sync seguro no self-checkout/i);
+  assert.match(release.notes, /node \.\/bin\/wendkeep\.mjs/i);
+  assert.doesNotMatch(release.notes, /019f[0-9a-f-]+/i);
+});
+
+test('[sensor:release-tests] 0.75.2 historical handoff notes remain extractable', () => {
+  const release = extractReleaseNotes(CHANGELOG, '0.75.2');
   assert.match(release.notes, /Handoffs legados reescopáveis/i);
   assert.match(release.notes, /Curadoria proporcional/i);
   assert.match(release.notes, /Diagnóstico sem falso bloqueio/i);

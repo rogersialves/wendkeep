@@ -180,6 +180,10 @@ later stages. An invalid `.wendkeep.json` stops at `init` without falling back t
 The install stays outside `sync` on purpose: a running process cannot replace itself and
 keep going — the code in memory would still be the old one.
 
+In WendKeep's own development checkout, do not install `wendkeep` in `devDependencies`. Use
+`node ./bin/wendkeep.mjs sync --project . --yes`: the installer recognizes the self-checkout and
+keeps hooks on the working tree without duplicating consumer `npx` commands.
+
 In a **pnpm** monorepo the install command differs (`npm` in a pnpm repo fails with
 `Cannot read properties of null (reading 'matches')`). Resolve the published version first and
 reuse exactly the value returned:

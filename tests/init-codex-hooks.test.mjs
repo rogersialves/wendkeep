@@ -125,6 +125,29 @@ test('mergeCodexHooks: idempotente — re-init não duplica grupo', () => {
   }
 });
 
+test('[req:REL-PROV-2] mergeCodexHooks reconhece self-checkout e migra hooks para o working tree', () => {
+  const proj = mkdtempSync(join(tmpdir(), 'wk-self-codex-'));
+  try {
+    mkdirSync(join(proj, 'bin'), { recursive: true });
+    writeFileSync(join(proj, 'bin', 'wendkeep.mjs'), '// working tree');
+    writeFileSync(join(proj, 'package.json'), JSON.stringify({
+      name: 'wendkeep',
+      bin: { wendkeep: 'bin/wendkeep.mjs' },
+    }));
+    const consumer = mergeCodexHooks(null, {});
+    const reconciled = mergeCodexHooks(consumer, { projectPath: proj });
+    const managed = Object.entries(reconciled.hooks).flatMap(([event, groups]) => groups
+      .flatMap((group) => (group.hooks || []).map((entry) => ({ event, entry }))));
+    const commands = managed.map(({ entry }) => entry)
+      .filter((entry) => String(entry.command || '').includes('wendkeep'));
+    assert.ok(commands.length > 0);
+    assert.ok(commands.every((entry) => /^node \.\/bin\/wendkeep\.mjs hook [a-z-]+$/.test(entry.command)));
+    const identities = managed.filter(({ entry }) => String(entry.command || '').includes('wendkeep'))
+      .map(({ event, entry }) => `${event}:${entry.command.split(' ').at(-1)}`);
+    assert.equal(new Set(identities).size, identities.length, 'nenhum hook gerenciado foi duplicado');
+  } finally { rmSync(proj, { recursive: true, force: true }); }
+});
+
 test('mergeCodexHooks: preserva hooks de terceiros já presentes', () => {
   const existing = {
     hooks: {

@@ -16,6 +16,7 @@ const HOST_HOOK_EXPORTS = [
   'hookCommand',
   'hookCommandLocal',
   'hookCommandLocalLegacy',
+  'hookCommandWorkingTree',
 ];
 
 test('[req:MOD-20] [req:MOD-21] Integrations owns host-hook rules while taxonomy remains identity-compatible', async () => {
@@ -33,6 +34,10 @@ test('[req:MOD-20] [req:MOD-21] Integrations owns host-hook rules while taxonomy
 
   assert.deepEqual(canonical.CODEX_MATCHER_EVENTS, new Set(['SessionStart', 'PreToolUse']));
   assert.equal(canonical.hookCommand('session-stop'), 'npx --no-install wendkeep hook session-stop');
+  assert.equal(
+    canonical.hookCommandWorkingTree('session-stop'),
+    'node ./bin/wendkeep.mjs hook session-stop',
+  );
   assert.equal(
     canonical.hookCommandLocal('change-context'),
     'node "${CLAUDE_PROJECT_DIR}/node_modules/wendkeep/hooks/change-context.mjs"',
