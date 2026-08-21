@@ -100,6 +100,38 @@ test('mergeSettings: dual-recognition não duplica ao alternar npx ↔ node-dire
   } finally { rmSync(proj, { recursive: true, force: true }); }
 });
 
+test('[req:REL-PROV-2] mergeSettings reconhece self-checkout e migra hooks para o working tree', () => {
+  const proj = mkdtempSync(join(tmpdir(), 'wk-self-claude-'));
+  try {
+    mkdirSync(join(proj, 'bin'), { recursive: true });
+    writeFileSync(join(proj, 'bin', 'wendkeep.mjs'), '// working tree');
+    writeFileSync(join(proj, 'package.json'), JSON.stringify({
+      name: 'wendkeep',
+      bin: { wendkeep: 'bin/wendkeep.mjs' },
+    }));
+    assert.equal(
+      hookCommandFor('session-stop', proj),
+      'node ./bin/wendkeep.mjs hook session-stop',
+    );
+    const consumer = mergeSettings(null, {
+      vaultPath: '/v', withMcp: true, companions: [], projectPath: '',
+    }).settings;
+    const reconciled = mergeSettings(consumer, {
+      vaultPath: '/v', withMcp: true, companions: [], projectPath: proj,
+    }).settings;
+    const managed = Object.entries(reconciled.hooks).flatMap(([event, groups]) => groups
+      .flatMap((group) => (group.hooks || []).map((entry) => ({ event, entry }))));
+    const commands = managed.map(({ entry }) => entry)
+      .filter((entry) => String(entry.command || '').includes('wendkeep'));
+    assert.ok(commands.length > 0);
+    assert.ok(commands.every((entry) => /^node \.\/bin\/wendkeep\.mjs hook [a-z-]+$/.test(entry.command)));
+    assert.ok(commands.every((entry) => entry.args === undefined));
+    const identities = managed.filter(({ entry }) => String(entry.command || '').includes('wendkeep'))
+      .map(({ event, entry }) => `${event}:${entry.command.split(' ').at(-1)}`);
+    assert.equal(new Set(identities).size, identities.length, 'nenhum hook gerenciado foi duplicado');
+  } finally { rmSync(proj, { recursive: true, force: true }); }
+});
+
 test('mergeSettings migra comando node relativo quebrado sem duplicar, mesmo sem force', () => {
   const proj = mkdtempSync(join(tmpdir(), 'wk-relative-'));
   try {

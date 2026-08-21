@@ -87,6 +87,16 @@
             "statusMessage": "wendkeep: change ping"
           }
         ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node ./bin/wendkeep.mjs hook evidence-context",
+            "timeout": 10,
+            "statusMessage": "wendkeep: retrieving relevant evidence"
+          }
+        ]
       }
     ],
     "PostToolUse": [

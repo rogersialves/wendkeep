@@ -36,6 +36,12 @@ export function hookCommand(name) {
   return `npx --no-install wendkeep hook ${name}`;
 }
 
+// O checkout do próprio WendKeep não depende do pacote publicado. Seus hooks versionados
+// executam o binário do working tree para que sync/dogfood não recrie a autodependência.
+export function hookCommandWorkingTree(name) {
+  return `node ./bin/wendkeep.mjs hook ${name}`;
+}
+
 // Forma node-direta do comando de hook: 1 processo (~100-250ms) em vez dos 3 do npx (cold-start
 // de segundos no Windows). Usada pelos hooks de ALTA FREQUÊNCIA (por prompt / por tool-call)
 // quando o projeto tem wendkeep instalado localmente; o init decide (hookCommandFor).

@@ -4,6 +4,15 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.75.3] — 2026-08-20
+
+### Fixed
+
+- **Sync seguro no self-checkout.** O instalador agora reconhece o repositório do próprio
+  WendKeep e migra hooks Claude/Codex para `node ./bin/wendkeep.mjs` sem duplicá-los. Projetos
+  consumidores continuam usando `npx --no-install`, e executar `sync` no checkout de
+  desenvolvimento não reintroduz a autodependência publicada.
+
 ## [0.75.2] — 2026-08-20
 
 ### Fixed

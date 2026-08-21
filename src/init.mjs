@@ -13,6 +13,7 @@ import {
   CHANGE_NUDGE_HOOKS,
   CHANGE_GATE_HOOKS,
   hookCommand,
+  hookCommandWorkingTree,
   hookCommandLocal,
   hookCommandLocalLegacy,
   codexHookSpecs,
@@ -109,7 +110,19 @@ function backup(path) {
 
 // Comando preferido para um hook: node-direto quando o projeto tem o pacote local (alta
 // frequência sem cold-start de npx — ver R3 do design 0.31.0); senão o npx portátil.
+export function isWendkeepSelfCheckout(projectPath) {
+  try {
+    if (!projectPath || !existsSync(join(projectPath, 'bin', 'wendkeep.mjs'))) return false;
+    const pkg = JSON.parse(readFileSync(join(projectPath, 'package.json'), 'utf8'));
+    const bin = typeof pkg.bin === 'string' ? pkg.bin : pkg.bin?.wendkeep;
+    return pkg.name === 'wendkeep' && String(bin || '').replace(/\\/g, '/') === 'bin/wendkeep.mjs';
+  } catch {
+    return false;
+  }
+}
+
 export function hookCommandFor(name, projectPath) {
+  if (isWendkeepSelfCheckout(projectPath)) return hookCommandWorkingTree(name);
   try {
     if (projectPath && existsSync(join(projectPath, 'node_modules', 'wendkeep', 'hooks', `${name}.mjs`))) {
       return hookCommandLocal(name);
@@ -142,13 +155,22 @@ export function mergeSettings(existing, { vaultPath, withMcp, force, companions 
     ...CHANGE_GATE_HOOKS,
     ...companionHookSpecs(companions, { dotcontextHookLevel }),
   ].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+  const selfCheckout = isWendkeepSelfCheckout(projectPath);
   for (const h of allSpecs) {
+    const useWorkingTree = !h.command && selfCheckout;
     const useLocal = !h.command && h.preferLocal && localHookAvailable(h.name, projectPath);
-    const command = h.command ?? (useLocal ? 'node' : hookCommand(h.name));
-    const args = useLocal ? [localHookArg(h.name)] : undefined;
+    const command = h.command ?? (useWorkingTree
+      ? hookCommandWorkingTree(h.name)
+      : (useLocal ? 'node' : hookCommand(h.name)));
+    const args = !useWorkingTree && useLocal ? [localHookArg(h.name)] : undefined;
     // Dual-recognition: um hook nomeado é reconhecido tanto na forma npx quanto na node-direta,
     // para que trocar a forma preferida (ou re-initar noutra máquina) nunca duplique o grupo.
-    const candidates = h.command ? [h.command] : [hookCommand(h.name), hookCommandLocal(h.name), hookCommandLocalLegacy(h.name)];
+    const candidates = h.command ? [h.command] : [
+      hookCommand(h.name),
+      hookCommandWorkingTree(h.name),
+      hookCommandLocal(h.name),
+      hookCommandLocalLegacy(h.name),
+    ];
     const ownsHook = (x) => candidates.includes(x.command)
       || (x.command === 'node' && Array.isArray(x.args) && x.args[0] === localHookArg(h.name));
     const groups = Array.isArray(s.hooks[h.event]) ? [...s.hooks[h.event]] : [];
@@ -159,7 +181,8 @@ export function mergeSettings(existing, { vaultPath, withMcp, force, companions 
       // entry's fields in place — without disturbing any sibling hooks the user grouped with it.
       const hk = owning.hooks.find(ownsHook);
       const brokenRelative = hk?.command === hookCommandLocalLegacy(h.name);
-      if (force || brokenRelative) {
+      const wrongRuntime = !h.command && hk?.command !== command;
+      if (force || brokenRelative || wrongRuntime) {
         hk.command = command;
         if (args) hk.args = args;
         else delete hk.args;
@@ -208,14 +231,19 @@ export function mergeSettings(existing, { vaultPath, withMcp, force, companions 
 // it does handle is the legacy `timeout` key, which Codex silently ignores in favour of a
 // 600s default; rewriting it to `timeoutSec` invalidates the stored trusted_hash and costs
 // the user one "Hooks need review" prompt. That is the point.
-export function mergeCodexHooks(existing, { force = false } = {}) {
+export function mergeCodexHooks(existing, { force = false, projectPath = '' } = {}) {
   const file = existing && typeof existing === 'object' ? { ...existing } : {};
   file.hooks = { ...(file.hooks || {}) };
   const specs = codexHookSpecs([...SESSION_HOOKS, ...CHANGE_NUDGE_HOOKS, ...CHANGE_GATE_HOOKS])
     .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+  const selfCheckout = isWendkeepSelfCheckout(projectPath);
   for (const h of specs) {
-    const entry = codexHookEntry(h);
-    const owns = (x) => x.command === entry.command;
+    const entry = {
+      ...codexHookEntry(h),
+      ...(selfCheckout ? { command: hookCommandWorkingTree(h.name) } : {}),
+    };
+    const candidates = new Set([hookCommand(h.name), hookCommandWorkingTree(h.name)]);
+    const owns = (x) => candidates.has(x.command);
     const groups = Array.isArray(file.hooks[h.event]) ? [...file.hooks[h.event]] : [];
     const owning = groups.find((g) => (g.hooks || []).some(owns));
     if (owning) {
@@ -224,7 +252,8 @@ export function mergeCodexHooks(existing, { force = false } = {}) {
       // `timeout` is the pre-0.46 key: Codex never read it. Migrate it even without --force,
       // otherwise the hook keeps running at the 600s default forever.
       const legacyTimeout = 'timeout' in hk;
-      if (force || legacyTimeout) {
+      const wrongRuntime = hk.command !== entry.command;
+      if (force || legacyTimeout || wrongRuntime) {
         if (legacyTimeout) {
           if (hk.timeoutSec === undefined) hk.timeoutSec = hk.timeout;
           delete hk.timeout;
@@ -233,6 +262,7 @@ export function mergeCodexHooks(existing, { force = false } = {}) {
           hk.timeoutSec = entry.timeoutSec;
           if (entry.statusMessage) hk.statusMessage = entry.statusMessage;
         }
+        if (wrongRuntime) hk.command = entry.command;
       }
       if (force && matcher) owning.matcher = matcher;
       if (force && !matcher) delete owning.matcher;
@@ -593,12 +623,12 @@ export async function runInit(argv) {
   const codexPath = join(projectPath, '.codex', 'hooks.json');
   const codexRead = readJsonSafe(codexPath);
   if (!codexRead.ok) {
-    writeJson(`${codexPath}.new`, mergeCodexHooks(null, { force: true }));
+    writeJson(`${codexPath}.new`, mergeCodexHooks(null, { force: true, projectPath }));
     log(M.codexBadJson(codexPath));
   } else {
     const hadFile = codexRead.data !== null;
     if (hadFile) backup(codexPath);
-    writeJson(codexPath, mergeCodexHooks(codexRead.data, { force: args.force }));
+    writeJson(codexPath, mergeCodexHooks(codexRead.data, { force: args.force, projectPath }));
     log(M.codexHooks(hadFile ? M.merged : M.created, hadFile ? M.bakSaved : ''));
   }
   log(M.codexTrust);

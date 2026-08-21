@@ -177,6 +177,10 @@ os passos seguintes. Um `.wendkeep.json` inválido para no `init`, sem cair no V
 O `install` fica de fora do `sync` de propósito: um processo não se auto-substitui e segue
 rodando — o código em execução continuaria sendo o antigo.
 
+No checkout de desenvolvimento do próprio WendKeep, não instale `wendkeep` em `devDependencies`.
+Use `node ./bin/wendkeep.mjs sync --project . --yes`: o instalador reconhece o self-checkout e
+mantém os hooks no working tree, sem duplicar comandos de consumidor via `npx`.
+
 Num monorepo **pnpm**, o comando de instalação é outro (`npm` num repositório pnpm falha com
 `Cannot read properties of null (reading 'matches')`). Resolva a versão publicada primeiro e
 reutilize exatamente o valor retornado:

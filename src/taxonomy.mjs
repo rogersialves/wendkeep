@@ -11,6 +11,7 @@ import {
   codexHookEntry,
   codexHookSpecs,
   hookCommand,
+  hookCommandWorkingTree,
   hookCommandLocal,
   hookCommandLocalLegacy,
 } from '../packages/integrations/src/host-hooks.mjs';
@@ -24,6 +25,7 @@ export {
   codexHookEntry,
   codexHookSpecs,
   hookCommand,
+  hookCommandWorkingTree,
   hookCommandLocal,
   hookCommandLocalLegacy,
   mcpServerEntry,
