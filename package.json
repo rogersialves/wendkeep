@@ -72,6 +72,7 @@
     "url": "https://github.com/rogersialves/wendkeep/issues"
   },
   "devDependencies": {
-    "acorn": "^8.18.0"
+    "acorn": "^8.18.0",
+    "wendkeep": "^0.75.3"
   }
 }
