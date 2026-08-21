@@ -33,39 +33,6 @@
             "statusMessage": "wendkeep: publishing local observer snapshot"
           }
         ]
-      },
-      {
-        "matcher": "startup|clear|compact",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "npx --no-install wendkeep hook brain-inject",
-            "timeout": 45,
-            "statusMessage": "wendkeep: injecting memory + active change"
-          }
-        ]
-      },
-      {
-        "matcher": "startup",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "npx --no-install wendkeep hook session-start",
-            "timeout": 30,
-            "statusMessage": "wendkeep: opening Obsidian session"
-          }
-        ]
-      },
-      {
-        "matcher": "startup|resume|clear|compact",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "npx --no-install wendkeep hook observer-publish",
-            "timeout": 5,
-            "statusMessage": "wendkeep: publishing local observer snapshot"
-          }
-        ]
       }
     ],
     "Stop": [
@@ -98,39 +65,6 @@
             "statusMessage": "wendkeep: publishing local observer snapshot"
           }
         ]
-      },
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "npx --no-install wendkeep hook session-stop",
-            "timeout": 60,
-            "statusMessage": "wendkeep: writing session checkpoint"
-          }
-        ]
-      },
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node",
-            "timeout": 15,
-            "statusMessage": "wendkeep: open tasks check",
-            "args": [
-              "${CLAUDE_PROJECT_DIR}/node_modules/wendkeep/hooks/change-nag.mjs"
-            ]
-          }
-        ]
-      },
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "npx --no-install wendkeep hook observer-publish",
-            "timeout": 5,
-            "statusMessage": "wendkeep: publishing local observer snapshot"
-          }
-        ]
       }
     ],
     "UserPromptSubmit": [
@@ -151,39 +85,6 @@
             "command": "node ./bin/wendkeep.mjs hook change-context",
             "timeout": 15,
             "statusMessage": "wendkeep: change ping"
-          }
-        ]
-      },
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "npx --no-install wendkeep hook session-ensure",
-            "timeout": 30,
-            "statusMessage": "wendkeep: ensuring active session"
-          }
-        ]
-      },
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "npx --no-install wendkeep hook evidence-context",
-            "timeout": 10,
-            "statusMessage": "wendkeep: retrieving relevant evidence"
-          }
-        ]
-      },
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node",
-            "timeout": 15,
-            "statusMessage": "wendkeep: change ping",
-            "args": [
-              "${CLAUDE_PROJECT_DIR}/node_modules/wendkeep/hooks/change-context.mjs"
-            ]
           }
         ]
       }
@@ -221,45 +122,6 @@
             "statusMessage": "wendkeep: capturing approved plan"
           }
         ]
-      },
-      {
-        "matcher": "AskUserQuestion",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "npx --no-install wendkeep hook decision-capture",
-            "timeout": 15,
-            "statusMessage": "wendkeep: recording decision"
-          }
-        ]
-      },
-      {
-        "matcher": "Edit|Write|MultiEdit",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node",
-            "timeout": 10,
-            "statusMessage": "wendkeep: change warn",
-            "args": [
-              "${CLAUDE_PROJECT_DIR}/node_modules/wendkeep/hooks/change-warn.mjs"
-            ]
-          }
-        ]
-      },
-      {
-        "matcher": "ExitPlanMode",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node",
-            "timeout": 15,
-            "statusMessage": "wendkeep: capturing approved plan",
-            "args": [
-              "${CLAUDE_PROJECT_DIR}/node_modules/wendkeep/hooks/plan-capture.mjs"
-            ]
-          }
-        ]
       }
     ],
     "SubagentStop": [
@@ -282,26 +144,6 @@
             "statusMessage": "wendkeep: publishing local observer usage"
           }
         ]
-      },
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "npx --no-install wendkeep hook subagent-stop",
-            "timeout": 20,
-            "statusMessage": "wendkeep: subagent telemetry"
-          }
-        ]
-      },
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "npx --no-install wendkeep hook observer-publish",
-            "timeout": 5,
-            "statusMessage": "wendkeep: publishing local observer usage"
-          }
-        ]
       }
     ],
     "TaskCompleted": [
@@ -310,16 +152,6 @@
           {
             "type": "command",
             "command": "node ./bin/wendkeep.mjs hook task-log",
-            "timeout": 10,
-            "statusMessage": "wendkeep: plan progress"
-          }
-        ]
-      },
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "npx --no-install wendkeep hook task-log",
             "timeout": 10,
             "statusMessage": "wendkeep: plan progress"
           }
@@ -335,20 +167,6 @@
             "command": "node ./bin/wendkeep.mjs hook change-guard",
             "timeout": 10,
             "statusMessage": "wendkeep: change gate"
-          }
-        ]
-      },
-      {
-        "matcher": "Bash|exec_command|apply_patch|mcp__.*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node",
-            "timeout": 10,
-            "statusMessage": "wendkeep: change gate",
-            "args": [
-              "${CLAUDE_PROJECT_DIR}/node_modules/wendkeep/hooks/change-guard.mjs"
-            ]
           }
         ]
       }
