@@ -560,6 +560,14 @@
       "severity": "critical",
       "type": "command",
       "command": "node --test tests/observer-sql-publish.test.mjs tests/observer-sql-api.test.mjs"
+    },
+    {
+      "id": "worktree-manager",
+      "name": "worktree-manager",
+      "description": "Validates managed worktree metadata, CLI, Vault binding, privacy and physical scan exclusions",
+      "severity": "critical",
+      "type": "command",
+      "command": "node --test tests/worktree-metadata.test.mjs tests/worktree-cli.test.mjs tests/project-vault.test.mjs tests/privacy-hygiene.test.mjs tests/flow-protected-policy.test.mjs"
     }
   ]
 }

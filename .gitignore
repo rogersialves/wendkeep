@@ -12,6 +12,7 @@ coverage/
 *.tgz
 .tmp/
 tmp/
+.worktrees/
 
 # Local Obsidian vaults created by `wendkeep init` and the test suite
 .*-vault/

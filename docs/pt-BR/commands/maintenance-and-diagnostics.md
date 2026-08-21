@@ -37,6 +37,8 @@ npx --no-install wendkeep --help
   atenção de workflow, dívida reparável e memória degradada apropriadas para gate de CI/release.
 - `--scope core` verifica somente instalação, identidade, sessão e memória; `sync` usa esse escopo
   e não falha por change ainda em andamento. `--scope runtime` isola harness/governança.
+- O bloco `[worktrees]` reconcilia o registry privado com o Git e aponta slugs em `failed`,
+  `missing` ou com binding inválido. Em `--strict`, essa dívida também falha; o doctor não repara.
 - O `doctor` usa saída em formato humano, com blocos `[integridade]` e `[memória]`, categorias
   amigáveis e uma próxima ação copiável. O hook `vault-health.mjs` continua sendo a superfície JSON
   para automações; nenhum dos dois aplica curadoria.

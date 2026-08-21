@@ -1,6 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
@@ -11,6 +13,27 @@ import {
 } from '../scripts/privacy-hygiene.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
+
+test('[req:WT-7] privacy walker exclui fisicamente árvores .worktrees', () => {
+  const root = mkdtempSync(join(tmpdir(), 'wk-privacy-worktrees-'));
+  try {
+    spawnSync('git', ['init'], { cwd: root, encoding: 'utf8' });
+    writeFileSync(join(root, '.gitignore'), '.worktrees/\n', 'utf8');
+    const change = join(root, '.WendKeep-vault', '08-Mudanças', 'codex-subagent-observability');
+    const visible = change;
+    const hidden = join(change, '.worktrees', 'private');
+    mkdirSync(visible, { recursive: true });
+    mkdirSync(hidden, { recursive: true });
+    writeFileSync(join(visible, 'verdict.json'), '{}\n', 'utf8');
+    writeFileSync(join(hidden, 'verdict.json'), '{}\n', 'utf8');
+
+    const sources = repositoryPrivacySources(root);
+    assert.equal(sources.includes('.WendKeep-vault/08-Mudanças/codex-subagent-observability/verdict.json'), true);
+    assert.equal(sources.some((path) => path.includes('.worktrees')), false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
 
 function runtimeSamples() {
   const slash = '\\';
@@ -200,6 +223,23 @@ test('[req:OBS-14] staged diff scans only added content and reports destination 
   assert.deepEqual(inspectStagedDiff(diff), [
     'tests/fixtures/wk-fixture-observability.mjs:2:opaque-identifier',
     'tests/fixtures/wk-fixture-observability.mjs:2:unapproved-fixture-value',
+  ]);
+});
+
+test('[req:OBS-14] staged scanner accepts public error codes without admitting opaque identifiers', () => {
+  const sample = runtimeSamples();
+  const diff = [
+    'diff --git a/src/example.mjs b/src/example.mjs',
+    '--- a/src/example.mjs',
+    '+++ b/src/example.mjs',
+    '@@ -0,0 +10,3 @@',
+    "+const failure = { code: 'ENOENT' };",
+    "+const publicCode = 'WENDKEEP_WORKTREE_PATH_SYMLINK_ESCAPE';",
+    `+const opaque = ${JSON.stringify(sample.opaqueId)};`,
+  ].join('\n');
+
+  assert.deepEqual(inspectStagedDiff(diff), [
+    'src/example.mjs:12:opaque-identifier',
   ]);
 });
 

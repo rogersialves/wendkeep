@@ -1,4 +1,5 @@
 export * from './project-vault.mjs';
+export * from './worktree-metadata.mjs';
 export * from './vault-path-safety.mjs';
 export * from './locale.mjs';
 export * from './memory-schema.mjs';

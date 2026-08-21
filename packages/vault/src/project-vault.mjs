@@ -9,6 +9,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { basename, dirname, isAbsolute, join, parse, relative, resolve } from 'node:path';
+import { resolveWorktreeVaultBinding } from './worktree-metadata.mjs';
 
 export const PROJECT_CONFIG_FILE = '.wendkeep.json';
 export const PROJECT_MARKER_REL = '.brain/PROJECT.json';
@@ -203,7 +204,7 @@ export function resolveProjectVault({
     bindingFailure = error;
   }
   if (binding) {
-    const result = {
+    let result = {
       base: binding.base,
       source: 'project-config',
       projectRoot: binding.projectRoot,
@@ -211,7 +212,29 @@ export function resolveProjectVault({
       configPath: binding.configPath,
       config: binding.config,
     };
-    if (validateIdentity) validateMarker(result);
+    if (validateIdentity) {
+      try {
+        validateMarker(result);
+      } catch (error) {
+        const canUsePrivateBinding = error?.code === 'WENDKEEP_VAULT_MARKER_MISSING'
+          && !isAbsolute(binding.config.vault);
+        if (!canUsePrivateBinding) throw error;
+        const privateBinding = resolveWorktreeVaultBinding({
+          startDir: start,
+          projectId: binding.config.projectId,
+        });
+        if (!privateBinding) throw error;
+        result = {
+          ...result,
+          base: privateBinding.base,
+          source: 'worktree-registry',
+          projectRoot: privateBinding.projectRoot,
+          repositoryId: privateBinding.repositoryId,
+          registryPath: privateBinding.registryPath,
+        };
+        validateMarker(result);
+      }
+    }
     return result;
   }
 

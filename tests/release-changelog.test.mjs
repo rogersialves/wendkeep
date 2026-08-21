@@ -83,9 +83,9 @@ test('extractReleaseNotes: throws when the version is absent', () => {
 
 test('[sensor:release-tests] current release notes are extractable and match the package', () => {
   const release = extractReleaseNotes(CHANGELOG, PACKAGE.version);
-  assert.equal(release.date, '2026-08-20');
-  assert.match(release.notes, /Sync seguro no self-checkout/i);
-  assert.match(release.notes, /node \.\/bin\/wendkeep\.mjs/i);
+  assert.equal(release.date, '2026-08-21');
+  assert.match(release.notes, /Worktrees gerenciadas e seguras/i);
+  assert.match(release.notes, /worktree create\/list\/status\/open/i);
   assert.doesNotMatch(release.notes, /019f[0-9a-f-]+/i);
 });
 

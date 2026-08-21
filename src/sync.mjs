@@ -26,7 +26,10 @@ export async function runSync(argv) {
   const profileRaw = opt(argv, '--profile');
   const profileArgs = hasProfile ? ['--profile', profileRaw] : [];
   const projectPath = resolve(projectRaw && !projectRaw.startsWith('--') ? projectRaw : process.cwd());
-  const passthrough = argv.filter((a) => a === '--yes' || a === '-y' || a === '--force');
+  const passthrough = argv.filter((a) => a === '--yes'
+    || a === '-y'
+    || a === '--force'
+    || a === '--vscode-worktree-tasks');
 
   // 1. init — idempotente: refaz a fiação sem sobrescrever o que já está configurado.
   step(1, 'init');
