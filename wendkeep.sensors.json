@@ -239,7 +239,7 @@
       "description": "node --test tests/project-scope-guard.test.mjs tests/init-codex-hooks.test.mjs tests/change-hooks.test.mjs tests/project-vault.test.mjs",
       "severity": "critical",
       "type": "command",
-      "command": "node --test tests/project-scope-guard.test.mjs tests/init-codex-hooks.test.mjs tests/change-hooks.test.mjs tests/project-vault.test.mjs"
+      "command": "node --test tests/context-cli.test.mjs tests/project-scope-guard.test.mjs tests/init-codex-hooks.test.mjs tests/change-hooks.test.mjs tests/project-vault.test.mjs"
     },
     {
       "id": "git-snapshot-windows-suite-timeout",

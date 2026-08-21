@@ -4,6 +4,21 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.76.1] — 2026-08-21
+
+### Added
+
+- **Transição causal de branch.** `context switch <branch> [--create] [--session <id>]` move
+  Git e a scope da mesma sessão juntos na worktree atual, preserva change/lease/autorizações,
+  incrementa revisão e registra evidência `from/to` sob o lock do registry.
+
+### Fixed
+
+- **Guard não deixa mais a sessão inutilizável após checkout.** `git checkout/switch` cru que
+  mudaria branch é negado antecipadamente com orientação acionável; falha durante a transição
+  segura executa rollback da branch/HEAD e não publica scope parcial. Contextos incompletos de
+  outra worktree comprovada também deixam de causar falso conflito na worktree atual.
+
 ## [0.76.0] — 2026-08-21
 
 ### Added

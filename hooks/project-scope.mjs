@@ -115,11 +115,15 @@ function invocationOf(segment) {
   if (executable === 'git' || executable === 'git.exe' || executable === 'git.cmd') {
     return { kind: 'git', args: segment.slice(index + 1).map(unquote) };
   }
-  if (['rm', 'rm.exe', 'del', 'erase', 'remove-item', 'move-item', 'set-content', 'out-file', 'copy-item', 'new-item'].includes(executable)) {
-    return { kind: 'filesystem', args: segment.slice(index + 1).map(unquote) };
+  const args = segment.slice(index + 1).map(unquote);
+  if (isWendKeepContextSwitch(executable, args)) {
+    return { kind: 'context-switch', args };
   }
-  if (isPublicationInvocation(executable, segment.slice(index + 1).map(unquote))) {
-    return { kind: 'publication', args: segment.slice(index + 1).map(unquote) };
+  if (['rm', 'rm.exe', 'del', 'erase', 'remove-item', 'move-item', 'set-content', 'out-file', 'copy-item', 'new-item'].includes(executable)) {
+    return { kind: 'filesystem', args };
+  }
+  if (isPublicationInvocation(executable, args)) {
+    return { kind: 'publication', args };
   }
   return null;
 }
@@ -131,6 +135,24 @@ function firstNonOption(args) {
 function isWendKeepPublication(args) {
   const command = firstNonOption(args);
   return command === 'publish' || command === 'release';
+}
+
+function isWendKeepContextSwitch(executable, args) {
+  let commandArgs = args;
+  if (['node', 'node.exe'].includes(executable)) {
+    const entrypoint = args.findIndex((arg) => executableName(arg) === 'wendkeep.mjs');
+    if (entrypoint < 0) return false;
+    commandArgs = args.slice(entrypoint + 1);
+  } else if (['npx', 'npx.cmd'].includes(executable)) {
+    const packageIndex = args.findIndex((arg) => ['wendkeep', 'wk'].includes(executableName(arg)));
+    if (packageIndex < 0) return false;
+    commandArgs = args.slice(packageIndex + 1);
+  } else if (!['wendkeep', 'wendkeep.cmd', 'wk', 'wk.cmd'].includes(executable)) {
+    return false;
+  }
+  const command = firstNonOption(commandArgs);
+  const commandIndex = commandArgs.findIndex((arg) => String(arg).toLowerCase() === command);
+  return command === 'context' && String(commandArgs[commandIndex + 1] || '').toLowerCase() === 'switch';
 }
 
 function isPublicationInvocation(executable, args) {
@@ -214,10 +236,25 @@ export function scopeActionsForCommand(command) {
   const actions = [];
   for (const invocation of commandInvocations(command)) {
     if (invocation.kind === 'git') actions.push(gitAction(invocation.args));
+    if (invocation.kind === 'context-switch') actions.push('git:destructive');
     if (invocation.kind === 'filesystem') actions.push('filesystem:mutation');
     if (invocation.kind === 'publication') actions.push('publish');
   }
   return [...new Set(actions.filter(Boolean))];
+}
+
+export function commandChangesGitBranch(command) {
+  return commandInvocations(command).some((invocation) => {
+    if (invocation.kind !== 'git') return false;
+    const subcommand = firstGitSubcommand(invocation.args);
+    if (subcommand === 'switch') return true;
+    if (subcommand !== 'checkout') return false;
+    const subcommandIndex = invocation.args.findIndex((arg) => String(arg).toLowerCase() === 'checkout');
+    const checkoutArgs = invocation.args.slice(subcommandIndex + 1);
+    if (!checkoutArgs.length || checkoutArgs.includes('--')) return false;
+    if (checkoutArgs.includes('-p') || checkoutArgs.includes('--patch') || checkoutArgs.includes('--help')) return false;
+    return true;
+  });
 }
 
 export function commandChangesDirectory(command) {
@@ -333,7 +370,14 @@ export function concurrentScopeConflicts(expectedScope, activeSessions = [], cur
     if (!entry || String(sessionId) === String(current) || String(entry.sessionId || '') === String(current)) continue;
     if (entry.status && entry.status !== 'active') continue;
     const other = entry.project_scope || entry.projectScope || (entry.complete !== undefined ? entry : null);
-    if (!other || other.complete !== true) {
+    if (!other) {
+      conflicts.push({ sessionId: String(sessionId), reason: 'scope-unavailable' });
+      continue;
+    }
+    const leftWorktree = comparableScopeValue(expectedScope, 'worktree');
+    const rightWorktree = comparableScopeValue(other, 'worktree');
+    if (leftWorktree && rightWorktree && leftWorktree !== rightWorktree) continue;
+    if (other.complete !== true) {
       conflicts.push({ sessionId: String(sessionId), reason: 'scope-unavailable' });
       continue;
     }
@@ -343,8 +387,6 @@ export function concurrentScopeConflicts(expectedScope, activeSessions = [], cur
       return Boolean(left && right && left === right);
     });
     if (!sameRepositoryBranch) continue;
-    const leftWorktree = comparableScopeValue(expectedScope, 'worktree');
-    const rightWorktree = comparableScopeValue(other, 'worktree');
     if (!leftWorktree || !rightWorktree || leftWorktree === rightWorktree) {
       conflicts.push({ sessionId: String(sessionId), reason: 'same-repository-branch' });
     }
@@ -387,6 +429,9 @@ export function scopeDecision({
   const concurrent = concurrentScopeConflicts(expectedScope, activeSessions, currentSessionId);
   if (concurrent.length) {
     return decision(host, `WENDKEEP_SCOPE_CONFLICT: há ${concurrent.length} sessão(ões) ativa(s) com a mesma raiz Git/branch ou escopo não comprovado; use um worktree distinto ou selecione explicitamente o projeto para criar uma nova lease.`);
+  }
+  if (commandChangesGitBranch(command)) {
+    return decision(host, 'WENDKEEP_CONTEXT_SWITCH_REQUIRED: troca de branch Git crua deixaria a sessão fora da scope reservada; use `wendkeep context switch <branch> [--create] [--session <id>]`.');
   }
   const authorized = Array.isArray(expectedScope.authorizedActions)
     ? expectedScope.authorizedActions
