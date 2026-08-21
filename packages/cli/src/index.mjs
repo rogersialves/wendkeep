@@ -1,5 +1,5 @@
 // wendkeep CLI — canonical private runtime.
-//   wendkeep init [--vault <path>] [--project <path>] [--no-mcp] [--yes] [--force]
+//   wendkeep init [--vault <path>] [--project <path>] [--no-mcp] [--yes] [--force] [--vscode-worktree-tasks]
 //   wendkeep hook <name>      (invoked by the agent's settings.json; pipes stdin/stdout)
 //   wendkeep doctor [--vault <path>]
 //   wendkeep --version | --help
@@ -33,6 +33,7 @@ Usage:
                            (default: none — opt in explicitly). dotcontext is legacy — the native a2 loop replaces it.
     --no-companions        Skip companion plugins/MCP entirely.
     --no-colors            Skip the Obsidian color system (.obsidian snippet + graph groups).
+    --vscode-worktree-tasks Create local, Git-excluded VS Code tasks for managed worktrees.
     --dotcontext-mcp <v>   dotcontext MCP placement: auto (default; skip project entry
                            if already global), project, or none.
     --dotcontext-hooks <v> dotcontext hooks: full (default), light (no PostToolUse), none.
@@ -46,10 +47,16 @@ Usage:
                            command — the three steps that repeat identically after every
                            package update. Stops at the first failing step. Install the
                            package first (npm i -D wendkeep@latest); a running process
-                           cannot replace itself. · --vault P · --profile <name> · --yes.
+                           cannot replace itself. · --vault P · --profile <name> · --yes
+                           · --vscode-worktree-tasks.
 
   wendkeep doctor [--vault P]  Health check. --scope core|runtime · --strict for CI/release.
   wendkeep observer <sub>     Local multi-project Observer: serve | register | publish | reconcile | status.
+  wendkeep worktree create <slug> [--base ref] [--branch name] [--open vscode|none] [--json]
+  wendkeep worktree list [--json]
+  wendkeep worktree status [slug] [--json]
+  wendkeep worktree open <slug> [--editor vscode] [--json]
+                           Managed linked worktrees under .worktrees (branch default wk/<slug>).
   wendkeep change <sub>        Change lifecycle: new [--simple|--guide] | use | bind <slug> --session <id> | continue | list | show |
                            status | done <id> | undone <id> | diff | archive [--force] | abandon | relink | backlink.
                            archive exige verdict (rode verify --deep); abandon descarta sem ADR.
@@ -206,7 +213,7 @@ async function main(argv) {
     // `sync` starts with `init` and resolves the freshly bound Vault itself. Pre-resolving
     // here would prevent that repair step from reporting a corrupt binding as its own
     // first-stage failure (and could never make it as far as the guarded init).
-    && !['init', 'sync', 'hook', 'observer', '--version', '-v', '--help', '-h', 'help'].includes(cmd)) {
+    && !['init', 'sync', 'worktree', 'hook', 'observer', '--version', '-v', '--help', '-h', 'help'].includes(cmd)) {
     await preferProjectVault(rest);
   }
   switch (cmd) {
@@ -227,6 +234,11 @@ async function main(argv) {
       const { runObserver } = await import('../../../src/observer.mjs');
       const observerExitCode = await runObserver(rest);
       if (rest[0] !== 'serve') process.exit(observerExitCode);
+      break;
+    }
+    case 'worktree': {
+      const { runWorktree } = await import('../../../src/worktree.mjs');
+      process.exit(runWorktree(rest));
       break;
     }
     case 'sync': {

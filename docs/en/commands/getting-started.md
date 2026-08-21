@@ -27,7 +27,7 @@ Do not run `init --force` as a generic repair for memory or unreadable configura
 ```bash
 npm install --save-dev wendkeep
 npx wendkeep init [options]
-npx wendkeep sync [--project <root>] [--vault <vault>] [--profile <profile>] [--yes]
+npx wendkeep sync [--project <root>] [--vault <vault>] [--profile <profile>] [--yes] [--vscode-worktree-tasks]
 ```
 
 ## Options and exit codes
@@ -37,6 +37,8 @@ npx wendkeep sync [--project <root>] [--vault <vault>] [--profile <profile>] [--
 - `--profile <OFF|FLOW|GUIDE|GOVERN|ASSURE>` selects the Operating Profile; new installs use
   `GOVERN`, re-init/sync without the flag preserves the existing choice, and `OFF` is never inferred.
 - `--no-mcp`, `--no-colors`, and `--no-companions` disable optional integrations.
+- `--vscode-worktree-tasks` creates local VS Code tasks without overwriting `tasks.json`; `sync`
+  forwards the same flag to its `init` stage.
 - `--companions <csv>` explicitly enables companion integrations.
 - `--yes` accepts non-interactive defaults; `--force` refreshes managed blocks only.
 - Exit `0` means setup/sync completed. Any other exit identifies the failed stage. `sync` stops at

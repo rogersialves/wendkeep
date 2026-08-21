@@ -40,6 +40,7 @@ import { seedDotcontext, globalHasDotcontext, resolveDotcontextSkipMcp, renderSe
 import { adoptSpecsState, ensureSpecsReadme, SPECS_STATE_FILE } from '../hooks/spec-core.mjs';
 import { bindProjectVault, readProjectBinding } from './project-vault.mjs';
 import { seedMemoryV2 } from './memory.mjs';
+import { installVscodeWorktreeTasks } from './worktree.mjs';
 import {
   DEFAULT_OPERATING_PROFILE,
   normalizeOperatingProfile,
@@ -67,6 +68,7 @@ function parseArgs(argv) {
     else if (a === '--force') args.force = true;
     else if (a === '--no-companions') args.noCompanions = true;
     else if (a === '--no-colors') args.noColors = true;
+    else if (a === '--vscode-worktree-tasks') args.vscodeWorktreeTasks = true;
     else if (a === '--dotcontext-mcp') args.dotcontextMcp = argv[++i];
     else if (a.startsWith('--dotcontext-mcp=')) args.dotcontextMcp = a.slice(17);
     else if (a === '--dotcontext-hooks') args.dotcontextHooks = argv[++i];
@@ -480,6 +482,10 @@ export async function runInit(argv) {
     ?? (existingBinding ? undefined : DEFAULT_OPERATING_PROFILE);
   const configPatch = profile === undefined ? {} : setOperatingProfile({}, profile);
   bindProjectVault({ projectRoot: projectPath, vaultPath, configPatch });
+  if (args.vscodeWorktreeTasks) {
+    const tasks = installVscodeWorktreeTasks({ projectRoot: projectPath });
+    log(`VS Code worktree tasks: ${tasks.state} (${tasks.path})`);
+  }
 
   // Companion plugins/MCP selection. --no-companions wins; --companions <csv> is
   // explicit; an interactive TTY gets a multi-choice prompt (context-mode pre-checked);

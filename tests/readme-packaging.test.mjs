@@ -18,7 +18,7 @@ const GUIDE_SLUGS = [
   'getting-started.md', 'operating-profiles.md', 'changes-and-verification.md', 'memory.md',
   'sessions-and-import.md', 'notes-and-knowledge.md', 'costs-and-observability.md',
   'maintenance-and-diagnostics.md', 'verify.md', 'memory-migration.md',
-  'retroactive-import.md', 'observer.md',
+  'retroactive-import.md', 'observer.md', 'worktrees.md',
 ];
 
 function filesUnder(dir, base = dir) {

@@ -2,6 +2,7 @@
 // harness integrity check (hooks/harness-doctor.mjs). Exits 1 on any error.
 import { resolve } from 'node:path';
 import { checkHarness, checkVaultLinks, checkSessionActivity, checkStackedFrontmatter, renderStackedFrontmatterLines, checkUnpricedModels, renderUnpricedModelLines, checkStaleDerivedSections, renderStaleDerivedSectionLines, checkSessionObservability, renderSessionObservabilityLines } from '../hooks/harness-doctor.mjs';
+import { diagnoseManagedWorktrees } from './worktree.mjs';
 import { runVaultHealth } from '../hooks/vault-health.mjs';
 import { checkSyncDefs } from './sync-defs.mjs';
 import { resolveProjectVault } from './project-vault.mjs';
@@ -133,6 +134,12 @@ export function runDoctor(argv) {
   for (const item of repairable) process.stdout.write(`  → ${item}\n`);
   for (const w of warnings) process.stdout.write(`  ! ${w}\n`);
 
+  const worktrees = diagnoseManagedWorktrees({ startDir: projectRoot });
+  process.stdout.write(`\n[worktrees] ${worktrees.initialized ? `${worktrees.issues.length} problema(s)` : 'não inicializado'}\n`);
+  for (const issue of worktrees.issues) {
+    process.stdout.write(`  → ${issue.slug}: ${issue.errorCode} — ${issue.repair}\n`);
+  }
+
   // 3. Link/graph health — órfãos que o grafo do Obsidian mostraria, com o comando de reparo.
   const links = checkVaultLinks(vaultBase);
   const graphLabel = links.graphColors === true ? 'com cores' : links.graphColors === false ? 'sem cores' : 'sem graph.json';
@@ -181,6 +188,7 @@ export function runDoctor(argv) {
     || attention.length
     || repairable.length
     || warnings.length
+    || worktrees.issues.length
     || links.derivedOrphans
     || links.artifactOrphans
     || links.graphColors === false

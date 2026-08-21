@@ -54,7 +54,7 @@ test('[req:OBS-SEC-1] non-loopback exige token já na abertura', async () => {
   const dataDir = makeDataDir();
   try {
     await assert.rejects(
-      () => startObserverServer({ host: '0.0.0.0', port: 0, dataDir, allowNonLoopback: true }),
+      () => startObserverServer({ host: '0.0.0.0', port: 0, dataDir, allowNonLoopback: true, token: '' }),
       (error) => error?.code === 'WENDKEEP_OBSERVER_TOKEN_REQUIRED',
     );
   } finally { rmSync(dataDir, { recursive: true, force: true }); }

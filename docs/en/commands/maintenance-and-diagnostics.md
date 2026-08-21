@@ -37,6 +37,9 @@ npx --no-install wendkeep --help
   also fails on workflow attention, repairable debt, semantic degradation, and warnings.
 - `--scope core` checks the installation, binding, ledger, and Keep Core only. `--scope runtime`
   checks changes, sensors, and governance only. The default `all` reports both surfaces.
+- The `[worktrees]` section reconciles the private registry with Git and reports slugs in
+  `failed`, `missing`, or invalid-binding states. Under `--strict` this debt also fails; doctor
+  never performs the repair.
 - `doctor` uses human-readable output with `[integrity]` and `[memory]` sections, friendly
   categories, and a copyable next action. The `vault-health.mjs` hook remains the JSON surface for
   automation; neither surface applies curation.

@@ -27,7 +27,7 @@ export const FLOW_PROTECTED_SCAN_POLICY = Object.freeze({
   maxDepth: 64,
   maxEntries: 100_000,
   excludedDirectoryNames: Object.freeze([
-    '.git', 'node_modules', '.pnpm-store', '.yarn', '.venv', 'venv',
+    '.git', '.worktrees', 'node_modules', '.pnpm-store', '.yarn', '.venv', 'venv',
     '__pycache__', '.pytest_cache', '.mypy_cache', '.ruff_cache', '.tox', '.nox',
   ]),
 });

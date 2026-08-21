@@ -100,7 +100,7 @@ test('[req:OP-7] política co-localiza caps e exclusões do scan físico protegi
   assert.equal(Object.isFrozen(FLOW_PROTECTED_SCAN_POLICY), true);
   assert.ok(FLOW_PROTECTED_SCAN_POLICY.maxDepth > 0);
   assert.ok(FLOW_PROTECTED_SCAN_POLICY.maxEntries > 0);
-  for (const name of ['.git', 'node_modules', '.pnpm-store', '.venv']) {
+  for (const name of ['.git', '.worktrees', 'node_modules', '.pnpm-store', '.venv']) {
     assert.ok(FLOW_PROTECTED_SCAN_POLICY.excludedDirectoryNames.includes(name), name);
   }
 

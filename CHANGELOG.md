@@ -4,6 +4,24 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.76.0] — 2026-08-21
+
+### Added
+
+- **Worktrees gerenciadas e seguras.** `worktree create/list/status/open` cria linked worktrees
+  idempotentes sob `.worktrees`, com branch `wk/<slug>`, validação de path/ref e abertura opcional
+  em nova janela do VS Code. O registry privado no Git common-dir compartilha identidade e Vault
+  canônico sem alterar `.wendkeep.json`, usa lock multiprocesso e registra falhas recuperáveis.
+- **Integração operacional.** `doctor` reconcilia registry/Git, `init` e `sync` aceitam
+  `--vscode-worktree-tasks` sem sobrescrever preferências locais, e ignores/walkers excluem a raiz
+  gerenciada. Saídas humanas são bilíngues e `--json` preserva o boundary do Vault.
+
+### Fixed
+
+- **Gate staged sem falsos positivos.** O scanner reconhece códigos públicos `WENDKEEP_*`, limita
+  a allowlist de diagnósticos às superfícies de observabilidade e mantém bloqueio de identificadores
+  opacos; fixtures do worktree manager usam exclusivamente o namespace sintético `wk-fixture-*`.
+
 ## [0.75.3] — 2026-08-20
 
 ### Fixed

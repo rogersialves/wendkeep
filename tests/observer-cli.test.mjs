@@ -7,7 +7,15 @@ import { rmSync } from 'node:fs';
 import { makeDataDir, makeObserverFixture } from './helpers/observer-fixture.mjs';
 
 const BIN = join(dirname(fileURLToPath(import.meta.url)), '..', 'bin', 'wendkeep.mjs');
-const run = (args) => spawnSync(process.execPath, [BIN, ...args], { encoding: 'utf8' });
+const {
+  WENDKEEP_OBSERVER_URL: _observerUrl,
+  WENDKEEP_OBSERVER_TOKEN: _observerToken,
+  ...OBSERVER_TEST_ENV
+} = process.env;
+const run = (args) => spawnSync(process.execPath, [BIN, ...args], {
+  encoding: 'utf8',
+  env: OBSERVER_TEST_ENV,
+});
 
 test('[req:OBS-LOCAL-2] [req:OBS-LOCAL-3] CLI observer expõe status, register, publish e mantém loopback', () => {
   const dataDir = makeDataDir();

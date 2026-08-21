@@ -187,6 +187,13 @@ function allowedSyntheticLifecyclePath(relativePath, value) {
     || /^08-Mudanças\/_arquivo\/wk-fixture-[a-z0-9-]+\/verdict\.json$/i.test(expanded);
 }
 
+function allowedPublicIdentifier(value) {
+  const opaqueTokens = String(value ?? '').match(/\b[A-Za-z0-9_-]{32,}\b/g) ?? [];
+  return opaqueTokens.length > 0 && opaqueTokens.every((token) => (
+    /^WENDKEEP_[A-Z0-9_]+$/.test(token)
+  ));
+}
+
 function structuralCategories(value) {
   const categories = [];
   const text = String(value ?? '');
@@ -198,7 +205,9 @@ function structuralCategories(value) {
   if (/\b[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\b/i.test(text)
     || /\b[0-9a-f]{24,}\b/i.test(text)
     || /\b[A-Za-z0-9_-]{32,}\b/.test(text)) {
-    if (!allowedFixtureValue(text)) categories.push('opaque-identifier');
+    if (!allowedFixtureValue(text) && !allowedPublicIdentifier(text)) {
+      categories.push('opaque-identifier');
+    }
   }
   return categories;
 }
@@ -241,22 +250,24 @@ function staticDiagnosticFields(line) {
   return [...object.matchAll(/\b([A-Za-z_][A-Za-z0-9_]*)\s*:/g)].map((match) => match[1]);
 }
 
-export function inspectFixtureSource(relativePath, source) {
+export function inspectFixtureSource(relativePath, source, { inspectDiagnostics = true } = {}) {
   const findings = new Set();
   const lines = String(source).replaceAll('\r\n', '\n').split('\n');
   let insideTemplate = false;
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index];
-    const code = staticDiagnosticCode(line);
-    if (code && !OBSERVABILITY_DIAGNOSTIC_ALLOWLIST.has(code)) {
-      findings.add(finding(relativePath, index + 1, 'diagnostic-code-not-allowlisted'));
-    }
-    const diagnosticFields = staticDiagnosticFields(line);
-    if (diagnosticFields.some((field) => field !== 'code' && field !== 'count')) {
-      findings.add(finding(relativePath, index + 1, 'diagnostic-unapproved-field'));
-    }
-    if (diagnosticFields.some((field) => PROMPT_OR_MESSAGE_FIELDS.has(field))) {
-      findings.add(finding(relativePath, index + 1, 'diagnostic-prompt-or-message'));
+    if (inspectDiagnostics) {
+      const code = staticDiagnosticCode(line);
+      if (code && !OBSERVABILITY_DIAGNOSTIC_ALLOWLIST.has(code)) {
+        findings.add(finding(relativePath, index + 1, 'diagnostic-code-not-allowlisted'));
+      }
+      const diagnosticFields = staticDiagnosticFields(line);
+      if (diagnosticFields.some((field) => field !== 'code' && field !== 'count')) {
+        findings.add(finding(relativePath, index + 1, 'diagnostic-unapproved-field'));
+      }
+      if (diagnosticFields.some((field) => PROMPT_OR_MESSAGE_FIELDS.has(field))) {
+        findings.add(finding(relativePath, index + 1, 'diagnostic-prompt-or-message'));
+      }
     }
     if (insideTemplate) {
       for (const category of structuralCategories(line)) {
@@ -328,7 +339,9 @@ export function inspectStagedDiff(diff) {
     }
     if (!relativePath || line.startsWith('diff --git ') || line.startsWith('--- ')) continue;
     if (line.startsWith('+')) {
-      for (const item of inspectFixtureSource(relativePath, line.slice(1))) {
+      for (const item of inspectFixtureSource(relativePath, line.slice(1), {
+        inspectDiagnostics: isPrivacySurface(relativePath),
+      })) {
         const category = item.slice(item.lastIndexOf(':') + 1);
         findings.add(finding(relativePath, destinationLine, category));
       }
@@ -345,6 +358,7 @@ function walkFiles(root, directory) {
   if (!existsSync(directory)) return [];
   const files = [];
   for (const entry of readdirSync(directory, { withFileTypes: true })) {
+    if (entry.isDirectory() && entry.name === '.worktrees') continue;
     const absolute = join(directory, entry.name);
     if (entry.isDirectory()) files.push(...walkFiles(root, absolute));
     else if (entry.isFile()) files.push(normalizeRelativePath(relative(root, absolute)));
