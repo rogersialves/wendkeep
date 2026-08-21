@@ -33,39 +33,6 @@
             "statusMessage": "wendkeep: publishing local observer snapshot"
           }
         ]
-      },
-      {
-        "matcher": "startup|clear|compact",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "npx --no-install wendkeep hook brain-inject",
-            "timeoutSec": 45,
-            "statusMessage": "wendkeep: injecting memory + active change"
-          }
-        ]
-      },
-      {
-        "matcher": "startup",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "npx --no-install wendkeep hook session-start",
-            "timeoutSec": 30,
-            "statusMessage": "wendkeep: opening Obsidian session"
-          }
-        ]
-      },
-      {
-        "matcher": "startup|resume|clear|compact",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "npx --no-install wendkeep hook observer-publish",
-            "timeoutSec": 5,
-            "statusMessage": "wendkeep: publishing local observer snapshot"
-          }
-        ]
       }
     ],
     "Stop": [
@@ -98,36 +65,6 @@
             "statusMessage": "wendkeep: publishing local observer snapshot"
           }
         ]
-      },
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "npx --no-install wendkeep hook session-stop",
-            "timeoutSec": 60,
-            "statusMessage": "wendkeep: writing session checkpoint"
-          }
-        ]
-      },
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "npx --no-install wendkeep hook change-nag",
-            "timeoutSec": 15,
-            "statusMessage": "wendkeep: open tasks check"
-          }
-        ]
-      },
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "npx --no-install wendkeep hook observer-publish",
-            "timeoutSec": 5,
-            "statusMessage": "wendkeep: publishing local observer snapshot"
-          }
-        ]
       }
     ],
     "UserPromptSubmit": [
@@ -146,36 +83,6 @@
           {
             "type": "command",
             "command": "node ./bin/wendkeep.mjs hook change-context",
-            "timeoutSec": 15,
-            "statusMessage": "wendkeep: change ping"
-          }
-        ]
-      },
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "npx --no-install wendkeep hook session-ensure",
-            "timeoutSec": 30,
-            "statusMessage": "wendkeep: ensuring active session"
-          }
-        ]
-      },
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "npx --no-install wendkeep hook evidence-context",
-            "timeoutSec": 10,
-            "statusMessage": "wendkeep: retrieving relevant evidence"
-          }
-        ]
-      },
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "npx --no-install wendkeep hook change-context",
             "timeoutSec": 15,
             "statusMessage": "wendkeep: change ping"
           }
@@ -202,26 +109,6 @@
             "statusMessage": "wendkeep: publishing local observer usage"
           }
         ]
-      },
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "npx --no-install wendkeep hook subagent-stop",
-            "timeoutSec": 20,
-            "statusMessage": "wendkeep: subagent telemetry"
-          }
-        ]
-      },
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "npx --no-install wendkeep hook observer-publish",
-            "timeoutSec": 5,
-            "statusMessage": "wendkeep: publishing local observer usage"
-          }
-        ]
       }
     ],
     "PreToolUse": [
@@ -231,17 +118,6 @@
           {
             "type": "command",
             "command": "node ./bin/wendkeep.mjs hook change-guard",
-            "timeoutSec": 10,
-            "statusMessage": "wendkeep: change gate"
-          }
-        ]
-      },
-      {
-        "matcher": "Bash|exec_command|apply_patch|mcp__.*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "npx --no-install wendkeep hook change-guard",
             "timeoutSec": 10,
             "statusMessage": "wendkeep: change gate"
           }

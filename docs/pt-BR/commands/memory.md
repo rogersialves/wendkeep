@@ -28,7 +28,7 @@ Informe o vault explicitamente em automações. Preserve backups e evidências a
 
 ```bash
 npx wendkeep memory status [--gate] --vault <cofre>
-npx wendkeep memory curate --vault <cofre>
+npx wendkeep memory curate [--all] --vault <cofre>
 npx wendkeep memory candidates [--active] --vault <cofre>
 npx wendkeep memory rescope [--apply] --vault <cofre>
 npx wendkeep memory repair --vault <cofre>
@@ -43,12 +43,14 @@ npx wendkeep validate-memory --vault <cofre-v2>
 ## Opções e códigos de saída
 
 - `memory status` é read-only; `--gate` retorna exit `1` apenas para estado bloqueante.
-- `memory curate` é o caminho recomendado para pessoas: em um terminal interativo, agrupa cada
-  conflito por nome amigável, mostra somente previews sanitizados e oferece escolhas numeradas,
-  `P` para pular, `R` para rejeitar, `D` para detalhes técnicos e `Q` para sair. Cada promoção ou
-  rejeição pede confirmação com padrão negativo: Enter ou `N` não grava. Pular ou sair deixa o
-  restante pendente; uma nova execução retoma os conflitos ainda ativos.
-- O assistente aceita somente `--vault`: não há `--yes`, `--apply` ou modo em lote. Em ambiente
+- `memory curate` é o caminho recomendado para pessoas: por padrão mostra somente conflitos
+  acionáveis. Em um terminal interativo, agrupa por nome amigável, mostra previews e contexto
+  sanitizados e oferece escolhas numeradas, `P` para pular, `R` para rejeitar, `D` para detalhes
+  técnicos e `Q` para sair. `--all` inclui handoffs de sessões comprovadamente encerradas; nesses
+  casos, `H` encerra em lote somente as recomendações seguras, relendo a autoridade entre cada
+  decisão. Toda escrita pede confirmação com padrão negativo: Enter ou `N` não grava. Pular ou
+  sair preserva o restante para retomar em outra execução.
+- O assistente aceita `--vault` e `--all`: não há `--yes` nem `--apply`. Em ambiente
   não-TTY/terminal não interativo, ele retorna exit `2` sem alterar bytes e orienta usar o fallback
   avançado `memory candidates --active`.
 - `memory candidates` é read-only e imprime JSON determinístico com somente `candidate_id`,
@@ -98,8 +100,10 @@ npx wendkeep validate-memory --vault <cofre-v2>
   notas, nem consome a outbox. Repetir a mesma decisão aplicada é idempotente.
 - `memory rescope` é dry-run por padrão e lista somente IDs, chaves e escopos planejados. Com
   `--apply`, anexa eventos explícitos de projeto, work session, change, branch ou worktree e mantém
-  os bytes históricos como prefixo do ledger. Candidates ambíguos não são migrados nem recebem
-  vencedor; uma repetição retorna `unchanged`.
+  os bytes históricos como prefixo do ledger. Eventos legados de `handoff.latest` que participam
+  de candidates também são reescopados individualmente quando possuem identidade de sessão
+  comprovável: isso separa workflows independentes sem selecionar vencedor. Ambiguidades que
+  permanecem no mesmo escopo continuam sob curadoria; uma repetição retorna `unchanged`.
 - Registradores como `git.local-head`, `handoff.latest`, `quality.latest-*` e
   `change.<slug>.status` só competem dentro do mesmo escopo. Resolução automática ainda exige o
   mesmo projeto e linhagem causal; decisões, constraints e blockers incompatíveis permanecem sob

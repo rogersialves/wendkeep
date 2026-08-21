@@ -28,7 +28,7 @@ Pass the vault explicitly in automation. Preserve backups and evidence before re
 
 ```bash
 npx wendkeep memory status [--gate] --vault <vault>
-npx wendkeep memory curate --vault <vault>
+npx wendkeep memory curate [--all] --vault <vault>
 npx wendkeep memory candidates [--active] --vault <vault>
 npx wendkeep memory rescope [--apply] --vault <vault>
 npx wendkeep memory repair --vault <vault>
@@ -43,12 +43,14 @@ npx wendkeep validate-memory --vault <v2-vault>
 ## Options and exit codes
 
 - `memory status` is read-only; `--gate` exits `1` only for blocking state.
-- `memory curate` is the recommended human path: in an interactive terminal it groups each
-  conflict under a friendly name, shows sanitized previews only, and offers numbered choices,
-  `P` to skip, `R` to reject, `D` for technical details, and `Q` to quit. Every promotion or
-  rejection asks for confirmation with default `no`: Enter or `N` does not write. Skip or quit
-  leaves the remaining work pending; running the command again resumes the active conflicts.
-- The assistant accepts only `--vault`: there is no `--yes`, `--apply`, or batch mode. In a
+- `memory curate` is the recommended human path and shows actionable conflicts only by default.
+  In an interactive terminal it groups conflicts under friendly names, shows sanitized previews
+  and context, and offers numbered choices, `P` to skip, `R` to reject, `D` for technical details,
+  and `Q` to quit. `--all` includes handoffs from proven closed sessions; for those, `H` batch-closes
+  only safe recommendations while reloading authority between decisions. Every write asks for
+  confirmation with default `no`: Enter or `N` does not write. Skip or quit preserves the
+  remaining conflicts so a later run can resume them.
+- The assistant accepts `--vault` and `--all`: there is no `--yes` or `--apply`. In a
   non-TTY environment it exits `2` without changing bytes and recommends the advanced fallback
   `memory candidates --active`.
 - `memory candidates` is read-only and prints deterministic JSON containing only `candidate_id`,
@@ -98,8 +100,10 @@ npx wendkeep validate-memory --vault <v2-vault>
   decision is idempotent.
 - `memory rescope` is a dry run by default and lists only planned IDs, keys, and scopes. With
   `--apply`, it appends explicit project, work-session, change, branch, or worktree events while
-  preserving historic bytes as the ledger prefix. Ambiguous candidates are neither migrated nor
-  assigned a winner; retry returns `unchanged`.
+  preserving historic bytes as the ledger prefix. Legacy `handoff.latest` events inside candidates
+  are also rescoped individually when they carry proven session identity, separating independent
+  workflows without selecting a winner. Ambiguities that remain inside one scope stay under human
+  curation; retry returns `unchanged`.
 - Registers such as `git.local-head`, `handoff.latest`, `quality.latest-*`, and
   `change.<slug>.status` compete only inside the same scope. Automatic resolution still requires
   the same project and causal lineage; incompatible decisions, constraints, and blockers remain

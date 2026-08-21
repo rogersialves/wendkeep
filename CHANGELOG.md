@@ -4,6 +4,20 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.75.2] — 2026-08-20
+
+### Fixed
+
+- **Handoffs legados reescopáveis.** `memory rescope` agora separa individualmente eventos
+  `handoff.latest` ambíguos quando a sessão de origem é comprovável. A migração permanece
+  append-only, não escolhe vencedor e conserva ambiguidades reais dentro da mesma work session.
+- **Curadoria proporcional.** `memory curate` mostra conflitos acionáveis por padrão; `--all`
+  inclui handoffs de sessões encerradas com status/change sanitizados e permite `H` para encerrar
+  em lote somente recomendações seguras, sempre com confirmação e releitura entre decisões.
+- **Diagnóstico sem falso bloqueio.** O doctor separa conflitos acionáveis de handoffs históricos
+  reparáveis no mesmo snapshot. Dívida histórica isolada gera atenção e orienta `memory rescope`,
+  sem degradar a memória nem ocultar a contagem restante.
+
 ## [0.75.1] — 2026-08-20
 
 ### Fixed

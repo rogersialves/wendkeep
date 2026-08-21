@@ -410,10 +410,13 @@ rederiváveis são migrados por CAS do attempt e de `memory_checkpoint`, com bac
 a fronteira física correta; espelhos divergentes falham fechados. Uma
 ambiguidade comprovadamente substituída usa `memory reconcile <sessão>
 --by-session <sucessora> --reason <motivo>` como dry-run e exige `--apply`; a decisão faz backup e
-auditoria sem reescrever ledger, CORE ou notas. Depois rode `status --gate` novamente. Conflitos
-exigem curadoria explícita e durável. Comece por `memory curate --vault <cofre>`: o menu agrupa os
-conflitos com nomes amigáveis, mostra previews sanitizados e confirma cada escrita com padrão
-negativo. Pular ou sair permite retomar depois. Em terminal não interativo, use
+auditoria sem reescrever ledger, CORE ou notas. Depois rode `status --gate` novamente. Handoffs
+legados com identidade comprovável são separados de forma append-only por `memory rescope`, mesmo
+quando já participam de candidates; isso não escolhe vencedor. Conflitos acionáveis exigem
+curadoria explícita e durável. Comece por `memory curate --vault <cofre>`: o menu mostra apenas os
+acionáveis, agrupa por nomes amigáveis, apresenta previews sanitizados e confirma cada escrita com
+padrão negativo. `memory curate --all` inclui handoffs históricos comprovados e permite encerrá-los
+em lote com `H`, após confirmação. Em terminal não interativo, use
 `memory candidates --active --vault <cofre>` para listar, em modo read-only, apenas IDs e metadados
 seguros — nunca valores ou conteúdo da memória. Depois da revisão humana,
 `memory promote <id> --event <event-id>` escolhe um dos eventos do candidate;

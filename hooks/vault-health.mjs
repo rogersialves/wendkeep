@@ -18,6 +18,7 @@ import { detectMemoryMode, LEGACY_MEMORY_WARNING } from './memory-mode.mjs';
 import { deriveMemoryProjection } from './memory-store.mjs';
 import { assertVaultPathSafe, assertVaultPathsSafe } from './vault-path-safety.mjs';
 import { validateMemoryBundle } from '../src/validate-memory.mjs';
+import { isHistoricalHandoffCandidate } from '../packages/vault/src/memory-candidate-policy.mjs';
 
 const DEFAULT_PENDING_PATTERNS = [
   /^- \[ \] Revisar resumo da sessão$/i,
@@ -114,6 +115,12 @@ const memoryCandidatesCommand = (vaultBase) => (
 );
 const memoryCurateCommand = (vaultBase) => (
   `${WENDKEEP_COMMAND} memory curate --vault ${quoteCommandArgument(vaultBase)}`
+);
+const memoryCurateAllCommand = (vaultBase) => (
+  `${WENDKEEP_COMMAND} memory curate --all --vault ${quoteCommandArgument(vaultBase)}`
+);
+const memoryRescopeCommand = (vaultBase, { apply = false } = {}) => (
+  `${WENDKEEP_COMMAND} memory rescope${apply ? ' --apply' : ''} --vault ${quoteCommandArgument(vaultBase)}`
 );
 
 const MEMORY_KEY_PURPOSES = new Map([
@@ -231,6 +238,7 @@ function memoryMetrics() {
     pendingOutbox: 0,
     candidates: 0,
     activeConflicts: 0,
+    repairableHandoffs: 0,
     semanticStatus: null,
     semanticCode: null,
     semanticActiveKeys: [],
@@ -497,7 +505,12 @@ export function checkMemoryBundle(vaultBase, { registry } = {}) {
   warnings.push(...lifecycle.warnings);
 
   const unresolved = candidates.items.filter((item) => !['resolved', 'rejected', 'superseded'].includes(item?.status));
-  const activeConflicts = unresolved.filter((item) => item?.reason === 'conflict');
+  const allConflicts = unresolved.filter((item) => item?.reason === 'conflict');
+  const historicalHandoffs = allConflicts.filter(
+    (item) => isHistoricalHandoffCandidate(item, effectiveRegistry),
+  );
+  const historicalIds = new Set(historicalHandoffs.map((item) => item.candidate_id));
+  const activeConflicts = allConflicts.filter((item) => !historicalIds.has(item.candidate_id));
   const ordinaryCandidates = unresolved.filter((item) => item?.reason !== 'conflict');
   if (activeConflicts.length) {
     const label = activeConflicts.length === 1
@@ -505,6 +518,17 @@ export function checkMemoryBundle(vaultBase, { registry } = {}) {
       : `${activeConflicts.length} conflitos ativos`;
     const purposes = groupConflictPurposes(activeConflicts).join('; ');
     warnings.push(`${label} (${purposes}). Existem versões concorrentes e nenhum dado foi escolhido automaticamente. Conflito semântico degrada somente as chaves afetadas e exige curadoria humana; memory repair não escolhe vencedor. Próximo passo: ${memoryCurateCommand(vaultBase)}. Inventário avançado: ${memoryCandidatesCommand(vaultBase)}.`);
+  }
+  if (historicalHandoffs.length) {
+    const label = historicalHandoffs.length === 1
+      ? '1 handoff histórico reparável'
+      : `${historicalHandoffs.length} handoffs históricos reparáveis`;
+    warnings.push(
+      `${label}; sessões de origem estão encerradas e nenhuma versão precisa virar estado atual. `
+      + `Execute primeiro o dry-run: ${memoryRescopeCommand(vaultBase)}. `
+      + `Se a prévia estiver correta: ${memoryRescopeCommand(vaultBase, { apply: true })}. `
+      + `Dívida restante: ${memoryCurateAllCommand(vaultBase)}.`,
+    );
   }
   if (outbox.count) warnings.push(`${outbox.count} evento(s) pendente(s) na outbox; execute o projector quando seguro.`);
   if (ordinaryCandidates.length) warnings.push(`${ordinaryCandidates.length} candidate(s) aguardando curadoria humana.`);
@@ -526,6 +550,7 @@ export function checkMemoryBundle(vaultBase, { registry } = {}) {
       pendingOutbox: outbox.count,
       candidates: candidates.items.length,
       activeConflicts: activeConflicts.length,
+      repairableHandoffs: historicalHandoffs.length,
       semanticStatus: semantic.status ?? null,
       semanticCode: semantic.code ?? null,
       semanticActiveKeys: semantic.activeKeys || [],

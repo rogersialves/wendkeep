@@ -413,10 +413,13 @@ CAS-migrated on both the attempt and `memory_checkpoint` to the correct physical
 backup/audit; divergent mirrors fail closed. A demonstrably superseded
 ambiguity uses `memory reconcile <session> --by-session <successor>
 --reason <reason>` as a dry run and requires `--apply`; the decision is backed up and audited
-without rewriting ledger, CORE, or notes. Run `status --gate` again afterwards. Conflicts require
-explicit, durable curation. Start with `memory curate --vault <vault>`: the menu groups conflicts
-under friendly names, shows sanitized previews, and confirms every write with default `no`. Skip
-or quit and run it again to resume. In a non-TTY environment, use
+without rewriting ledger, CORE, or notes. Run `status --gate` again afterwards. `memory rescope`
+append-only separates legacy handoffs with proven identity even when they already participate in
+candidates; it never selects a winner. Actionable conflicts require explicit, durable curation.
+Start with `memory curate --vault <vault>`: the menu shows actionable conflicts only, groups them
+under friendly names, shows sanitized previews, and confirms every write with default `no`.
+`memory curate --all` includes proven historical handoffs and lets `H` batch-close them after
+confirmation. In a non-TTY environment, use
 `memory candidates --active --vault <vault>` to list only safe IDs and metadata in read-only mode —
 it does not expose memory values or content. After human review,
 `memory promote <id> --event <event-id>` selects one event from the candidate, while

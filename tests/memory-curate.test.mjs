@@ -13,6 +13,7 @@ import { listMemoryCandidatesForCuration } from '../src/memory.mjs';
 import { renderCoreSkeleton } from '../src/validate-core.mjs';
 import {
   parseMemoryCurateArgs,
+  renderMemoryConflict,
   runGuidedMemoryCuration,
   runMemoryCurateCli,
 } from '../src/memory-curate.mjs';
@@ -20,7 +21,7 @@ import {
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const BIN = join(ROOT, 'bin', 'wendkeep.mjs');
 
-function fixture(candidates) {
+function fixture(candidates, { sessions } = {}) {
   const vault = mkdtempSync(join(tmpdir(), 'wk-memory-curate-'));
   const brain = join(vault, '.brain');
   mkdirSync(brain, { recursive: true });
@@ -28,6 +29,12 @@ function fixture(candidates) {
     join(brain, 'MEMORY_CANDIDATES.jsonl'),
     `${candidates.map((candidate) => JSON.stringify(candidate)).join('\n')}\n`,
   );
+  if (sessions) {
+    writeFileSync(
+      join(brain, 'SESSION_REGISTRY.json'),
+      `${JSON.stringify({ version: 2, sessions })}\n`,
+    );
+  }
   return vault;
 }
 
@@ -114,8 +121,9 @@ test('[req:MEM-CUR-5] curation view exposes two interpretable choices without ra
     const [candidate] = candidates;
     assert.deepEqual(
       Object.keys(candidate).sort(),
-      ['candidate_id', 'events', 'memory_key', 'reason', 'status'],
+      ['candidate_id', 'classification', 'events', 'memory_key', 'reason', 'status'],
     );
+    assert.equal(candidate.classification, 'unknown');
     assert.deepEqual(candidate.events.map((event) => event.event_id), ['mem-a', 'mem-b']);
     assert.deepEqual(candidate.events.map((event) => event.source), ['turn', 'session']);
     assert.deepEqual(
@@ -138,6 +146,53 @@ test('[req:MEM-CUR-5] curation view exposes two interpretable choices without ra
   }
 });
 
+test('[req:MEM-HANDOFF-2] terminal handoffs are historical while active or unproven sessions stay actionable', () => {
+  const candidate = {
+    candidate_id: 'memcand-historical',
+    reason: 'conflict',
+    status: 'active',
+    memory_key: 'handoff.latest',
+    event_ids: ['mem-a', 'mem-b'],
+    events: [
+      { event_id: 'mem-a', value: 'done A', canonical_session_id: 'session-a' },
+      { event_id: 'mem-b', value: 'done B', canonical_session_id: 'session-b' },
+    ],
+  };
+  const terminal = fixture([candidate], {
+    sessions: {
+      'session-a': { status: 'done', change_slug: 'change-a' },
+      'session-b': { status: 'superseded', change_slug: 'change-b' },
+    },
+  });
+  const active = fixture([candidate], {
+    sessions: {
+      'session-a': { status: 'done' },
+      'session-b': { status: 'active' },
+    },
+  });
+  const unknown = fixture([candidate], { sessions: { 'session-a': { status: 'done' } } });
+  try {
+    assert.deepEqual(listMemoryCandidatesForCuration(terminal), []);
+    const [historical] = listMemoryCandidatesForCuration(terminal, { includeHistorical: true });
+    assert.equal(historical.classification, 'historical');
+    assert.equal(historical.recommended_action, 'reject');
+    assert.deepEqual(historical.events.map((item) => item.session_status), ['done', 'superseded']);
+    assert.deepEqual(historical.events.map((item) => item.change_slug), ['change-a', 'change-b']);
+
+    const [actionable] = listMemoryCandidatesForCuration(active);
+    assert.equal(actionable.classification, 'actionable');
+    assert.equal(actionable.recommended_action, undefined);
+
+    const [unproven] = listMemoryCandidatesForCuration(unknown);
+    assert.equal(unproven.classification, 'unknown');
+    assert.equal(unproven.recommended_action, undefined);
+  } finally {
+    rmSync(terminal, { recursive: true, force: true });
+    rmSync(active, { recursive: true, force: true });
+    rmSync(unknown, { recursive: true, force: true });
+  }
+});
+
 function guidedCandidate(id = 'c1', key = 'handoff.latest') {
   return {
     candidate_id: id,
@@ -154,6 +209,15 @@ function guidedCandidate(id = 'c1', key = 'handoff.latest') {
         source: 'session', preview: 'second safe preview',
       },
     ],
+  };
+}
+
+function historicalCandidate(id) {
+  return {
+    ...guidedCandidate(id),
+    classification: 'historical',
+    recommended_action: 'reject',
+    events: guidedCandidate(id).events.map((item) => ({ ...item, session_status: 'done' })),
   };
 }
 
@@ -216,6 +280,36 @@ test('[req:MEM-CUR-5] [req:MEM-CUR-6] skip, reject, details and quit have explic
   assert.match(ordinary.writes, /\[2\][\s\S]*2026-08-02T17:00:00\.000Z/);
   assert.doesNotMatch(ordinary.writes, /\[(?:x|\*)\]|pré-selecionad|selecionad[ao]/i);
   assert.doesNotMatch(ordinary.writes, /session-one|session-two|c1-e1|candidate: c1/);
+});
+
+test('[req:MEM-HANDOFF-3] historical batch requires confirmation and rejects only safe recommendations', async () => {
+  const candidates = [
+    historicalCandidate('history-a'),
+    guidedCandidate('active-a'),
+    historicalCandidate('history-b'),
+    { ...historicalCandidate('history-unproven'), recommended_action: undefined },
+  ];
+  const declined = await drive(['h', '', 'q'], candidates);
+  assert.equal(declined.result.decisions, 0);
+  assert.deepEqual(declined.applied, []);
+
+  const confirmed = await drive(['h', 's', 'q'], candidates);
+  assert.deepEqual(confirmed.applied, [
+    { action: 'reject', candidateId: 'history-a' },
+    { action: 'reject', candidateId: 'history-b' },
+  ]);
+  assert.equal(confirmed.result.decisions, 2);
+  assert.ok(confirmed.loads >= 4, 'reloads authority before every historical decision');
+  assert.match(confirmed.writes, /2 handoff\(s\) histórico\(s\)/i);
+  assert.match(confirmed.writes, /Conflito 3 de 4/);
+});
+
+test('[req:MEM-HANDOFF-3] historical rendering explains terminal context and safe recommendation', () => {
+  const rendered = renderMemoryConflict(historicalCandidate('history-a'));
+  assert.match(rendered, /sessão encerrada/i);
+  assert.match(rendered, /recomendação segura/i);
+  assert.match(rendered, /encerrar sem vencedor/i);
+  assert.match(rendered, /\[H\].*históricos/i);
 });
 
 test('[req:MEM-CUR-5] progress advances across skipped conflicts without restarting', async () => {
@@ -406,7 +500,11 @@ test('[req:MEM-CUR-5] English vault gets English guidance without changing the c
 test('[req:MEM-CUR-6] parser has no batch or implicit-confirmation escape hatch', () => {
   assert.deepEqual(parseMemoryCurateArgs(['--vault', 'C:\\vault']), { vault: 'C:\\vault' });
   assert.deepEqual(parseMemoryCurateArgs(['--vault=C:\\vault']), { vault: 'C:\\vault' });
-  for (const args of [['--yes'], ['--apply'], ['candidate-id'], ['--vault', 'C:\\one', '--vault', 'C:\\two']]) {
+  assert.deepEqual(
+    parseMemoryCurateArgs(['--all', '--vault', 'C:\\vault']),
+    { vault: 'C:\\vault', includeHistorical: true },
+  );
+  for (const args of [['--yes'], ['--apply'], ['candidate-id'], ['--all', '--all'], ['--vault', 'C:\\one', '--vault', 'C:\\two']]) {
     assert.throws(() => parseMemoryCurateArgs(args), /desconhecida|inesperado|duplicado/i);
   }
 });
