@@ -678,3 +678,29 @@ test('[req:ACTX-22] [req:ACTX-24] [req:ACTX-25] DOC-19: handoff e recall automá
     }
   }
 });
+
+test('[req:ACTX-30] [req:ACTX-31] [req:ACTX-32] DOC-20: injeção e sentinel de change são causais e bilíngues', () => {
+  const cases = {
+    pt: {
+      guide: readFileSync(join(GUIDE_DIR.pt, 'context.md'), 'utf8'),
+      readme: readFileSync(join(ROOT, 'README.md'), 'utf8'),
+      focus: /brain-inject[\s\S]*change-context[\s\S]*(?:identidade|active context)[\s\S]*causal/i,
+      backlog: /backlog[\s\S]*global[\s\S]*(?:ATUAL|change atual)/i,
+      empty: /active_contexts:\s*\{\}[\s\S]*(?:desativa o fallback|falha fechad)/i,
+    },
+    en: {
+      guide: readFileSync(join(GUIDE_DIR.en, 'context.md'), 'utf8'),
+      readme: readFileSync(join(ROOT, 'README.en.md'), 'utf8'),
+      focus: /brain-inject[\s\S]*change-context[\s\S]*(?:identity|active context)[\s\S]*causal/i,
+      backlog: /backlog[\s\S]*global[\s\S]*(?:CURRENT|current change)/i,
+      empty: /active_contexts:\s*\{\}[\s\S]*(?:disables legacy fallback|fails? closed)/i,
+    },
+  };
+  for (const [locale, docs] of Object.entries(cases)) {
+    for (const text of [docs.guide, docs.readme]) {
+      assert.match(text, docs.focus, `${locale}: foco causal dos hooks ausente`);
+      assert.match(text, docs.backlog, `${locale}: backlog global sem marcador causal`);
+      assert.match(text, docs.empty, `${locale}: store vazio não está fail-closed`);
+    }
+  }
+});

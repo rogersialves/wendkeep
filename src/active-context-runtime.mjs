@@ -1,5 +1,9 @@
 import { readSessionRegistry } from '../hooks/obsidian-common.mjs';
-import { migrateLegacyActiveContext } from '../hooks/active-context-store.mjs';
+import {
+  activeContextRegistryInitialized,
+  migrateLegacyActiveContext,
+  resolveActiveContext,
+} from '../hooks/active-context-store.mjs';
 import { captureProjectScope, compareProjectScopes } from '../hooks/project-scope.mjs';
 import {
   discoverWorktreeRepository,
@@ -107,6 +111,7 @@ export function resolveCommandActiveContext({
   projectRoot = process.cwd(),
   sessionId = '',
   spawn,
+  requireExisting = false,
 } = {}) {
   const requestedSession = String(sessionId || '').trim();
   let identity;
@@ -116,7 +121,7 @@ export function resolveCommandActiveContext({
     });
   } catch (error) {
     const registry = readSessionRegistry(vaultBase);
-    const initialized = Object.keys(registry.active_contexts || {}).length > 0;
+    const initialized = activeContextRegistryInitialized(registry);
     const legacyUnavailable = error?.code === 'WENDKEEP_ACTIVE_CONTEXT_IDENTITY_UNAVAILABLE'
       || (!requestedSession && error?.code === 'WENDKEEP_ACTIVE_CONTEXT_NOT_FOUND');
     if (!initialized && legacyUnavailable) return null;
@@ -127,5 +132,10 @@ export function resolveCommandActiveContext({
       vaultBase, projectRoot, sessionId: candidateId, ...(spawn ? { spawn } : {}),
     }),
   });
+  if (requireExisting) {
+    const registry = readSessionRegistry(vaultBase);
+    if (!activeContextRegistryInitialized(registry)) return null;
+    resolveActiveContext(vaultBase, identity);
+  }
   return identity;
 }

@@ -4,6 +4,20 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.76.9] — 2026-08-22
+
+### Fixed
+
+- **Injeção de change causal.** `brain-inject` e `change-context` usam o active context da sessão
+  para marcar `ATUAL`, calcular o hash da sentinela e preservar o mesmo foco em todos os degraus do
+  budget; o backlog continua global sem promover a change irmã pelo pointer legado.
+- **Store vazio fail-closed.** A presença de `active_contexts`, schema ou revision — inclusive
+  `active_contexts: {}` — impede fallback a `CURRENT_CHANGE.md` quando o contexto causal está ausente
+  ou ambíguo; compatibilidade legada permanece somente antes da inicialização contextual.
+- **Criação contextual preservada.** Operações mutáveis como `delivery start` continuam recebendo a
+  identidade causal antes de existir um context record, enquanto hooks read-only exigem o registro
+  existente e nunca publicam foco de sibling.
+
 ## [0.76.8] — 2026-08-22
 
 ### Added

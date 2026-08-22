@@ -1,6 +1,11 @@
 import { readSessionRegistry } from './obsidian-common.mjs';
-import { resolveActiveContext } from './active-context-store.mjs';
+import {
+  activeContextRegistryInitialized,
+  resolveActiveContext,
+} from './active-context-store.mjs';
 import { resolveRuntimeActiveContext } from '../src/active-context-runtime.mjs';
+
+export { activeContextRegistryInitialized } from './active-context-store.mjs';
 
 const IDENTITY_FIELDS = Object.freeze([
   ['work_session_id', 'workSessionId'],
@@ -24,12 +29,6 @@ function contextsOf(registry) {
   return registry?.active_contexts && typeof registry.active_contexts === 'object'
     && !Array.isArray(registry.active_contexts)
     ? registry.active_contexts : {};
-}
-
-export function activeContextRegistryInitialized(registry = {}) {
-  return Object.hasOwn(registry, 'active_contexts')
-    || Object.hasOwn(registry, 'active_contexts_schema')
-    || Object.hasOwn(registry, 'active_contexts_revision');
 }
 
 function assertAuthority(identity, context) {
