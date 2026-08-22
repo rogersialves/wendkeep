@@ -4,6 +4,22 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.77.0] — 2026-08-22
+
+### Added
+
+- **Fechamento comprovado de worktrees.** `worktree finish <slug> --pr <ref>` valida no GitHub que o
+  PR foi merged, cruza branch e merge commit com a base local, executa preflight de checkout,
+  sessões, delivery, outbox e handoff, e fecha somente o active context da worktree alvo.
+- **Cleanup auditável e retomável.** Reservas sob lock, remoção do ref local por CAS e receipts JSONL
+  append-only tornam o fechamento idempotente e retomável depois de crash; `doctor` diagnostica
+  estado interrompido, failed ou receipt inconsistente com recovery objetivo.
+- **Comandos destrutivos explícitos.** `worktree cleanup --merged` e `worktree prune` são dry-run por
+  padrão e exigem `--apply`; `worktree remove --reason` preserva branch não merged. Exclusão remota
+  continua proibida sem `--delete-remote` e falha fechado quando a branch diverge.
+- **Paridade operacional.** README e guia de worktrees PT-BR/EN documentam flags, blockers,
+  PowerShell/POSIX e recovery; a task local do VS Code oferece `WendKeep: Finish merged worktree`.
+
 ## [0.76.9] — 2026-08-22
 
 ### Fixed

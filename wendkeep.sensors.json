@@ -616,6 +616,14 @@
       "severity": "critical",
       "type": "command",
       "command": "node --test tests/active-context-injection.test.mjs tests/change-hooks.test.mjs tests/brain-inject-memory.test.mjs tests/active-context-delivery-cli.test.mjs"
+    },
+    {
+      "id": "worktree-cleanup",
+      "name": "worktree-cleanup",
+      "description": "Validates merge proof, fail-closed preflight, idempotent cleanup receipts, crash recovery, remote opt-in and CLI/doctor integration",
+      "severity": "critical",
+      "type": "command",
+      "command": "node --test tests/worktree-cleanup.test.mjs tests/worktree-cli.test.mjs"
     }
   ]
 }

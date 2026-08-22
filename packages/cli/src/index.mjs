@@ -249,7 +249,7 @@ async function main(argv) {
     }
     case 'worktree': {
       const { runWorktree } = await import('../../../src/worktree.mjs');
-      process.exit(runWorktree(rest));
+      process.exit(await runWorktree(rest));
       break;
     }
     case 'context': {

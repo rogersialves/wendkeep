@@ -147,7 +147,7 @@ npx wendkeep init --no-companions --no-mcp --yes              # zero companions,
 | `--no-companions` | Pin no companions. |
 | `--no-mcp` | Skip **wendkeep's own** vault MCP (`wendkeep-vault`). Companion MCPs still follow `--companions`. |
 | `--no-colors` | Skip the Obsidian color system (`.obsidian` snippet + graph groups). |
-| `--vscode-worktree-tasks` | Create a local, Git-excluded `.vscode/tasks.json` for creating/listing/opening worktrees; never overwrites an existing file. Also accepted by `sync`. |
+| `--vscode-worktree-tasks` | Create a local, Git-excluded `.vscode/tasks.json` for creating/listing/opening/finishing worktrees; never overwrites an existing file. Also accepted by `sync`. |
 | `--yes`, `-y` | Non-interactive; accept defaults (skips the language / vault / companion prompts). |
 | `--force` | Overwrite existing wendkeep config blocks. |
 
@@ -239,7 +239,7 @@ The README is the map; the guides provide syntax, options, exit codes, examples,
 | Group | Use it for | Detailed guide |
 |---|---|---|
 | **Installation and updates** | `init`, `sync`, companions, and the first project↔vault binding | [Installation and first use](https://github.com/rogersialves/wendkeep/blob/main/docs/en/commands/getting-started.md) |
-| **Managed worktrees** | `worktree create/list/status/open`, Vault binding, and recovery | [Managed worktrees](https://github.com/rogersialves/wendkeep/blob/main/docs/en/commands/worktrees.md) |
+| **Managed worktrees** | `worktree create/list/status/open/finish/cleanup/remove/prune`, merge proof, preflight, and receipts | [Managed worktrees](https://github.com/rogersialves/wendkeep/blob/main/docs/en/commands/worktrees.md) |
 | **Active context** | `active_contexts` by `repository_id`/`worktree_id`/`work_session_id`, causal transition, quarantine, and explicit recovery | [Active context](https://github.com/rogersialves/wendkeep/blob/main/docs/en/commands/context.md) |
 | **Operating profiles** | `profile`, `flow`, always-on Keep Core, and Wend Runtime governance | [Operating profiles](https://github.com/rogersialves/wendkeep/blob/main/docs/en/commands/operating-profiles.md) |
 | **Changes and verification** | `change`, specs, sensors, TDD, evidence, and archive | [Changes and verification](https://github.com/rogersialves/wendkeep/blob/main/docs/en/commands/changes-and-verification.md) |

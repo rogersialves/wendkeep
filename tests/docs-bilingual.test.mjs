@@ -704,3 +704,30 @@ test('[req:ACTX-30] [req:ACTX-31] [req:ACTX-32] DOC-20: injeção e sentinel de 
     }
   }
 });
+
+test('[req:WT-17] DOC-21: cleanup de worktrees mantém flags, erros e exemplos PowerShell/POSIX bilíngues', () => {
+  const pt = readFileSync(join(GUIDE_DIR.pt, 'worktrees.md'), 'utf8');
+  const en = readFileSync(join(GUIDE_DIR.en, 'worktrees.md'), 'utf8');
+  const readmePt = readFileSync(join(ROOT, 'README.md'), 'utf8');
+  const readmeEn = readFileSync(join(ROOT, 'README.en.md'), 'utf8');
+  for (const token of [
+    'worktree finish', 'worktree cleanup --merged', 'worktree remove', 'worktree prune',
+    '--pr', '--delete-remote', '--open-main', '--dry-run', '--apply', '--reason',
+    'WENDKEEP_WORKTREE_PR_INVALID', 'WENDKEEP_WORKTREE_PR_NOT_MERGED',
+    'WENDKEEP_WORKTREE_PR_MISMATCH', 'WENDKEEP_WORKTREE_PR_MERGE_UNREACHABLE',
+    'WENDKEEP_WORKTREE_DIRTY', 'WENDKEEP_WORKTREE_ACTIVE_SESSION',
+    'WENDKEEP_WORKTREE_ACTIVE_DELIVERY', 'WENDKEEP_WORKTREE_OUTBOX_PENDING',
+    'WENDKEEP_WORKTREE_HANDOFF_PENDING', 'WENDKEEP_WORKTREE_CLEANUP_BUSY',
+    'WENDKEEP_WORKTREE_REMOTE_UNAVAILABLE', 'WENDKEEP_WORKTREE_REMOTE_DIVERGED',
+  ]) {
+    assert.ok(pt.includes(token), `guia PT-BR sem ${token}`);
+    assert.ok(en.includes(token), `guia EN sem ${token}`);
+  }
+  for (const guide of [pt, en]) {
+    assert.match(guide, /PowerShell:[\s\S]*```powershell[\s\S]*worktree finish/);
+    assert.match(guide, /POSIX:[\s\S]*```bash[\s\S]*worktree cleanup --merged --apply/);
+    assert.match(guide, /dry-run por padrão|dry-run by default/i);
+  }
+  assert.match(readmePt, /worktree create\/list\/status\/open\/finish\/cleanup\/remove\/prune/);
+  assert.match(readmeEn, /worktree create\/list\/status\/open\/finish\/cleanup\/remove\/prune/);
+});

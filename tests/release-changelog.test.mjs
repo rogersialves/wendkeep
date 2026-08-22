@@ -82,13 +82,20 @@ test('extractReleaseNotes: throws when the version is absent', () => {
 });
 
 test('[sensor:release-tests] current release notes are extractable and match the package', () => {
-  assert.equal(PACKAGE.version, '0.76.9');
+  assert.equal(PACKAGE.version, '0.77.0');
   const release = extractReleaseNotes(CHANGELOG, PACKAGE.version);
   assert.equal(release.date, '2026-08-22');
+  assert.match(release.notes, /Fechamento comprovado de worktrees/i);
+  assert.match(release.notes, /Cleanup auditável e retomável/i);
+  assert.match(release.notes, /Comandos destrutivos explícitos/i);
+  assert.doesNotMatch(release.notes, /019f[0-9a-f-]+/i);
+});
+
+test('[sensor:release-tests] 0.76.9 active-context injection notes remain extractable', () => {
+  const release = extractReleaseNotes(CHANGELOG, '0.76.9');
   assert.match(release.notes, /Injeção de change causal/i);
   assert.match(release.notes, /Store vazio fail-closed/i);
   assert.match(release.notes, /Criação contextual preservada/i);
-  assert.doesNotMatch(release.notes, /019f[0-9a-f-]+/i);
 });
 
 test('[sensor:release-tests] 0.76.8 doctor/recovery notes remain extractable', () => {
