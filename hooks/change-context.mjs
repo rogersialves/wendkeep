@@ -8,7 +8,9 @@
 import { pathToFileURL } from 'node:url';
 import { readHookInput, writeHookOutput } from './obsidian-common.mjs';
 import { profileRuntimeError } from './brain-inject.mjs';
-import { changeCtxState, readSentinel, renderOpenChanges, writeSentinel } from './change-core.mjs';
+import {
+  activeChange, changeCtxState, readSentinel, renderOpenChanges, writeSentinel,
+} from './change-core.mjs';
 import {
   hookProfilePolicy,
   profileSentinelId,
@@ -43,7 +45,7 @@ export function buildChangePing(vaultBase, sessionId, prompt = '', changeSlug = 
       hash,
     };
   }
-  const st = changeCtxState(vaultBase);
+  const st = changeCtxState(vaultBase, { context });
   if (st) {
     if (readSentinel(vaultBase, 'ctx', sentinelId) === st.hash) return null;
     writeSentinel(vaultBase, 'ctx', sentinelId, st.hash);
@@ -75,10 +77,14 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       vaultBase,
       projectRoot: input.cwd || process.cwd(),
       sessionId: sid,
+      requireExisting: true,
     });
+    const changeSlug = commandContext
+      ? activeChange(vaultBase, { context: commandContext })
+      : (entry?.change_slug || '');
     const ping = runtime.bindingError
       ? { context: profileRuntimeError(runtime.bindingError) }
-      : buildChangePing(vaultBase, sid, input.prompt || '', entry?.change_slug || '', {
+      : buildChangePing(vaultBase, sid, input.prompt || '', changeSlug, {
         profile: runtime.profile,
         context: commandContext,
       });

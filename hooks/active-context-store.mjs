@@ -11,6 +11,12 @@ const ID_PATTERN = /^[A-Za-z0-9._-]{1,160}$/;
 const SLUG_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,159}$/;
 const DELIVERY_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{1,100}$/;
 
+export function activeContextRegistryInitialized(registry = {}) {
+  return Object.hasOwn(registry, 'active_contexts')
+    || Object.hasOwn(registry, 'active_contexts_schema')
+    || Object.hasOwn(registry, 'active_contexts_revision');
+}
+
 function contextError(code, message) {
   const error = new Error(message);
   error.code = code;
@@ -254,7 +260,7 @@ export function migrateLegacyActiveContext(vaultBase, {
   const slug = legacyPointer(vaultBase);
   if (!slug) return { migrated: false, reason: 'no-pointer' };
   const registry = readSessionRegistry(vaultBase);
-  if (Object.keys(contextsOf(registry)).length) return { migrated: false, reason: 'already-initialized' };
+  if (activeContextRegistryInitialized(registry)) return { migrated: false, reason: 'already-initialized' };
   if (typeof identityForSession !== 'function') return { migrated: false, reason: 'identity-unavailable' };
 
   const candidates = [];

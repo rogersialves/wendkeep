@@ -7,7 +7,12 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { readHookInput, writeHookOutput } from './obsidian-common.mjs';
 import { brainDir } from './brain-core.mjs';
-import { buildActiveChangeInjection, changeCtxState, writeSentinel } from './change-core.mjs';
+import {
+  activeChange,
+  buildActiveChangeInjection,
+  changeCtxState,
+  writeSentinel,
+} from './change-core.mjs';
 import { buildLessonsInjection } from './lessons-core.mjs';
 import { getLocale } from './locale.mjs';
 import { resolveSessionEntry } from './session-identity.mjs';
@@ -20,6 +25,7 @@ import {
 } from './operating-profile-runtime.mjs';
 import { assertVaultPathSafe } from './vault-path-safety.mjs';
 import { CORE_LIMITS, validateCore } from '../src/validate-core.mjs';
+import { resolveCommandActiveContext } from '../src/active-context-runtime.mjs';
 
 // The process ROUTER — the enforcement layer. The wk-* skills are passive files; without a
 // standing instruction the model plans in chat, leaves the change scaffold raw and forces the
@@ -220,7 +226,9 @@ function budgetNotice(priority, layer, message) {
   return `<wk_budget_notice priority="${priority}" layer="${layer}">${message}</wk_budget_notice>`;
 }
 
-export function buildInjection(vaultBase, input = {}, { profile = 'GOVERN', bindingError = null } = {}) {
+export function buildInjection(vaultBase, input = {}, {
+  profile = 'GOVERN', bindingError = null, context = null,
+} = {}) {
   const brain = detectMemoryMode(vaultBase).mode === 'v2'
     ? buildV2Memory(vaultBase)
     : buildLegacyMemory(vaultBase);
@@ -236,10 +244,14 @@ export function buildInjection(vaultBase, input = {}, { profile = 'GOVERN', bind
   // visible below, but the standing change router would contradict that contract.
   const router = policy.requiresChange ? processRouter(getLocale(vaultBase).id) : '';
   const { identity, entry } = resolveSessionEntry(vaultBase, input);
-  const focus = identity.state === 'resolved' && entry?.change_slug
-    ? `<session_change>${boundAncillaryText(`Change vinculada a esta sessão: ${entry.change_slug}. Este vínculo prevalece para writes automáticos; todas as pendências continuam visíveis acima.`, '<session_change></session_change>'.length)}</session_change>`
+  const contextualChange = context ? activeChange(vaultBase, { context }) : '';
+  const sessionChange = contextualChange || (!context && identity.state === 'resolved' ? entry?.change_slug : '');
+  const focus = sessionChange
+    ? `<session_change>${boundAncillaryText(`Change vinculada a esta sessão: ${sessionChange}. Este vínculo prevalece para writes automáticos; todas as pendências continuam visíveis acima.`, '<session_change></session_change>'.length)}</session_change>`
     : '';
-  const allChanges = buildActiveChangeInjection(vaultBase, { maxLineChars: INJECTION_LIMITS.lineChars });
+  const allChanges = buildActiveChangeInjection(vaultBase, {
+    context, maxLineChars: INJECTION_LIMITS.lineChars,
+  });
 
   // Global priority is deterministic: memory/router/focus, then changes, then lessons.
   let output = joinInjection([brain, profileNotice, router, focus, allChanges, lessons]);
@@ -253,6 +265,7 @@ export function buildInjection(vaultBase, input = {}, { profile = 'GOVERN', bind
   // Second pressure step: non-current changes leave the hot context before the current one.
   const nonCurrentEvicted = budgetNotice(2, 'non-current-changes', 'Changes não atuais omitidas depois das lessons.');
   const currentChange = buildActiveChangeInjection(vaultBase, {
+    context,
     currentOnly: true,
     maxLineChars: INJECTION_LIMITS.lineChars,
   });
@@ -264,6 +277,7 @@ export function buildInjection(vaultBase, input = {}, { profile = 'GOVERN', bind
   const fixed = joinInjection([brain, profileNotice, router, focus, lessonsEvicted, nonCurrentEvicted, currentSummarized]);
   const remaining = Math.max(512, INJECTION_LIMITS.totalBytes - byteLength(fixed) - 1);
   const boundedCurrent = buildActiveChangeInjection(vaultBase, {
+    context,
     currentOnly: true,
     maxBytes: remaining,
     maxLineChars: INJECTION_LIMITS.lineChars,
@@ -285,21 +299,29 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     const input = readHookInput();
     const runtime = resolveHookOperatingProfile({ input });
     const vaultBase = runtime.vaultBase;
+    const { identity } = runtime;
+    const sid = identity.state === 'resolved'
+      ? identity.canonicalConversationId : (input.session_id || input.sessionId || '');
+    const commandContext = runtime.bindingError ? null : resolveCommandActiveContext({
+      vaultBase,
+      projectRoot: input.cwd || process.cwd(),
+      sessionId: sid,
+      requireExisting: true,
+    });
     writeHookOutput({
       hookSpecificOutput: {
         hookEventName: 'SessionStart',
         additionalContext: buildInjection(vaultBase, input, {
           profile: runtime.profile,
           bindingError: runtime.bindingError,
+          context: commandContext,
         }),
       },
     });
     // Sentinela do change-context: o backlog completo acabou de ser injetado aqui, então o hook
     // UserPromptSubmit não precisa re-pingar no 1º prompt. Bônus — nunca derruba a injeção.
     if (runtime.policy.harness && !runtime.bindingError) try {
-      const st = changeCtxState(vaultBase);
-      const { identity } = runtime;
-      const sid = identity.state === 'resolved' ? identity.canonicalConversationId : (input.session_id || input.sessionId || '');
+      const st = changeCtxState(vaultBase, { context: commandContext });
       if (st) {
         writeSentinel(vaultBase, 'ctx', profileSentinelId(sid, runtime.profile), st.hash);
       }

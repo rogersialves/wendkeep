@@ -608,6 +608,14 @@
       "severity": "critical",
       "type": "command",
       "command": "node --test tests/active-context-doctor-recovery.test.mjs tests/context-recovery.test.mjs tests/context-cli.test.mjs tests/harness-doctor.test.mjs"
+    },
+    {
+      "id": "active-context-injection",
+      "name": "active-context-injection",
+      "description": "Validates causal SessionStart/UserPromptSubmit change focus, sentinel hashes, empty-store fail-closed behavior and legacy compatibility",
+      "severity": "critical",
+      "type": "command",
+      "command": "node --test tests/active-context-injection.test.mjs tests/change-hooks.test.mjs tests/brain-inject-memory.test.mjs tests/active-context-delivery-cli.test.mjs"
     }
   ]
 }

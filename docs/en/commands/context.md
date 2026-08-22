@@ -117,6 +117,14 @@ unambiguous active context. With zero or multiple contexts it stays empty. Migra
 and never invents a worktree or session identity. The legacy pointer becomes a context only
 when one active session, a complete scope, and worktree metadata prove one identity.
 
+The `brain-inject` (`SessionStart`) and `change-context` (`UserPromptSubmit`) hooks resolve the same
+causal identity before marking a change as `CURRENT` or computing the sentinel hash. The backlog
+remains global and lists every other change as `OPEN`, but a divergent `CURRENT_CHANGE.md` never
+turns a sibling change into the session focus. The presence of `active_contexts`, its schema, or its
+revision — including `active_contexts: {}` — disables legacy fallback: a missing or ambiguous
+context fails closed without reviving the pointer. Fallback exists only before contextual-store
+initialization.
+
 ## Common errors and diagnosis
 
 - `WENDKEEP_CONTEXT_AMBIGUOUS`: pass `--session <id>`; no candidate is selected silently.

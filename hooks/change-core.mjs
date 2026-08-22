@@ -420,7 +420,8 @@ export function renderOpenChanges(state, {
 // Mantém o nome exportado para consumidores internos existentes, mas agora injeta o backlog
 // completo em vez de ocultar changes não selecionadas.
 export function buildActiveChangeInjection(vaultBase, options = {}) {
-  return renderOpenChanges(allChangesState(vaultBase), options);
+  const { context, ...renderOptions } = options;
+  return renderOpenChanges(allChangesState(vaultBase, { context }), renderOptions);
 }
 
 export function activeChangeLink(vaultBase, { context } = {}) {
@@ -479,8 +480,8 @@ export function writeSentinel(vaultBase, kind, sid, value = '1') {
 // Estado global usado pelo change-context: hash cobre qualquer tarefa aberta, inclusive de uma
 // change que não esteja no ponteiro. As propriedades slug/openTasks preservam compatibilidade com
 // consumidores antigos e descrevem somente a atual.
-export function changeCtxState(vaultBase) {
-  const state = allChangesState(vaultBase);
+export function changeCtxState(vaultBase, { context } = {}) {
+  const state = allChangesState(vaultBase, { context });
   if (!state.changes.length && !state.pointerWarning) return null;
   const selected = state.changes.find((change) => change.current);
   return {

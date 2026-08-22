@@ -114,6 +114,13 @@ contexto ativo inequívoco. Com zero ou múltiplos contextos, fica vazio. A migr
 não inventa uma identidade de worktree ou sessão. O ponteiro legado só vira contexto quando uma sessão
 ativa, scope completa e metadados da worktree provam uma única identidade.
 
+Os hooks `brain-inject` (`SessionStart`) e `change-context` (`UserPromptSubmit`) resolvem a mesma
+identidade causal antes de marcar uma change como `ATUAL` ou calcular o hash da sentinela. O backlog
+continua global e lista as demais changes como `ABERTA`, mas um `CURRENT_CHANGE.md` divergente nunca
+transforma a change irmã em foco da sessão. A presença de `active_contexts`, schema ou revision —
+inclusive `active_contexts: {}` — desativa o fallback legado: contexto ausente ou ambíguo falha
+fechado sem reativar o ponteiro. O fallback só existe antes da inicialização do store contextual.
+
 ## Erros comuns e diagnóstico
 
 - `WENDKEEP_CONTEXT_AMBIGUOUS`: informe `--session <id>`; nenhuma candidata é escolhida em silêncio.
