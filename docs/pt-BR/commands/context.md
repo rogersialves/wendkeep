@@ -82,6 +82,22 @@ atuais. Sob o lock do registry, o comando revalida a revisão, incrementa `conte
 change/lease/autorizações, limpa somente a quarentena e anexa um receipt sanitizado em
 `context_recoveries`. Qualquer falha deixa registry e quarentena byte a byte intactos.
 
+### Registry multi-contexto de changes
+
+O `SESSION_REGISTRY.json` mantém `active_contexts` com schema e revisão próprios. Cada entrada é
+identificada por `repository_id` + `worktree_id` + `work_session_id`; branch, HEAD e `change_slug`
+pertencem a essa entrada. Assim, duas worktrees podem selecionar changes diferentes sem
+sobrescrever o foco uma da outra.
+
+Com sessão causal explícita, change, spec e verify resolvem somente a entrada correspondente. Sem
+sessão, uma única entrada ativa da worktree pode ser usada; duas sessões compatíveis causam
+ambiguidade e a operação falha fechada, sem escolher uma change em silêncio.
+
+`CURRENT_CHANGE.md` é apenas uma projeção derivada: contém a change somente quando existe um único
+contexto ativo inequívoco. Com zero ou múltiplos contextos, fica vazio. A migração é conservadora:
+não inventa uma identidade de worktree ou sessão. O ponteiro legado só vira contexto quando uma sessão
+ativa, scope completa e metadados da worktree provam uma única identidade.
+
 ## Erros comuns e diagnóstico
 
 - `WENDKEEP_CONTEXT_AMBIGUOUS`: informe `--session <id>`; nenhuma candidata é escolhida em silêncio.

@@ -276,9 +276,12 @@ export function readSessionRegistry(vaultBase) {
 
   try {
     const parsed = JSON.parse(readFileSync(checked.target, 'utf-8'));
+    const root = parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
     return {
-      version: Math.max(2, parsed.version || 1),
-      sessions: parsed.sessions && typeof parsed.sessions === 'object' ? parsed.sessions : {},
+      ...root,
+      version: Math.max(2, root.version || 1),
+      sessions: root.sessions && typeof root.sessions === 'object' && !Array.isArray(root.sessions)
+        ? root.sessions : {},
     };
   } catch {
     return { version: 2, sessions: {} };

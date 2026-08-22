@@ -17,6 +17,7 @@ import {
   backfillArtifactLinks,
   scaffoldPlaceholders,
   isGuideCompactChange,
+  setActiveChange,
 } from '../hooks/change-core.mjs';
 import { evaluateGate, requiredSensors } from '../hooks/sensors-core.mjs';
 import { buildEffectiveRequirementPackage, evaluateVerdict, formatOrphanReqs, tasksHashOf, parseSpecsList, parseDelta, parseRequirements, applyDelta, validateSpecImpact } from '../hooks/spec-core.mjs';
@@ -24,6 +25,7 @@ import { getNextAdrNumber, readControl, readSessionRegistry, upsertSessionRegist
 import { getLocale } from '../hooks/locale.mjs';
 import { enqueueObserverDocumentChange } from './observer-sql-publish.mjs';
 import { readProjectForValidation } from '../packages/vault/src/validate-memory.mjs';
+import { resolveCommandActiveContext } from './active-context-runtime.mjs';
 
 function observerMarkdownUnder(vaultBase, relativeRoot) {
   const output = [];
@@ -71,6 +73,24 @@ export function runChange(argv) {
   const vaultBase = resolveVault(rest);
   const VALUE_FLAGS = new Set(['--vault', '--change', '--project', '--session']);
   const slugArg = () => rest.find((a, i) => !a.startsWith('-') && !VALUE_FLAGS.has(rest[i - 1]));
+  const projectRoot = resolve(opt(rest, '--project') || process.cwd());
+  let contextResolved = false;
+  let resolvedContext = null;
+  const context = () => {
+    if (contextResolved) return resolvedContext;
+    contextResolved = true;
+    const sessionId = opt(rest, '--session')
+      || process.env.CODEX_THREAD_ID
+      || process.env.CLAUDE_SESSION_ID
+      || '';
+    try {
+      resolvedContext = resolveCommandActiveContext({ vaultBase, projectRoot, sessionId });
+      return resolvedContext;
+    } catch (error) {
+      process.stderr.write(`wendkeep change: ${error.code || 'WENDKEEP_ACTIVE_CONTEXT_FAILED'}: ${error.message}\n`);
+      process.exit(2);
+    }
+  };
 
   if (sub === 'new') {
     const slug = slugArg();
@@ -80,6 +100,7 @@ export function runChange(argv) {
     try { sessionRel = readControl(vaultBase).session_file || ''; } catch { /* sem control */ }
     const r = newChange(vaultBase, slug, {
       dateStr: today(), simple: rest.includes('--simple'), guide: rest.includes('--guide'), sessionRel,
+      context: context(),
     });
     process.stdout.write(`change ${r.created ? 'created' : 'exists'}: ${r.rel} (active)\n`);
     process.exit(0);
@@ -88,7 +109,7 @@ export function runChange(argv) {
   if (sub === 'use') {
     const slug = slugArg();
     if (!slug) { process.stderr.write('wendkeep change use: missing <slug>\n'); process.exit(2); }
-    const r = useChange(vaultBase, slug);
+    const r = useChange(vaultBase, slug, { context: context() });
     if (!r.ok) { process.stderr.write(`wendkeep change use: ${r.error}\n`); process.exit(2); }
     process.stdout.write(`current change: ${slug}\n`);
     process.exit(0);
@@ -102,6 +123,8 @@ export function runChange(argv) {
     if (!state.changes.some((item) => item.slug === slug)) { process.stderr.write(`wendkeep change bind: open change not found: ${slug}\n`); process.exit(2); }
     if (!readSessionRegistry(vaultBase).sessions?.[sessionId]) { process.stderr.write(`wendkeep change bind: session not found: ${sessionId}\n`); process.exit(2); }
     upsertSessionRegistry(vaultBase, sessionId, { change_slug: slug });
+    const selectedContext = context();
+    if (selectedContext) setActiveChange(vaultBase, slug, { context: selectedContext });
     process.stdout.write(`session ${sessionId} -> change ${slug}\n`);
     process.exit(0);
   }
@@ -117,6 +140,7 @@ export function runChange(argv) {
     try { sessionRel = readControl(vaultBase).session_file || ''; } catch { /* no control */ }
     const r = continueChange(vaultBase, archivedSlug, newSlug, {
       dateStr: today(), simple: rest.includes('--simple'), guide: rest.includes('--guide'), sessionRel,
+      context: context(),
     });
     if (!r.ok) { process.stderr.write(`wendkeep change continue: ${r.error}\n`); process.exit(2); }
     process.stdout.write(`change created: ${r.rel} (continues ${r.archived}; active)\n`);
@@ -124,7 +148,7 @@ export function runChange(argv) {
   }
 
   if (sub === 'list') {
-    const state = allChangesState(vaultBase);
+    const state = allChangesState(vaultBase, { context: context() });
     const { archived } = listChanges(vaultBase);
     process.stdout.write(`${renderOpenChanges(state, { tag: '' }) || 'open changes: (none)'}\n`);
     process.stdout.write(`archived: ${archived.join(', ') || '(none)'}\n`);
@@ -147,7 +171,7 @@ export function runChange(argv) {
   if (sub === 'status') {
     const slug = slugArg();
     if (!slug) {
-      const state = allChangesState(vaultBase);
+      const state = allChangesState(vaultBase, { context: context() });
       if (!state.changes.length && !state.pointerWarning) {
         process.stderr.write('wendkeep change status: no open changes\n');
         process.exit(2);
@@ -161,7 +185,7 @@ export function runChange(argv) {
     catch { process.stderr.write(`wendkeep change status: not found: ${slug}\n`); process.exit(2); }
     const tasks = parseTasks(tarefasMd);
     const done = tasks.filter((t) => t.done).length;
-    process.stdout.write(`change: ${slug}${slug === activeChange(vaultBase) ? ' (ativa)' : ''}\n`);
+    process.stdout.write(`change: ${slug}${slug === activeChange(vaultBase, { context: context() }) ? ' (ativa)' : ''}\n`);
     let specs = [];
     try { specs = parseSpecsList(readFileSync(join(dir, 'proposta.md'), 'utf8')); } catch { /* sem proposta */ }
     process.stdout.write(`specs: ${specs.join(', ') || '(nenhuma)'}\n`);
@@ -194,7 +218,7 @@ export function runChange(argv) {
   if (sub === 'done' || sub === 'undone') {
     const taskId = slugArg();
     if (!taskId) { process.stderr.write(`wendkeep change ${sub}: missing <taskId>\n`); process.exit(2); }
-    const slug = opt(rest, '--change') || activeChange(vaultBase);
+    const slug = opt(rest, '--change') || activeChange(vaultBase, { context: context() });
     if (!slug) { process.stderr.write(`wendkeep change ${sub}: no active change\n`); process.exit(2); }
     const dir = join(vaultBase, getLocale(vaultBase).folders.changes, slug);
     let ok = false;
@@ -205,7 +229,7 @@ export function runChange(argv) {
   }
 
   if (sub === 'diff') {
-    const slug = slugArg() || activeChange(vaultBase);
+    const slug = slugArg() || activeChange(vaultBase, { context: context() });
     if (!slug) { process.stderr.write('wendkeep change diff: no change (arg or active)\n'); process.exit(2); }
     const dir = join(vaultBase, getLocale(vaultBase).folders.changes, slug);
     let specs = [];
@@ -228,7 +252,8 @@ export function runChange(argv) {
   }
 
   if (sub === 'archive') {
-    const slug = slugArg() || activeChange(vaultBase);
+    const selectedContext = context();
+    const slug = slugArg() || activeChange(vaultBase, { context: selectedContext });
     if (!slug) { process.stderr.write('wendkeep change archive: missing <slug> and no active change\n'); process.exit(2); }
     // Real gate (Pilar C): every sensor a task declared must be green in evidencia.json.
     const gate = (dir) => {
@@ -310,7 +335,10 @@ export function runChange(argv) {
     if (trivial) process.stderr.write(compactGuide
       ? 'aviso: GUIDE compacta sem [req:]/[sensor:] — resultado permanece auditável no archive, sem ADR automático\n'
       : 'aviso: change trivial (sem [req:]/[sensor:]) — ADR marcado trivial: true\n');
-    const r = archiveChange(vaultBase, slug, { dateStr: today(), adrNum: getNextAdrNumber(vaultBase), gate, adrFlags: { forced, trivial } });
+    const r = archiveChange(vaultBase, slug, {
+      dateStr: today(), adrNum: getNextAdrNumber(vaultBase), gate,
+      adrFlags: { forced, trivial }, context: selectedContext,
+    });
     if (!r.ok) {
       process.stderr.write(`change archive BLOCKED (gate): ${r.failing.join('; ')}\n`);
       process.exit(1);
@@ -366,9 +394,10 @@ export function runChange(argv) {
   }
 
   if (sub === 'abandon') {
-    const slug = slugArg() || activeChange(vaultBase);
+    const selectedContext = context();
+    const slug = slugArg() || activeChange(vaultBase, { context: selectedContext });
     if (!slug) { process.stderr.write('wendkeep change abandon: missing <slug> and no active change\n'); process.exit(2); }
-    const r = abandonChange(vaultBase, slug, { dateStr: today() });
+    const r = abandonChange(vaultBase, slug, { dateStr: today(), context: selectedContext });
     if (!r.ok) { process.stderr.write(`wendkeep change abandon: ${r.failing.join('; ')}\n`); process.exit(2); }
     process.stdout.write(`abandoned: ${r.archivedRel}\n`);
     process.exit(0);

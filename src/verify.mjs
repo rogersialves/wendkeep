@@ -20,6 +20,7 @@ import {
 } from '../hooks/spec-core.mjs';
 import { addLesson } from '../hooks/lessons-core.mjs';
 import { getLocale } from '../hooks/locale.mjs';
+import { resolveCommandActiveContext } from './active-context-runtime.mjs';
 
 function today() {
   const d = new Date();
@@ -40,7 +41,20 @@ export function runVerify(argv) {
   // --project wins; otherwise climb from cwd to the nearest project marker (agent shells
   // keep their cwd across commands, so verify from a subdirectory is a recurring miss).
   const projectRoot = resolve(opt(argv, '--project') || findProjectRoot(process.cwd()) || process.cwd());
-  const slug = opt(argv, '--change') || activeChange(vaultBase);
+  let commandContext = null;
+  if (!opt(argv, '--change')) {
+    try {
+      commandContext = resolveCommandActiveContext({
+        vaultBase,
+        projectRoot,
+        sessionId: opt(argv, '--session') || process.env.CODEX_THREAD_ID || process.env.CLAUDE_SESSION_ID || '',
+      });
+    } catch (error) {
+      process.stderr.write(`wendkeep verify: ${error.code || 'WENDKEEP_ACTIVE_CONTEXT_FAILED'}: ${error.message}\n`);
+      process.exit(2);
+    }
+  }
+  const slug = opt(argv, '--change') || activeChange(vaultBase, { context: commandContext });
   if (!slug) { process.stderr.write('wendkeep verify: no change (--change or active).\n'); process.exit(2); }
 
   const changeDir = join(vaultBase, getLocale(vaultBase).folders.changes, slug);

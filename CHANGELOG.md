@@ -4,6 +4,19 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.76.4] — 2026-08-22
+
+### Added
+
+- **Registry multi-contexto.** `active_contexts` mantém change, branch e HEAD por
+  `repository_id` + `worktree_id` + `work_session_id`, com schema, revisão, CAS e writes atômicos;
+  duas worktrees ou sessões deixam de sobrescrever o foco operacional umas das outras.
+- **Resolução causal de change.** Change, spec e verify usam a sessão/worktree chamadora; ausência
+  de sessão só aceita um contexto inequívoco e qualquer ambiguidade falha fechado.
+- **Compatibilidade conservadora.** `CURRENT_CHANGE.md` é somente projeção quando há um único
+  contexto ativo, e a migração legada não inventa worktree ou sessão quando a identidade não pode
+  ser provada.
+
 ## [0.76.3] — 2026-08-21
 
 ### Added

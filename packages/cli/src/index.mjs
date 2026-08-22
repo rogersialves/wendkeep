@@ -64,6 +64,7 @@ Usage:
                            Inspect or explicitly recover a quarantined causal scope conflict.
   wendkeep change <sub>        Change lifecycle: new [--simple|--guide] | use | bind <slug> --session <id> | continue | list | show |
                            status | done <id> | undone <id> | diff | archive [--force] | abandon | relink | backlink.
+                           --session <id> selects the causal active_context for implicit change operations.
                            archive exige verdict (rode verify --deep); abandon descarta sem ADR.
                            backlink [--apply]: injeta o backlink pro proposta em design/tarefas/spec órfãos (open + _arquivo).
   wendkeep theme sync          Re-aplica o color system (snippet CSS + graph color groups) num vault
@@ -76,7 +77,7 @@ Usage:
                            FLOW records scope, sensors and a receipt without creating a change.
   wendkeep delivery <sub>      Operational delivery: start | status | finish | abandon.
                            Records authorization and an append-only receipt; never creates a change/spec/ADR.
-  wendkeep spec <sub>          Specs: list | show | effective [--change] [--json] | migrate | rebase.
+  wendkeep spec <sub>          Specs: list | show | effective [--change] [--session] [--json] | migrate | rebase.
   wendkeep sensors <sub>       list | add <id> "<command>" [--severity --type --report].
   wendkeep cost [opts]         Aggregate AI-coding spend across the vault's sessions.
                            --since <date> · --top [N] (priciest) · --trend [day|week|month]
@@ -91,7 +92,7 @@ Usage:
                            --rescan-decisions (capture prose decisions from already-imported transcripts) ·
                            --from <dir> · --codex-from <dir> · --since <date> · --limit N ·
                            --dry-run · --json.
-  wendkeep verify [--deep] [--change s]  Run a change's task sensors + record evidence (the gate);
+  wendkeep verify [--deep] [--change s] [--session id]  Run a change's task sensors + record evidence (the gate);
                            --deep assembles the verification package for the wk-verify pass.
   wendkeep dashboard [--force]  (Re)generate the vault's folder-filtered Bases + 00-Dashboard MOC.
   wendkeep renumber-decisions   Renumber 04-Decisões to ADR-<NNNN>-<slug> in chronological order,
