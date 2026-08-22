@@ -1,11 +1,18 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
 import {
   assertVaultPathSafe, mkdirVaultPath, writeVaultFileSync,
 } from '../hooks/vault-path-safety.mjs';
 import { resolveProjectVault } from './project-vault.mjs';
 import { createWorkRoute } from './work-kind.mjs';
+import {
+  activeContextKey,
+  clearActiveContextDelivery,
+  resolveActiveContext,
+  setActiveContextDelivery,
+} from '../hooks/active-context-store.mjs';
+import { resolveCommandActiveContext } from './active-context-runtime.mjs';
 
 export const DELIVERY_HELP = `wendkeep delivery <subcommand>
 
@@ -15,7 +22,7 @@ export const DELIVERY_HELP = `wendkeep delivery <subcommand>
               [--npm-integrity <sha512-...>] [--release-url <url>]
   abandon [id] --reason <text>
 
-Common options: --project <path> --vault <path> --json
+Common options: --project <path> --vault <path> --session <id> --json
 Delivery authorizes operational risk and creates an append-only receipt. It never creates a change,
 spec, or ADR. If code/config must change, abandon or pause delivery and resume an implementation.
 `;
@@ -26,7 +33,7 @@ export const DELIVERY_CAPABILITIES = Object.freeze([
 
 const VALUE_OPTIONS = new Set([
   '--project', '--vault', '--allow', '--source-change', '--source-commit', '--target',
-  '--ci-url', '--version', '--npm-integrity', '--release-url', '--reason',
+  '--ci-url', '--version', '--npm-integrity', '--release-url', '--reason', '--session',
 ]);
 
 function parseArgv(argv) {
@@ -95,11 +102,49 @@ function readPointer(vaultBase) {
   try { return safeId(readFileSync(pointer, 'utf8').trim()); } catch { return ''; }
 }
 
-export function activeDelivery(vaultBase) {
-  const id = readPointer(vaultBase);
+function deliveryContextError(message) {
+  const error = new Error(message);
+  error.code = 'WENDKEEP_DELIVERY_CONTEXT_MISMATCH';
+  return error;
+}
+
+function deliveryContextBusy(id) {
+  const error = new Error(`active context já possui delivery ativo: ${id}`);
+  error.code = 'WENDKEEP_DELIVERY_CONTEXT_BUSY';
+  return error;
+}
+
+function contextualBinding(vaultBase, context, expectedId = '') {
+  const binding = resolveActiveContext(vaultBase, context);
+  const id = String(binding.delivery_id || '').trim();
+  if (expectedId && id !== expectedId) {
+    throw deliveryContextError(`delivery ${expectedId} não pertence ao active context chamador`);
+  }
+  return { binding, id, key: activeContextKey(context) };
+}
+
+function assertStateContext(state, binding) {
+  if (!binding) return;
+  if (state.context_key !== binding.key) {
+    throw deliveryContextError(`delivery ${state.id} pertence a outro active context`);
+  }
+}
+
+export function activeDelivery(vaultBase, { context = null } = {}) {
+  let binding = null;
+  let id = readPointer(vaultBase);
+  if (context) {
+    try { binding = contextualBinding(vaultBase, context); }
+    catch (error) {
+      if (error?.code === 'WENDKEEP_ACTIVE_CONTEXT_NOT_FOUND') return null;
+      throw error;
+    }
+    id = binding.id;
+  }
   if (!id) return null;
   try {
     const state = readState(vaultBase, id);
+    assertStateContext(state, binding);
     return state.state === 'active' ? state : null;
   } catch {
     return null;
@@ -156,8 +201,12 @@ function context(parsed) {
   return { projectRoot, repoRoot, vaultBase: resolved.base };
 }
 
-function currentId(parsed, vaultBase) {
-  return safeId(parsed.positionals[1] || readPointer(vaultBase));
+function currentId(parsed, vaultBase, commandContext = null) {
+  const explicit = parsed.positionals[1];
+  if (explicit) return safeId(explicit);
+  return safeId(commandContext
+    ? activeDelivery(vaultBase, { context: commandContext })?.id
+    : readPointer(vaultBase));
 }
 
 function ensureClean(repoRoot) {
@@ -169,11 +218,30 @@ function ensureClean(repoRoot) {
   }
 }
 
-export function startDelivery({ vaultBase, repoRoot, id, capabilities, sourceChange = '', sourceCommit = '', now = new Date() }) {
+export function startDelivery({
+  vaultBase,
+  repoRoot,
+  id,
+  capabilities,
+  sourceChange = '',
+  sourceCommit = '',
+  context = null,
+  bindDelivery = setActiveContextDelivery,
+  removeState = rmSync,
+  now = new Date(),
+}) {
   ensureClean(repoRoot);
   const deliveryId = safeId(id || generatedId(now));
   const paths = deliveryPaths(vaultBase, deliveryId);
   if (existsSync(paths.state)) throw new Error(`delivery já existe: ${deliveryId}`);
+  if (context) {
+    try {
+      const current = contextualBinding(vaultBase, context);
+      if (current.id) throw deliveryContextBusy(current.id);
+    } catch (error) {
+      if (error?.code !== 'WENDKEEP_ACTIVE_CONTEXT_NOT_FOUND') throw error;
+    }
+  }
   const commit = sourceCommit || git(repoRoot, ['rev-parse', 'HEAD']);
   git(repoRoot, ['cat-file', '-e', `${commit}^{commit}`]);
   const requestedCapabilities = [...new Set((capabilities || []).map((item) => String(item).trim()).filter(Boolean))];
@@ -195,16 +263,29 @@ export function startDelivery({ vaultBase, repoRoot, id, capabilities, sourceCha
     worktree: repoRoot,
     branch: git(repoRoot, ['branch', '--show-current'], true),
     source_commit: commit,
+    ...(context ? { context_key: activeContextKey(context) } : {}),
     started_at: now.toISOString(),
   };
   writeState(vaultBase, state);
-  setPointer(vaultBase, deliveryId);
+  if (context) {
+    try { bindDelivery(vaultBase, context, deliveryId); }
+    catch (error) {
+      try { removeState(paths.state, { force: true }); } catch { /* rollback best-effort */ }
+      throw error;
+    }
+  } else {
+    setPointer(vaultBase, deliveryId);
+  }
   return state;
 }
 
-export function finishDelivery({ vaultBase, repoRoot, id, target = 'HEAD', evidence = {}, now = new Date() }) {
+export function finishDelivery({
+  vaultBase, repoRoot, id, target = 'HEAD', evidence = {}, context = null, now = new Date(),
+}) {
   ensureClean(repoRoot);
   const state = readState(vaultBase, safeId(id));
+  const binding = context ? contextualBinding(vaultBase, context, state.id) : null;
+  assertStateContext(state, binding);
   if (state.state !== 'active') throw new Error(`delivery ${id} não está ativa`);
   const targetCommit = git(repoRoot, ['rev-parse', `${target}^{commit}`]);
   git(repoRoot, ['merge-base', '--is-ancestor', state.source_commit, targetCommit]);
@@ -228,29 +309,49 @@ export function finishDelivery({ vaultBase, repoRoot, id, target = 'HEAD', evide
     work_kind: 'delivery',
     source_change: state.route.source_change || '',
     source_commit: state.source_commit,
+    ...(state.context_key ? { context_key: state.context_key } : {}),
     target,
     target_commit: targetCommit,
     capabilities,
     evidence,
     finished_at: now.toISOString(),
   };
-  appendReceipt(vaultBase, receipt);
-  writeState(vaultBase, { ...state, state: 'completed', target, target_commit: targetCommit, finished_at: receipt.finished_at, receipt });
-  if (readPointer(vaultBase) === state.id) setPointer(vaultBase);
+  if (context) clearActiveContextDelivery(vaultBase, context, { expectedRevision: binding.binding.revision });
+  try {
+    appendReceipt(vaultBase, receipt);
+    writeState(vaultBase, { ...state, state: 'completed', target, target_commit: targetCommit, finished_at: receipt.finished_at, receipt });
+  } catch (error) {
+    if (context) {
+      try { setActiveContextDelivery(vaultBase, context, state.id); } catch { /* rollback best-effort */ }
+    }
+    throw error;
+  }
+  if (!context && readPointer(vaultBase) === state.id) setPointer(vaultBase);
   return receipt;
 }
 
-export function abandonDelivery({ vaultBase, id, reason, now = new Date() }) {
+export function abandonDelivery({ vaultBase, id, reason, context = null, now = new Date() }) {
   const state = readState(vaultBase, safeId(id));
+  const binding = context ? contextualBinding(vaultBase, context, state.id) : null;
+  assertStateContext(state, binding);
   if (state.state !== 'active') throw new Error(`delivery ${id} não está ativa`);
   if (!String(reason || '').trim()) throw new Error('delivery abandon requer --reason <text>');
   const receipt = {
     schema_version: 1, delivery_id: state.id, outcome: 'abandoned',
+    ...(state.context_key ? { context_key: state.context_key } : {}),
     reason: String(reason).trim(), abandoned_at: now.toISOString(),
   };
-  appendReceipt(vaultBase, receipt);
-  writeState(vaultBase, { ...state, state: 'abandoned', reason: receipt.reason, abandoned_at: receipt.abandoned_at });
-  if (readPointer(vaultBase) === state.id) setPointer(vaultBase);
+  if (context) clearActiveContextDelivery(vaultBase, context, { expectedRevision: binding.binding.revision });
+  try {
+    appendReceipt(vaultBase, receipt);
+    writeState(vaultBase, { ...state, state: 'abandoned', reason: receipt.reason, abandoned_at: receipt.abandoned_at });
+  } catch (error) {
+    if (context) {
+      try { setActiveContextDelivery(vaultBase, context, state.id); } catch { /* rollback best-effort */ }
+    }
+    throw error;
+  }
+  if (!context && readPointer(vaultBase) === state.id) setPointer(vaultBase);
   return receipt;
 }
 
@@ -263,23 +364,33 @@ export function runDelivery(argv = []) {
   try {
     const parsed = parseArgv(argv);
     const sub = parsed.positionals[0] || 'status';
-    const { repoRoot, vaultBase } = context(parsed);
+    const { projectRoot, repoRoot, vaultBase } = context(parsed);
+    const commandContext = resolveCommandActiveContext({
+      vaultBase,
+      projectRoot,
+      sessionId: parsed.value('--session') || process.env.CODEX_THREAD_ID || process.env.CLAUDE_SESSION_ID || '',
+    });
     if (sub === 'start') {
       const state = startDelivery({
         vaultBase, repoRoot, id: parsed.positionals[1], capabilities: parsed.all('--allow'),
         sourceChange: parsed.value('--source-change'), sourceCommit: parsed.value('--source-commit'),
+        context: commandContext,
       });
       emit(state, parsed.json);
       return 0;
     }
     if (sub === 'status') {
-      const state = readState(vaultBase, currentId(parsed, vaultBase));
+      const id = currentId(parsed, vaultBase, commandContext);
+      const binding = commandContext ? contextualBinding(vaultBase, commandContext, id) : null;
+      const state = readState(vaultBase, id);
+      assertStateContext(state, binding);
       emit(state, parsed.json);
       return 0;
     }
     if (sub === 'finish') {
       const receipt = finishDelivery({
-        vaultBase, repoRoot, id: currentId(parsed, vaultBase), target: parsed.value('--target') || 'HEAD',
+        vaultBase, repoRoot, id: currentId(parsed, vaultBase, commandContext), target: parsed.value('--target') || 'HEAD',
+        context: commandContext,
         evidence: {
           ci_url: parsed.value('--ci-url'), version: parsed.value('--version'),
           npm_integrity: parsed.value('--npm-integrity'), release_url: parsed.value('--release-url'),
@@ -290,14 +401,15 @@ export function runDelivery(argv = []) {
     }
     if (sub === 'abandon') {
       const receipt = abandonDelivery({
-        vaultBase, id: currentId(parsed, vaultBase), reason: parsed.value('--reason'),
+        vaultBase, id: currentId(parsed, vaultBase, commandContext), reason: parsed.value('--reason'),
+        context: commandContext,
       });
       emit(receipt, parsed.json);
       return 0;
     }
     throw new Error(`subcomando desconhecido: ${sub}`);
   } catch (error) {
-    process.stderr.write(`wendkeep delivery: ${error.message}\n`);
+    process.stderr.write(`wendkeep delivery: ${error.code ? `${error.code}: ` : ''}${error.message}\n`);
     return 2;
   }
 }

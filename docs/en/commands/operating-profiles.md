@@ -57,10 +57,10 @@ npx wendkeep flow status [<id>]
 npx wendkeep flow show <id> [--session <id>]
 npx wendkeep flow finish <id> [--session <id>]
 npx wendkeep flow promote <id> [--change-slug <slug>] [--session <id>]
-npx wendkeep delivery start [id] --allow <capability> [--source-change <slug>] [--source-commit <sha>]
-npx wendkeep delivery status [id]
-npx wendkeep delivery finish [id] [--target <ref>] [--ci-url <url>] [--version <x.y.z>] [--npm-integrity <sha512>] [--release-url <url>]
-npx wendkeep delivery abandon [id] --reason <text>
+npx wendkeep delivery start [id] --allow <capability> [--source-change <slug>] [--source-commit <sha>] [--session <id>]
+npx wendkeep delivery status [id] [--session <id>]
+npx wendkeep delivery finish [id] [--target <ref>] [--ci-url <url>] [--version <x.y.z>] [--npm-integrity <sha512>] [--release-url <url>] [--session <id>]
+npx wendkeep delivery abandon [id] --reason <text> [--session <id>]
 ```
 
 Every FLOW subcommand also accepts `--project <path>`, `--vault <path>`, and `--json`. When
@@ -178,6 +178,15 @@ ownership to the native LLM harness.
   and for `publish` requires CI, version, npm integrity, and GitHub Release evidence. Receipts are
   append-only in `.brain/runtime/delivery-receipts.jsonl`. If code/config must change, delivery
   stops with `WENDKEEP_DELIVERY_IMPLEMENTATION_REQUIRED` and work returns to implementation.
+- In a multi-context Vault, `active_contexts[].delivery_id` is authoritative. `--session <id>`
+  selects the work session explicitly; without it, only one unambiguous active context for the
+  worktree may be used. Implicit status, finish, and abandon resolve that binding, not a global pointer.
+- `CURRENT_DELIVERY` is only a derived projection: it contains the ID for one single, unambiguous
+  active context with delivery and stays empty with zero or multiple contexts.
+  `WENDKEEP_DELIVERY_CONTEXT_MISMATCH` means the explicit ID belongs to another context; neither
+  context is mutated.
+- The `change-context` and `change-warn` hooks consult only the caller's causal delivery; one
+  session's authorization is neither injected into nor allowed to suppress warnings in another.
 - Exit `0` means a successful query or transition; exit `1` means a policy/red-sensor block; exit
   `2` means invalid profile, session, flow, or arguments, with no partial mutation.
 

@@ -4,6 +4,17 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.76.5] — 2026-08-22
+
+### Added
+
+- **Delivery causal.** `delivery_id` passa a pertencer ao `active_contexts` da worktree/work session;
+  start, status, finish e abandon isolam deliveries concorrentes e rejeitam IDs de outro contexto.
+- **Hooks escopados.** `change-context` e `change-warn` só reconhecem a autorização de delivery do
+  chamador causal, sem herdar permissões de sessões irmãs.
+- **Compatibilidade conservadora.** `CURRENT_DELIVERY` vira projeção somente para um contexto
+  inequívoco; falha de bind remove o estado recém-criado sem publicar ponteiro parcial.
+
 ## [0.76.4] — 2026-08-22
 
 ### Added

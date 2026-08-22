@@ -6,8 +6,10 @@ import { mkdirVaultPath, writeVaultFileSync } from './vault-path-safety.mjs';
 
 export const ACTIVE_CONTEXTS_SCHEMA_VERSION = 1;
 const POINTER = '.brain/CURRENT_CHANGE.md';
+const DELIVERY_POINTER = '.brain/runtime/CURRENT_DELIVERY';
 const ID_PATTERN = /^[A-Za-z0-9._-]{1,160}$/;
 const SLUG_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,159}$/;
+const DELIVERY_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{1,100}$/;
 
 function contextError(code, message) {
   const error = new Error(message);
@@ -84,6 +86,22 @@ export function projectLegacyActiveChange(vaultBase, registry = readSessionRegis
     { label: 'projeção legada CURRENT_CHANGE.md' },
   );
   return slug;
+}
+
+export function projectLegacyActiveDelivery(vaultBase, registry = readSessionRegistry(vaultBase)) {
+  const active = activeContexts(registry);
+  const id = active.length === 1 ? optionalText(active[0][1]?.delivery_id, 101) : '';
+  mkdirVaultPath(vaultBase, join(vaultBase, '.brain', 'runtime'), {
+    label: 'runtime da projeção legada de delivery',
+  });
+  writeVaultFileSync(
+    vaultBase,
+    join(vaultBase, DELIVERY_POINTER),
+    id ? `${id}\n` : '',
+    'utf8',
+    { label: 'projeção legada CURRENT_DELIVERY' },
+  );
+  return id;
 }
 
 export function resolveActiveContext(vaultBase, query = {}) {
@@ -174,6 +192,7 @@ export function mutateActiveContext(vaultBase, identity, updater, {
     return { key, context: structuredClone(next), registryRevision: registry.active_contexts_revision };
   });
   projectLegacyActiveChange(vaultBase);
+  projectLegacyActiveDelivery(vaultBase);
   return result;
 }
 
@@ -193,6 +212,26 @@ export function clearActiveContextChange(vaultBase, identity, options = {}) {
   return mutateActiveContext(vaultBase, identity, (context) => ({
     ...context,
     change_slug: '',
+    state: 'active',
+  }), options);
+}
+
+export function setActiveContextDelivery(vaultBase, identity, deliveryId, options = {}) {
+  const normalizedId = String(deliveryId || '').trim();
+  if (!DELIVERY_PATTERN.test(normalizedId)) {
+    throw contextError('WENDKEEP_ACTIVE_CONTEXT_DELIVERY_INVALID', 'delivery_id inválido ou ausente');
+  }
+  return mutateActiveContext(vaultBase, identity, (context) => ({
+    ...context,
+    delivery_id: normalizedId,
+    state: 'active',
+  }), options);
+}
+
+export function clearActiveContextDelivery(vaultBase, identity, options = {}) {
+  return mutateActiveContext(vaultBase, identity, (context) => ({
+    ...context,
+    delivery_id: '',
     state: 'active',
   }), options);
 }

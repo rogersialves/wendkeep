@@ -57,10 +57,10 @@ npx wendkeep flow status [<id>]
 npx wendkeep flow show <id> [--session <id>]
 npx wendkeep flow finish <id> [--session <id>]
 npx wendkeep flow promote <id> [--change-slug <slug>] [--session <id>]
-npx wendkeep delivery start [id] --allow <capability> [--source-change <slug>] [--source-commit <sha>]
-npx wendkeep delivery status [id]
-npx wendkeep delivery finish [id] [--target <ref>] [--ci-url <url>] [--version <x.y.z>] [--npm-integrity <sha512>] [--release-url <url>]
-npx wendkeep delivery abandon [id] --reason <texto>
+npx wendkeep delivery start [id] --allow <capability> [--source-change <slug>] [--source-commit <sha>] [--session <id>]
+npx wendkeep delivery status [id] [--session <id>]
+npx wendkeep delivery finish [id] [--target <ref>] [--ci-url <url>] [--version <x.y.z>] [--npm-integrity <sha512>] [--release-url <url>] [--session <id>]
+npx wendkeep delivery abandon [id] --reason <texto> [--session <id>]
 ```
 
 Todos os subcomandos FLOW também aceitam `--project <path>`, `--vault <path>` e `--json`.
@@ -177,6 +177,15 @@ harness nativo da LLM.
   para capability `publish`, exige CI, versão, integridade npm e GitHub Release. O receipt é
   append-only em `.brain/runtime/delivery-receipts.jsonl`. Se código/config precisar mudar, a
   delivery para com `WENDKEEP_DELIVERY_IMPLEMENTATION_REQUIRED` e o trabalho volta a implementation.
+- Em Vault multi-contexto, `active_contexts[].delivery_id` é a autoridade. `--session <id>` escolhe
+  explicitamente a work session; sem ela, somente um active context inequívoco da worktree pode ser
+  usado. Status, finish e abandon implícitos consultam esse binding, não um ponteiro global.
+- `CURRENT_DELIVERY` é somente uma projeção derivada: contém o ID quando existe um único contexto
+  ativo inequívoco com delivery e fica vazio com zero ou múltiplos contextos.
+  `WENDKEEP_DELIVERY_CONTEXT_MISMATCH` indica que o ID explícito pertence a outro contexto; nenhum
+  dos dois é mutado.
+- Os hooks `change-context` e `change-warn` consultam somente o delivery causal do chamador; a
+  autorização de uma sessão não é injetada nem suprime aviso em outra.
 - Exit `0` indica consulta ou transição concluída; exit `1` indica política/sensor vermelho; exit
   `2` indica perfil, sessão, flow ou argumentos inválidos, sem mutação parcial.
 

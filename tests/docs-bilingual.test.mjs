@@ -571,3 +571,32 @@ test('[req:ACTX-12] [req:ACTX-13] DOC-16: registry multi-contexto e migração c
     assert.match(docs.guide, docs.ambiguity, `${locale}: ambiguidade causal ausente`);
   }
 });
+
+test('[req:ACTX-15] [req:ACTX-16] DOC-17: delivery causal e projeção legada são bilíngues', () => {
+  const cases = {
+    pt: {
+      guide: readFileSync(join(GUIDE_DIR.pt, 'operating-profiles.md'), 'utf8'),
+      readme: readFileSync(join(ROOT, 'README.md'), 'utf8'),
+      projection: /CURRENT_DELIVERY[\s\S]*(?:projeção|derivad)[\s\S]*(?:único|inequívoc)/i,
+      mismatch: /WENDKEEP_DELIVERY_CONTEXT_MISMATCH[\s\S]*(?:outro|diferente)[\s\S]*contexto/i,
+      hooks: /(?:hooks?|change-context|change-warn)[\s\S]*(?:delivery|autoriza)[\s\S]*(?:causal|chamador)/i,
+    },
+    en: {
+      guide: readFileSync(join(GUIDE_DIR.en, 'operating-profiles.md'), 'utf8'),
+      readme: readFileSync(join(ROOT, 'README.en.md'), 'utf8'),
+      projection: /CURRENT_DELIVERY[\s\S]*(?:projection|derived)[\s\S]*(?:single|unambiguous)/i,
+      mismatch: /WENDKEEP_DELIVERY_CONTEXT_MISMATCH[\s\S]*(?:other|different)[\s\S]*context/i,
+      hooks: /(?:hooks?|change-context|change-warn)[\s\S]*(?:delivery|authoriz)[\s\S]*(?:causal|caller)/i,
+    },
+  };
+  for (const [locale, docs] of Object.entries(cases)) {
+    for (const text of [docs.guide, docs.readme]) {
+      assert.match(text, /active_contexts/i, `${locale}: registry contextual ausente`);
+      assert.match(text, /delivery_id/i, `${locale}: binding delivery_id ausente`);
+      assert.match(text, /--session <id>/i, `${locale}: seleção causal explícita ausente`);
+    }
+    assert.match(docs.guide, docs.projection, `${locale}: projeção CURRENT_DELIVERY ausente`);
+    assert.match(docs.guide, docs.mismatch, `${locale}: erro cross-context ausente`);
+    assert.match(docs.guide, docs.hooks, `${locale}: contrato causal dos hooks ausente`);
+  }
+});

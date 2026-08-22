@@ -7,10 +7,15 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
-  abandonDelivery, finishDelivery, startDelivery,
+  abandonDelivery, activeDelivery, finishDelivery, startDelivery,
 } from '../src/delivery.mjs';
 import { buildChangePing } from '../hooks/change-context.mjs';
 import { warnDecision } from '../hooks/change-warn.mjs';
+import {
+  clearActiveContextDelivery,
+  resolveActiveContext,
+  setActiveContextDelivery,
+} from '../hooks/active-context-store.mjs';
 
 function git(cwd, args) {
   return execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
@@ -29,6 +34,17 @@ function fixture() {
   const commit = git(repo, ['rev-parse', 'HEAD']);
   git(repo, ['tag', '-a', 'v1.2.3', '-m', 'v1.2.3']);
   return { repo, vault, commit };
+}
+
+function identity(worktreeId, workSessionId) {
+  return {
+    projectId: 'project-delivery',
+    repositoryId: 'repository-delivery',
+    worktreeId,
+    workSessionId,
+    branch: `wk/${worktreeId}`,
+    headSha: 'a'.repeat(40),
+  };
 }
 
 test('delivery registra autorização e receipt sem criar change/spec/ADR', () => {
@@ -122,6 +138,156 @@ test('delivery rejeita capabilities desconhecidas e exige prova da tag autorizad
       vaultBase: vault, repoRoot: repo, id: state.id, evidence: { version: '1.2.3' },
     });
     assert.equal(receipt.outcome, 'completed');
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+    rmSync(vault, { recursive: true, force: true });
+  }
+});
+
+test('[req:ACTX-14] [req:ACTX-17] lifecycle resolves and clears only the owning active context', () => {
+  const { repo, vault } = fixture();
+  try {
+    const a = identity('worktree-a', 'work-a');
+    const b = identity('worktree-b', 'work-b');
+    const first = startDelivery({
+      vaultBase: vault, repoRoot: repo, id: 'delivery-a', capabilities: ['git:push'], context: a,
+    });
+    const second = startDelivery({
+      vaultBase: vault, repoRoot: repo, id: 'delivery-b', capabilities: ['git:push'], context: b,
+    });
+    const secondPath = join(vault, '.brain', 'runtime', 'deliveries', 'delivery-b.json');
+    const secondBefore = readFileSync(secondPath);
+
+    assert.equal(activeDelivery(vault, { context: a }).id, first.id);
+    assert.equal(activeDelivery(vault, { context: b }).id, second.id);
+    assert.throws(
+      () => finishDelivery({ vaultBase: vault, repoRoot: repo, id: first.id, context: b }),
+      (error) => error?.code === 'WENDKEEP_DELIVERY_CONTEXT_MISMATCH',
+    );
+
+    const receipt = finishDelivery({
+      vaultBase: vault, repoRoot: repo, id: first.id, context: a, target: 'HEAD',
+    });
+    assert.equal(receipt.outcome, 'completed');
+    assert.equal(receipt.context_key, first.context_key);
+    assert.equal(activeDelivery(vault, { context: a }), null);
+    assert.equal(activeDelivery(vault, { context: b }).id, second.id);
+    assert.equal(resolveActiveContext(vault, a).delivery_id, '');
+    assert.equal(resolveActiveContext(vault, b).delivery_id, second.id);
+    assert.deepEqual(readFileSync(secondPath), secondBefore);
+
+    const abandoned = abandonDelivery({
+      vaultBase: vault, id: second.id, context: b, reason: 'context-specific stop',
+    });
+    assert.equal(abandoned.outcome, 'abandoned');
+    assert.equal(activeDelivery(vault, { context: b }), null);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+    rmSync(vault, { recursive: true, force: true });
+  }
+});
+
+test('[req:ACTX-17] abandon records its context and preserves an active sibling byte-for-byte', () => {
+  const { repo, vault } = fixture();
+  try {
+    const a = identity('worktree-a', 'work-a');
+    const b = identity('worktree-b', 'work-b');
+    const first = startDelivery({
+      vaultBase: vault, repoRoot: repo, id: 'abandon-a', capabilities: ['git:push'], context: a,
+    });
+    const second = startDelivery({
+      vaultBase: vault, repoRoot: repo, id: 'keep-b', capabilities: ['git:push'], context: b,
+    });
+    const siblingPath = join(vault, '.brain', 'runtime', 'deliveries', 'keep-b.json');
+    const siblingBefore = readFileSync(siblingPath);
+
+    const receipt = abandonDelivery({
+      vaultBase: vault, id: first.id, context: a, reason: 'context-specific stop',
+    });
+
+    assert.equal(receipt.outcome, 'abandoned');
+    assert.equal(receipt.context_key, first.context_key);
+    assert.equal(activeDelivery(vault, { context: a }), null);
+    assert.equal(activeDelivery(vault, { context: b }).id, second.id);
+    assert.equal(resolveActiveContext(vault, b).delivery_id, second.id);
+    assert.deepEqual(readFileSync(siblingPath), siblingBefore);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+    rmSync(vault, { recursive: true, force: true });
+  }
+});
+
+test('[req:ACTX-14] one context cannot replace an active delivery silently', () => {
+  const { repo, vault } = fixture();
+  try {
+    const context = identity('worktree-a', 'work-a');
+    startDelivery({
+      vaultBase: vault, repoRoot: repo, id: 'delivery-a', capabilities: ['git:push'], context,
+    });
+    const secondPath = join(vault, '.brain', 'runtime', 'deliveries', 'delivery-a-2.json');
+    assert.throws(
+      () => startDelivery({
+        vaultBase: vault, repoRoot: repo, id: 'delivery-a-2', capabilities: ['git:push'], context,
+      }),
+      (error) => error?.code === 'WENDKEEP_DELIVERY_CONTEXT_BUSY',
+    );
+    assert.equal(existsSync(secondPath), false);
+    assert.equal(activeDelivery(vault, { context }).id, 'delivery-a');
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+    rmSync(vault, { recursive: true, force: true });
+  }
+});
+
+test('[req:ACTX-15] start removes its new state when contextual bind fails', () => {
+  const { repo, vault } = fixture();
+  try {
+    const statePath = join(vault, '.brain', 'runtime', 'deliveries', 'bind-fails.json');
+    assert.throws(
+      () => startDelivery({
+        vaultBase: vault,
+        repoRoot: repo,
+        id: 'bind-fails',
+        capabilities: ['git:push'],
+        context: identity('worktree-a', 'work-a'),
+        bindDelivery: () => { throw new Error('simulated context bind failure'); },
+      }),
+      /simulated context bind failure/,
+    );
+    assert.equal(existsSync(statePath), false);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+    rmSync(vault, { recursive: true, force: true });
+  }
+});
+
+test('[req:ACTX-16] hooks observe delivery only in the caller active context', () => {
+  const { repo, vault } = fixture();
+  try {
+    const a = identity('worktree-a', 'work-a');
+    const b = identity('worktree-b', 'work-b');
+    assert.match(warnDecision('src/pre-context.mjs', {
+      vaultBase: vault, cwd: repo, sessionId: 'session-before-context', profile: 'ASSURE', context: a,
+    }), /change_warn/);
+    setActiveContextDelivery(vault, a, 'temporary-a');
+    clearActiveContextDelivery(vault, a);
+    startDelivery({
+      vaultBase: vault, repoRoot: repo, id: 'delivery-b', capabilities: ['git:push'], context: b,
+    });
+
+    assert.equal(buildChangePing(vault, 'session-a', 'publique a versão', '', {
+      profile: 'ASSURE', context: a,
+    }), null);
+    assert.match(buildChangePing(vault, 'session-b', 'publique a versão', '', {
+      profile: 'ASSURE', context: b,
+    }).context, /Delivery delivery-b ativa/);
+
+    assert.match(warnDecision('src/release.mjs', {
+      vaultBase: vault, cwd: repo, sessionId: 'session-a', profile: 'ASSURE', context: a,
+    }), /change_warn/);
+    assert.equal(warnDecision('src/release.mjs', {
+      vaultBase: vault, cwd: repo, sessionId: 'session-b', profile: 'ASSURE', context: b,
+    }), null);
   } finally {
     rmSync(repo, { recursive: true, force: true });
     rmSync(vault, { recursive: true, force: true });

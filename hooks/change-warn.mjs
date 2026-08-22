@@ -13,6 +13,7 @@ import {
   resolveHookOperatingProfile,
 } from './operating-profile-runtime.mjs';
 import { activeDelivery } from '../src/delivery.mjs';
+import { resolveCommandActiveContext } from '../src/active-context-runtime.mjs';
 
 const CODE_EXT = /\.(ts|tsx|js|jsx|mjs|cjs|py|prisma|sql|go|rs|java|cs)$/i;
 
@@ -28,12 +29,13 @@ export function warnDecision(filePath, {
   cwd = '.',
   sessionId = '',
   profile = 'GOVERN',
+  context = null,
 } = {}) {
   const policy = hookProfilePolicy(profile);
   if (!policy.requiresChange) return null;
   if (!filePath || !isCodeFile(filePath)) return null;
-  if (activeChange(vaultBase)) return null;
-  if (activeDelivery(vaultBase)) return null;
+  if (activeChange(vaultBase, { context })) return null;
+  if (activeDelivery(vaultBase, { context })) return null;
   const abs = norm(isAbsolute(filePath) ? filePath : resolve(cwd, filePath));
   // Dentro do vault (NTFS é case-insensitive) ou em dirs de config de agente: não é código do projeto.
   if (abs.toLowerCase().startsWith(`${norm(resolve(vaultBase)).toLowerCase()}/`)) return null;
@@ -52,13 +54,20 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   try {
     const input = readHookInput();
     const runtime = resolveHookOperatingProfile({ input });
+    const sid = input.session_id || input.sessionId || '';
+    const commandContext = runtime.bindingError ? null : resolveCommandActiveContext({
+      vaultBase: runtime.vaultBase,
+      projectRoot: input.cwd || process.cwd(),
+      sessionId: sid,
+    });
     const warn = runtime.bindingError
       ? profileRuntimeError(runtime.bindingError)
       : warnDecision(input.tool_input?.file_path, {
         vaultBase: runtime.vaultBase,
         cwd: input.cwd || '.',
-        sessionId: input.session_id || input.sessionId || '',
+        sessionId: sid,
         profile: runtime.profile,
+        context: commandContext,
       });
     if (!warn) { writeHookOutput({}); }
     else writeHookOutput({ hookSpecificOutput: { hookEventName: 'PostToolUse', additionalContext: warn } });

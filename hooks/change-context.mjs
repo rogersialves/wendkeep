@@ -15,6 +15,7 @@ import {
   resolveHookOperatingProfile,
 } from './operating-profile-runtime.mjs';
 import { activeDelivery } from '../src/delivery.mjs';
+import { resolveCommandActiveContext } from '../src/active-context-runtime.mjs';
 
 // Conservador de propósito: verbos de tarefa comuns (pt+en) + tamanho mínimo. Falso-negativo
 // custa só o nudge; falso-positivo em pergunta curta viraria ruído.
@@ -26,11 +27,13 @@ export function looksLikeTask(prompt) {
 }
 
 // Retorna { context, hash? } quando há algo a injetar; null = silêncio.
-export function buildChangePing(vaultBase, sessionId, prompt = '', changeSlug = '', { profile = 'GOVERN' } = {}) {
+export function buildChangePing(vaultBase, sessionId, prompt = '', changeSlug = '', {
+  profile = 'GOVERN', context = null,
+} = {}) {
   const policy = hookProfilePolicy(profile);
   if (!policy.harness) return null;
   const sentinelId = profileSentinelId(sessionId, profile);
-  const delivery = activeDelivery(vaultBase);
+  const delivery = activeDelivery(vaultBase, { context });
   if (delivery) {
     const hash = `delivery:${delivery.id}`;
     if (readSentinel(vaultBase, 'ctx', sentinelId) === hash) return null;
@@ -68,10 +71,16 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     const vaultBase = runtime.vaultBase;
     const { identity, entry } = runtime;
     const sid = identity.state === 'resolved' ? identity.canonicalConversationId : (input.session_id || input.sessionId || '');
+    const commandContext = runtime.bindingError ? null : resolveCommandActiveContext({
+      vaultBase,
+      projectRoot: input.cwd || process.cwd(),
+      sessionId: sid,
+    });
     const ping = runtime.bindingError
       ? { context: profileRuntimeError(runtime.bindingError) }
       : buildChangePing(vaultBase, sid, input.prompt || '', entry?.change_slug || '', {
         profile: runtime.profile,
+        context: commandContext,
       });
     if (!ping) { writeHookOutput({}); }
     else writeHookOutput({ hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: ping.context } });

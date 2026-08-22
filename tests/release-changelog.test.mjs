@@ -84,9 +84,15 @@ test('extractReleaseNotes: throws when the version is absent', () => {
 test('[sensor:release-tests] current release notes are extractable and match the package', () => {
   const release = extractReleaseNotes(CHANGELOG, PACKAGE.version);
   assert.equal(release.date, '2026-08-22');
+  assert.match(release.notes, /Delivery causal/i);
+  assert.match(release.notes, /CURRENT_DELIVERY.*projeção/i);
+  assert.doesNotMatch(release.notes, /019f[0-9a-f-]+/i);
+});
+
+test('[sensor:release-tests] 0.76.4 active-context registry notes remain extractable', () => {
+  const release = extractReleaseNotes(CHANGELOG, '0.76.4');
   assert.match(release.notes, /Registry multi-contexto/i);
   assert.match(release.notes, /CURRENT_CHANGE.*projeção/i);
-  assert.doesNotMatch(release.notes, /019f[0-9a-f-]+/i);
 });
 
 test('[sensor:release-tests] 0.76.3 recovery notes remain extractable', () => {

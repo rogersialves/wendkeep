@@ -338,10 +338,15 @@ Work kind, profile, contract impact, and operational risk are independent dimens
 spec, or ADR. If delivery requires a code/config edit, it pauses and work returns to
 `implementation`:
 
+In multi-context Vaults, `active_contexts[].delivery_id` is authoritative and `--session <id>`
+selects the caller explicitly. `CURRENT_DELIVERY` is only a derived projection when there is one
+single, unambiguous context; hooks consult only the causal delivery, and an ID from another context
+fails with `WENDKEEP_DELIVERY_CONTEXT_MISMATCH`.
+
 ```bash
-npx wendkeep delivery start release-0-74-0 --allow git:merge --allow git:push --allow publish --source-change <slug> --source-commit <sha>
-npx wendkeep delivery status release-0-74-0
-npx wendkeep delivery finish release-0-74-0 --target main --ci-url <url> --version 0.74.0 --npm-integrity <sha512> --release-url <url>
+npx wendkeep delivery start release-0-74-0 --allow git:merge --allow git:push --allow publish --source-change <slug> --source-commit <sha> --session <id>
+npx wendkeep delivery status release-0-74-0 --session <id>
+npx wendkeep delivery finish release-0-74-0 --target main --ci-url <url> --version 0.74.0 --npm-integrity <sha512> --release-url <url> --session <id>
 ```
 
 If the harness does not record a lease, a small fix remains under the configured profile —
