@@ -600,3 +600,31 @@ test('[req:ACTX-15] [req:ACTX-16] DOC-17: delivery causal e projeção legada s�
     assert.match(docs.guide, docs.hooks, `${locale}: contrato causal dos hooks ausente`);
   }
 });
+
+test('[req:ACTX-19] [req:ACTX-21] DOC-18: task lease causal e fallback legado são bilíngues', () => {
+  const cases = {
+    pt: {
+      guide: readFileSync(join(GUIDE_DIR.pt, 'operating-profiles.md'), 'utf8'),
+      readme: readFileSync(join(ROOT, 'README.md'), 'utf8'),
+      authority: /operating_profile_task[\s\S]*active context[\s\S]*(?:work session|sessão causal)/i,
+      lifecycle: /profile route[\s\S]*status[\s\S]*(?:hooks?|Stop)[\s\S]*(?:causal|chamador)/i,
+      fallback: /(?:fallback|compatibilidade) legado[\s\S]*(?:sem|ausente)[\s\S]*active_contexts/i,
+    },
+    en: {
+      guide: readFileSync(join(GUIDE_DIR.en, 'operating-profiles.md'), 'utf8'),
+      readme: readFileSync(join(ROOT, 'README.en.md'), 'utf8'),
+      authority: /operating_profile_task[\s\S]*active context[\s\S]*(?:work session|causal session)/i,
+      lifecycle: /profile route[\s\S]*status[\s\S]*(?:hooks?|Stop)[\s\S]*(?:causal|caller)/i,
+      fallback: /legacy (?:fallback|compatibility)[\s\S]*(?:without|absent)[\s\S]*active_contexts/i,
+    },
+  };
+  for (const [locale, docs] of Object.entries(cases)) {
+    for (const text of [docs.guide, docs.readme]) {
+      assert.match(text, /operating_profile_task/i, `${locale}: campo da lease contextual ausente`);
+      assert.match(text, /--session <id>/i, `${locale}: seleção causal ausente`);
+    }
+    assert.match(docs.guide, docs.authority, `${locale}: autoridade contextual da lease ausente`);
+    assert.match(docs.guide, docs.lifecycle, `${locale}: lifecycle causal da lease ausente`);
+    assert.match(docs.guide, docs.fallback, `${locale}: limite do fallback legado ausente`);
+  }
+});

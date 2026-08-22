@@ -131,6 +131,12 @@ harness nativo da LLM.
   projeto; com `--session`, grava override, origem e timestamp sem trocar a identidade da sessão.
 - `profile route` exige `--session` e `--reason`, aceita somente os quatro perfis adaptativos e
   grava `lease_id`, motivo, turno/sequência e timestamp sem tocar no perfil persistente.
+- `operating_profile_task` pertence ao active context da work session/sessão causal. `profile route`
+  cria e `profile status --session <id>` consulta somente essa lease; os hooks usam o mesmo contexto
+  do chamador e o Stop aceito consome por `lease_id` com revision/CAS, sem alterar o sibling.
+- O fallback legado de lease na sessão existe apenas sem `active_contexts`. Com o registry
+  inicializado, uma lease global ausente do contexto não é copiada nem aplicada; contexto
+  ausente, ambíguo ou stale falha fechado sem mutação parcial.
 - `.wendkeep.json` continua em `schemaVersion: 1`; o campo aditivo usa, por exemplo,
   `"harness": { "profile": "GOVERN" }`. Binding legado sem o campo também resolve `GOVERN`.
 - Binding corrompido nunca equivale a `OFF`. Quando o payload ou a integração legada identifica

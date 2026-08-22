@@ -15,11 +15,11 @@ import {
 } from './operating-profile-runtime.mjs';
 import { consumeSessionTaskOperatingProfile } from './operating-profile-task-store.mjs';
 
-export function nagDecision(input, vaultBase, { profile = 'GOVERN' } = {}) {
+export function nagDecision(input, vaultBase, { profile = 'GOVERN', context = null } = {}) {
   if (input && input.stop_hook_active) return null; // anti-loop: sempre primeiro
   const policy = hookProfilePolicy(profile);
   if (!policy.harness) return null;
-  const gate = quickGateState(vaultBase);
+  const gate = quickGateState(vaultBase, { context });
   if (!gate || !gate.openTasks) return null;
   const sid = input?.session_id || input?.sessionId || '';
   const sentinelId = profileSentinelId(sid, profile);
@@ -39,12 +39,16 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       ? null
       : runtime.bindingError
         ? { decision: 'block', reason: profileRuntimeError(runtime.bindingError) }
-        : nagDecision(input, runtime.vaultBase, { profile: runtime.profile });
+        : nagDecision(input, runtime.vaultBase, {
+          profile: runtime.profile,
+          context: runtime.activeContext,
+        });
     if (!decision && runtime.taskLease?.state === 'active') {
       consumeSessionTaskOperatingProfile(
         runtime.vaultBase,
         runtime.identity?.canonicalConversationId || input?.session_id || input?.sessionId || '',
         runtime.taskLease.lease_id,
+        { context: runtime.activeContext },
       );
     }
     writeHookOutput(decision || {});

@@ -130,6 +130,12 @@ ownership to the native LLM harness.
   session identity.
 - `profile route` requires `--session` and `--reason`, accepts only the four adaptive profiles,
   and records lease id, reason, turn/sequence, and timestamp without touching persistent profiles.
+- `operating_profile_task` belongs to the causal session/work session's active context. `profile route`
+  creates and `profile status --session <id>` reads only that lease; hooks use the same caller
+  context and an accepted Stop consumes it by `lease_id` with revision/CAS without changing a sibling.
+- Legacy fallback of the lease in the session exists only without `active_contexts`. With an
+  initialized registry, a global lease absent from the context is neither copied nor applied;
+  missing, ambiguous, or stale context fails closed without a partial mutation.
 - `.wendkeep.json` stays on `schemaVersion: 1`; the additive field is, for example,
   `"harness": { "profile": "GOVERN" }`. A legacy binding without it also resolves to `GOVERN`.
 - A corrupt binding never means `OFF`. When the payload or legacy integration identifies one

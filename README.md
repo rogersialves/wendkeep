@@ -340,6 +340,11 @@ explicitamente o chamador. `CURRENT_DELIVERY` é somente uma projeção derivada
 contexto inequívoco; hooks consultam apenas o delivery causal e um ID de outro contexto falha com
 `WENDKEEP_DELIVERY_CONTEXT_MISMATCH`.
 
+`operating_profile_task` pertence ao active context da work session causal. `profile route` e
+`profile status --session <id>`, hooks e Stop leem/consomem somente essa lease; uma rota temporária
+não atravessa para o sibling. O fallback legado na sessão existe apenas sem `active_contexts`;
+registry inicializado nunca copia uma autorização global sem identidade provada.
+
 ```bash
 npx wendkeep delivery start release-0-74-0 --allow git:merge --allow git:push --allow publish --source-change <slug> --source-commit <sha> --session <id>
 npx wendkeep delivery status release-0-74-0 --session <id>

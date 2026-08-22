@@ -584,6 +584,14 @@
       "severity": "critical",
       "type": "command",
       "command": "node --test tests/active-context-delivery.test.mjs tests/active-context-delivery-cli.test.mjs tests/delivery.test.mjs"
+    },
+    {
+      "id": "active-context-task-lease",
+      "name": "active-context-task-lease",
+      "description": "Validates contextual task-lease authority, CLI/hooks/Stop isolation, CAS and legacy fallback",
+      "severity": "critical",
+      "type": "command",
+      "command": "node --test tests/operating-profile-task-store.test.mjs tests/active-context-task-lease-cli.test.mjs tests/profile-cli.test.mjs tests/operating-profile-hooks.test.mjs"
     }
   ]
 }
