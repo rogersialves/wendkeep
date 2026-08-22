@@ -4,6 +4,17 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.76.3] — 2026-08-21
+
+### Added
+
+- **Recuperação explícita do contexto em quarentena.** `context status --session <id>` inventaria
+  candidatas `reserved`/`observed` sem paths locais; `context recover` exige seleção, revisão CAS,
+  motivo e correspondência integral com o checkout/HEAD antes de limpar o conflito.
+- **Receipt pós-conflito.** A recuperação preserva change, lease e autorizações, incrementa a revisão
+  e registra evidência sanitizada `from/to`; revision stale, identidade divergente ou falha de
+  persistência mantêm registry e quarentena intactos.
+
 ## [0.76.2] — 2026-08-21
 
 ### Fixed

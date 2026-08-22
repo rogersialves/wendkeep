@@ -59,6 +59,9 @@ Usage:
                            Managed linked worktrees under .worktrees (branch default wk/<slug>).
   wendkeep context switch <branch> [--create] [--session <id>] [--json]
                            Switch Git branch and the causal session scope in the same worktree.
+  wendkeep context status --session <id> [--json]
+  wendkeep context recover --session <id> --select reserved|observed --revision <n> --reason <text> [--json]
+                           Inspect or explicitly recover a quarantined causal scope conflict.
   wendkeep change <sub>        Change lifecycle: new [--simple|--guide] | use | bind <slug> --session <id> | continue | list | show |
                            status | done <id> | undone <id> | diff | archive [--force] | abandon | relink | backlink.
                            archive exige verdict (rode verify --deep); abandon descarta sem ADR.
