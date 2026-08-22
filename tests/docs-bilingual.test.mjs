@@ -628,3 +628,32 @@ test('[req:ACTX-19] [req:ACTX-21] DOC-18: task lease causal e fallback legado s�
     assert.match(docs.guide, docs.fallback, `${locale}: limite do fallback legado ausente`);
   }
 });
+
+test('[req:ACTX-22] [req:ACTX-24] [req:ACTX-25] DOC-19: handoff e recall automático são causais e bilíngues', () => {
+  const cases = {
+    pt: {
+      guide: readFileSync(join(GUIDE_DIR.pt, 'memory.md'), 'utf8'),
+      readme: readFileSync(join(ROOT, 'README.md'), 'utf8'),
+      mismatch: /handoff[\s\S]*(?:divergente|divergir)[\s\S]*(?:antes de)[\s\S]*(?:CAS|ledger)/i,
+      recall: /(?:recall|UserPromptSubmit)[\s\S]*(?:sessão|change) irmã ativa[\s\S]*(?:global|históric)/i,
+      legacy: /(?:fallback|compatibilidade) legad[oa][\s\S]*(?:sem|somente sem)[\s\S]*(?:store contextual|active_contexts)/i,
+    },
+    en: {
+      guide: readFileSync(join(GUIDE_DIR.en, 'memory.md'), 'utf8'),
+      readme: readFileSync(join(ROOT, 'README.en.md'), 'utf8'),
+      mismatch: /(?:divergent handoff|handoff[\s\S]*divergent)[\s\S]*before[\s\S]*(?:CAS|ledger)/i,
+      recall: /(?:recall|UserPromptSubmit)[\s\S]*active sibling (?:session|change)[\s\S]*(?:global|historical)/i,
+      legacy: /legacy (?:fallback|compatibility)[\s\S]*(?:without|only without)[\s\S]*(?:contextual store|active_contexts)/i,
+    },
+  };
+  for (const [locale, docs] of Object.entries(cases)) {
+    for (const text of [docs.guide, docs.readme]) {
+      for (const field of ['work_session_id', 'repository_id', 'worktree_id']) {
+        assert.match(text, new RegExp(field), `${locale}: identidade causal ausente ${field}`);
+      }
+      assert.match(text, docs.mismatch, `${locale}: fail-before-mutation ausente`);
+      assert.match(text, docs.recall, `${locale}: filtro causal de recall ausente`);
+      assert.match(text, docs.legacy, `${locale}: limite legado ausente`);
+    }
+  }
+});
