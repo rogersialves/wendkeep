@@ -57,7 +57,8 @@ const GUIDE_FOR_FAMILY = new Map([
   ['wendkeep init', 'getting-started.md'], ['wendkeep sync', 'getting-started.md'],
   ['wendkeep worktree create', 'worktrees.md'], ['wendkeep worktree list', 'worktrees.md'],
   ['wendkeep worktree status', 'worktrees.md'], ['wendkeep worktree open', 'worktrees.md'],
-  ['wendkeep context switch', 'context.md'],
+  ['wendkeep context switch', 'context.md'], ['wendkeep context status', 'context.md'],
+  ['wendkeep context recover', 'context.md'],
   ['wendkeep profile', 'operating-profiles.md'], ['wendkeep flow', 'operating-profiles.md'],
   ['wendkeep delivery', 'operating-profiles.md'],
   ['wendkeep hook', 'sessions-and-import.md'], ['wendkeep doctor', 'maintenance-and-diagnostics.md'],
@@ -352,6 +353,27 @@ test('DOC-4: todas as famílias derivadas do help aparecem na sintaxe do guia co
         locale === 'pt' ? 'Erros comuns e diagnóstico' : 'Common errors and diagnosis',
       ]) assert.ok(section(text, heading).trim(), `${locale}: ${guide} não explica ${heading}`);
     }
+  }
+});
+
+test('[req:ACTX-8] DOC-15: recovery documenta argumentos, candidatos, CAS e fail-closed nos dois idiomas', () => {
+  const help = readFileSync(join(ROOT, 'packages', 'cli', 'src', 'index.mjs'), 'utf8');
+  for (const token of ['context status', 'context recover', '--select', '--revision', '--reason']) {
+    assert.match(help, new RegExp(token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'), `help: ${token}`);
+  }
+  for (const [locale, dir] of Object.entries(GUIDE_DIR)) {
+    const guide = readFileSync(join(dir, 'context.md'), 'utf8');
+    const readme = readFileSync(join(ROOT, locale === 'pt' ? 'README.md' : 'README.en.md'), 'utf8');
+    for (const token of [
+      'context status', 'context recover', '--select', '--revision', '--reason',
+      'reserved', 'observed', 'matches_actual', 'WENDKEEP_CONTEXT_CAS_MISMATCH',
+    ]) assert.match(guide, new RegExp(token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'), `${locale} guide: ${token}`);
+    for (const token of [
+      'context status', 'context recover', '--select', '--revision', '--reason',
+      'reserved', 'observed', 'CAS',
+    ]) assert.match(readme, new RegExp(token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'), `${locale} README: ${token}`);
+    assert.match(guide, /fail(?:-| )closed|falha[^\n]*sem writes|byte(?:-| )a(?:-| )byte/i, `${locale}: fail-closed`);
+    assert.match(readme, /checkout/i, `${locale}: revalidation`);
   }
 });
 
