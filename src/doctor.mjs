@@ -7,6 +7,10 @@ import { runVaultHealth } from '../hooks/vault-health.mjs';
 import { checkSyncDefs } from './sync-defs.mjs';
 import { resolveProjectVault } from './project-vault.mjs';
 import { inspectObserverSqlOutbox } from './observer-sql-publish.mjs';
+import {
+  inspectActiveContextHealth,
+  renderActiveContextHealthLines,
+} from './active-context-health.mjs';
 
 const healthStatusLabel = (status) => ({
   healthy: 'saudável', warning: 'atenção', degraded: 'degradada', blocked: 'bloqueada', legacy: 'legado',
@@ -140,6 +144,9 @@ export function runDoctor(argv) {
     process.stdout.write(`  → ${issue.slug}: ${issue.errorCode} — ${issue.repair}\n`);
   }
 
+  const activeContexts = inspectActiveContextHealth({ vaultBase, projectRoot });
+  process.stdout.write(`\n${renderActiveContextHealthLines(activeContexts).join('\n')}\n`);
+
   // 3. Link/graph health — órfãos que o grafo do Obsidian mostraria, com o comando de reparo.
   const links = checkVaultLinks(vaultBase);
   const graphLabel = links.graphColors === true ? 'com cores' : links.graphColors === false ? 'sem cores' : 'sem graph.json';
@@ -189,6 +196,7 @@ export function runDoctor(argv) {
     || repairable.length
     || warnings.length
     || worktrees.issues.length
+    || activeContexts.issues.length
     || links.derivedOrphans
     || links.artifactOrphans
     || links.graphColors === false

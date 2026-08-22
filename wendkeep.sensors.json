@@ -600,6 +600,14 @@
       "severity": "critical",
       "type": "command",
       "command": "node --test tests/active-context-handoff-evidence.test.mjs tests/evidence-recall.test.mjs tests/memory-hybrid-e2e.test.mjs tests/session-stop-migration-lifecycle.test.mjs"
+    },
+    {
+      "id": "active-context-doctor-recovery",
+      "name": "active-context-doctor-recovery",
+      "description": "Validates read-only orphan/removed/expired diagnostics and explicit CAS repair with historical preservation",
+      "severity": "critical",
+      "type": "command",
+      "command": "node --test tests/active-context-doctor-recovery.test.mjs tests/context-recovery.test.mjs tests/context-cli.test.mjs tests/harness-doctor.test.mjs"
     }
   ]
 }

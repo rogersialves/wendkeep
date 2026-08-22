@@ -4,19 +4,23 @@
 
 ## Purpose
 
-Inspect and move the same session's causal scope with proof of the current checkout: during a
-normal branch transition or when explicitly recovering a divergence already under quarantine.
+Inspect and move the same session's causal scope with proof of the current checkout, recover a
+quarantined divergence, or explicitly repair operational authority that `doctor` proved orphaned,
+bound to a removed worktree, or carrying an expired lease.
 
 ## When to use
 
 Use `context switch` to create or select another branch in the same worktree. If the registry
 already records `project_scope_conflict`, use `context status` to inventory `reserved` and
 `observed` without local paths; recover only through `context recover` and an explicit human choice.
+Use `doctor` to obtain the key/revision for `active_contexts` debt; run `context repair` only after
+reviewing that diagnosis and providing an active actor session and explicit reason.
 
 ## When not to use
 
 Do not use it to move to another worktree, hand-edit the registry, or replace `worktree create`.
 Recovery never selects a candidate automatically or accepts a scope that no longer matches HEAD.
+`context repair` is not a healthy-context close command, an age-based cleanup, or history deletion.
 
 ## Prerequisites
 
@@ -30,6 +34,7 @@ Recovery never selects a candidate automatically or accepts a scope that no long
 npx --no-install wendkeep context switch <branch> [--create] [--session <id>] [--project <root>] [--vault <vault>] [--json]
 npx --no-install wendkeep context status --session <id> [--project <root>] [--vault <vault>] [--json]
 npx --no-install wendkeep context recover --session <id> --select <reserved|observed> --revision <n> --reason <text> [--project <root>] [--vault <vault>] [--json]
+npx --no-install wendkeep context repair --key <repository:worktree:work-session> --revision <n> --reason <text> --session <id> [--project <root>] [--vault <vault>] [--json]
 ```
 
 Without `--session`, exactly one active session must fully match the current scope. `--create`
@@ -38,9 +43,11 @@ uses `git switch -c`; without it, the command follows `git switch` semantics.
 ## Options and exit codes
 
 - `--create`: create the branch from the current HEAD.
-- `--session <id>`: select the causal session explicitly; recommended whenever selection is unclear.
+- `--session <id>`: select the causal session or, for repair, the active auditable actor session.
+- `--key <repository:worktree:work-session>`: select exactly the diagnosed active context.
 - `--select <reserved|observed>`: select exactly one quarantined candidate; required for recovery.
-- `--revision <n>`: CAS against the revision returned by `context status`; required for recovery.
+- `--revision <n>`: CAS against the revision returned by `context status` or `doctor`; required for
+  recovery and repair.
 - `--reason <text>`: auditable reason, sanitized and limited to 240 characters.
 - `--project <root>` and `--vault <vault>`: select the binding and paths for manual use.
 - `--json`: emit status, session id, branch, HEAD, revision, and event without exposing the Vault.
@@ -57,6 +64,7 @@ npx --no-install wendkeep context switch main --session 019abc-session-id
 npx --no-install wendkeep context switch wk/auth --session 019abc-session-id --json
 npx --no-install wendkeep context status --session 019abc-session-id --json
 npx --no-install wendkeep context recover --session 019abc-session-id --select observed --revision 7 --reason "checkout confirmed"
+npx --no-install wendkeep context repair --key "repo:tree:work" --revision 4 --reason "worktree removed after merge" --session 019abc-session-id
 ```
 
 Do not replace it with the raw command below while the harness is active:
@@ -84,6 +92,14 @@ Under the registry lock, the command revalidates the revision, increments `conte
 preserves the change/lease/authorizations, clears only the quarantine, and appends a sanitized
 receipt to `context_recoveries`. Any failure leaves the registry and quarantine byte-identical.
 This is fail-closed: no candidate, receipt, or partial scope is published after a failed check.
+
+For repair, the command rereads the target under lock, validates revision and actor session, proves
+the Git topology again, and reapplies the diagnosis. A context without an active session or with a
+removed worktree becomes `state=closed`, while its record and historical bindings remain; an
+isolated expired lease becomes `expired` and the context stays active. The append-only
+`active_context_repairs` receipt records actor, reason, diagnostics, and effect. Only after the
+authoritative write are `CURRENT_CHANGE.md` and `CURRENT_DELIVERY` reprojected; the ledger,
+evidence index, notes, and historical memory remain unchanged.
 
 ### Multi-context change registry
 
@@ -116,6 +132,13 @@ when one active session, a complete scope, and worktree metadata prove one ident
 - `WENDKEEP_CONTEXT_ROLLBACK_FAILED`: preserve Git and registry state and diagnose manually before
   any new mutation.
 - `WENDKEEP_CONTEXT_SWITCH_REQUIRED`: replace the raw Git command with `wendkeep context switch`.
+- `WENDKEEP_ACTIVE_CONTEXT_CAS_MISMATCH`: the target revision changed; rerun `doctor`.
+- `WENDKEEP_ACTIVE_CONTEXT_HEALTHY`: the condition disappeared or was never repairable; do not force it.
+- `WENDKEEP_ACTIVE_CONTEXT_TOPOLOGY_UNPROVEN`: Git/registry could not prove worktrees; repair the
+  topology before any context repair.
+- `WENDKEEP_ACTIVE_CONTEXT_ACTOR_MISMATCH`: the actor session does not belong to the target's proven project.
+- `WENDKEEP_ACTIVE_CONTEXT_SESSION_ORPHAN`, `WENDKEEP_ACTIVE_CONTEXT_WORKTREE_REMOVED`, and
+  `WENDKEEP_ACTIVE_CONTEXT_LEASE_EXPIRED`: read-only diagnostics emitted by `doctor`.
 
 ## Next steps
 
