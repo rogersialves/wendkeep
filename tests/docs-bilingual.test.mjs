@@ -731,3 +731,43 @@ test('[req:WT-17] DOC-21: cleanup de worktrees mantém flags, erros e exemplos P
   assert.match(readmePt, /worktree create\/list\/status\/open\/finish\/cleanup\/remove\/prune/);
   assert.match(readmeEn, /worktree create\/list\/status\/open\/finish\/cleanup\/remove\/prune/);
 });
+
+test('[req:EVID-8] DOC-22: Evidence Envelope v2 has semantic PT-BR/EN parity', () => {
+  const cases = {
+    pt: {
+      guide: readFileSync(join(GUIDE_DIR.pt, 'verify.md'), 'utf8'),
+      changes: readFileSync(join(GUIDE_DIR.pt, 'changes-and-verification.md'), 'utf8'),
+      readme: readFileSync(join(ROOT, 'README.md'), 'utf8'),
+      binary: /atributos Git `binary`\/`-text`[\s\S]*extensões binárias[\s\S]*`\.bin`/i,
+      recovery: /volte à worktree\/sessão correta[\s\S]*`verify`[\s\S]*`verify --deep`/i,
+    },
+    en: {
+      guide: readFileSync(join(GUIDE_DIR.en, 'verify.md'), 'utf8'),
+      changes: readFileSync(join(GUIDE_DIR.en, 'changes-and-verification.md'), 'utf8'),
+      readme: readFileSync(join(ROOT, 'README.en.md'), 'utf8'),
+      binary: /Git `binary`\/`-text` attributes[\s\S]*(?:known\s+)?binary\s+extensions[\s\S]*`\.bin`/i,
+      recovery: /return to the correct worktree\/session[\s\S]*`verify`[\s\S]*`verify --deep`/i,
+    },
+  };
+  for (const [locale, docs] of Object.entries(cases)) {
+    for (const token of [
+      'project_id', 'repository_id', 'worktree_id', 'work_session_id', 'base_sha', 'head_sha',
+      'index_tree_sha', 'worktree_digest', 'evidenceEnvelopeId', 'evidenceBinding',
+      'legacy-unbound', 'stale', 'context-mismatch', 'WENDKEEP_EVIDENCE_HEAD_CHANGED',
+    ]) assert.ok(docs.guide.includes(token), `${locale}: verify sem ${token}`);
+    assert.match(docs.guide, /staged[\s\S]*unstaged[\s\S]*untracked[\s\S]*rename[\s\S]*delete/i);
+    assert.match(docs.guide, /CRLF\/CR[\s\S]*LF/i);
+    assert.match(docs.guide, docs.binary, `${locale}: regra binária ausente`);
+    assert.match(docs.guide, /2[. ]000|2,000/);
+    assert.match(docs.guide, /path-safe[\s\S]*(?:rename atômico|atomic rename)/i);
+    assert.match(docs.guide, docs.recovery, `${locale}: recovery v2 ausente`);
+    for (const token of [
+      'Evidence Envelope v2', 'evidenceEnvelopeId', 'evidenceBinding', 'legacy-unbound',
+      'bound', 'stale', 'context-mismatch', 'verify --deep', 'wk-verify',
+    ]) assert.ok(docs.changes.includes(token), `${locale}: changes sem ${token}`);
+    assert.match(docs.changes, /worktree\/sess(?:ão|ion)[\s\S]*verify/i);
+    assert.match(docs.changes, /\]\(verify\.md\)/);
+    assert.match(docs.readme, /Evidence Envelope v2/);
+    assert.match(docs.readme, /bound[\s\S]*stale[\s\S]*context-mismatch[\s\S]*legacy-unbound/);
+  }
+});

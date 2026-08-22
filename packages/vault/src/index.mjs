@@ -8,5 +8,6 @@ export * from './memory-handoff.mjs';
 export * from './memory-store.mjs';
 export * from './memory-scope.mjs';
 export * from './evidence-recall.mjs';
+export * from './evidence-envelope.mjs';
 export * from './validate-core.mjs';
 export * from './validate-memory.mjs';

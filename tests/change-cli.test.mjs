@@ -5,6 +5,7 @@ import { existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, 
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { initGitRepository as initGitProject } from './helpers/git-fixture.mjs';
 
 const BIN = join(dirname(fileURLToPath(import.meta.url)), '..', 'bin', 'wendkeep.mjs');
 
@@ -126,10 +127,12 @@ test('wendkeep verify: runs task sensors, writes evidencia.json', () => {
       { id: 'ok', severity: 'critical', command: 'node -e "process.exit(0)"' },
       { id: 'also-ok', severity: 'critical', command: 'node -e "process.exit(0)"' },
     ] }));
+    initGitProject(proj);
     const r = spawnSync(process.execPath, [BIN, 'verify', '--vault', vault, '--project', proj], { encoding: 'utf8' });
     assert.equal(r.status, 0, r.stderr);
     const ev = JSON.parse(readFileSync(join(vault, '08-Mudanças', 'x', 'evidencia.json'), 'utf8'));
-    assert.deepEqual(ev.map((e) => [e.id, e.status]), [['ok', 'green'], ['also-ok', 'green']]);
+    assert.equal(ev.schema_version, 2);
+    assert.deepEqual(ev.sensors.map((e) => [e.id, e.status]), [['ok', 'green'], ['also-ok', 'green']]);
   } finally { rmSync(vault, { recursive: true, force: true }); rmSync(proj, { recursive: true, force: true }); }
 });
 
@@ -145,10 +148,11 @@ test('wendkeep verify: a second critical sensor on the same task is evidence and
       { id: 'ok', severity: 'critical', command: 'node -e "process.exit(0)"' },
       { id: 'blocked', severity: 'critical', command: 'node -e "process.exit(1)"' },
     ] }));
+    initGitProject(proj);
     const r = spawnSync(process.execPath, [BIN, 'verify', '--vault', vault, '--project', proj], { encoding: 'utf8' });
     assert.equal(r.status, 1, 'the second critical sensor must block verify');
     const ev = JSON.parse(readFileSync(join(vault, '08-Mudanças', 'x', 'evidencia.json'), 'utf8'));
-    assert.deepEqual(ev.map((e) => [e.id, e.status]), [['ok', 'green'], ['blocked', 'red']]);
+    assert.deepEqual(ev.sensors.map((e) => [e.id, e.status]), [['ok', 'green'], ['blocked', 'red']]);
   } finally { rmSync(vault, { recursive: true, force: true }); rmSync(proj, { recursive: true, force: true }); }
 });
 
@@ -165,6 +169,7 @@ test('[req:OP-10] wendkeep verify exports its effective --vault to sensor proces
       severity: 'critical',
       command: 'node -e "require(\'node:fs\').writeFileSync(\'seen-vault.txt\', process.env.OBSIDIAN_VAULT_PATH || \'\')"',
     }] }));
+    initGitProject(proj);
     const result = spawnSync(process.execPath, [BIN, 'verify', '--vault', vault, '--project', proj], { encoding: 'utf8' });
     assert.equal(result.status, 0, result.stderr);
     assert.equal(readFileSync(join(proj, 'seen-vault.txt'), 'utf8'), vault);
@@ -209,6 +214,7 @@ process.exit(result.status === 0 && result.stdout.includes(${JSON.stringify(slug
       command: `node "${sensorScript}"`,
     }] }));
 
+    initGitProject(proj);
     const result = spawnSync(process.execPath, [BIN, 'verify', '--vault', vault, '--project', proj], { encoding: 'utf8' });
     assert.equal(result.status, 0, result.stderr);
   } finally { rmSync(root, { recursive: true, force: true }); }
@@ -228,6 +234,7 @@ test('archive blocked until verify green when a task declares a sensor', () => {
     assert.equal(blocked.status, 1, 'archive blocked without evidence');
     assert.match(blocked.stderr, /BLOCKED/);
     // 0.31.0: --deep também grava o auto-verdict (agora sempre exigido pelo gate)
+    initGitProject(proj);
     assert.equal(spawn(['verify', '--deep']).status, 0);
     const ok = spawn(['change', 'archive', 'x']);
     assert.equal(ok.status, 0, ok.stderr);
@@ -265,6 +272,7 @@ test('warning sensor red does not block verify or archive', () => {
     writeFileSync(join(vault, '08-Mudanças', 'x', 'tarefas.md'), '- [x] 1.1 polish [sensor:style]\n');
     // style is a RED warning sensor (exit 1) — advisory, must NOT gate.
     writeFileSync(join(proj, 'wendkeep.sensors.json'), JSON.stringify({ version: 1, sensors: [{ id: 'style', severity: 'warning', command: 'exit 1' }] }));
+    initGitProject(proj);
     assert.equal(spawn(['verify', '--deep']).status, 0, 'red warning still passes verify (--deep grava o auto-verdict)');
     const arch = spawn(['change', 'archive', 'x']);
     assert.equal(arch.status, 0, `red warning does not block archive; stderr=${arch.stderr}`);
@@ -313,10 +321,11 @@ test('archive blocks a stale verdict when tarefas.md changed after verification 
     writeLivingRequirement(vault, 'X-1');
     const tarefas = join(vault, '08-Mudanças', 'x', 'tarefas.md');
     writeFileSync(tarefas, '- [x] 1.1 faz [req:X-1]\n');
+    initGitProject(proj);
     assert.equal(spawn(['verify', '--deep']).status, 0);
     const pkg = JSON.parse(readFileSync(join(vault, '08-Mudanças', 'x', 'verificacao.json'), 'utf8'));
     assert.ok(pkg.tasksHash, 'package carries tasksHash');
-    writeFileSync(join(vault, '08-Mudanças', 'x', 'verdict.json'), JSON.stringify({ slug: 'x', ok: true, coverage: [{ req: 'X-1', covered: true }], tasksHash: pkg.tasksHash, effectiveSpecHash: pkg.effectiveSpecHash }));
+    writeFileSync(join(vault, '08-Mudanças', 'x', 'verdict.json'), JSON.stringify({ slug: 'x', ok: true, coverage: [{ req: 'X-1', covered: true }], tasksHash: pkg.tasksHash, effectiveSpecHash: pkg.effectiveSpecHash, evidenceEnvelopeId: pkg.evidenceEnvelopeId, evidenceBinding: pkg.evidenceBinding }));
     // muda as tarefas depois do verdict -> stale
     writeFileSync(tarefas, '- [x] 1.1 faz [req:X-1]\n- [x] 1.2 nova\n');
     const blocked = spawn(['change', 'archive', 'x']);
@@ -326,6 +335,62 @@ test('archive blocks a stale verdict when tarefas.md changed after verification 
     writeFileSync(tarefas, '- [x] 1.1 faz [req:X-1]\n');
     assert.equal(spawn(['change', 'archive', 'x']).status, 0);
   } finally { rmSync(vault, { recursive: true, force: true }); rmSync(proj, { recursive: true, force: true }); }
+});
+
+test('[req:EVID-6] public archive gate rejects foreign package and verdict checkout bindings', () => {
+  const vault = mkdtempSync(join(tmpdir(), 'wk-binding-gate-'));
+  const proj = mkdtempSync(join(tmpdir(), 'wk-binding-project-'));
+  const run = (args) => spawnSync(process.execPath, [
+    BIN, ...args, '--vault', vault, '--project', proj,
+  ], { encoding: 'utf8' });
+  const changeDir = join(vault, '08-Mudanças', 'x');
+  try {
+    mkdirSync(join(vault, '04-Decisões'), { recursive: true });
+    mkdirSync(join(vault, '.brain'), { recursive: true });
+    writeFileSync(join(proj, 'wendkeep.sensors.json'), JSON.stringify({ version: 1, sensors: [] }));
+    assert.equal(run(['change', 'new', 'x']).status, 0);
+    fillScaffold(vault, 'x');
+    writeLivingRequirement(vault, 'X-1');
+    writeFileSync(join(changeDir, 'tarefas.md'), '- [x] 1.1 faz [req:X-1]\n');
+    initGitProject(proj);
+    const deep = run(['verify', '--deep']);
+    assert.equal(deep.status, 0, deep.stderr);
+    const pkgPath = join(changeDir, 'verificacao.json');
+    const verdictPath = join(changeDir, 'verdict.json');
+    const pkg = JSON.parse(readFileSync(pkgPath, 'utf8'));
+    const validVerdict = {
+      slug: 'x', ok: true, coverage: [{ req: 'X-1', covered: true }],
+      tasksHash: pkg.tasksHash,
+      effectiveSpecHash: pkg.effectiveSpecHash,
+      evidenceEnvelopeId: pkg.evidenceEnvelopeId,
+      evidenceBinding: pkg.evidenceBinding,
+    };
+    writeFileSync(verdictPath, JSON.stringify(validVerdict));
+
+    writeFileSync(pkgPath, JSON.stringify({
+      ...pkg,
+      evidenceBinding: { ...pkg.evidenceBinding, worktree_id: 'foreign-package-worktree' },
+    }));
+    const packageBlocked = run(['change', 'archive', 'x']);
+    assert.equal(packageBlocked.status, 1, packageBlocked.stderr);
+    assert.match(packageBlocked.stderr, /binding do pacote.*diverge/i);
+
+    writeFileSync(pkgPath, JSON.stringify(pkg));
+    writeFileSync(verdictPath, JSON.stringify({
+      ...validVerdict,
+      evidenceBinding: { ...pkg.evidenceBinding, worktree_id: 'foreign-verdict-worktree' },
+    }));
+    const verdictBlocked = run(['change', 'archive', 'x']);
+    assert.equal(verdictBlocked.status, 1, verdictBlocked.stderr);
+    assert.match(verdictBlocked.stderr, /binding do verdict.*diverge/i);
+
+    writeFileSync(verdictPath, JSON.stringify(validVerdict));
+    const archived = run(['change', 'archive', 'x']);
+    assert.equal(archived.status, 0, archived.stderr);
+  } finally {
+    rmSync(vault, { recursive: true, force: true });
+    rmSync(proj, { recursive: true, force: true });
+  }
 });
 
 test('archive blocks on open tasks; --force overrides (G1)', () => {
@@ -501,6 +566,7 @@ test('verify: mutation survivors -> fix tasks + exit 1; clean report resets the 
     writeFileSync(join(proj, 'wendkeep.sensors.json'), JSON.stringify({ version: 1, sensors: [{ id: 'mut', type: 'mutation', severity: 'critical', command: 'exit 0', report: 'rep.json' }] }));
     writeFileSync(join(proj, 'rep.json'), JSON.stringify({ files: { 'a.js': { mutants: [{ mutatorName: 'M', status: 'Survived', location: { start: { line: 3 } } }] } } }));
     // G4: sobrevivente = exit 1 (a suíte não discrimina)
+    initGitProject(proj);
     assert.equal(spawn(['verify']).status, 1, 'survivor fails verify');
     const tarefas = join(vault, '08-Mudanças', 'm', 'tarefas.md');
     assert.match(readFileSync(tarefas, 'utf8'), /mata mutante a\.js:3/, 'fix task appended');
@@ -525,6 +591,7 @@ test('verify: 3rd round escalates with an auto-lesson instead of new fix tasks',
     writeFileSync(join(vault, '.brain', 'CURRENT_CHANGE.md'), 'change: m\n');
     writeFileSync(join(proj, 'wendkeep.sensors.json'), JSON.stringify({ version: 1, sensors: [{ id: 'mut', type: 'mutation', severity: 'critical', command: 'exit 0', report: 'rep.json' }] }));
     writeFileSync(join(proj, 'rep.json'), JSON.stringify({ files: { 'a.js': { mutants: [{ mutatorName: 'M', status: 'Survived', location: { start: { line: 3 } } }] } } }));
+    initGitProject(proj);
     const r = spawn(['verify']);
     assert.equal(r.status, 1);
     assert.match(r.stderr, /3 rodadas/);
@@ -550,6 +617,7 @@ test('archive exige verdict SEMPRE (mesmo sem [req:]); verify --deep destrava', 
     const blocked = spawn(['change', 'archive', 'x']);
     assert.equal(blocked.status, 1, 'sem verdict bloqueia mesmo sem [req:]');
     assert.match(blocked.stderr, /verdict.*verify --deep/i);
+    initGitProject(proj);
     assert.equal(spawn(['verify', '--deep']).status, 0, 'auto-verdict trivial');
     assert.equal(spawn(['change', 'archive', 'x']).status, 0, 'com verdict passa');
   } finally { rmSync(vault, { recursive: true, force: true }); rmSync(proj, { recursive: true, force: true }); }
@@ -678,6 +746,7 @@ test('verify --deep: trivial auto-writes verdict; a change with [req:] only writ
     mkdirSync(join(vault, '08-Mudanças', 't'), { recursive: true });
     writeFileSync(join(vault, '08-Mudanças', 't', 'tarefas.md'), '- [ ] 1.1 faz [sensor:ok]\n');
     writeFileSync(join(vault, '.brain', 'CURRENT_CHANGE.md'), 'change: t\n');
+    initGitProject(proj);
     assert.equal(spawn(['verify', '--deep']).status, 0);
     assert.ok(existsSync(join(vault, '08-Mudanças', 't', 'verificacao.json')));
     assert.ok(existsSync(join(vault, '08-Mudanças', 't', 'verdict.json')), 'trivial auto-verdict');

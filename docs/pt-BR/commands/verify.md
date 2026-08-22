@@ -43,7 +43,8 @@ npx wendkeep change use <slug>
 - **Exit 1:** o gate executou, mas ao menos um sensor crítico ficou vermelho ou um mutante
   sobreviveu.
 - **Exit 2:** uso/contexto inválido, como `no change (--change or active)`, vault ausente,
-  change inexistente ou `wendkeep.sensors.json` inválido.
+  change inexistente, projeto fora de um repositório Git, `wendkeep.sensors.json` inválido ou
+  `WENDKEEP_EVIDENCE_HEAD_CHANGED`.
 
 `verify --deep` gera `verificacao.json`; ele não substitui o verificador. A skill `wk-verify`
 precisa ser executada por autor diferente e grava `verdict.json`.
@@ -73,11 +74,22 @@ npx wendkeep memory status --gate --vault .MeuApp-vault
 
 ## Resultado esperado
 
-`evidencia.json` contém resultados dos sensores e um selo liga a prova ao hash atual de
-`tarefas.md`. Quando um sensor fica vermelho, sua entrada recebe somente um diagnóstico local
-sanitizado e limitado a 2.000 caracteres; stdout/stderr de sensores verdes não é persistido. No
-deep, o pacote contém requisitos, tarefas e evidência suficientes para revisão read-only; o
-verdict cobre cada `[req:]` antes do archive.
+`evidencia.json` segue o [schema público v2](../../../schema/wendkeep.evidence-envelope-v2.schema.json).
+O envelope liga `project_id`, `repository_id`, `worktree_id`, `work_session_id`, change e branch a
+`base_sha`, `head_sha`, `index_tree_sha`, `worktree_digest`, tarefas, spec e configuração dos
+sensores por SHA-256 completo. O digest cobre staged, unstaged, untracked, rename e delete; paths
+usam `/`, texto normaliza CRLF/CR para LF e binários preservam bytes. A classificação binária
+respeita atributos Git `binary`/`-text` e extensões binárias conhecidas (incluindo `.bin`); arquivos
+ignorados não entram.
+
+Cada sensor registra comando sanitizado e seu hash, início/fim, duração, exit code, digest da saída
+e tail sanitizado de até 2.000 caracteres. Os artefatos são publicados por temporário path-safe no
+mesmo diretório e rename atômico. No deep, `verificacao.json` e `verdict.json` carregam o mesmo
+`evidenceEnvelopeId` e `evidenceBinding` completo; o verificador independente deve preservar ambos
+no verdict.
+
+Evidência v1 continua legível como `legacy-unbound`, nunca como autoridade equivalente. Rode
+`wendkeep change status <slug>` para ver `bound`, `stale` ou `context-mismatch`.
 
 ## Erros comuns e diagnóstico
 
@@ -87,6 +99,10 @@ verdict cobre cada `[req:]` antes do archive.
 - Gate vermelho: consulte o campo `note` limitado da entrada em `evidencia.json`, corrija a causa
   e repita; não use `archive --force` por conta própria.
 - Verdict stale/ausente: regenere `--deep` e peça novo passe independente.
+- `WENDKEEP_EVIDENCE_HEAD_CHANGED`: o HEAD mudou enquanto os sensores rodavam; estabilize o
+  checkout e repita. A evidência anterior não foi substituída.
+- `legacy-unbound`, `stale` ou `context-mismatch`: volte à worktree/sessão correta, recupere o
+  contexto se necessário e rode `verify` + `verify --deep` novamente.
 - Mutantes sobreviventes: fortaleça o teste discriminante; após três rodadas, revise manualmente.
 
 ## Próximos passos

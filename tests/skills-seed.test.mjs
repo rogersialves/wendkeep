@@ -142,7 +142,9 @@ test('skills carry bundled templates that their SKILL.md references', () => {
   assert.match(by['wk-brainstorming'].body, /design-template\.md/);
   // the verdict template is valid JSON with the gate-relevant fields.
   const verdict = JSON.parse((by['wk-verify'].files.find((f) => f.name === 'verdict-template.json')).content);
-  for (const k of ['slug', 'ok', 'coverage', 'tasksHash']) assert.ok(k in verdict, `verdict has ${k}`);
+  for (const k of ['slug', 'ok', 'coverage', 'tasksHash', 'effectiveSpecHash', 'evidenceEnvelopeId', 'evidenceBinding']) {
+    assert.ok(k in verdict, `verdict has ${k}`);
+  }
 });
 
 test('seedWkSkills: writes each SKILL.md + bundled templates, non-destructive', () => {

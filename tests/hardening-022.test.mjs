@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { priceForModel } from '../hooks/token-usage.mjs';
 import { parseClaudeTranscript } from '../hooks/session-stop.mjs';
 import { discoverCodexTranscripts } from '../hooks/import-sessions.mjs';
+import { initGitRepository } from './helpers/git-fixture.mjs';
 
 const BIN = join(dirname(fileURLToPath(import.meta.url)), '..', 'bin', 'wendkeep.mjs');
 
@@ -113,6 +114,7 @@ test('archive blocks stale evidence after tarefas.md changed post-verify (item 1
   const proj = mkdtempSync(join(tmpdir(), 'wk-stalep-'));
   const spawn = (a) => spawnSync(process.execPath, [BIN, ...a, '--vault', vault, '--project', proj], { encoding: 'utf8' });
   try {
+    initGitRepository(proj);
     mkdirSync(join(vault, '04-Decisões'), { recursive: true });
     assert.equal(spawn(['change', 'new', 'x']).status, 0);
     fill(vault, 'x');

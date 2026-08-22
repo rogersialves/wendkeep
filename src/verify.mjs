@@ -1,7 +1,7 @@
 // `wendkeep verify [--change <slug>]` — run a change's task sensors, record evidence.
 // Sensors run at the PROJECT root (--project or cwd); the change + evidence live in
 // the VAULT. Writes 08-Mudanças/<slug>/evidencia.json; exit 1 if a critical sensor is red.
-import { readFileSync, unlinkSync, writeFileSync } from 'node:fs';
+import { readFileSync, unlinkSync } from 'node:fs';
 import { isAbsolute, join, resolve } from 'node:path';
 import { parseTasks, activeChange, appendFixTasks, healSpecBacklinks } from '../hooks/change-core.mjs';
 import {
@@ -21,6 +21,15 @@ import {
 import { addLesson } from '../hooks/lessons-core.mjs';
 import { getLocale } from '../hooks/locale.mjs';
 import { resolveCommandActiveContext } from './active-context-runtime.mjs';
+import { writeVaultFileAtomic } from '../packages/vault/src/vault-path-safety.mjs';
+import { evidenceCheckoutBinding } from '../packages/vault/src/evidence-envelope.mjs';
+import {
+  assertStableHead,
+  buildEvidenceEnvelope,
+  captureGitSnapshot,
+  resolveEvidenceIdentity,
+  sensorConfigSha256,
+} from './evidence-envelope.mjs';
 
 function today() {
   const d = new Date();
@@ -34,6 +43,23 @@ function opt(argv, name) {
   return eq ? eq.slice(name.length + 1) : undefined;
 }
 
+export function createChangeAuthorityWriter(vaultBase, changeDir, {
+  writeAtomic = writeVaultFileAtomic,
+  beforeRename,
+} = {}) {
+  return (file, content) => writeAtomic(
+    vaultBase,
+    join(changeDir, file),
+    content,
+    'utf8',
+    {
+      scopeRoot: changeDir,
+      label: `artefato de evidência ${file}`,
+      ...(beforeRename ? { beforeRename: (details) => beforeRename({ file, ...details }) } : {}),
+    },
+  );
+}
+
 export function runVerify(argv) {
   const vaultRaw = opt(argv, '--vault') || process.env.OBSIDIAN_VAULT_PATH;
   if (!vaultRaw) { process.stderr.write('wendkeep verify: no vault (--vault or OBSIDIAN_VAULT_PATH).\n'); process.exit(2); }
@@ -41,23 +67,23 @@ export function runVerify(argv) {
   // --project wins; otherwise climb from cwd to the nearest project marker (agent shells
   // keep their cwd across commands, so verify from a subdirectory is a recurring miss).
   const projectRoot = resolve(opt(argv, '--project') || findProjectRoot(process.cwd()) || process.cwd());
+  const requestedSession = opt(argv, '--session') || process.env.CODEX_THREAD_ID || process.env.CLAUDE_SESSION_ID || '';
   let commandContext = null;
-  if (!opt(argv, '--change')) {
-    try {
-      commandContext = resolveCommandActiveContext({
-        vaultBase,
-        projectRoot,
-        sessionId: opt(argv, '--session') || process.env.CODEX_THREAD_ID || process.env.CLAUDE_SESSION_ID || '',
-      });
-    } catch (error) {
-      process.stderr.write(`wendkeep verify: ${error.code || 'WENDKEEP_ACTIVE_CONTEXT_FAILED'}: ${error.message}\n`);
-      process.exit(2);
-    }
+  try {
+    commandContext = resolveCommandActiveContext({
+      vaultBase,
+      projectRoot,
+      sessionId: requestedSession,
+    });
+  } catch (error) {
+    process.stderr.write(`wendkeep verify: ${error.code || 'WENDKEEP_ACTIVE_CONTEXT_FAILED'}: ${error.message}\n`);
+    process.exit(2);
   }
   const slug = opt(argv, '--change') || activeChange(vaultBase, { context: commandContext });
   if (!slug) { process.stderr.write('wendkeep verify: no change (--change or active).\n'); process.exit(2); }
 
   const changeDir = join(vaultBase, getLocale(vaultBase).folders.changes, slug);
+  const writeAuthority = createChangeAuthorityWriter(vaultBase, changeDir);
   let tarefas = '';
   try { tarefas = readFileSync(join(changeDir, 'tarefas.md'), 'utf8'); }
   catch { process.stderr.write(`wendkeep verify: change not found: ${slug}\n`); process.exit(2); }
@@ -65,7 +91,8 @@ export function runVerify(argv) {
   // Backlink dos specs escritos à mão pro hub proposta (grafo conectado). Idempotente, fail-quiet.
   try { healSpecBacklinks(changeDir, vaultBase); } catch { /* heal é bônus */ }
 
-  const ids = requiredSensors(parseTasks(tarefas));
+  const tasks = parseTasks(tarefas);
+  const ids = requiredSensors(tasks);
   const loaded = loadSensorsDetailed(projectRoot);
   if (loaded.error) {
     process.stderr.write(`wendkeep verify: wendkeep.sensors.json inválido em ${loaded.path}: ${loaded.error}\n`);
@@ -75,14 +102,52 @@ export function runVerify(argv) {
     process.stderr.write(`wendkeep verify: wendkeep.sensors.json não encontrado em ${loaded.path} — rode da raiz do projeto ou use --project <raiz>\n`);
   }
   const sensors = loaded.sensors;
+  const reqIds = [...new Set(tasks.flatMap((task) => task.reqs ?? []))];
+  const effective = buildEffectiveRequirementPackage(vaultBase, changeDir, reqIds);
+  const tasksHash = tasksHashOf(tarefas);
+  const startedAt = new Date().toISOString();
+  let startSnapshot;
+  let identity;
+  try {
+    startSnapshot = captureGitSnapshot(projectRoot);
+    identity = resolveEvidenceIdentity({
+      vaultBase,
+      projectRoot,
+      changeSlug: slug,
+      sessionId: requestedSession,
+      context: commandContext,
+    });
+  } catch (error) {
+    process.stderr.write(`wendkeep verify: ${error.code || 'WENDKEEP_EVIDENCE_BINDING_FAILED'}: ${error.message}\n`);
+    process.exit(2);
+  }
   const evidence = runSensors(sensors, ids, {
     cwd: projectRoot,
     env: sensorProcessEnv(vaultBase),
   });
-  writeFileSync(join(changeDir, 'evidencia.json'), `${JSON.stringify(evidence, null, 2)}\n`, 'utf8');
+  let finishSnapshot;
+  try {
+    finishSnapshot = captureGitSnapshot(projectRoot);
+    assertStableHead(startSnapshot, finishSnapshot);
+  } catch (error) {
+    process.stderr.write(`wendkeep verify: ${error.code || 'WENDKEEP_EVIDENCE_BINDING_FAILED'}: ${error.message}\n`);
+    process.exit(2);
+  }
+  const envelope = buildEvidenceEnvelope({
+    identity,
+    changeSlug: slug,
+    snapshot: startSnapshot,
+    tasksSha256: tasksHash,
+    effectiveSpecSha256: `sha256:${effective.hash}`,
+    sensorConfigSha256: sensorConfigSha256(sensors, ids),
+    sensors: evidence,
+    startedAt,
+    finishedAt: new Date().toISOString(),
+  });
+  writeAuthority('evidencia.json', `${JSON.stringify(envelope, null, 2)}\n`);
   // Freshness seal: bind this evidence to the tarefas.md it was produced against, so the archive
   // gate can reject evidence gone stale (a sensor task added after this verify run).
-  writeFileSync(join(changeDir, '.evidence-hash'), tasksHashOf(tarefas), 'utf8');
+  writeAuthority('.evidence-hash', tasksHash);
 
   // Mutation survivors -> fix tasks (Wave B), bounded at 3 rounds then escalate. A surviving
   // mutant always fails verify (exit 1): the suite does not discriminate yet. A clean report
@@ -108,7 +173,7 @@ export function runVerify(argv) {
     } else {
       let added = 0;
       for (const e of withSurvivors) added += appendFixTasks(changeDir, e.survivors, e.id);
-      writeFileSync(roundFile, String(round + 1), 'utf8');
+      writeAuthority('.mutation-round', String(round + 1));
       process.stdout.write(`verify: ${added} fix-task(s) de mutação (rodada ${round + 1}/3)\n`);
     }
     process.stderr.write('verify: mutantes sobreviventes — a suíte não discrimina ainda.\n');
@@ -127,11 +192,7 @@ export function runVerify(argv) {
   // --deep (Q2=B): assemble the verification package the wk-verify skill judges. A trivial
   // change (no [req:] tasks, sensors green) gets an auto verdict — no agent pass needed.
   if (argv.includes('--deep')) {
-    const tasks = parseTasks(tarefas);
-    const reqIds = [...new Set(tasks.flatMap((t) => t.reqs ?? []))];
-    const tasksHash = tasksHashOf(tarefas);
     captureSpecBaseline(vaultBase, changeDir);
-    const effective = buildEffectiveRequirementPackage(vaultBase, changeDir, reqIds);
     if (effective.errors.length) {
       process.stderr.write(`verify --deep: spec efetiva inválida: ${effective.errors.join('; ')}\n`);
       process.exit(1);
@@ -144,6 +205,8 @@ export function runVerify(argv) {
       slug,
       tasksHash,
       effectiveSpecHash: effective.hash,
+      evidenceEnvelopeId: envelope.envelope_id,
+      evidenceBinding: evidenceCheckoutBinding(envelope),
       requirements: effective.requirements.map((req) => {
         return {
           id: req.id,
@@ -157,9 +220,9 @@ export function runVerify(argv) {
       tasks: tasks.map((t) => ({ id: t.id, text: t.text, req: t.req || null, reqs: t.reqs || [], done: t.done })),
       sensors: evidence,
     };
-    writeFileSync(join(changeDir, 'verificacao.json'), `${JSON.stringify(pkg, null, 2)}\n`, 'utf8');
+    writeAuthority('verificacao.json', `${JSON.stringify(pkg, null, 2)}\n`);
     if (reqIds.length === 0) {
-      writeFileSync(join(changeDir, 'verdict.json'), `${JSON.stringify({ slug, ok: true, coverage: [], tasksHash, effectiveSpecHash: effective.hash, notes: ['trivial: sem requisito'] }, null, 2)}\n`, 'utf8');
+      writeAuthority('verdict.json', `${JSON.stringify({ slug, ok: true, coverage: [], tasksHash, effectiveSpecHash: effective.hash, evidenceEnvelopeId: envelope.envelope_id, evidenceBinding: pkg.evidenceBinding, notes: ['trivial: sem requisito'] }, null, 2)}\n`);
       process.stdout.write('verify --deep: pacote + verdict trivial escritos\n');
     } else {
       process.stdout.write('verify --deep: pacote escrito — rode a skill wk-verify pra gravar verdict.json\n');

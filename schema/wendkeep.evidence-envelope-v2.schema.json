@@ -1,0 +1,92 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/rogersialves/wendkeep/schema/wendkeep.evidence-envelope-v2.schema.json",
+  "title": "WendKeep Evidence Envelope v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "project_id",
+    "repository_id",
+    "worktree_id",
+    "work_session_id",
+    "change_slug",
+    "branch",
+    "base_sha",
+    "head_sha",
+    "index_tree_sha",
+    "worktree_digest",
+    "dirty",
+    "tasks_sha256",
+    "effective_spec_sha256",
+    "sensor_config_sha256",
+    "wendkeep_version",
+    "platform",
+    "started_at",
+    "finished_at",
+    "sensors",
+    "envelope_id"
+  ],
+  "properties": {
+    "schema_version": { "const": 2 },
+    "project_id": { "type": "string", "minLength": 1 },
+    "repository_id": { "type": "string", "minLength": 1 },
+    "worktree_id": { "type": "string", "minLength": 1 },
+    "work_session_id": { "type": "string", "minLength": 1 },
+    "change_slug": { "type": "string", "minLength": 1 },
+    "branch": { "type": "string", "minLength": 1 },
+    "base_sha": { "$ref": "#/$defs/gitObject" },
+    "head_sha": { "$ref": "#/$defs/gitObject" },
+    "index_tree_sha": { "$ref": "#/$defs/gitObject" },
+    "worktree_digest": { "$ref": "#/$defs/sha256" },
+    "dirty": { "type": "boolean" },
+    "tasks_sha256": { "$ref": "#/$defs/sha256" },
+    "effective_spec_sha256": { "$ref": "#/$defs/sha256" },
+    "sensor_config_sha256": { "$ref": "#/$defs/sha256" },
+    "wendkeep_version": { "type": "string", "minLength": 1 },
+    "platform": { "type": "string", "minLength": 1 },
+    "started_at": { "type": "string", "format": "date-time" },
+    "finished_at": { "type": "string", "format": "date-time" },
+    "envelope_id": { "$ref": "#/$defs/sha256" },
+    "sensors": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/sensor" }
+    }
+  },
+  "$defs": {
+    "gitObject": { "type": "string", "pattern": "^[a-f0-9]{40,64}$" },
+    "sha256": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "sensor": {
+      "type": "object",
+      "required": [
+        "id",
+        "status",
+        "severity",
+        "command",
+        "command_sha256",
+        "started_at",
+        "finished_at",
+        "duration_ms",
+        "exit_code",
+        "output_sha256",
+        "output_tail"
+      ],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "status": { "enum": ["green", "red"] },
+        "severity": { "enum": ["critical", "warning"] },
+        "command": { "type": "string" },
+        "command_sha256": { "$ref": "#/$defs/sha256" },
+        "started_at": { "type": "string", "format": "date-time" },
+        "finished_at": { "type": "string", "format": "date-time" },
+        "duration_ms": { "type": "number", "minimum": 0 },
+        "exit_code": { "type": ["integer", "null"] },
+        "output_sha256": { "$ref": "#/$defs/sha256" },
+        "output_tail": { "type": "string", "maxLength": 2000 },
+        "note": { "type": "string", "maxLength": 2000 },
+        "survivors": { "type": "array" },
+        "ts": { "type": "string", "format": "date-time" }
+      }
+    }
+  }
+}

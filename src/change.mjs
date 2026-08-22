@@ -19,13 +19,24 @@ import {
   isGuideCompactChange,
   setActiveChange,
 } from '../hooks/change-core.mjs';
-import { evaluateGate, requiredSensors } from '../hooks/sensors-core.mjs';
+import { evaluateGate, loadSensorsDetailed, requiredSensors } from '../hooks/sensors-core.mjs';
 import { buildEffectiveRequirementPackage, evaluateVerdict, formatOrphanReqs, tasksHashOf, parseSpecsList, parseDelta, parseRequirements, applyDelta, validateSpecImpact } from '../hooks/spec-core.mjs';
 import { getNextAdrNumber, readControl, readSessionRegistry, upsertSessionRegistry } from '../hooks/obsidian-common.mjs';
 import { getLocale } from '../hooks/locale.mjs';
 import { enqueueObserverDocumentChange } from './observer-sql-publish.mjs';
 import { readProjectForValidation } from '../packages/vault/src/validate-memory.mjs';
 import { resolveCommandActiveContext } from './active-context-runtime.mjs';
+import {
+  captureGitSnapshot,
+  resolveEvidenceIdentity,
+  sensorConfigSha256,
+} from './evidence-envelope.mjs';
+import {
+  evaluateEvidenceBinding,
+  evidenceCheckoutBinding,
+  evidenceCheckoutBindingMatches,
+  evidenceSensors,
+} from '../packages/vault/src/evidence-envelope.mjs';
 
 function observerMarkdownUnder(vaultBase, relativeRoot) {
   const output = [];
@@ -74,15 +85,15 @@ export function runChange(argv) {
   const VALUE_FLAGS = new Set(['--vault', '--change', '--project', '--session']);
   const slugArg = () => rest.find((a, i) => !a.startsWith('-') && !VALUE_FLAGS.has(rest[i - 1]));
   const projectRoot = resolve(opt(rest, '--project') || process.cwd());
+  const sessionId = opt(rest, '--session')
+    || process.env.CODEX_THREAD_ID
+    || process.env.CLAUDE_SESSION_ID
+    || '';
   let contextResolved = false;
   let resolvedContext = null;
   const context = () => {
     if (contextResolved) return resolvedContext;
     contextResolved = true;
-    const sessionId = opt(rest, '--session')
-      || process.env.CODEX_THREAD_ID
-      || process.env.CLAUDE_SESSION_ID
-      || '';
     try {
       resolvedContext = resolveCommandActiveContext({ vaultBase, projectRoot, sessionId });
       return resolvedContext;
@@ -196,19 +207,48 @@ export function runChange(argv) {
     }
     let evidence = null;
     try { evidence = JSON.parse(readFileSync(join(dir, 'evidencia.json'), 'utf8')); } catch { /* sem evidência */ }
-    if (evidence) for (const e of evidence) process.stdout.write(`  ${e.status === 'green' ? '✓' : '✗'} ${e.id} (${e.severity || 'critical'})\n`);
+    if (evidence) for (const e of evidenceSensors(evidence)) process.stdout.write(`  ${e.status === 'green' ? '✓' : '✗'} ${e.id} (${e.severity || 'critical'})\n`);
     else process.stdout.write('evidencia: ausente\n');
     const reqIds = [...new Set(tasks.flatMap((t) => t.reqs ?? []))];
     const effective = buildEffectiveRequirementPackage(vaultBase, dir, reqIds);
     if (effective.errors.length || effective.missing.length) {
       process.stdout.write(`spec efetiva: inválida (${[...effective.errors, ...effective.missing.map((id) => `req órfão ${id}`)].join('; ')})\n`);
     }
+    if (evidence) {
+      let expected = {
+        change_slug: slug,
+        tasks_sha256: tasksHashOf(tarefasMd),
+        effective_spec_sha256: `sha256:${effective.hash}`,
+      };
+      let unavailable = '';
+      try {
+        const ids = requiredSensors(tasks);
+        const loaded = loadSensorsDetailed(projectRoot);
+        expected = {
+          ...expected,
+          identity: resolveEvidenceIdentity({
+            vaultBase, projectRoot, changeSlug: slug, sessionId, context: context(),
+          }),
+          snapshot: captureGitSnapshot(projectRoot),
+          sensor_config_sha256: sensorConfigSha256(loaded.sensors, ids),
+        };
+      } catch (error) {
+        unavailable = error.code || error.message;
+      }
+      const binding = evaluateEvidenceBinding(evidence, expected);
+      process.stdout.write(`evidence-binding: ${binding.state}${binding.reasons.length ? ` (${binding.reasons.join('; ')})` : ''}${unavailable ? ` [current snapshot unavailable: ${unavailable}]` : ''}\n`);
+    }
     let verdict = null;
     try { verdict = JSON.parse(readFileSync(join(dir, 'verdict.json'), 'utf8')); } catch { /* sem verdict */ }
     if (!verdict) process.stdout.write(`verdict: ausente — rode \`wendkeep verify --deep\`${reqIds.length ? ' + wk-verify' : ' (verdict trivial automático)'}\n`);
     else if (!reqIds.length) process.stdout.write(`verdict: ${verdict.ok === true ? 'ok (trivial)' : 'não-ok — re-verifique'}\n`);
     else {
-      const v = evaluateVerdict(verdict, reqIds, { tasksHash: tasksHashOf(tarefasMd), effectiveSpecHash: effective.hash });
+      const v = evaluateVerdict(verdict, reqIds, {
+        tasksHash: tasksHashOf(tarefasMd),
+        effectiveSpecHash: effective.hash,
+        evidenceEnvelopeId: evidence?.schema_version === 2 ? evidence.envelope_id : undefined,
+        evidenceBinding: evidence?.schema_version === 2 ? evidenceCheckoutBinding(evidence) : undefined,
+      });
       process.stdout.write(`verdict: ${v.ok ? 'ok' : v.stale ? 'stale — re-verifique' : `incompleto: falta ${v.missing.join(', ')}`}\n`);
     }
     try { process.stdout.write(`mutation-round: ${readFileSync(join(dir, '.mutation-round'), 'utf8').trim()}/3\n`); } catch { /* sem rodadas */ }
@@ -289,9 +329,34 @@ export function runChange(argv) {
       const effective = buildEffectiveRequirementPackage(vaultBase, dir, reqIds);
       if (effective.errors.length) return { ok: false, failing: [`spec efetiva inválida: ${effective.errors.join('; ')}`] };
       if (effective.missing.length) return { ok: false, failing: [formatOrphanReqs(effective.missing)] };
-      let evidence = [];
+      let evidence = null;
       try { evidence = JSON.parse(readFileSync(join(dir, 'evidencia.json'), 'utf8')); } catch { /* no evidence */ }
-      const s = evaluateGate(evidence, required);
+      const sensorEvidence = evidenceSensors(evidence);
+      if (required.length && (!evidence || evidence.schema_version !== 2)) {
+        return { ok: false, failing: ['evidência legacy-unbound não satisfaz autoridade v2 — rode `wendkeep verify` novamente'] };
+      }
+      if (evidence?.schema_version === 2) {
+        let currentBinding;
+        try {
+          const loaded = loadSensorsDetailed(projectRoot);
+          currentBinding = evaluateEvidenceBinding(evidence, {
+            change_slug: slug,
+            identity: resolveEvidenceIdentity({
+              vaultBase, projectRoot, changeSlug: slug, sessionId, context: selectedContext,
+            }),
+            snapshot: captureGitSnapshot(projectRoot),
+            tasks_sha256: tasksHashOf(tarefasMd),
+            effective_spec_sha256: `sha256:${effective.hash}`,
+            sensor_config_sha256: sensorConfigSha256(loaded.sensors, required),
+          });
+        } catch (error) {
+          return { ok: false, failing: [`binding atual indisponível (${error.code || error.message}) — recupere o contexto e rode \`wendkeep verify\` novamente`] };
+        }
+        if (currentBinding.state !== 'bound') {
+          return { ok: false, failing: [`evidência ${currentBinding.state} (${currentBinding.reasons.join('; ')}) — rode \`wendkeep verify\` novamente`] };
+        }
+      }
+      const s = evaluateGate(sensorEvidence, required);
       if (!s.ok) return s;
       // Verdict SEMPRE exigido (0.31.0) — a exigência universal vive AQUI no gate; a semântica
       // reqless→ok de evaluateVerdict (spec-core) não muda porque `verify --deep` e `change
@@ -310,6 +375,19 @@ export function runChange(argv) {
       }
       let verification = null;
       try { verification = JSON.parse(readFileSync(join(dir, 'verificacao.json'), 'utf8')); } catch { /* none */ }
+      const checkoutBinding = evidence?.schema_version === 2 ? evidenceCheckoutBinding(evidence) : null;
+      if (evidence?.schema_version === 2 && verification?.evidenceEnvelopeId !== evidence.envelope_id) {
+        return { ok: false, failing: ['pacote de verificação não está ligado ao envelope atual — rode `wendkeep verify --deep` novamente'] };
+      }
+      if (checkoutBinding && !evidenceCheckoutBindingMatches(verification?.evidenceBinding, checkoutBinding)) {
+        return { ok: false, failing: ['binding do pacote de verificação diverge do checkout provado — rode `wendkeep verify --deep` novamente'] };
+      }
+      if (evidence?.schema_version === 2 && verdict.evidenceEnvelopeId !== evidence.envelope_id) {
+        return { ok: false, failing: [`verdict não está ligado ao envelope atual — rode \`wendkeep verify --deep\`${reqIds.length ? ' + wk-verify' : ''}`] };
+      }
+      if (checkoutBinding && !evidenceCheckoutBindingMatches(verdict.evidenceBinding, checkoutBinding)) {
+        return { ok: false, failing: [`binding do verdict diverge do checkout provado — rode \`wendkeep verify --deep\`${reqIds.length ? ' + wk-verify' : ''}`] };
+      }
       if (verification?.effectiveSpecHash && verification.effectiveSpecHash !== effective.hash) {
         return { ok: false, failing: ['pacote de verificação stale (spec efetiva mudou) — rode `wendkeep verify --deep` novamente'] };
       }
@@ -317,7 +395,12 @@ export function runChange(argv) {
         return { ok: false, failing: ['verdict sem effectiveSpecHash — rode a skill wk-verify novamente'] };
       }
       if (reqIds.length) {
-        const v = evaluateVerdict(verdict, reqIds, { tasksHash: hash, effectiveSpecHash: effective.hash });
+        const v = evaluateVerdict(verdict, reqIds, {
+          tasksHash: hash,
+          effectiveSpecHash: effective.hash,
+          evidenceEnvelopeId: evidence?.schema_version === 2 ? evidence.envelope_id : undefined,
+          evidenceBinding: checkoutBinding || undefined,
+        });
         if (!v.ok) {
           if (v.stale) return { ok: false, failing: ['verdict stale (tarefas.md mudou depois da verificação) — re-verifique: `wendkeep verify --deep` + wk-verify'] };
           return { ok: false, failing: [`verdict incompleto: falta ${v.missing.join(', ')}`] };

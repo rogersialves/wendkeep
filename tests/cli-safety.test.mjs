@@ -6,6 +6,7 @@ import { mkdtempSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSyn
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { initGitRepository } from './helpers/git-fixture.mjs';
 
 const BIN = join(dirname(fileURLToPath(import.meta.url)), '..', 'bin', 'wendkeep.mjs');
 
@@ -59,6 +60,7 @@ test('import with unknown flag: names the flag, exit 2, writes nothing', () => {
 function changeFixture({ tarefas, specReqs }) {
   const vault = mkdtempSync(join(tmpdir(), 'wk-vfx-'));
   const proj = mkdtempSync(join(tmpdir(), 'wk-vfxp-'));
+  initGitRepository(proj);
   mkdirSync(join(vault, '.brain'), { recursive: true });
   const dir = join(vault, '08-Mudanças', 'x');
   mkdirSync(dir, { recursive: true });
@@ -121,6 +123,6 @@ test('verify: run from a subdirectory without --project finds the root sensors',
     const r = spawnSync(process.execPath, [BIN, 'verify', '--vault', vault], { encoding: 'utf8', cwd: sub });
     assert.equal(r.status, 0, r.stderr);
     const ev = JSON.parse(readFileSync(join(dir, 'evidencia.json'), 'utf8'));
-    assert.equal(ev.find((e) => e.id === 'ok').status, 'green', 'sensor da raiz achado e verde a partir do subdir');
+    assert.equal(ev.sensors.find((e) => e.id === 'ok').status, 'green', 'sensor da raiz achado e verde a partir do subdir');
   } finally { rmSync(vault, { recursive: true, force: true }); rmSync(proj, { recursive: true, force: true }); }
 });

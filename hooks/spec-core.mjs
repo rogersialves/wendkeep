@@ -5,12 +5,12 @@ import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { getLocale } from './locale.mjs';
 import {
-  assertVaultPathSafe, assertVaultPathsSafe, mkdirVaultPath, writeVaultFileSync,
+  assertVaultPathSafe, assertVaultPathsSafe, mkdirVaultPath, writeVaultFileAtomic, writeVaultFileSync,
 } from './vault-path-safety.mjs';
 
-// Short stable fingerprint of tarefas.md — freshness check between package/verdict and gate.
+// Canonical SHA-256 fingerprint of tarefas.md — freshness binding between package/verdict and gate.
 export function tasksHashOf(md) {
-  return createHash('sha1').update(String(md)).digest('hex').slice(0, 12);
+  return `sha256:${createHash('sha256').update(String(md).replace(/\r\n?/g, '\n')).digest('hex')}`;
 }
 
 export function contentHashOf(value) {
@@ -168,7 +168,11 @@ function recordPromotedSpecs(vaultBase, capabilities) {
   return state;
 }
 
-export function captureSpecBaseline(vaultBase, changeDir, { refresh = false } = {}) {
+export function captureSpecBaseline(vaultBase, changeDir, {
+  refresh = false,
+  writeAtomic = writeVaultFileAtomic,
+  beforeRename,
+} = {}) {
   const path = join(changeDir, SPEC_BASELINE_FILE);
   const checked = assertVaultPathSafe(vaultBase, path, {
     expectedType: 'file', label: 'baseline de specs da change',
@@ -177,12 +181,12 @@ export function captureSpecBaseline(vaultBase, changeDir, { refresh = false } = 
     try { return JSON.parse(readFileSync(path, 'utf8')); } catch { /* rebuild malformed baseline */ }
   }
   const baseline = { version: 1, capturedAt: new Date().toISOString(), specs: readLivingSpecs(vaultBase) };
-  writeVaultFileSync(
+  writeAtomic(
     vaultBase,
     path,
     `${JSON.stringify(baseline, null, 2)}\n`,
     'utf8',
-    { label: 'baseline de specs da change' },
+    { scopeRoot: changeDir, label: 'baseline de specs da change', beforeRename },
   );
   return baseline;
 }
@@ -474,10 +478,24 @@ export function promoteSpecs(vaultBase, changeDir, specs, { changeWikilink, date
 // Gate check for the independent verdict (Wave A). A requirement-bearing change must have
 // a verdict that is ok and covers every declared req id. A requirement-less change passes:
 // nothing for an independent verifier to check — the sensor gate is already the proof.
-export function evaluateVerdict(verdict, reqIds, { tasksHash, effectiveSpecHash } = {}) {
+export function evaluateVerdict(verdict, reqIds, {
+  tasksHash,
+  effectiveSpecHash,
+  evidenceEnvelopeId,
+  evidenceBinding,
+} = {}) {
   const ids = reqIds || [];
-  if (ids.length === 0) return { ok: true, missing: [] };
+  if (ids.length === 0 && !evidenceEnvelopeId) return { ok: true, missing: [] };
   if (!verdict || verdict.ok !== true) return { ok: false, missing: [] };
+  if (evidenceEnvelopeId && verdict.evidenceEnvelopeId !== evidenceEnvelopeId) {
+    return { ok: false, missing: [], stale: true };
+  }
+  if (evidenceBinding && (!verdict.evidenceBinding || Object.entries(evidenceBinding).some(
+    ([key, value]) => verdict.evidenceBinding[key] !== value,
+  ))) {
+    return { ok: false, missing: [], stale: true };
+  }
+  if (ids.length === 0) return { ok: true, missing: [] };
   // Freshness (G3/#6): a verdict minted against a different tarefas.md is stale. Verdicts
   // without a hash (pre-0.6.1) are accepted for backward compat.
   if (tasksHash && verdict.tasksHash && verdict.tasksHash !== tasksHash) {

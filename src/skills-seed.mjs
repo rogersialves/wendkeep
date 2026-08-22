@@ -281,7 +281,8 @@ nunca tivesse visto a implementação. Contexto fresco, read-only.
   (isolamento real). Nos outros, entre num contexto limpo e re-derive do spec, não da memória.
 - \`ok: false\` se algum requisito não tem cobertura que discrimina. Gap não é "quase lá" — é vermelho.
 - Não conserte aqui. Gap vira tarefa de correção na change; re-verifica depois.
-- O gate do \`archive\` **exige** \`verdict.json\` com \`ok\` cobrindo todo \`[req:]\`. Sem isso, não arquiva.
+- O gate do \`archive\` **exige** \`verdict.json\` com \`ok\` cobrindo todo \`[req:]\` e copiando
+  \`evidenceEnvelopeId\` + \`evidenceBinding\` de \`verificacao.json\`. Sem isso, não arquiva.
 
 ## Templates (nesta pasta)
 - \`spec-reviewer-prompt.md\` — cole ao spawnar o subagente verificador (read-only, autor≠verificador).
@@ -489,7 +490,8 @@ the author — even if you wrote the code, enter as if you'd never seen it. Fres
 - **Author ≠ verifier.** On Claude, spawn a read-only sub-agent for real isolation.
 - \`ok: false\` if any requirement lacks discriminating coverage. A gap is red, not "almost".
 - Don't fix here — a gap becomes a fix task; re-verify after.
-- The archive gate **requires** a fresh \`verdict.json\` (matching \`tasksHash\` and \`effectiveSpecHash\`) covering every \`[req:]\`.
+- The archive gate **requires** a fresh \`verdict.json\` matching \`tasksHash\`,
+  \`effectiveSpecHash\`, \`evidenceEnvelopeId\`, and \`evidenceBinding\`, covering every \`[req:]\`.
 
 ## Templates (in this folder)
 - \`spec-reviewer-prompt.md\` — hand it to the verifier sub-agent you spawn (read-only, author≠verifier).
@@ -507,6 +509,8 @@ const VERDICT_TEMPLATE = `{
   ],
   "tasksHash": "<copie de verificacao.json — selo de frescor / copy from verificacao.json — freshness seal>",
   "effectiveSpecHash": "<copie de verificacao.json / copy from verificacao.json>",
+  "evidenceEnvelopeId": "<copie de verificacao.json / copy from verificacao.json>",
+  "evidenceBinding": "<copie o objeto de verificacao.json / copy the object from verificacao.json>",
   "notes": []
 }
 `;
@@ -532,7 +536,8 @@ Para cada \`[req:ID]\` da mudança:
 
 Grave \`08-Mudanças/<slug>/verdict.json\` no formato de \`verdict-template.json\`. \`ok: false\` se
 qualquer \`[req:]\` não tem cobertura que discrimina. Não conserte aqui — gap vira tarefa de
-correção. \`tasksHash\` e \`effectiveSpecHash\` vêm do pacote; alterações posteriores deixam o verdict stale.
+correção. \`tasksHash\`, \`effectiveSpecHash\`, \`evidenceEnvelopeId\` e \`evidenceBinding\` vêm do
+pacote; alterações posteriores deixam o verdict stale e o binding nunca deve ser reconstruído à mão.
 ---
 `;
 
@@ -556,8 +561,9 @@ For each \`[req:ID]\`:
 4. Check the observable result against the criterion — not the code.
 
 Write \`08-Changes/<slug>/verdict.json\` in the shape of \`verdict-template.json\`. \`ok: false\` if any
-\`[req:]\` lacks discriminating coverage. Don't fix here — a gap becomes a fix task. \`tasksHash\`
-and \`effectiveSpecHash\` come from the package (freshness seals; later task/spec edits make verdict stale).
+\`[req:]\` lacks discriminating coverage. Don't fix here — a gap becomes a fix task. \`tasksHash\`,
+\`effectiveSpecHash\`, \`evidenceEnvelopeId\`, and \`evidenceBinding\` are copied from the package;
+never reconstruct the binding by hand (later checkout/task/spec edits make the verdict stale).
 ---
 `;
 

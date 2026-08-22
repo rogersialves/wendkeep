@@ -11,6 +11,14 @@
       "command": "npm test"
     },
     {
+      "id": "evidence-envelope",
+      "name": "Evidence Envelope v2",
+      "description": "Validates Git/worktree bindings, sensor provenance, atomic authority writes, legacy classification and consumers",
+      "severity": "critical",
+      "type": "command",
+      "command": "node --test tests/evidence-envelope.test.mjs tests/change-cli.test.mjs tests/cli-safety.test.mjs tests/spec-core.test.mjs tests/active-context-handoff-evidence.test.mjs tests/memory-handoff.test.mjs tests/hardening-022.test.mjs tests/memory-gate.test.mjs"
+    },
+    {
       "id": "pricing-coverage",
       "name": "Pricing coverage",
       "description": "Validates published prices, explicit research-preview status and doctor classification",

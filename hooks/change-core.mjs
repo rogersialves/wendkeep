@@ -15,6 +15,7 @@ import {
   resolveActiveContext,
   setActiveContextChange,
 } from './active-context-store.mjs';
+import { evidenceSensors } from '../packages/vault/src/evidence-envelope.mjs';
 
 export const ARCHIVE_DIR = '_arquivo';
 const POINTER = '.brain/CURRENT_CHANGE.md';
@@ -442,7 +443,7 @@ export function quickGateState(vaultBase, { context } = {}) {
   let redCritical = false;
   try {
     const ev = JSON.parse(readFileSync(join(dir, 'evidencia.json'), 'utf8'));
-    redCritical = (Array.isArray(ev) ? ev : []).some((e) => e.status !== 'green' && (e.severity || 'critical') !== 'warning');
+    redCritical = evidenceSensors(ev).some((e) => e.status !== 'green' && (e.severity || 'critical') !== 'warning');
   } catch { /* sem/ilegível = não conta contra o nudge */ }
   let evidenceStale = false;
   try {

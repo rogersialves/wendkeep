@@ -381,9 +381,10 @@ test('[req:ACTX-22] [req:ACTX-23] [req:ACTX-25] Stop isolates handoff and eviden
     assert.equal(verdict?.scope?.id, 'causal-change');
     assert.ok(verdict?.evidence?.some((item) => /causal-change\/verdict\.json/.test(item)));
     const sensors = eventsA.find((event) => event.memory_key === 'quality.latest-sensors');
-    assert.deepEqual(sensors?.value, ['causal-sensor']);
+    assert.deepEqual(sensors?.value, { ids: ['causal-sensor'], evidence_state: 'legacy-unbound' });
     assert.equal(sensors?.scope?.id, 'causal-change');
-    assert.deepEqual(sensors?.evidence, ['causal-sensor']);
+    assert.deepEqual(sensors?.evidence, ['08-Mudanças/_arquivo/causal-change/evidencia.json']);
+    assert.equal(sensors?.authority, 'reported', 'legacy v1 evidence is readable but never promoted to v2 authority');
     assert.ok(!eventsA.some((event) => JSON.stringify(event.value).includes('wk-fixture-example-sensor-alpha')));
     assert.match(readFileSync(fixture.sessionPath, 'utf8'), /causal-change\/proposta/);
     assert.doesNotMatch(readFileSync(fixture.sessionPath, 'utf8'), new RegExp(`${SYNTHETIC_MEMORY.changeSlug}/proposta`));
