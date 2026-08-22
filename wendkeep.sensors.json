@@ -576,6 +576,14 @@
       "severity": "critical",
       "type": "command",
       "command": "node --test tests/active-context-store.test.mjs tests/active-context-runtime.test.mjs tests/active-context-change-cli.test.mjs tests/change-core.test.mjs tests/change-cli.test.mjs"
+    },
+    {
+      "id": "active-context-delivery",
+      "name": "active-context-delivery",
+      "description": "Validates contextual delivery bindings, CLI lifecycle, hooks, rollback and legacy projection",
+      "severity": "critical",
+      "type": "command",
+      "command": "node --test tests/active-context-delivery.test.mjs tests/active-context-delivery-cli.test.mjs tests/delivery.test.mjs"
     }
   ]
 }
