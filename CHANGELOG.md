@@ -4,6 +4,19 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.76.8] — 2026-08-22
+
+### Added
+
+- **Doctor de active contexts.** A seção `[active-contexts]` cruza store, sessões e topologia Git
+  read-only para classificar sessão órfã, worktree removida e lease `request-stop` expirada; uma
+  topologia não provada permanece diagnóstico não acionável, nunca falso positivo de remoção.
+- **Reparo explícito com CAS.** `context repair` exige key, revision, sessão ator e motivo, revalida
+  sob o lock e falha sem writes quando o alvo ficou saudável, stale ou não pode ser provado.
+- **Preservação histórica.** Orphan/removed muda para `closed` sem apagar o contexto; lease vencida
+  isolada muda para `expired` sem fechar contexto saudável. Receipt append-only e projeções legadas
+  são atualizados sem tocar ledger, evidência, notas ou memória histórica.
+
 ## [0.76.7] — 2026-08-22
 
 ### Fixed

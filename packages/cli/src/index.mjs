@@ -61,7 +61,9 @@ Usage:
                            Switch Git branch and the causal session scope in the same worktree.
   wendkeep context status --session <id> [--json]
   wendkeep context recover --session <id> --select reserved|observed --revision <n> --reason <text> [--json]
+  wendkeep context repair --key <repository:worktree:work-session> --revision <n> --reason <text> --session <id> [--json]
                            Inspect or explicitly recover a quarantined causal scope conflict.
+                           Repair revalidates orphan/removed contexts or expired request leases without deleting history.
   wendkeep change <sub>        Change lifecycle: new [--simple|--guide] | use | bind <slug> --session <id> | continue | list | show |
                            status | done <id> | undone <id> | diff | archive [--force] | abandon | relink | backlink.
                            --session <id> selects the causal active_context for implicit change operations.

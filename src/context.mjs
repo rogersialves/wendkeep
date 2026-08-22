@@ -12,6 +12,7 @@ import {
 } from '../hooks/project-scope.mjs';
 import { readVaultMarker } from './project-vault.mjs';
 import { sanitizeMemoryText } from '../packages/vault/src/memory-schema.mjs';
+import { repairActiveContext } from './active-context-health.mjs';
 
 export const CONTEXT_HELP = `wendkeep context <subcommand>
 
@@ -19,14 +20,17 @@ export const CONTEXT_HELP = `wendkeep context <subcommand>
   status --session <id> [--project <path>] [--vault <path>] [--json]
   recover --session <id> --select <reserved|observed> --revision <n> --reason <text>
     [--project <path>] [--vault <path>] [--json]
+  repair --key <repository:worktree:work-session> --revision <n> --reason <text> --session <id>
+    [--project <path>] [--vault <path>] [--json]
 
 Switches Git branch and the causal session scope together inside the same worktree.
 Without --session, exactly one active session must match the current scope.
 Status inventories reserved/observed recovery candidates without selecting one.
 Recover resolves a quarantined conflict only when the selected candidate still matches the checkout.
+Repair revalidates an orphan/removed context or expired request lease under CAS; it never deletes history.
 `;
 
-const VALUE_OPTIONS = new Set(['--project', '--vault', '--session', '--select', '--revision', '--reason']);
+const VALUE_OPTIONS = new Set(['--project', '--vault', '--session', '--select', '--revision', '--reason', '--key']);
 const FLAG_OPTIONS = new Set(['--create', '--json']);
 
 function contextError(code, message) {
@@ -525,6 +529,9 @@ function output(result, json) {
   else if (result.status === 'recovered') {
     process.stdout.write(`context recovered: ${result.selected} selected (session ${result.session_id}; revision ${result.revision})\n`);
   }
+  else if (result.status === 'repaired') {
+    process.stdout.write(`context repaired: ${result.key} (${result.effect}; revision ${result.revision})\n`);
+  }
   else process.stdout.write(`context ${result.status}: ${result.branch} (session ${result.session_id}; revision ${result.revision})\n`);
 }
 
@@ -549,6 +556,18 @@ export function runContext(argv = []) {
         select: optionValue(argv, '--select'),
         revision: optionValue(argv, '--revision'),
         reason: optionValue(argv, '--reason'),
+      });
+      output(result, argv.includes('--json'));
+      return 0;
+    }
+    if (sub === 'repair' && !branch && !extra.length) {
+      const result = repairActiveContext({
+        vaultBase: vaultOf(argv),
+        projectRoot: projectOf(argv),
+        key: optionValue(argv, '--key'),
+        revision: optionValue(argv, '--revision'),
+        reason: optionValue(argv, '--reason'),
+        actorSessionId: optionValue(argv, '--session'),
       });
       output(result, argv.includes('--json'));
       return 0;

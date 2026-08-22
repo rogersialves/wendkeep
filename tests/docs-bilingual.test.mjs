@@ -58,7 +58,7 @@ const GUIDE_FOR_FAMILY = new Map([
   ['wendkeep worktree create', 'worktrees.md'], ['wendkeep worktree list', 'worktrees.md'],
   ['wendkeep worktree status', 'worktrees.md'], ['wendkeep worktree open', 'worktrees.md'],
   ['wendkeep context switch', 'context.md'], ['wendkeep context status', 'context.md'],
-  ['wendkeep context recover', 'context.md'],
+  ['wendkeep context recover', 'context.md'], ['wendkeep context repair', 'context.md'],
   ['wendkeep profile', 'operating-profiles.md'], ['wendkeep flow', 'operating-profiles.md'],
   ['wendkeep delivery', 'operating-profiles.md'],
   ['wendkeep hook', 'sessions-and-import.md'], ['wendkeep doctor', 'maintenance-and-diagnostics.md'],
@@ -374,6 +374,27 @@ test('[req:ACTX-8] DOC-15: recovery documenta argumentos, candidatos, CAS e fail
     ]) assert.match(readme, new RegExp(token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'), `${locale} README: ${token}`);
     assert.match(guide, /fail(?:-| )closed|falha[^\n]*sem writes|byte(?:-| )a(?:-| )byte/i, `${locale}: fail-closed`);
     assert.match(readme, /checkout/i, `${locale}: revalidation`);
+  }
+});
+
+test('[req:ACTX-26] [req:ACTX-28] DOC-16: doctor/repair documentam diagnóstico, CAS e preservação histórica', () => {
+  const help = readFileSync(join(ROOT, 'packages', 'cli', 'src', 'index.mjs'), 'utf8');
+  for (const token of ['context repair', '--key', '--revision', '--reason', '--session']) {
+    assert.match(help, new RegExp(token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'), `help: ${token}`);
+  }
+  for (const [locale, dir] of Object.entries(GUIDE_DIR)) {
+    const guide = readFileSync(join(dir, 'context.md'), 'utf8');
+    const readme = readFileSync(join(ROOT, locale === 'pt' ? 'README.md' : 'README.en.md'), 'utf8');
+    for (const token of [
+      'context repair', 'doctor', '--key', '--revision', 'active_context_repairs',
+      'WENDKEEP_ACTIVE_CONTEXT_SESSION_ORPHAN', 'WENDKEEP_ACTIVE_CONTEXT_WORKTREE_REMOVED',
+      'WENDKEEP_ACTIVE_CONTEXT_LEASE_EXPIRED', 'WENDKEEP_ACTIVE_CONTEXT_TOPOLOGY_UNPROVEN',
+    ]) assert.match(guide, new RegExp(token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'), `${locale} guide: ${token}`);
+    for (const token of ['context repair', 'doctor', 'worktree', 'lease']) {
+      assert.match(readme, new RegExp(token, 'i'), `${locale} README: ${token}`);
+    }
+    assert.match(guide, /históric|historical/i, `${locale}: preserves history`);
+    assert.match(guide, /byte(?:-| )a(?:-| )byte|byte(?:-| )for(?:-| )byte|byte-identical|sem escrita|without writ/i, `${locale}: fail closed`);
   }
 });
 
