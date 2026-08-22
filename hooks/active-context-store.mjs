@@ -139,6 +139,7 @@ export function mutateActiveContext(vaultBase, identity, updater, {
   expectedRevision,
   now = new Date().toISOString(),
   mutateRegistry = mutateSessionRegistry,
+  projectLegacy = true,
 } = {}) {
   const normalized = normalizeIdentity(identity);
   const key = activeContextKey(normalized);
@@ -191,8 +192,10 @@ export function mutateActiveContext(vaultBase, identity, updater, {
     registry.active_contexts = { ...contexts, [key]: next };
     return { key, context: structuredClone(next), registryRevision: registry.active_contexts_revision };
   });
-  projectLegacyActiveChange(vaultBase);
-  projectLegacyActiveDelivery(vaultBase);
+  if (projectLegacy) {
+    projectLegacyActiveChange(vaultBase);
+    projectLegacyActiveDelivery(vaultBase);
+  }
   return result;
 }
 

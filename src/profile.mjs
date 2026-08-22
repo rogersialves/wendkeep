@@ -8,7 +8,11 @@ import {
   resolveOperatingProfile,
   setOperatingProfile,
 } from './operating-profile.mjs';
-import { setSessionTaskOperatingProfile } from '../hooks/operating-profile-task-store.mjs';
+import {
+  sessionTaskOperatingProfile,
+  setSessionTaskOperatingProfile,
+} from '../hooks/operating-profile-task-store.mjs';
+import { resolveCommandActiveContext } from './active-context-runtime.mjs';
 import { resolve } from 'node:path';
 import { findProjectBinding, resolveProjectVault, updateProjectBinding } from './project-vault.mjs';
 
@@ -163,12 +167,13 @@ function sessionProfile(vaultBase, sessionId, projectResolved) {
   return sessionBaseProfile(sessions[sessionId], projectResolved);
 }
 
-function sessionProfileStatus(vaultBase, sessionId, projectResolved) {
+function sessionProfileStatus(vaultBase, sessionId, projectResolved, { context = null } = {}) {
   const sessions = readSessionRegistry(vaultBase).sessions || {};
   if (!Object.hasOwn(sessions, sessionId)) throw new Error(`sessão não encontrada: ${sessionId}`);
   const entry = sessions[sessionId];
   const base = sessionBaseProfile(entry, projectResolved);
-  const taskLease = evaluateTaskOperatingProfileLease(entry.operating_profile_task, {
+  const taskLease = evaluateTaskOperatingProfileLease(
+    sessionTaskOperatingProfile(vaultBase, sessionId, { context }), {
     sessionId,
     turnId: entry.last_prompt_turn_id || '',
     turnSequence: entry.last_turn_sequence,
@@ -181,6 +186,15 @@ function sessionProfileStatus(vaultBase, sessionId, projectResolved) {
     baseSource: base.source,
     taskLease,
   };
+}
+
+function commandActiveContext(state, sessionId) {
+  if (!sessionId || state.resolved.bindingError) return null;
+  return resolveCommandActiveContext({
+    vaultBase: state.vaultBase,
+    projectRoot: state.resolved.projectRoot || process.cwd(),
+    sessionId,
+  });
 }
 
 function sessionOutputPayload(effective, sessionId) {
@@ -213,8 +227,9 @@ export function runProfile(argv = []) {
   if (sub === 'status' || sub === 'show') {
     if (args.length > 1) return fail(`${sub} não aceita argumentos posicionais adicionais`);
     try {
+      const activeContext = sessionId ? commandActiveContext(state, sessionId) : null;
       const effective = sessionId
-        ? sessionProfileStatus(state.vaultBase, sessionId, projectResolved)
+        ? sessionProfileStatus(state.vaultBase, sessionId, projectResolved, { context: activeContext })
         : { profile: projectResolved.profile, source: projectResolved.source, scope: 'project' };
       output({
         ...(sessionId ? sessionOutputPayload(effective, sessionId) : {
@@ -235,11 +250,12 @@ export function runProfile(argv = []) {
     if (!reason) return fail('route requer --reason <text>');
     try {
       const base = sessionProfile(state.vaultBase, sessionId, projectResolved);
+      const activeContext = commandActiveContext(state, sessionId);
       const lease = setSessionTaskOperatingProfile(
         state.vaultBase,
         sessionId,
         args[1],
-        { reason },
+        { reason, context: activeContext },
       );
       output({
         profile: lease.profile,

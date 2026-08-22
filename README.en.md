@@ -343,6 +343,11 @@ selects the caller explicitly. `CURRENT_DELIVERY` is only a derived projection w
 single, unambiguous context; hooks consult only the causal delivery, and an ID from another context
 fails with `WENDKEEP_DELIVERY_CONTEXT_MISMATCH`.
 
+`operating_profile_task` belongs to the causal work session's active context. `profile route` and
+`profile status --session <id>`, hooks, and Stop read/consume only that lease; a temporary route
+never crosses into a sibling. Legacy session fallback exists only without `active_contexts`;
+an initialized registry never copies a global authorization without proven identity.
+
 ```bash
 npx wendkeep delivery start release-0-74-0 --allow git:merge --allow git:push --allow publish --source-change <slug> --source-commit <sha> --session <id>
 npx wendkeep delivery status release-0-74-0 --session <id>

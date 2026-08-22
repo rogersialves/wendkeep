@@ -4,6 +4,17 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.76.6] — 2026-08-22
+
+### Fixed
+
+- **Task lease causal.** `operating_profile_task` passa a pertencer ao `active_contexts` da
+  worktree/work session; rotas temporárias irmãs não se sobrescrevem nem ampliam autorização.
+- **CLI e hooks escopados.** `profile route/status`, os hooks de operating profile e o consumo no
+  Stop resolvem a lease do chamador e preservam o sibling byte a byte por revision/CAS.
+- **Fallback legado fail-closed.** Vault sem registry contextual conserva a lease na sessão;
+  depois da inicialização, uma lease global não é copiada nem aplicada sem identidade provada.
+
 ## [0.76.5] — 2026-08-22
 
 ### Added

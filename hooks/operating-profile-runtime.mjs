@@ -11,6 +11,8 @@ import {
 import { findProjectBinding, resolveProjectVault } from '../src/project-vault.mjs';
 import { readSessionRegistry } from './obsidian-common.mjs';
 import { resolveSessionIdentity } from './session-identity.mjs';
+import { resolveCommandActiveContext } from '../src/active-context-runtime.mjs';
+import { sessionTaskOperatingProfile } from './operating-profile-task-store.mjs';
 
 function bindingDiagnostic(error, configPath = '') {
   return {
@@ -152,9 +154,26 @@ export function resolveHookOperatingProfile({
   const entry = identity.state === 'resolved'
     ? readSessionRegistry(vaultResolution.base).sessions?.[identity.canonicalConversationId] || null
     : null;
+  let activeContext = null;
+  let contextError = null;
+  if (!bindingError && identity.state === 'resolved') {
+    try {
+      activeContext = resolveCommandActiveContext({
+        vaultBase: vaultResolution.base,
+        projectRoot: input?.cwd || vaultResolution.projectRoot || process.cwd(),
+        sessionId: identity.canonicalConversationId,
+      });
+    } catch (error) {
+      contextError = bindingDiagnostic(error);
+    }
+  }
   const base = sessionOverride(entry) || project;
   const taskLease = evaluateTaskOperatingProfileLease(
-    entry?.operating_profile_task,
+    contextError ? null : sessionTaskOperatingProfile(
+      vaultResolution.base,
+      identity.canonicalConversationId || '',
+      { context: activeContext },
+    ),
     taskLeaseContext(entry, input, identity.canonicalConversationId || ''),
   );
   const selected = taskLease.state === 'active'
@@ -176,6 +195,8 @@ export function resolveHookOperatingProfile({
     baseProfile: base.profile,
     baseSource: base.source,
     taskLease,
+    activeContext,
+    ...(contextError ? { contextError } : {}),
     resolution: vaultResolution,
     ...(bindingError ? { bindingError } : {}),
   };
