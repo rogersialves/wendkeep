@@ -568,6 +568,14 @@
       "severity": "critical",
       "type": "command",
       "command": "node --test tests/worktree-metadata.test.mjs tests/worktree-cli.test.mjs tests/project-vault.test.mjs tests/privacy-hygiene.test.mjs tests/flow-protected-policy.test.mjs"
+    },
+    {
+      "id": "active-context-registry",
+      "name": "active-context-registry",
+      "description": "Validates multi-context schema, CAS, runtime identity, change isolation and legacy projection",
+      "severity": "critical",
+      "type": "command",
+      "command": "node --test tests/active-context-store.test.mjs tests/active-context-runtime.test.mjs tests/active-context-change-cli.test.mjs tests/change-core.test.mjs tests/change-cli.test.mjs"
     }
   ]
 }

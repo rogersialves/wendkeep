@@ -10,6 +10,11 @@ import {
   assertVaultPathSafe, assertVaultPathsSafe, mkdirVaultPath, renameVaultPath,
   unlinkVaultFile, writeVaultFileSync,
 } from './vault-path-safety.mjs';
+import {
+  clearActiveContextChange,
+  resolveActiveContext,
+  setActiveContextChange,
+} from './active-context-store.mjs';
 
 export const ARCHIVE_DIR = '_arquivo';
 const POINTER = '.brain/CURRENT_CHANGE.md';
@@ -118,7 +123,14 @@ export function scaffoldPlaceholders(dir) {
   return found;
 }
 
-export function activeChange(vaultBase) {
+export function activeChange(vaultBase, { context } = {}) {
+  if (context) {
+    try { return String(resolveActiveContext(vaultBase, context).change_slug || '').trim(); }
+    catch (error) {
+      if (error?.code === 'WENDKEEP_ACTIVE_CONTEXT_NOT_FOUND') return '';
+      throw error;
+    }
+  }
   try {
     const m = readFileSync(join(vaultBase, POINTER), 'utf8').match(/^change:\s*(.+)$/m);
     return m ? m[1].trim() : '';
@@ -127,7 +139,8 @@ export function activeChange(vaultBase) {
   }
 }
 
-export function setActiveChange(vaultBase, slug) {
+export function setActiveChange(vaultBase, slug, { context } = {}) {
+  if (context) return setActiveContextChange(vaultBase, context, slug);
   mkdirVaultPath(vaultBase, join(vaultBase, '.brain'), { label: 'raiz de controle da change' });
   writeVaultFileSync(
     vaultBase,
@@ -138,7 +151,8 @@ export function setActiveChange(vaultBase, slug) {
   );
 }
 
-export function clearActiveChange(vaultBase) {
+export function clearActiveChange(vaultBase, { context } = {}) {
+  if (context) return clearActiveContextChange(vaultBase, context);
   const p = join(vaultBase, POINTER);
   const checked = assertVaultPathSafe(vaultBase, p, {
     expectedType: 'file', label: 'ponteiro CURRENT_CHANGE.md',
@@ -191,7 +205,9 @@ export function assertChangeScaffoldTargetsSafe(vaultBase, slug, {
   return { dir, rel: changeDirRel(slug, vaultBase) };
 }
 
-export function newChange(vaultBase, slug, { sessionRel = '', dateStr, simple = false, guide = false }) {
+export function newChange(vaultBase, slug, {
+  sessionRel = '', dateStr, simple = false, guide = false, context,
+}) {
   const compact = simple || guide;
   const loc = getLocale(vaultBase);
   const { dir } = assertChangeScaffoldTargetsSafe(vaultBase, slug, { simple: compact });
@@ -218,14 +234,14 @@ export function newChange(vaultBase, slug, { sessionRel = '', dateStr, simple = 
     write('design.md', files.design);
   }
   if (!existed) captureSpecBaseline(vaultBase, dir);
-  setActiveChange(vaultBase, slug);
+  setActiveChange(vaultBase, slug, { context });
   return { rel: changeDirRel(slug, vaultBase), created: !existed };
 }
 
-export function useChange(vaultBase, slug) {
+export function useChange(vaultBase, slug, { context } = {}) {
   const dir = join(vaultBase, getLocale(vaultBase).folders.changes, slug);
   if (!existsSync(join(dir, 'proposta.md'))) return { ok: false, error: `change aberta não encontrada: ${slug}` };
-  setActiveChange(vaultBase, slug);
+  setActiveChange(vaultBase, slug, { context });
   return { ok: true, rel: changeDirRel(slug, vaultBase) };
 }
 
@@ -314,8 +330,8 @@ export function listChanges(vaultBase) {
 // comandos implícitos; provider/session nunca filtram a fila, para que outro agente possa assumir
 // o trabalho. O hash leva o conteúdo inteiro de cada tarefas.md — não apenas as contagens — pois
 // ele controla a reinjeção por sessão dos hooks.
-export function allChangesState(vaultBase) {
-  const current = activeChange(vaultBase);
+export function allChangesState(vaultBase, { context } = {}) {
+  const current = activeChange(vaultBase, { context });
   const { active } = listChanges(vaultBase);
   const chDir = getLocale(vaultBase).folders.changes;
   const fingerprint = [`current:${current}`];
@@ -407,16 +423,16 @@ export function buildActiveChangeInjection(vaultBase, options = {}) {
   return renderOpenChanges(allChangesState(vaultBase), options);
 }
 
-export function activeChangeLink(vaultBase) {
-  const slug = activeChange(vaultBase);
+export function activeChangeLink(vaultBase, { context } = {}) {
+  const slug = activeChange(vaultBase, { context });
   return slug ? `Change ativa: [[${getLocale(vaultBase).folders.changes}/${slug}/proposta]]` : '';
 }
 
 // --- Estado rápido do gate + sentinelas por sessão (0.31.0) --------------------
 // Fonte única e barata (só leituras, tudo fail-open) do estado do gate, consumida pelos hooks
 // de lifecycle (change-guard/change-nag/change-context) e pelo CLI. null sem change ativa.
-export function quickGateState(vaultBase) {
-  const slug = activeChange(vaultBase);
+export function quickGateState(vaultBase, { context } = {}) {
+  const slug = activeChange(vaultBase, { context });
   if (!slug) return null;
   const dir = join(vaultBase, getLocale(vaultBase).folders.changes, slug);
   let tarefasMd = '';
@@ -536,7 +552,9 @@ export function gateGreen() {
   return { ok: true, failing: [] };
 }
 
-export function archiveChange(vaultBase, slug, { gate = gateGreen, dateStr, adrNum, adrFlags = {} }) {
+export function archiveChange(vaultBase, slug, {
+  gate = gateGreen, dateStr, adrNum, adrFlags = {}, context,
+}) {
   const loc = getLocale(vaultBase);
   const chDir = loc.folders.changes;
   const src = join(vaultBase, chDir, slug);
@@ -656,7 +674,7 @@ Mudança ${changeWikilink} concluída e arquivada.${capLine}${reqLine}${forcedNo
 
   // Only clear the pointer when the archived change IS the active one — archiving some other
   // slug explicitly must not blank the pointer of a different, still-active change.
-  if (activeChange(vaultBase) === slug) clearActiveChange(vaultBase);
+  if (activeChange(vaultBase, { context }) === slug) clearActiveChange(vaultBase, { context });
   return { ok: true, failing: [], archivedRel: destRel, adrRel: createAdr ? adrRel : '', promoted, specWarnings, linksRewritten };
 }
 
@@ -849,7 +867,7 @@ export function relinkChanges(vaultBase, { apply = false } = {}) {
 // Abandono (0.31.0): a saída legítima para uma change que não vai adiante — o que antes só o
 // `archive --force` "resolvia", minting um ADR falso. Sem ADR, sem promoteSpecs (abandono não é
 // decisão arquitetural nem promove contrato); move para _arquivo com sufixo -abandonada.
-export function abandonChange(vaultBase, slug, { dateStr }) {
+export function abandonChange(vaultBase, slug, { dateStr, context } = {}) {
   const chDir = getLocale(vaultBase).folders.changes;
   const src = join(vaultBase, chDir, slug);
   const checkedProposal = assertVaultPathSafe(vaultBase, join(src, 'proposta.md'), {
@@ -882,6 +900,6 @@ export function abandonChange(vaultBase, slug, { dateStr }) {
   } catch { /* proposta sem frontmatter — segue */ }
   let linksRewritten = 0;
   try { linksRewritten = rewriteChangeLinks(vaultBase, `${chDir}/${slug}`, destRel.replaceAll('\\', '/')); } catch { /* abandono já íntegro */ }
-  if (activeChange(vaultBase) === slug) clearActiveChange(vaultBase);
+  if (activeChange(vaultBase, { context }) === slug) clearActiveChange(vaultBase, { context });
   return { ok: true, failing: [], archivedRel: destRel, linksRewritten };
 }

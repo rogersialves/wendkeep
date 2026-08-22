@@ -85,6 +85,22 @@ preserves the change/lease/authorizations, clears only the quarantine, and appen
 receipt to `context_recoveries`. Any failure leaves the registry and quarantine byte-identical.
 This is fail-closed: no candidate, receipt, or partial scope is published after a failed check.
 
+### Multi-context change registry
+
+`SESSION_REGISTRY.json` keeps `active_contexts` with its own schema and revision. Each entry is
+identified by `repository_id` + `worktree_id` + `work_session_id`; branch, HEAD, and `change_slug`
+belong to that entry. Two worktrees can therefore select different changes without overwriting
+each other's operational focus.
+
+With an explicit causal session, change, spec, and verify resolve only the matching entry. Without
+a session, only one active entry for the worktree is accepted; two sessions produce ambiguity and
+the operation must fail closed without silently selecting a change.
+
+`CURRENT_CHANGE.md` is only a derived projection: it contains a change when there is one single,
+unambiguous active context. With zero or multiple contexts it stays empty. Migration is conservative
+and never invents a worktree or session identity. The legacy pointer becomes a context only
+when one active session, a complete scope, and worktree metadata prove one identity.
+
 ## Common errors and diagnosis
 
 - `WENDKEEP_CONTEXT_AMBIGUOUS`: pass `--session <id>`; no candidate is selected silently.

@@ -11,6 +11,7 @@ import {
 } from '../hooks/spec-core.mjs';
 import { activeChange, parseTasks } from '../hooks/change-core.mjs';
 import { getLocale } from '../hooks/locale.mjs';
+import { resolveCommandActiveContext } from './active-context-runtime.mjs';
 
 function resolveVault(argv) {
   let vault;
@@ -38,9 +39,21 @@ export function runSpec(argv) {
     const entry = rest.find((a) => a.startsWith(`${name}=`));
     return entry ? entry.slice(name.length + 1) : undefined;
   };
+  const commandContext = () => {
+    try {
+      return resolveCommandActiveContext({
+        vaultBase,
+        projectRoot: resolve(option('--project') || process.cwd()),
+        sessionId: option('--session') || process.env.CODEX_THREAD_ID || process.env.CLAUDE_SESSION_ID || '',
+      });
+    } catch (error) {
+      process.stderr.write(`wendkeep spec: ${error.code || 'WENDKEEP_ACTIVE_CONTEXT_FAILED'}: ${error.message}\n`);
+      process.exit(2);
+    }
+  };
 
   if (sub === 'effective') {
-    const slug = option('--change') || activeChange(vaultBase);
+    const slug = option('--change') || activeChange(vaultBase, { context: commandContext() });
     if (!slug) { process.stderr.write('wendkeep spec effective: no change (--change or current)\n'); process.exit(2); }
     const changeDir = join(vaultBase, getLocale(vaultBase).folders.changes, slug);
     let tasks = [];
@@ -74,7 +87,7 @@ export function runSpec(argv) {
   }
 
   if (sub === 'rebase') {
-    const slug = option('--change') || activeChange(vaultBase);
+    const slug = option('--change') || activeChange(vaultBase, { context: commandContext() });
     if (!slug) { process.stderr.write('wendkeep spec rebase: no change (--change or current)\n'); process.exit(2); }
     const changeDir = join(vaultBase, getLocale(vaultBase).folders.changes, slug);
     try { readFileSync(join(changeDir, 'proposta.md'), 'utf8'); }

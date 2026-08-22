@@ -25,12 +25,12 @@ Tenha o projeto inicializado, um vault saudável e `wendkeep.sensors.json` váli
 ## Sintaxe
 
 ```bash
-npx wendkeep change new <slug> [--simple|--guide]
-npx wendkeep change status [slug]
-npx wendkeep spec effective --change <slug>
+npx wendkeep change new <slug> [--simple|--guide] [--session <id>]
+npx wendkeep change status [slug] [--session <id>]
+npx wendkeep spec effective [--change <slug>] [--session <id>]
 npx wendkeep sensors list
-npx wendkeep verify [--deep] [--change <slug>]
-npx wendkeep change archive <slug>
+npx wendkeep verify [--deep] [--change <slug>] [--session <id>]
+npx wendkeep change archive <slug> [--session <id>]
 ```
 
 ## Opções e códigos de saída
@@ -43,6 +43,8 @@ npx wendkeep change archive <slug>
   trabalho sem arquivar.
 - `change continue <arquivada> <nova>` abre continuação sem herdar evidência antiga.
 - `change bind <slug> --session <id>` liga uma sessão existente.
+- `--session <id>` seleciona o `active_contexts` causal nos comandos implícitos. Sem a opção,
+  somente um contexto ativo inequívoco da worktree é aceito; ambiguidade retorna exit `2`.
 - `change relink [--apply]` e `change backlink [--apply]` reparam o grafo; dry-run é o padrão.
 - `change abandon <slug>` descarta sem ADR; `archive --force` exige decisão humana explícita.
 - `wendkeep spec list|show|effective|migrate|rebase` administra contratos vivos e deltas.
@@ -54,6 +56,7 @@ npx wendkeep change archive <slug>
 
 ```bash
 npx wendkeep change new login-tenant
+npx wendkeep change use login-tenant --session <id>
 npx wendkeep change new ajuste-interno --guide
 npx wendkeep spec effective --change login-tenant
 npx wendkeep change done 1.1 --change login-tenant
@@ -81,6 +84,10 @@ O `change-guard` também é projetado para o `PreToolUse` do Codex. Antes de uma
 uma ferramenta de escrita suportada, ele compara sessão, projeto, raiz Git, remoto, branch e
 worktree com a lease registrada no `SESSION_REGISTRY.json`. Um alvo ausente, ambíguo, concorrente ou
 fora do projeto é bloqueado antes da ferramenta.
+
+O foco implícito de change vem de `active_contexts`, não de `CURRENT_CHANGE.md`. A chave combina
+`repository_id`, `worktree_id` e `work_session_id`; o ponteiro Markdown permanece apenas como
+projeção compatível quando existe um único contexto inequívoco.
 
 O [Observer local](observer.md) é uma projeção read-only da observabilidade: o vault e a change
 continuam autoridades locais. Consultas do Observer não concluem, arquivam, reparam ou promovem

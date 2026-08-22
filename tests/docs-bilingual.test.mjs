@@ -541,3 +541,33 @@ test('[req:MEM-CUR-4] [req:MEM-CUR-5] [req:MEM-CUR-6] [req:DIAG-8] [req:DIAG-11]
     assert.match(docs.memory, /memory reject <candidate-id>/i);
   }
 });
+
+test('[req:ACTX-12] [req:ACTX-13] DOC-16: registry multi-contexto e migração conservadora são bilíngues', () => {
+  const cases = {
+    pt: {
+      guide: readFileSync(join(GUIDE_DIR.pt, 'context.md'), 'utf8'),
+      readme: readFileSync(join(ROOT, 'README.md'), 'utf8'),
+      projection: /CURRENT_CHANGE\.md[\s\S]*(?:projeção|derivad)[\s\S]*(?:único|inequívoc)/i,
+      migration: /migra[çc][aã]o[\s\S]*(?:não inventa|sem inventar)[\s\S]*(?:identidade|worktree|sessão)/i,
+      ambiguity: /duas sessões[\s\S]*(?:ambiguidade|falha fechado|falha fechada)/i,
+    },
+    en: {
+      guide: readFileSync(join(GUIDE_DIR.en, 'context.md'), 'utf8'),
+      readme: readFileSync(join(ROOT, 'README.en.md'), 'utf8'),
+      projection: /CURRENT_CHANGE\.md[\s\S]*(?:projection|derived)[\s\S]*(?:single|unambiguous)/i,
+      migration: /migration[\s\S]*(?:does not|never)[\s\S]*invent[\s\S]*(?:identity|worktree|session)/i,
+      ambiguity: /two sessions[\s\S]*(?:ambiguity|fail closed)/i,
+    },
+  };
+  for (const [locale, docs] of Object.entries(cases)) {
+    for (const text of [docs.guide, docs.readme]) {
+      assert.match(text, /active_contexts/i, `${locale}: schema ausente`);
+      for (const field of ['repository_id', 'worktree_id', 'work_session_id']) {
+        assert.match(text, new RegExp(field), `${locale}: identidade ausente ${field}`);
+      }
+    }
+    assert.match(docs.guide, docs.projection, `${locale}: limite da projeção legada ausente`);
+    assert.match(docs.guide, docs.migration, `${locale}: migração conservadora ausente`);
+    assert.match(docs.guide, docs.ambiguity, `${locale}: ambiguidade causal ausente`);
+  }
+});

@@ -25,12 +25,12 @@ Initialize the project, keep the vault healthy, and provide a valid `wendkeep.se
 ## Syntax
 
 ```bash
-npx wendkeep change new <slug> [--simple|--guide]
-npx wendkeep change status [slug]
-npx wendkeep spec effective --change <slug>
+npx wendkeep change new <slug> [--simple|--guide] [--session <id>]
+npx wendkeep change status [slug] [--session <id>]
+npx wendkeep spec effective [--change <slug>] [--session <id>]
 npx wendkeep sensors list
-npx wendkeep verify [--deep] [--change <slug>]
-npx wendkeep change archive <slug>
+npx wendkeep verify [--deep] [--change <slug>] [--session <id>]
+npx wendkeep change archive <slug> [--session <id>]
 ```
 
 ## Options and exit codes
@@ -43,6 +43,8 @@ npx wendkeep change archive <slug>
   without archiving it.
 - `change continue <archived> <new>` starts follow-up work without inheriting stale proof.
 - `change bind <slug> --session <id>` attaches an existing session.
+- `--session <id>` selects the causal `active_contexts` entry for implicit commands. Without it,
+  only one unambiguous active context for the worktree is accepted; ambiguity returns exit `2`.
 - `change relink [--apply]` and `change backlink [--apply]` repair graph links; preview is default.
 - `change abandon <slug>` drops work without an ADR; `archive --force` needs explicit human choice.
 - `wendkeep spec list|show|effective|migrate|rebase` manages living contracts and deltas.
@@ -54,6 +56,7 @@ npx wendkeep change archive <slug>
 
 ```bash
 npx wendkeep change new tenant-login
+npx wendkeep change use tenant-login --session <id>
 npx wendkeep change new internal-adjustment --guide
 npx wendkeep spec effective --change tenant-login
 npx wendkeep change done 1.1 --change tenant-login
@@ -81,6 +84,10 @@ sensors, and a fresh verdict.
 tool runs, it compares the session, project, Git root, remote, branch, and worktree with the lease
 recorded in `SESSION_REGISTRY.json`. Missing, ambiguous, concurrent, or cross-project targets are
 blocked before the tool.
+
+Implicit change focus comes from `active_contexts`, not `CURRENT_CHANGE.md`. Its key combines
+`repository_id`, `worktree_id`, and `work_session_id`; the Markdown pointer remains only a
+compatibility projection when there is one unambiguous context.
 
 The [local Observer](observer.md) is a read-only observability projection: the vault and change
 remain local authorities. Observer queries do not complete, archive, repair, or promote state in a
