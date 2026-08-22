@@ -98,12 +98,19 @@ npx wendkeep validate-memory --vault <cofre-v2>
   do attempt exato, salva backup do registry e limita a mutação ao attempt ambíguo e à sucessora.
   O replay é CORE-aware, usa cursor físico do ledger no checkpoint e não reescreve ledger, CORE ou
   notas, nem consome a outbox. Repetir a mesma decisão aplicada é idempotente.
+- O projector admite eventos completos de forma determinística e prioriza estado operacional
+  crítico até o limite de 48 linhas/6144 bytes. `projection_mode`, `projected_events` e
+  `omitted_events` tornam o recorte verificável; revision, cursor e `state_hash` continuam cobrindo
+  o ledger integral. O gate aceita somente a omissão que rederiva exatamente da mesma política.
 - `memory rescope` é dry-run por padrão e lista somente IDs, chaves e escopos planejados. Com
   `--apply`, anexa eventos explícitos de projeto, work session, change, branch ou worktree e mantém
   os bytes históricos como prefixo do ledger. Eventos legados de `handoff.latest` que participam
   de candidates também são reescopados individualmente quando possuem identidade de sessão
   comprovável: isso separa workflows independentes sem selecionar vencedor. Ambiguidades que
   permanecem no mesmo escopo continuam sob curadoria; uma repetição retorna `unchanged`.
+  Se o doctor indicar memória estruturalmente bloqueada, execute primeiro `memory repair`, confirme
+  `memory status --gate` verde e só então volte ao dry-run; não aplique rescope sobre uma projeção
+  inválida.
 - Registradores como `git.local-head`, `handoff.latest`, `quality.latest-*` e
   `change.<slug>.status` só competem dentro do mesmo escopo. Resolução automática ainda exige o
   mesmo projeto e linhagem causal; decisões, constraints e blockers incompatíveis permanecem sob

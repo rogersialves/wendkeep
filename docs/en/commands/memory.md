@@ -98,12 +98,19 @@ npx wendkeep validate-memory --vault <v2-vault>
   and its successor. Replay is CORE-aware, checkpoints use the physical ledger cursor, and the
   command neither rewrites ledger/CORE/notes nor consumes the outbox. Retrying the same applied
   decision is idempotent.
+- The projector deterministically admits whole events, prioritizing critical operational state up
+  to 48 lines/6144 bytes. `projection_mode`, `projected_events`, and `omitted_events` make the
+  selection verifiable; revision, cursor, and `state_hash` still cover the complete ledger. The
+  gate accepts only omissions that re-derive exactly from the same policy.
 - `memory rescope` is a dry run by default and lists only planned IDs, keys, and scopes. With
   `--apply`, it appends explicit project, work-session, change, branch, or worktree events while
   preserving historic bytes as the ledger prefix. Legacy `handoff.latest` events inside candidates
   are also rescoped individually when they carry proven session identity, separating independent
   workflows without selecting a winner. Ambiguities that remain inside one scope stay under human
   curation; retry returns `unchanged`.
+  If doctor reports structurally blocked memory, run `memory repair` first, confirm a green
+  `memory status --gate`, and only then return to the dry run; never apply rescope over an invalid
+  projection.
 - Registers such as `git.local-head`, `handoff.latest`, `quality.latest-*`, and
   `change.<slug>.status` compete only inside the same scope. Automatic resolution still requires
   the same project and causal lineage; incompatible decisions, constraints, and blockers remain

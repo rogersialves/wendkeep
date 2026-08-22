@@ -22,6 +22,7 @@ import {
   reprojectMemoryLedger,
   repairMemoryLedger,
 } from '../hooks/memory-store.mjs';
+import { parseSharedMemory, SHARED_LIMITS, validateSharedMemory } from '../hooks/memory-schema.mjs';
 
 const PROJECT_ID = 'project-a';
 
@@ -60,6 +61,49 @@ function event(eventId, memoryKey, operation, value, extra = {}) {
     ...extra,
   };
 }
+
+test('[req:MEM-HYB-6] prepareMemoryProjection never prepares an oversized SHARED publication', () => {
+  const vault = scratch();
+  try {
+    const events = Array.from({ length: 72 }, (_, index) => event(
+      `mem-project-bounded-${String(index).padStart(2, '0')}`,
+      `${index % 2 ? 'next' : 'blocker'}.bounded-${String(index).padStart(2, '0')}`,
+      'assert',
+      `bounded projection value ${index} ${'y'.repeat(190)}`,
+      {
+        turn_sequence: index + 1,
+        source_turn_id: `turn-bounded-${index + 1}`,
+        observed_at: `2026-07-26T12:${String(index % 60).padStart(2, '0')}:00.000Z`,
+      },
+    ));
+
+    const prepared = prepareMemoryProjection(vault, events);
+    const validation = validateSharedMemory(prepared.sharedContent, {
+      eventIds: new Set(events.map((item) => item.event_id)),
+    });
+    const parsed = parseSharedMemory(prepared.sharedContent);
+
+    assert.equal(validation.ok, true, validation.errors.join('\n'));
+    assert.ok(validation.lineCount <= SHARED_LIMITS.lines);
+    assert.ok(validation.bytes <= SHARED_LIMITS.bytes);
+    assert.equal(prepared.projectedEvents, parsed.metadata.projected_events);
+    assert.equal(prepared.omittedEvents, parsed.metadata.omitted_events);
+    assert.ok(prepared.omittedEvents > 0);
+
+    writeFileSync(
+      join(vault, '.brain', 'MEMORY_EVENTS.jsonl'),
+      `${events.map((item) => canonicalMemoryJson(item)).join('\n')}\n`,
+    );
+    const published = reprojectMemoryLedger(vault);
+    const retained = readMemoryLedger(vault);
+    assert.equal(published.status, 'reprojected');
+    assert.equal(published.omittedEvents, prepared.omittedEvents);
+    assert.equal(retained.events.length, events.length, 'bounded publication cannot remove ledger authority');
+    assert.equal(parseSharedMemory(readFileSync(join(vault, '.brain', 'SHARED_MEMORY.md'), 'utf8')).metadata.state_hash, published.stateHash);
+  } finally {
+    rmSync(vault, { recursive: true, force: true });
+  }
+});
 
 function deferredAssertReplayFixture({ assertOverrides = {}, correctionOverrides = {} } = {}) {
   const selected = event('mem-replay-selected', 'handoff.latest', 'assert', 'resumo promovido', {

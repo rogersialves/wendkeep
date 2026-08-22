@@ -1,6 +1,8 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { basename, join, relative } from 'node:path';
-import { sanitizeMemoryText, validateMemoryEvent, validateSharedMemory } from './memory-schema.mjs';
+import {
+  parseSharedMemory, renderSharedMemory, sanitizeMemoryText, validateMemoryEvent, validateSharedMemory,
+} from './memory-schema.mjs';
 import { deriveMemoryProjection } from './memory-store.mjs';
 import { assertVaultPathSafe } from './vault-path-safety.mjs';
 import { validateCore } from './validate-core.mjs';
@@ -161,6 +163,10 @@ function sharedEventIds(content) {
   return ids;
 }
 
+function sameStringSet(left, right) {
+  return left.size === right.size && [...left].every((value) => right.has(value));
+}
+
 function walkDecisionFiles(root, vaultBase, output = []) {
   let entries;
   try { entries = readdirSync(root, { withFileTypes: true }); } catch { return output; }
@@ -255,13 +261,41 @@ function semanticMemoryHealth(vaultBase, { ledger, shared, candidates }) {
   const errors = [];
   const warnings = [];
   const codes = [];
+  const metadata = shared.metadata || {};
+  const boundedDeclared = metadata.projection_mode === 'bounded';
+  let boundedProjection = false;
+  if (boundedDeclared) {
+    const expectedContent = renderSharedMemory({
+      revision: metadata.revision,
+      eventCursor: metadata.event_cursor,
+      stateHash: metadata.state_hash,
+      updatedAt: metadata.updated_at,
+      reviewAfter: metadata.review_after,
+      events: replay.activeEvents,
+    });
+    const expectedIds = sharedEventIds(expectedContent);
+    const expectedMetadata = parseSharedMemory(expectedContent).metadata;
+    boundedProjection = sameStringSet(projectedIds, expectedIds)
+      && metadata.projected_events === expectedMetadata.projected_events
+      && metadata.omitted_events === expectedMetadata.omitted_events;
+    if (!boundedProjection) {
+      codes.push('MEMORY_SEMANTIC_COVERAGE_MISSING');
+      errors.push('[MEMORY_SEMANTIC_COVERAGE_MISSING] SHARED declara bounded, mas IDs ou contagens não reproduzem a seleção do ledger.');
+    }
+  }
 
   if (missingKeys.length && placeholderOnly) {
     codes.push('MEMORY_SEMANTIC_PLACEHOLDER_ONLY');
     errors.push(`[MEMORY_SEMANTIC_PLACEHOLDER_ONLY] SHARED contém somente placeholders para ${activeKeys.length} chave(s) ativa(s); candidates=${candidateCount}.`);
   } else if (missingKeys.length) {
-    codes.push('MEMORY_SEMANTIC_COVERAGE_MISSING');
-    errors.push(`[MEMORY_SEMANTIC_COVERAGE_MISSING] SHARED não cobre ${missingKeys.length} chave(s) ativa(s): ${missingKeys.join(', ')}.`);
+    if (boundedProjection) {
+      warnings.push(`[MEMORY_SEMANTIC_BOUNDED_PROJECTION] SHARED omite deterministicamente ${metadata.omitted_events} evento(s) do ledger dentro do budget.`);
+    } else if (!boundedDeclared) {
+      codes.push('MEMORY_SEMANTIC_COVERAGE_MISSING');
+      errors.push(`[MEMORY_SEMANTIC_COVERAGE_MISSING] SHARED não cobre ${missingKeys.length} chave(s) ativa(s): ${missingKeys.join(', ')}.`);
+    }
+  } else if (boundedProjection) {
+    warnings.push(`[MEMORY_SEMANTIC_BOUNDED_PROJECTION] SHARED omite deterministicamente ${metadata.omitted_events} evento(s) do ledger dentro do budget.`);
   }
   if (unresolvedLinks.length) {
     codes.push('MEMORY_SEMANTIC_DECISION_LINK_UNRESOLVED');
@@ -280,6 +314,9 @@ function semanticMemoryHealth(vaultBase, { ledger, shared, candidates }) {
   } else if (codes.length) {
     status = 'degraded';
     code = codes[0];
+  } else if (boundedProjection) {
+    status = 'bounded';
+    code = 'MEMORY_SEMANTIC_BOUNDED_PROJECTION';
   }
 
   return {

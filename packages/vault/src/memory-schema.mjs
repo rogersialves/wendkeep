@@ -14,6 +14,17 @@ export const SHARED_SECTIONS = Object.freeze([
   'Último Handoff',
 ]);
 
+const SHARED_ADMISSION_SECTIONS = Object.freeze([
+  'Bloqueios',
+  'Objetivo Atual',
+  'Restrições Ativas',
+  'Decisões em Vigor',
+  'Próximas Ações',
+  'Riscos Conhecidos',
+  'Último Handoff',
+  'Estado Entregue',
+]);
+
 const AUTHORITIES = new Set(['verified', 'reported', 'candidate']);
 const OPERATIONS = new Set(['assert', 'replace', 'add', 'remove']);
 const ISO_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/;
@@ -197,6 +208,84 @@ function defaultInstant(events) {
   return instants.at(-1) || new Date(0).toISOString();
 }
 
+function authorityPriority(authority) {
+  if (authority === 'verified') return 0;
+  if (authority === 'reported') return 1;
+  return 2;
+}
+
+function compareProjectionEvents(left, right) {
+  return authorityPriority(left?.authority) - authorityPriority(right?.authority)
+    || String(right?.observed_at || '').localeCompare(String(left?.observed_at || ''))
+    || String(left?.projection_key || left?.memory_key || '').localeCompare(
+      String(right?.projection_key || right?.memory_key || ''),
+    )
+    || String(left?.event_id || '').localeCompare(String(right?.event_id || ''));
+}
+
+function admissionOrder(events) {
+  const grouped = new Map(SHARED_ADMISSION_SECTIONS.map((section) => [section, []]));
+  for (const event of events) grouped.get(sectionFor(event?.memory_key)).push(event);
+  for (const bucket of grouped.values()) bucket.sort(compareProjectionEvents);
+
+  const ordered = [];
+  for (let round = 0; ; round += 1) {
+    let admitted = false;
+    for (const section of SHARED_ADMISSION_SECTIONS) {
+      const event = grouped.get(section)[round];
+      if (!event) continue;
+      ordered.push(event);
+      admitted = true;
+    }
+    if (!admitted) return ordered;
+  }
+}
+
+function renderSharedMemoryContent({
+  revision,
+  eventCursor,
+  allEvents,
+  projectedEvents,
+  stateHash,
+  updated,
+  review,
+}) {
+  const grouped = new Map(SHARED_SECTIONS.map((section) => [section, []]));
+  for (const event of projectedEvents) grouped.get(sectionFor(event.memory_key)).push(eventLine(event));
+  const omittedEvents = allEvents.length - projectedEvents.length;
+
+  const lines = [
+    '---',
+    'schema_version: 2',
+    `revision: ${Number.isInteger(revision) ? revision : 0}`,
+    `event_cursor: ${sanitizeMemoryText(eventCursor || 'none')}`,
+    `state_hash: ${sanitizeMemoryText(stateHash || hashProjection(allEvents))}`,
+    `updated_at: ${sanitizeMemoryText(updated)}`,
+    `review_after: ${sanitizeMemoryText(review)}`,
+    `projection_mode: ${omittedEvents ? 'bounded' : 'complete'}`,
+    `projected_events: ${projectedEvents.length}`,
+    `omitted_events: ${omittedEvents}`,
+    '---',
+    '',
+    '# SHARED_MEMORY — projeção operacional gerada',
+    '',
+  ];
+  for (const section of SHARED_SECTIONS) {
+    lines.push(`## ${section}`, ...(grouped.get(section).length ? grouped.get(section) : ['- (vazio)']), '');
+  }
+  return `${lines.join('\n').trimEnd()}\n`;
+}
+
+function actualLineCount(text) {
+  const lines = text.split('\n');
+  return text.endsWith('\n') ? lines.length - 1 : lines.length;
+}
+
+function sharedFits(content) {
+  return actualLineCount(content) <= SHARED_LIMITS.lines
+    && Buffer.byteLength(content, 'utf8') <= SHARED_LIMITS.bytes;
+}
+
 /** Render the generated operational projection. Inputs are sanitized a second time. */
 export function renderSharedMemory({
   revision = 0,
@@ -209,26 +298,21 @@ export function renderSharedMemory({
   const safeEvents = Array.isArray(events) ? events : [];
   const updated = updatedAt || defaultInstant(safeEvents);
   const review = reviewAfter || new Date(Date.parse(updated) + (7 * 24 * 60 * 60 * 1000)).toISOString();
-  const grouped = new Map(SHARED_SECTIONS.map((section) => [section, []]));
-  for (const event of safeEvents) grouped.get(sectionFor(event.memory_key)).push(eventLine(event));
-
-  const lines = [
-    '---',
-    'schema_version: 2',
-    `revision: ${Number.isInteger(revision) ? revision : 0}`,
-    `event_cursor: ${sanitizeMemoryText(eventCursor || 'none')}`,
-    `state_hash: ${sanitizeMemoryText(stateHash || hashProjection(safeEvents))}`,
-    `updated_at: ${sanitizeMemoryText(updated)}`,
-    `review_after: ${sanitizeMemoryText(review)}`,
-    '---',
-    '',
-    '# SHARED_MEMORY — projeção operacional gerada',
-    '',
-  ];
-  for (const section of SHARED_SECTIONS) {
-    lines.push(`## ${section}`, ...(grouped.get(section).length ? grouped.get(section) : ['- (vazio)']), '');
+  const render = (projectedEvents) => renderSharedMemoryContent({
+    revision,
+    eventCursor,
+    allEvents: safeEvents,
+    projectedEvents,
+    stateHash,
+    updated,
+    review,
+  });
+  const projectedEvents = [];
+  for (const event of admissionOrder(safeEvents)) {
+    const trial = [...projectedEvents, event];
+    if (sharedFits(render(trial))) projectedEvents.push(event);
   }
-  return `${lines.join('\n').trimEnd()}\n`;
+  return render(projectedEvents);
 }
 
 function parseScalar(value) {
@@ -278,11 +362,6 @@ export function parseSharedMemory(content) {
   return { ok: errors.length === 0, errors, metadata, sections };
 }
 
-function actualLineCount(text) {
-  const lines = text.split('\n');
-  return text.endsWith('\n') ? lines.length - 1 : lines.length;
-}
-
 export function validateSharedMemory(content, { eventIds } = {}) {
   const text = String(content ?? '').replace(/\r\n/g, '\n');
   const parsed = parseSharedMemory(text);
@@ -305,6 +384,31 @@ export function validateSharedMemory(content, { eventIds } = {}) {
   if (!Number.isInteger(metadata.revision) || metadata.revision < 0) errors.push('revision deve ser inteiro não negativo.');
   for (const key of ['event_cursor', 'state_hash', 'updated_at', 'review_after']) {
     if (typeof metadata[key] !== 'string' || !metadata[key]) errors.push(`${key} é obrigatório.`);
+  }
+  const projectionFields = ['projection_mode', 'projected_events', 'omitted_events'];
+  const projectionFieldCount = projectionFields.filter((key) => metadata[key] !== undefined).length;
+  if (projectionFieldCount && projectionFieldCount !== projectionFields.length) {
+    errors.push('Metadados bounded incompletos: projection_mode, projected_events e omitted_events são inseparáveis.');
+  } else if (projectionFieldCount === projectionFields.length) {
+    const projectedEventLines = [...parsed.sections.values()].flat()
+      .filter((line) => /^\s*-\s+\[[^\]]+\]/.test(line)).length;
+    if (!['complete', 'bounded'].includes(metadata.projection_mode)) {
+      errors.push('projection_mode deve ser complete ou bounded.');
+    }
+    if (!Number.isInteger(metadata.projected_events) || metadata.projected_events < 0) {
+      errors.push('projected_events deve ser inteiro não negativo.');
+    } else if (metadata.projected_events !== projectedEventLines) {
+      errors.push(`projected_events declara ${metadata.projected_events}, mas SHARED contém ${projectedEventLines} evento(s).`);
+    }
+    if (!Number.isInteger(metadata.omitted_events) || metadata.omitted_events < 0) {
+      errors.push('omitted_events deve ser inteiro não negativo.');
+    }
+    if (metadata.projection_mode === 'complete' && metadata.omitted_events !== 0) {
+      errors.push('projection_mode complete exige omitted_events igual a 0.');
+    }
+    if (metadata.projection_mode === 'bounded' && !(metadata.omitted_events > 0)) {
+      errors.push('projection_mode bounded exige omitted_events maior que 0.');
+    }
   }
   for (const key of ['updated_at', 'review_after']) {
     if (typeof metadata[key] === 'string'

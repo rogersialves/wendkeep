@@ -104,6 +104,46 @@ test('[req:MEM-HYB-6] [req:MEM-HYB-8] renderSharedMemory emits a sanitized, fixe
   assert.match(parsed.sections.get('Último Handoff').join('\n'), /REDACTED/);
 });
 
+test('[req:MEM-HYB-6] renderSharedMemory deterministically admits critical events within the hard envelope', () => {
+  const prefixes = ['blocker', 'objective', 'constraint', 'decision', 'next', 'risk', 'handoff', 'state'];
+  const events = Array.from({ length: 64 }, (_, index) => ({
+    ...EVENT,
+    event_id: `mem-bounded-${String(index).padStart(2, '0')}`,
+    memory_key: `${prefixes[index % prefixes.length]}.${String(index).padStart(2, '0')}`,
+    value: `estado operacional ${index} ${'x'.repeat(180)}`,
+    authority: index % 3 === 0 ? 'verified' : 'reported',
+    observed_at: `2026-07-26T03:${String(index % 60).padStart(2, '0')}:47Z`,
+  }));
+  const options = {
+    revision: events.length,
+    eventCursor: events.at(-1).event_id,
+    stateHash: 'a'.repeat(64),
+    updatedAt: '2026-07-26T04:20:47Z',
+    reviewAfter: '2026-08-02T04:20:47Z',
+  };
+
+  const shared = renderSharedMemory({ ...options, events });
+  const reordered = renderSharedMemory({ ...options, events: [...events].reverse() });
+  const parsed = parseSharedMemory(shared);
+  const validation = validateSharedMemory(shared, { eventIds: new Set(events.map((event) => event.event_id)) });
+
+  assert.equal(validation.ok, true, validation.errors.join('\n'));
+  assert.equal(shared, reordered, 'ledger traversal order cannot change bounded admission');
+  assert.ok(validation.lineCount <= SHARED_LIMITS.lines);
+  assert.ok(validation.bytes <= SHARED_LIMITS.bytes);
+  assert.equal(parsed.metadata.projection_mode, 'bounded');
+  assert.equal(parsed.metadata.state_hash, options.stateHash);
+  assert.ok(parsed.metadata.projected_events > 0);
+  assert.ok(parsed.metadata.projected_events < events.length);
+  assert.equal(parsed.metadata.omitted_events, events.length - parsed.metadata.projected_events);
+  const projectedIds = new Set([...shared.matchAll(/^\s*-\s+\[([^\]]+)\]/gm)].map((match) => match[1]));
+  const omittedEvent = events.find((event) => !projectedIds.has(event.event_id));
+  assert.ok(omittedEvent, 'the bounded fixture must omit at least one event');
+  assert.doesNotMatch(shared, new RegExp(omittedEvent.value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  assert.match(parsed.sections.get('Bloqueios').join('\n'), /mem-bounded-/);
+  assert.match(parsed.sections.get('Objetivo Atual').join('\n'), /mem-bounded-/);
+});
+
 test('[req:MEM-HYB-6] [req:MEM-HYB-7] validateSharedMemory reports structural, budget and cursor failures', () => {
   const shared = renderSharedMemory({
     revision: 1,
