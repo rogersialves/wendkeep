@@ -76,7 +76,12 @@ npx wendkeep sensors add api-contracts "npm run test:contracts" --severity criti
 A change arquivada move seu delta para o spec vivo quando aplicável e preserva proposta,
 tarefas/evidência e design quando existente. GOVERN/ASSURE geram ADR; GUIDE compacta sem impacto
 de contrato não gera ADR automático. O archive só passa com tarefas fechadas, sensores exigidos
-verdes e verdict atual.
+verdes e verdict atual ligado ao mesmo Evidence Envelope v2. Evidência v1 é mostrada como
+`legacy-unbound`; `change status <slug>` também diagnostica `bound`, `stale` e `context-mismatch`.
+O archive compara `evidenceEnvelopeId` e o `evidenceBinding` completo de package/verdict com o
+checkout provado. Se houver divergência, volte à worktree/sessão correta e rode `verify`,
+`verify --deep` e `wk-verify` novamente. Campos, normalização textual/binária, códigos e recovery
+estão detalhados no [guia de verify](verify.md).
 
 ## Cerca de escopo para ferramentas
 
@@ -105,6 +110,8 @@ exige uma nova seleção/lease; não use autorização de outra conversa.
 - Sensor não executado: mantenha uma ou mais tags `[sensor:id]` na mesma linha do checkbox. Todos
   os IDs distintos dessa linha são exigidos e executados uma vez, na ordem declarada.
 - Evidência stale: rode novamente `verify` e `verify --deep` depois de alterar tarefas/spec.
+- Evidência de outra worktree/sessão: retorne ao contexto causal correto; ela não satisfaz o
+  archive atual mesmo que todos os sensores estejam verdes.
 - Rebase em conflito: resolva o delta ou use `--accept-current` apenas quando isso for a decisão.
 
 ## Próximos passos

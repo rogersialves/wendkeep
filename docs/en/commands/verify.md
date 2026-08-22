@@ -42,7 +42,8 @@ npx wendkeep change use <slug>
 - **Exit 0:** all required sensors passed and evidence was written.
 - **Exit 1:** the gate ran, but at least one critical sensor was red or a mutant survived.
 - **Exit 2:** invalid usage/context, including `no change (--change or active)`, missing vault,
-  unknown change, or invalid `wendkeep.sensors.json`.
+  unknown change, a project outside a Git repository, invalid `wendkeep.sensors.json`, or
+  `WENDKEEP_EVIDENCE_HEAD_CHANGED`.
 
 `verify --deep` writes `verificacao.json`; it does not replace the reviewer. The `wk-verify` skill
 must be run by a different author and writes `verdict.json`.
@@ -72,10 +73,22 @@ npx wendkeep memory status --gate --vault .MyApp-vault
 
 ## Expected result
 
-`evidencia.json` contains sensor results and a seal binds proof to the current `tarefas.md` hash.
-When a sensor is red, its entry receives only a local, sanitized diagnostic bounded to 2,000
-characters; stdout/stderr from green sensors is not persisted. Deep mode packages requirements,
-tasks, and evidence for read-only review; the verdict covers every `[req:]` before archive.
+`evidencia.json` follows the [public v2 schema](../../../schema/wendkeep.evidence-envelope-v2.schema.json).
+The envelope binds `project_id`, `repository_id`, `worktree_id`, `work_session_id`, change, and
+branch to `base_sha`, `head_sha`, `index_tree_sha`, `worktree_digest`, tasks, effective spec, and
+sensor configuration with complete SHA-256 digests. The worktree digest covers staged, unstaged,
+untracked, rename, and delete state; paths use `/`, text normalizes CRLF/CR to LF, and binaries keep
+their bytes. Binary classification honors Git `binary`/`-text` attributes and known binary
+extensions (including `.bin`); ignored files are excluded.
+
+Each sensor records its sanitized command and hash, start/end, duration, exit code, output digest,
+and a sanitized tail bounded to 2,000 characters. Authority artifacts publish through a path-safe
+temporary in the same directory and an atomic rename. In deep mode, `verificacao.json` and
+`verdict.json` carry the same `evidenceEnvelopeId` and complete `evidenceBinding`; the independent
+reviewer must preserve both.
+
+V1 evidence remains readable as `legacy-unbound`, never as equivalent authority. Run
+`wendkeep change status <slug>` to inspect `bound`, `stale`, or `context-mismatch`.
 
 ## Common errors and diagnosis
 
@@ -85,6 +98,10 @@ tasks, and evidence for read-only review; the verdict covers every `[req:]` befo
 - Red gate: inspect the bounded `note` field on the `evidencia.json` entry, fix the cause, and
   rerun; never choose `archive --force` on your own.
 - Missing/stale verdict: regenerate `--deep` and request a fresh independent pass.
+- `WENDKEEP_EVIDENCE_HEAD_CHANGED`: HEAD moved while sensors ran; stabilize the checkout and rerun.
+  The previous evidence was not replaced.
+- `legacy-unbound`, `stale`, or `context-mismatch`: return to the correct worktree/session, recover
+  the context when needed, and rerun `verify` plus `verify --deep`.
 - Surviving mutants: strengthen the discriminating test; after three rounds, review manually.
 
 ## Next steps

@@ -2,6 +2,7 @@
 // Pure-ish: `spawn` is injectable so runs are testable without a shell. Config lives
 // at the PROJECT ROOT (wendkeep.sensors.json); evidence lives per-change in the vault.
 import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 
@@ -20,6 +21,22 @@ function sanitizeSensorDiagnostic(value) {
     .replace(/:\/\/([^:\s/@]+):([^@\s/]+)@/g, '://[REDACTED_SECRET]@')
     .replace(/\r/g, '')
     .trim();
+}
+
+function sha256(value) {
+  return `sha256:${createHash('sha256').update(String(value || '')).digest('hex')}`;
+}
+
+function sensorNow(now) {
+  const value = typeof now === 'function' ? now() : (now || new Date().toISOString());
+  if (value instanceof Date) return value.toISOString();
+  if (typeof value === 'string') return value;
+  return new Date(value).toISOString();
+}
+
+function elapsedMilliseconds(startedAt, finishedAt) {
+  const elapsed = Date.parse(finishedAt) - Date.parse(startedAt);
+  return Number.isFinite(elapsed) ? Math.max(0, elapsed) : 0;
 }
 
 function sensorFailureNote(result = {}) {
@@ -86,11 +103,29 @@ export function requiredSensors(tasks) {
 
 export function runSensors(sensors, ids, { spawn = spawnSync, cwd, env, now } = {}) {
   const byId = Object.fromEntries((sensors || []).map((s) => [s.id, s]));
-  const ts = now || new Date().toISOString();
   const evidence = [];
   for (const id of ids) {
+    const startedAt = sensorNow(now);
     const s = byId[id];
-    if (!s) { evidence.push({ id, status: 'red', ts, severity: 'critical', note: 'sensor não definido' }); continue; }
+    if (!s) {
+      const finishedAt = sensorNow(now);
+      evidence.push({
+        id,
+        status: 'red',
+        ts: startedAt,
+        severity: 'critical',
+        started_at: startedAt,
+        finished_at: finishedAt,
+        duration_ms: elapsedMilliseconds(startedAt, finishedAt),
+        exit_code: null,
+        command: '',
+        command_sha256: sha256(''),
+        output_sha256: sha256(''),
+        output_tail: '',
+        note: 'sensor não definido',
+      });
+      continue;
+    }
     const r = spawn(s.command, [], {
       cwd,
       shell: true,
@@ -99,7 +134,26 @@ export function runSensors(sensors, ids, { spawn = spawnSync, cwd, env, now } = 
       stdio: ['ignore', 'pipe', 'pipe'],
       ...(env ? { env } : {}),
     });
-    const entry = { id, status: (r.status ?? 1) === 0 ? 'green' : 'red', ts, severity: s.severity || 'critical' };
+    const finishedAt = sensorNow(now);
+    const rawOutput = [r.stdout, r.stderr].filter(Boolean).join('\n');
+    const outputTail = sanitizeSensorDiagnostic(rawOutput);
+    const boundedOutputTail = outputTail.length > SENSOR_DIAGNOSTIC_MAX_LENGTH
+      ? `…${outputTail.slice(-(SENSOR_DIAGNOSTIC_MAX_LENGTH - 1))}`
+      : outputTail;
+    const entry = {
+      id,
+      status: (r.status ?? 1) === 0 ? 'green' : 'red',
+      ts: startedAt,
+      severity: s.severity || 'critical',
+      command: sanitizeSensorDiagnostic(s.command),
+      command_sha256: sha256(s.command),
+      started_at: startedAt,
+      finished_at: finishedAt,
+      duration_ms: elapsedMilliseconds(startedAt, finishedAt),
+      exit_code: Number.isInteger(r.status) ? r.status : null,
+      output_sha256: sha256(rawOutput),
+      output_tail: boundedOutputTail,
+    };
     if (entry.status === 'red') entry.note = sensorFailureNote(r);
     if (s.type === 'mutation' && s.report) {
       // Delegated mutation (Wave B): read the tool's mutation-testing-elements report and

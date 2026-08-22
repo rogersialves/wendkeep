@@ -17,6 +17,14 @@ import {
 import { parseObservabilityCheckpoint } from './session-observability-state.mjs';
 import { readObservabilityStore } from './session-observability-store.mjs';
 import { assessObservabilityFreshness } from './session-observability-lifecycle.mjs';
+import { evaluateEvidenceBinding } from '../packages/vault/src/evidence-envelope.mjs';
+import { evidenceCheckoutBinding } from '../packages/vault/src/evidence-envelope.mjs';
+import { loadSensorsDetailed, requiredSensors } from './sensors-core.mjs';
+import {
+  captureGitSnapshot,
+  resolveEvidenceIdentity,
+  sensorConfigSha256,
+} from '../src/evidence-envelope.mjs';
 
 export function checkSessionObservability(vaultBase, deps = {}) {
   const readRegistry = deps.readRegistry || readSessionRegistry;
@@ -144,10 +152,52 @@ export function checkHarness(vaultBase, projectRoot) {
     const effective = buildEffectiveRequirementPackage(vaultBase, dir, reqIds);
     errors.push(...effective.errors.map((e) => `${name}: spec efetiva inválida: ${e}`));
     if (effective.missing.length) errors.push(`req órfão em ${name}: ${effective.missing.map((id) => `[req:${id}]`).join(', ')} não existe na spec efetiva`);
+    let evidence = null;
+    try { evidence = JSON.parse(readFileSync(join(dir, 'evidencia.json'), 'utf8')); } catch { /* sem evidência */ }
+    if (evidence) {
+      const expected = {
+        change_slug: name,
+        tasks_sha256: tasksHashOf(tarefasMd),
+        effective_spec_sha256: `sha256:${effective.hash}`,
+      };
+      let bindingUnavailable = '';
+      if (evidence.schema_version === 2 && projectRoot) {
+        try {
+          const loaded = loadSensorsDetailed(projectRoot);
+          if (loaded.error) throw new Error(`wendkeep.sensors.json inválido: ${loaded.error}`);
+          expected.identity = resolveEvidenceIdentity({
+            vaultBase,
+            projectRoot,
+            changeSlug: name,
+            sessionId: evidence.work_session_id,
+          });
+          expected.snapshot = captureGitSnapshot(projectRoot);
+          expected.sensor_config_sha256 = sensorConfigSha256(
+            loaded.sensors,
+            requiredSensors(tasks),
+          );
+        } catch (error) {
+          bindingUnavailable = error.code || error.message;
+        }
+      }
+      const binding = evaluateEvidenceBinding(evidence, expected);
+      if (binding.state === 'legacy-unbound') {
+        attention.push(`${name}: evidence legacy-unbound — rode wendkeep verify novamente`);
+      } else if (binding.state !== 'bound') {
+        attention.push(`${name}: evidence ${binding.state} (${binding.reasons.join('; ')}) — rode wendkeep verify novamente`);
+      } else if (bindingUnavailable) {
+        attention.push(`${name}: evidence binding atual indisponível (${bindingUnavailable}) — rode doctor da raiz Git e depois wendkeep verify`);
+      }
+    }
     let verdict = null;
     try { verdict = JSON.parse(readFileSync(join(dir, 'verdict.json'), 'utf8')); } catch { /* sem verdict */ }
     if (verdict && reqIds.length) {
-      const v = evaluateVerdict(verdict, reqIds, { tasksHash: tasksHashOf(tarefasMd), effectiveSpecHash: effective.hash });
+      const v = evaluateVerdict(verdict, reqIds, {
+        tasksHash: tasksHashOf(tarefasMd),
+        effectiveSpecHash: effective.hash,
+        evidenceEnvelopeId: evidence?.schema_version === 2 ? evidence.envelope_id : undefined,
+        evidenceBinding: evidence?.schema_version === 2 ? evidenceCheckoutBinding(evidence) : undefined,
+      });
       if (!v.ok) attention.push(`verdict stale/incompleto em ${name}${v.missing.length ? `: falta cobrir ${v.missing.join(', ')}` : ''}`);
     }
   }

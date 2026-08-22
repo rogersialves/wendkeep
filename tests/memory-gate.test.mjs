@@ -9,6 +9,7 @@ import { renderSharedMemory } from '../hooks/memory-schema.mjs';
 import { reduceMemoryEvents, reprojectMemoryLedger } from '../hooks/memory-store.mjs';
 import { checkMemoryBundle } from '../hooks/vault-health.mjs';
 import { renderCoreSkeleton } from '../src/validate-core.mjs';
+import { initGitRepository } from './helpers/git-fixture.mjs';
 
 const BIN = join(dirname(fileURLToPath(import.meta.url)), '..', 'bin', 'wendkeep.mjs');
 const PROJECT_ID = 'project-memory-gate';
@@ -227,6 +228,7 @@ test('[req:DIAG-8] critical memory-health evidence blocks verify/archive on corr
   const vault = mkdtempSync(join(tmpdir(), 'wk-memory-gate-vault-'));
   const project = mkdtempSync(join(tmpdir(), 'wk-memory-gate-project-'));
   try {
+    initGitRepository(project);
     assert.equal(cli(['change', 'new', 'memory-broken', '--vault', vault, '--project', project]).status, 0);
     fillChange(vault, 'memory-broken');
     seedBundle(vault, { corrupt: true });
@@ -250,6 +252,7 @@ test('[req:DIAG-8] outbox/candidate warnings keep verify and archive open', () =
   const vault = mkdtempSync(join(tmpdir(), 'wk-memory-gate-vault-'));
   const project = mkdtempSync(join(tmpdir(), 'wk-memory-gate-project-'));
   try {
+    initGitRepository(project);
     assert.equal(cli(['change', 'new', 'memory-warning', '--vault', vault, '--project', project]).status, 0);
     fillChange(vault, 'memory-warning');
     seedBundle(vault, { warning: true });

@@ -4,6 +4,29 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.78.0] — 2026-08-22
+
+### Added
+
+- **Evidence Envelope v2.** `verify` liga cada prova a projeto, repositório, worktree, work session,
+  branch, base/HEAD, árvore do índice e digest determinístico de staged/unstaged/untracked por
+  SHA-256 canônico; texto normaliza CRLF/CR para LF e binários preservam bytes.
+- **Proveniência por sensor.** Cada resultado registra comando efetivo sanitizado e hash,
+  timestamps, duração, exit code, digest da saída e tail sanitizado limitado; alteração da
+  configuração invalida o binding anterior.
+- **Diagnóstico causal.** `change status`, doctor, handoff e Observer distinguem evidência `bound`,
+  `stale`, `context-mismatch` e `legacy-unbound`; pacote deep e verdict carregam o mesmo
+  `evidenceEnvelopeId` e `evidenceBinding` completo e não podem ser reutilizados entre worktrees.
+
+### Changed
+
+- **Publicação fail-closed.** Mudança de HEAD durante os sensores preserva a evidência anterior e
+  retorna `WENDKEEP_EVIDENCE_HEAD_CHANGED`. Evidência, pacote, verdict trivial e seals são gravados
+  por temporário path-safe no mesmo diretório e rename atômico.
+- **Compatibilidade explícita.** Evidência v1 continua legível para histórico, mas sensores v1 não
+  satisfazem autoridade v2 no archive. README, schema e guias PT-BR/EN documentam formato,
+  normalização, recovery e vínculo do passe independente.
+
 ## [0.77.0] — 2026-08-22
 
 ### Added

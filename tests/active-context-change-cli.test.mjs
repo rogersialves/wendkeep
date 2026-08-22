@@ -107,7 +107,10 @@ test('[req:ACTX-11] implicit spec and verify resolve the change from the selecte
     const verify = runCli(f, ['verify', '--session', 'session-a']);
     assert.equal(verify.status, 0, verify.stderr);
     assert.match(verify.stdout, /verify OK \(0 sensor\(s\)\)/);
-    assert.equal(readFileSync(join(f.vault, '08-Mudanças', 'change-a', 'evidencia.json'), 'utf8'), '[]\n');
+    const evidence = JSON.parse(readFileSync(join(f.vault, '08-Mudanças', 'change-a', 'evidencia.json'), 'utf8'));
+    assert.equal(evidence.schema_version, 2);
+    assert.deepEqual(evidence.sensors, []);
+    assert.equal(evidence.work_session_id, 'work-a');
     assert.throws(
       () => readFileSync(join(f.vault, '08-Mudanças', 'change-b', 'evidencia.json'), 'utf8'),
       { code: 'ENOENT' },

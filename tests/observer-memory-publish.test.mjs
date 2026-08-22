@@ -10,7 +10,9 @@ import {
   retryObserverMemoryOutbox,
 } from '../src/observer-memory-publish.mjs';
 import { registerObserverProject } from '../src/observer-store.mjs';
+import { buildSessionMemoryEvents } from '../packages/vault/src/memory-handoff.mjs';
 import { makeDataDir, makeObserverFixture } from './helpers/observer-fixture.mjs';
+import { makeSyntheticHandoff } from './fixtures/synthetic-memory-lifecycle.mjs';
 
 const TOKEN = 'observer-test-token';
 
@@ -57,6 +59,38 @@ test('[req:MEM-HOOK-5] coletor reúne conteúdo completo das raízes autorizadas
     assert.equal(second.events.length, 1);
     assert.equal(second.events[0].logical_path, 'CORE.md');
     assert.equal(second.events[0].revision, 2);
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test('[req:EVID-7] Observer projection carries stale classification and recovery without raw sensor output', () => {
+  const fixture = makeObserverFixture();
+  try {
+    const events = buildSessionMemoryEvents(makeSyntheticHandoff({
+      evidence: {
+        sensors: ['proof'],
+        sensors_binding: 'stale',
+        sensors_binding_reasons: ['private raw sensor output must not cross'],
+        sensors_envelope_id: `sha256:${'a'.repeat(64)}`,
+        sensors_path: '08-Mudanças/_arquivo/x/evidencia.json',
+      },
+    }));
+    const brain = join(fixture.vaultBase, '.brain');
+    mkdirSync(brain, { recursive: true });
+    writeFileSync(join(brain, 'MEMORY_EVENTS.jsonl'), `${events.map(JSON.stringify).join('\n')}\n`);
+
+    const batch = buildMemoryEventBatch({
+      vaultBase: fixture.vaultBase,
+      projectId: fixture.projectId,
+      now: '2026-08-22T20:00:00.000Z',
+    });
+    const projected = batch.events.find((event) => event.logical_path === '.brain/MEMORY_EVENTS.jsonl');
+    assert.ok(projected);
+    assert.match(projected.content, /"evidence_state":"stale"/);
+    assert.match(projected.content, /reabra a change.*verify --deep.*wk-verify/);
+    assert.doesNotMatch(projected.content, /private raw sensor output must not cross/);
+    assert.doesNotMatch(projected.content, /output_tail/);
   } finally {
     fixture.cleanup();
   }

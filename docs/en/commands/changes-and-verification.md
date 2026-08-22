@@ -76,7 +76,12 @@ npx wendkeep sensors add api-contracts "npm run test:contracts" --severity criti
 An archived change promotes its delta into the living spec when applicable and preserves proposal,
 tasks/proof, and design when present. GOVERN/ASSURE mint an ADR; compact GUIDE with no contract
 impact does not mint one automatically. Archive passes only with closed tasks, green required
-sensors, and a fresh verdict.
+sensors, and a fresh verdict bound to the same Evidence Envelope v2. V1 evidence is reported as
+`legacy-unbound`; `change status <slug>` also diagnoses `bound`, `stale`, and `context-mismatch`.
+Archive compares the package/verdict `evidenceEnvelopeId` and complete `evidenceBinding` with the
+proven checkout. On a mismatch, return to the correct worktree/session and rerun `verify`,
+`verify --deep`, and `wk-verify`. Fields, text/binary normalization, error codes, and recovery are
+detailed in the [verify guide](verify.md).
 
 ## Tool-scope fence
 
@@ -105,6 +110,8 @@ selection/lease; never carry authorization from another conversation.
 - Sensor not executed: keep one or more `[sensor:id]` tags on the same checkbox line. Every
   distinct ID on that line is required and runs once, in declaration order.
 - Stale evidence: rerun `verify` and `verify --deep` after task/spec edits.
+- Evidence from another worktree/session: return to the correct causal context; it cannot satisfy
+  the current archive even when every sensor is green.
 - Rebase conflict: resolve the delta or use `--accept-current` only when that is the decision.
 
 ## Next steps

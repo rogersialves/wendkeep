@@ -1,7 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { rmSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 import { buildSessionMemoryEvents, collectLifecycleEvidence } from '../hooks/memory-handoff.mjs';
+import { canonicalSha256, evidenceCheckoutBinding } from '../packages/vault/src/evidence-envelope.mjs';
 import {
   SYNTHETIC_MEMORY,
   SYNTHETIC_SUMMARY,
@@ -137,4 +140,66 @@ test('[req:MEM-STOP-7] synthetic archived artifacts are collected as lifecycle e
   assert.equal(evidence.git.commit, SYNTHETIC_MEMORY.artificialCommit);
   assert.equal(evidence.git.pushed, false);
   assert.equal(evidence.nextAction.summary, SYNTHETIC_MEMORY.nextActionId);
+});
+
+test('[req:EVID-7] archived handoff promotes only a v2 envelope cross-bound to package and verdict', () => {
+  const vault = seedSyntheticMemoryVault();
+  seedSyntheticLifecycleEvidence(vault);
+  const archived = join(vault, '08-Mudanças', '_arquivo', SYNTHETIC_MEMORY.changeSlug);
+  try {
+    const unsigned = {
+      schema_version: 2,
+      project_id: SYNTHETIC_MEMORY.projectId,
+      repository_id: 'repo-fixture',
+      worktree_id: 'worktree-fixture',
+      work_session_id: 'work-session-fixture',
+      change_slug: SYNTHETIC_MEMORY.changeSlug,
+      branch: 'main',
+      base_sha: 'a'.repeat(40),
+      head_sha: 'b'.repeat(40),
+      index_tree_sha: 'c'.repeat(40),
+      worktree_digest: `sha256:${'d'.repeat(64)}`,
+      dirty: false,
+      tasks_sha256: `sha256:${'1'.repeat(64)}`,
+      effective_spec_sha256: `sha256:${'2'.repeat(64)}`,
+      sensor_config_sha256: `sha256:${'3'.repeat(64)}`,
+      wendkeep_version: '0.78.0',
+      platform: 'test-x64',
+      started_at: '2026-08-22T20:00:00.000Z',
+      finished_at: '2026-08-22T20:00:01.000Z',
+      sensors: [{ id: 'proof', status: 'green' }],
+    };
+    const envelope = { ...unsigned, envelope_id: canonicalSha256(unsigned) };
+    const evidenceBinding = evidenceCheckoutBinding(envelope);
+    writeFileSync(join(archived, 'evidencia.json'), JSON.stringify(envelope));
+    writeFileSync(join(archived, 'verificacao.json'), JSON.stringify({
+      evidenceEnvelopeId: envelope.envelope_id,
+      evidenceBinding,
+    }));
+    writeFileSync(join(archived, 'verdict.json'), JSON.stringify({
+      ok: true,
+      coverage: [{ req: 'EVID-7', covered: true }],
+      evidenceEnvelopeId: envelope.envelope_id,
+      evidenceBinding,
+    }));
+
+    const bound = collectLifecycleEvidence(vault, { changeSlug: SYNTHETIC_MEMORY.changeSlug });
+    assert.equal(bound.sensors_binding, 'bound');
+    const boundEvent = buildSessionMemoryEvents(makeSyntheticHandoff({ evidence: bound }))
+      .find((event) => event.memory_key === 'quality.latest-sensors');
+    assert.equal(boundEvent.authority, 'verified');
+
+    writeFileSync(join(archived, 'verificacao.json'), JSON.stringify({
+      evidenceEnvelopeId: envelope.envelope_id,
+      evidenceBinding: { ...evidenceBinding, worktree_id: 'foreign-worktree' },
+    }));
+    const stale = collectLifecycleEvidence(vault, { changeSlug: SYNTHETIC_MEMORY.changeSlug });
+    assert.equal(stale.sensors_binding, 'stale');
+    const staleEvent = buildSessionMemoryEvents(makeSyntheticHandoff({ evidence: stale }))
+      .find((event) => event.memory_key === 'quality.latest-sensors');
+    assert.equal(staleEvent.authority, 'reported');
+    assert.match(staleEvent.value.recovery, /verify --deep.*wk-verify/);
+  } finally {
+    rmSync(vault, { recursive: true, force: true });
+  }
 });

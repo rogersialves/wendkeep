@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { cpSync, mkdtempSync, rmSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -15,6 +15,17 @@ export function git(cwd, ...args) {
   });
   assert.equal(result.status, 0, `${args.join(' ')}\n${result.stderr}`);
   return result.stdout.trim();
+}
+
+export function initGitRepository(projectRoot) {
+  mkdirSync(projectRoot, { recursive: true });
+  if (existsSync(join(projectRoot, '.git'))) return projectRoot;
+  git(projectRoot, 'init', '-q');
+  git(projectRoot, 'config', 'user.email', 'verify@example.test');
+  git(projectRoot, 'config', 'user.name', 'Verify Test');
+  git(projectRoot, 'checkout', '-q', '-b', 'main');
+  git(projectRoot, 'commit', '--allow-empty', '-q', '-m', 'baseline');
+  return projectRoot;
 }
 
 function createTemplate(key, setup) {

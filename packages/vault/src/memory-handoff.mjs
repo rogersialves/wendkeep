@@ -5,6 +5,12 @@ import { basename, join, relative } from 'node:path';
 
 import { sanitizeMemoryText } from './memory-schema.mjs';
 import { scopeForMemoryKey } from './memory-scope.mjs';
+import {
+  evaluateEvidenceBinding,
+  evidenceCheckoutBinding,
+  evidenceCheckoutBindingMatches,
+  evidenceSensors,
+} from './evidence-envelope.mjs';
 
 const SHARED_HANDOFF_FIELDS = Object.freeze([
   ['objective', 'objective.current'],
@@ -177,9 +183,33 @@ export function collectLifecycleEvidence(vaultBase, { changeSlug = '', summary =
         };
       }
       const sensorPath = join(archivedDir, 'evidencia.json');
-      const sensors = readJson(sensorPath);
-      if (Array.isArray(sensors) && sensors.length && sensors.every((item) => item?.status === 'green')) {
+      const sensorEnvelope = readJson(sensorPath);
+      const sensors = evidenceSensors(sensorEnvelope);
+      if (sensors.length && sensors.every((item) => item?.status === 'green')) {
         evidence.sensors = [...new Set(sensors.map((item) => String(item.id || '')).filter(Boolean))].sort();
+        evidence.sensors_path = vaultRel(vaultBase, sensorPath);
+        const assessed = evaluateEvidenceBinding(sensorEnvelope, { change_slug: slug });
+        evidence.sensors_binding = assessed.state;
+        if (sensorEnvelope?.schema_version === 2 && assessed.state === 'bound') {
+          const checkoutBinding = evidenceCheckoutBinding(sensorEnvelope);
+          const verification = readJson(join(archivedDir, 'verificacao.json'));
+          const crossBound = verification?.evidenceEnvelopeId === sensorEnvelope.envelope_id
+            && verdict?.evidenceEnvelopeId === sensorEnvelope.envelope_id
+            && evidenceCheckoutBindingMatches(verification?.evidenceBinding, checkoutBinding)
+            && evidenceCheckoutBindingMatches(verdict?.evidenceBinding, checkoutBinding);
+          if (!crossBound) {
+            evidence.sensors_binding = 'stale';
+            evidence.sensors_binding_reasons = ['archived verification/verdict binding mismatch'];
+          }
+        } else if (assessed.reasons.length) {
+          evidence.sensors_binding_reasons = assessed.reasons;
+        }
+        if (sensorEnvelope?.schema_version === 2) {
+          evidence.sensors_envelope_id = sensorEnvelope.envelope_id;
+          evidence.sensors_tasks_hash = sensorEnvelope.tasks_sha256;
+          evidence.sensors_repository_id = sensorEnvelope.repository_id;
+          evidence.sensors_worktree_id = sensorEnvelope.worktree_id;
+        }
       }
     }
   }
@@ -279,12 +309,23 @@ export function buildSessionMemoryEvents({
   if (Array.isArray(evidence.sensors) && evidence.sensors.length) {
     events.push(makeEvent(context, {
       memoryKey: 'quality.latest-sensors',
-      value: [...new Set(evidence.sensors.map(String))].sort(),
-      authority: 'verified',
-      evidence: evidence.sensors,
+      value: {
+        ids: [...new Set(evidence.sensors.map(String))].sort(),
+        evidence_state: evidence.sensors_binding || 'legacy-unbound',
+        ...(evidence.sensors_envelope_id ? { envelope_id: evidence.sensors_envelope_id } : {}),
+        ...(evidence.sensors_binding && !['bound', 'legacy-unbound'].includes(evidence.sensors_binding)
+          ? { recovery: 'reabra a change e rode wendkeep verify --deep + wk-verify' }
+          : {}),
+      },
+      authority: evidence.sensors_binding === 'bound' ? 'verified' : 'reported',
+      evidence: [evidence.sensors_path].filter(Boolean),
       scopeContext: {
         changeSlug: evidence.change?.slug || normalizedShared?.change_slug,
         tasksHash: evidence.sensors_tasks_hash || normalizedShared?.tasks_hash,
+        repositoryId: evidence.sensors_repository_id,
+        worktreeId: evidence.sensors_worktree_id,
+        evidenceEnvelopeId: evidence.sensors_envelope_id,
+        evidenceState: evidence.sensors_binding,
       },
     }));
   }

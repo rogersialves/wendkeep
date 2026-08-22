@@ -81,17 +81,26 @@ specs: [gate, auth]     # capabilities cujos deltas serão promovidos
 source: ["[[02-Sessões/…]]"]
 ```
 
+## Evidence Envelope v2 — `08-Mudanças/<slug>/evidencia.json`
+
+Escrito atomicamente por `wendkeep verify` conforme
+[`schema/wendkeep.evidence-envelope-v2.schema.json`](../schema/wendkeep.evidence-envelope-v2.schema.json).
+Liga identidade causal, `HEAD`, árvore do índice, digest normalizado da worktree, tarefas, spec e
+configuração de sensores por SHA-256. Evidência v1 é apenas `legacy-unbound`; mudança de HEAD durante
+os sensores preserva a evidência anterior e falha com `WENDKEEP_EVIDENCE_HEAD_CHANGED`.
+
 ## Pacote de verificação — `08-Mudanças/<slug>/verificacao.json`
 Escrito por `wendkeep verify --deep`; consumido pela skill `wk-verify`.
 ```json
-{ "slug": "x", "tasksHash": "a1b2c3d4e5f6", "effectiveSpecHash": "<sha256>",
+{ "slug": "x", "tasksHash": "sha256:<64-hex>", "effectiveSpecHash": "<sha256>",
+  "evidenceEnvelopeId": "sha256:<64-hex>", "evidenceBinding": { "worktree_id": "..." },
   "requirements": [{ "id": "GATE-1", "capability": "gate", "operation": "MODIFIED",
     "source": "change", "body": "comportamento completo" }],
   "tasks": [{ "id": "3.2", "text": "...", "req": "GATE-1", "done": false }],
   "sensors": [{ "id": "tests", "status": "green", "severity": "critical" }] }
 ```
-`tasksHash` e `effectiveSpecHash` são selos de frescor. A skill copia ambos pro verdict e julga
-somente o pacote autocontido; não relê `07-Specs`.
+`tasksHash`, `effectiveSpecHash`, `evidenceEnvelopeId` e `evidenceBinding` são selos de frescor. A
+skill copia todos pro verdict e julga somente o pacote autocontido; não relê `07-Specs`.
 
 ## Veredito — `08-Mudanças/<slug>/verdict.json`
 Escrito pela skill `wk-verify` (autor≠verificador). O gate do `archive` exige `ok:true`
@@ -99,7 +108,8 @@ cobrindo todo `[req:]` declarado.
 ```json
 { "slug": "x", "ok": true,
   "coverage": [{ "req": "GATE-1", "covered": true, "evidence": "tests/gate.test.mjs:42" }],
-  "tasksHash": "a1b2c3d4e5f6",
+  "tasksHash": "sha256:<64-hex>", "effectiveSpecHash": "<sha256>",
+  "evidenceEnvelopeId": "sha256:<64-hex>", "evidenceBinding": { "worktree_id": "..." },
   "notes": [] }
 ```
 Change sem `[req:]` = trivial: `verify --deep` auto-escreve o verdict; o gate passa pelo sensor.

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { linkSync, mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
+import { linkSync, mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { adoptSpecsState, buildEffectiveRequirementPackage, captureSpecBaseline, checkSpecsState, parseRequirements, parseDelta, applyDelta, renderSpec, parseSpecsList, promoteSpecs, evaluateVerdict, tasksHashOf, isPlaceholderDelta, discoverSpecDeltas, parseSpecImpact, specConflicts, validateSpecImpact, formatOrphanReqs, ensureSpecsReadme } from '../hooks/spec-core.mjs';
@@ -88,20 +88,33 @@ test('parseSpecImpact + validateSpecImpact: pending/required/none e legado', () 
 });
 
 test('evaluateVerdict: tasksHash mismatch = stale; sem hash no verdict = retrocompat', () => {
-  const v = { ok: true, coverage: [{ req: 'A-1', covered: true }], tasksHash: 'abc123', effectiveSpecHash: 'spec-a' };
+  const binding = {
+    project_id: 'project-a', repository_id: 'repo-a', worktree_id: 'worktree-a',
+    head_sha: 'a'.repeat(40), index_tree_sha: 'b'.repeat(40), worktree_digest: `sha256:${'c'.repeat(64)}`,
+  };
+  const v = { ok: true, coverage: [{ req: 'A-1', covered: true }], tasksHash: 'abc123', effectiveSpecHash: 'spec-a', evidenceBinding: binding };
   assert.deepEqual(evaluateVerdict(v, ['A-1'], { tasksHash: 'abc123' }), { ok: true, missing: [] });
   const stale = evaluateVerdict(v, ['A-1'], { tasksHash: 'zzz999' });
   assert.equal(stale.ok, false);
   assert.equal(stale.stale, true);
   const specStale = evaluateVerdict(v, ['A-1'], { tasksHash: 'abc123', effectiveSpecHash: 'spec-b' });
   assert.equal(specStale.stale, true);
+  const bindingStale = evaluateVerdict(v, ['A-1'], {
+    tasksHash: 'abc123',
+    evidenceBinding: { ...binding, worktree_id: 'foreign-worktree' },
+  });
+  assert.equal(bindingStale.ok, false);
+  assert.equal(bindingStale.stale, true);
+  assert.equal(evaluateVerdict({ ...v, evidenceBinding: undefined }, ['A-1'], {
+    tasksHash: 'abc123', evidenceBinding: binding,
+  }).stale, true);
   // verdict pré-0.6.1 (sem tasksHash): aceito
   const old = { ok: true, coverage: [{ req: 'A-1', covered: true }] };
   assert.equal(evaluateVerdict(old, ['A-1'], { tasksHash: 'abc123' }).ok, true);
   // hash estável e curto
   assert.equal(tasksHashOf('x'), tasksHashOf('x'));
   assert.notEqual(tasksHashOf('x'), tasksHashOf('y'));
-  assert.equal(tasksHashOf('x').length, 12);
+  assert.match(tasksHashOf('x'), /^sha256:[a-f0-9]{64}$/);
 });
 
 test('evaluateVerdict: sem req = trivial ok; com req exige verdict cobrindo', () => {
@@ -290,6 +303,32 @@ test('baseline conflict is requirement-scoped', () => {
     assert.match(specConflicts(vault, change, ['auth'])[0], /AUTH-1 mudou/);
     assert.throws(() => promoteSpecs(vault, change, ['auth']), /conflito de spec/);
   } finally { rmSync(vault, { recursive: true, force: true }); }
+});
+
+test('[req:EVID-5] spec baseline refresh is atomic and preserves the prior seal on fault', () => {
+  const vault = mkdtempSync(join(tmpdir(), 'wk-spec-baseline-atomic-'));
+  const change = join(vault, '08-Mudanças', 'x');
+  try {
+    mkdirSync(change, { recursive: true });
+    captureSpecBaseline(vault, change);
+    const path = join(change, '.spec-base.json');
+    const before = readFileSync(path, 'utf8');
+    assert.throws(
+      () => captureSpecBaseline(vault, change, {
+        refresh: true,
+        beforeRename: () => {
+          const error = new Error('fault-before-baseline-rename');
+          error.code = 'FAULT';
+          throw error;
+        },
+      }),
+      (error) => error?.code === 'FAULT',
+    );
+    assert.equal(readFileSync(path, 'utf8'), before);
+    assert.deepEqual(readdirSync(change), ['.spec-base.json']);
+  } finally {
+    rmSync(vault, { recursive: true, force: true });
+  }
 });
 
 test('[req:OP-7] captureSpecBaseline rejeita target preexistente por hardlink sem alterar a origem', (t) => {

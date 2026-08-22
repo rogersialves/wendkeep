@@ -225,10 +225,20 @@ export function writeVaultFileSync(vaultBase, targetPath, content, encoding = 'u
 export function writeVaultFileAtomic(vaultBase, targetPath, content, encoding = 'utf8', {
   label = 'arquivo atômico do Vault',
   code = 'VAULT_PATH_UNSAFE',
+  scopeRoot = '',
+  beforeRename,
 } = {}) {
   const checked = assertVaultPathSafe(vaultBase, targetPath, {
     expectedType: 'file', label, code,
   });
+  if (scopeRoot) {
+    const scope = assertVaultPathSafe(vaultBase, scopeRoot, {
+      allowMissing: false, expectedType: 'directory', label: `escopo de ${label}`, code,
+    });
+    if (!containedBy(scope.target, checked.target)) {
+      throw unsafe(`${label} escapa do escopo autorizado: ${checked.target}`, code);
+    }
+  }
   assertVaultPathSafe(vaultBase, dirname(checked.target), {
     allowMissing: false, expectedType: 'directory', label: `ancestral de ${label}`, code,
   });
@@ -245,6 +255,7 @@ export function writeVaultFileAtomic(vaultBase, targetPath, content, encoding = 
       allowMissing: false, expectedType: 'file', label: `temporário de ${label}`, code,
     });
     assertVaultPathSafe(vaultBase, checked.target, { expectedType: 'file', label, code });
+    if (typeof beforeRename === 'function') beforeRename({ temporary: tmp, target: checked.target });
     renameSync(tmp, checked.target);
     tmpCreated = false;
     assertVaultPathSafe(vaultBase, checked.target, {
