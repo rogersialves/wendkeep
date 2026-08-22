@@ -592,6 +592,14 @@
       "severity": "critical",
       "type": "command",
       "command": "node --test tests/operating-profile-task-store.test.mjs tests/active-context-task-lease-cli.test.mjs tests/profile-cli.test.mjs tests/operating-profile-hooks.test.mjs"
+    },
+    {
+      "id": "active-context-handoff-evidence",
+      "name": "active-context-handoff-evidence",
+      "description": "Validates causal Stop handoff, lifecycle evidence, rollback, automatic recall isolation and legacy fallback",
+      "severity": "critical",
+      "type": "command",
+      "command": "node --test tests/active-context-handoff-evidence.test.mjs tests/evidence-recall.test.mjs tests/memory-hybrid-e2e.test.mjs tests/session-stop-migration-lifecycle.test.mjs"
     }
   ]
 }

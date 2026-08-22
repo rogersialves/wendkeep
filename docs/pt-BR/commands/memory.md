@@ -114,11 +114,17 @@ npx wendkeep validate-memory --vault <cofre-v2>
 - Registradores como `git.local-head`, `handoff.latest`, `quality.latest-*` e
   `change.<slug>.status` só competem dentro do mesmo escopo. Resolução automática ainda exige o
   mesmo projeto e linhagem causal; decisões, constraints e blockers incompatíveis permanecem sob
-  curadoria. Uma chave ambígua é omitida de SHARED sem remover CORE ou chaves independentes.
+  curadoria. Uma chave ambígua é omitida de SHARED sem remover CORE ou chaves independentes. Com
+  `active_contexts` inicializado, o `Stop` deriva `work_session_id`, `repository_id`, `worktree_id`,
+  branch e `change_slug` do active context causal. Identidade divergente no handoff falha antes de
+  CAS, nota, outbox ou ledger; o fallback legado só existe sem o store contextual.
 - `.brain/EVIDENCE_INDEX.jsonl` divide documentos por headings e blocos e registra arquivo,
   heading, tipo, change, sessão, work session, autoridade, data, validade e hash. `/brain-recall`
   e o hook `UserPromptSubmit` usam BM25, frase exata, pesos por campo, autoridade, validade,
-  recência limitada e diversidade para retornar o trecho do match com proveniência.
+  recência limitada e diversidade para retornar o trecho do match com proveniência. No recall
+  automático, o hook é somente leitura: não migra `CURRENT_CHANGE.md` nem altera o registry;
+  exclui linhas pertencentes a sessão ou change irmã ativa e preserva linhas globais ou históricas
+  sem owner ativo. `/brain-recall` explícito permanece global.
 - Toda rota de memória valida a topologia física de `.brain`, ledger, outbox, CORE, SHARED,
   candidates, registry, notas, backups, temporários e sidecars antes de ler ou escrever. Junction,
   symlink, reparse point ou hardlink falham fechados sem tocar bytes externos. Locks publicam owner

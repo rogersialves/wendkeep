@@ -19,6 +19,11 @@ import { mutateSessionNote } from './session-note-io.mjs';
 import { appendIterationOutcome } from './session-iteration-outcome.mjs';
 import { applyDerivedSections, provenanceSessions } from './derived-sections.mjs';
 import { buildSessionMemoryEvents, collectLifecycleEvidence } from './memory-handoff.mjs';
+import {
+  buildCausalSharedHandoff,
+  causalChangeSlug,
+  resolveHandoffEvidenceAuthority,
+} from './active-context-handoff-evidence.mjs';
 import { enqueueMemoryEvent, projectMemoryOutbox } from './memory-store.mjs';
 import { detectMemoryMode } from './memory-mode.mjs';
 import { sanitizeMemoryText } from './memory-schema.mjs';
@@ -519,21 +524,6 @@ export function confirmedLoggedTurnId(currentTurnId, candidateTurnId, projection
 function shouldFinalizeSession() {
   // Finaliza em todo Stop por padrão; escape hatch negativo p/ debug/teste.
   return process.env.OBSIDIAN_NO_AUTO_FINALIZE !== '1';
-}
-
-function sharedHandoffFromInput(input = {}, entry = {}) {
-  const supplied = input.shared || input.handoff?.shared;
-  const shared = supplied && typeof supplied === 'object' && !Array.isArray(supplied)
-    ? { ...supplied }
-    : {};
-  const workSessionId = shared.work_session_id
-    || shared.workSessionId
-    || input.work_session_id
-    || input.workSessionId
-    || entry?.work_session_id
-    || '';
-  if (!shared.work_session_id && workSessionId) shared.work_session_id = workSessionId;
-  return Object.keys(shared).length ? shared : null;
 }
 
 export function commitSessionMemory(vaultBase, handoff, { projectOptions = {} } = {}) {
@@ -1277,6 +1267,29 @@ export async function main({
   const tx = parseTranscript(identity.transcriptPath || input.transcript_path || input.transcriptPath);
   const requestedTurnId = String(input.turn_id || input.turnId || '');
   const sessionId = identity.canonicalConversationId;
+  let handoffEvidenceAuthority;
+  let sharedHandoff;
+  let activeContextChangeSlug;
+  try {
+    handoffEvidenceAuthority = resolveHandoffEvidenceAuthority(vaultBase, {
+      input,
+      sessionId,
+      projectRoot: input.cwd || process.cwd(),
+    });
+    sharedHandoff = buildCausalSharedHandoff({
+      input,
+      entry,
+      authority: handoffEvidenceAuthority,
+    });
+    activeContextChangeSlug = causalChangeSlug(entry, handoffEvidenceAuthority);
+  } catch (error) {
+    const detail = String(error?.message || 'active context causal indisponível');
+    process.stderr.write(`[wendkeep] Stop causal bloqueado: ${detail}\n`);
+    writeHookOutput({
+      systemMessage: `wendkeep: Stop bloqueado antes de publicar handoff/evidência: ${detail}`,
+    });
+    return;
+  }
   const finalizing = shouldFinalizeSession();
   const turnIdentity = resolveTurnIdentity(tx, requestedTurnId);
   if (!turnIdentity) {
@@ -1389,11 +1402,10 @@ export async function main({
     }
     const finalSummary = sessionFinalSummary(tx);
     const memoryEvidence = collectLifecycleEvidence(vaultBase, {
-      changeSlug: entry.change_slug,
+      changeSlug: activeContextChangeSlug,
       summary: finalSummary,
       noteRel: sessionRel,
     });
-    const sharedHandoff = sharedHandoffFromInput(input, entry);
     memoryHandoff = {
       projectId,
       identity,
@@ -1531,9 +1543,11 @@ export async function main({
   // grafo quando a change fechava antes do turno seguinte. Aqui sobrevive ao reopen e acumula toda
   // change que passou pela sessão (upsertListSection deduplica). Fail-quiet: nunca derruba o Stop.
   try {
-    const chgLink = entry.change_slug
-      ? `Change ativa: [[${getLocale(vaultBase).folders.changes}/${entry.change_slug}/proposta]]`
-      : activeChangeLink(vaultBase);
+    const chgLink = activeContextChangeSlug
+      ? `Change ativa: [[${getLocale(vaultBase).folders.changes}/${activeContextChangeSlug}/proposta]]`
+      : handoffEvidenceAuthority.mode === 'legacy'
+        ? activeChangeLink(vaultBase)
+        : '';
     const wl = (chgLink.match(/\[\[[^\]]+\]\]/) || [])[0];
     if (wl) {
       mutateSessionNote(sessionPath, (cur) => (

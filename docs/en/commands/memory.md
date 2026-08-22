@@ -115,10 +115,17 @@ npx wendkeep validate-memory --vault <v2-vault>
   `change.<slug>.status` compete only inside the same scope. Automatic resolution still requires
   the same project and causal lineage; incompatible decisions, constraints, and blockers remain
   human-curated. An ambiguous key is omitted from SHARED without removing CORE or independent keys.
+  Once `active_contexts` is initialized, `Stop` derives `work_session_id`, `repository_id`,
+  `worktree_id`, branch, and `change_slug` from the causal active context. A divergent handoff
+  identity fails before CAS, note, outbox, or ledger mutation; legacy fallback exists only without
+  the contextual store.
 - `.brain/EVIDENCE_INDEX.jsonl` chunks documents by heading and block and records file, heading,
   type, change, session, work session, authority, date, validity, and hash. `/brain-recall` and the
   `UserPromptSubmit` hook use BM25, exact phrase, field weights, authority, validity, bounded
-  recency, and diversity to return the matching passage with provenance.
+  recency, and diversity to return the matching passage with provenance. Automatic recall is
+  read-only: it never migrates `CURRENT_CHANGE.md` or mutates the registry; it excludes rows owned
+  by an active sibling session or change while preserving global or historical rows with no active
+  owner. Explicit `/brain-recall` remains global.
 - Every memory path validates the physical topology of `.brain`, ledger, outbox, CORE, SHARED,
   candidates, registry, notes, backups, temporary files, and sidecars before reading or writing.
   Junctions, symlinks, reparse points, or hardlinks fail closed without touching external bytes.

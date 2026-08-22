@@ -4,6 +4,21 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.76.7] — 2026-08-22
+
+### Fixed
+
+- **Handoff causal no Stop.** Com `active_contexts` inicializado, work session, repository,
+  worktree, branch e change vêm do contexto chamador; payload divergente falha antes de CAS,
+  nota, outbox ou ledger e não publica estado parcial.
+- **Evidência da change correta.** O lifecycle coleta verdict, sensores e ADR apenas da change do
+  active context causal, sem reutilizar `change_slug` legado ou link global de uma sessão irmã.
+- **Recall automático escopado.** `UserPromptSubmit` permanece somente leitura, sem migrar pointer
+  ou registry; exclui evidência de sessão/change irmã ativa e preserva material global/histórico.
+  `/brain-recall` explícito segue global.
+- **Compatibilidade conservadora.** O comportamento anterior permanece somente quando o registry
+  ainda não possui nenhum campo do store contextual, inclusive quando `active_contexts` está vazio.
+
 ## [0.76.6] — 2026-08-22
 
 ### Fixed

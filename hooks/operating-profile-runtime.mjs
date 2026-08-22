@@ -133,6 +133,7 @@ export function resolveHookOperatingProfile({
   resolution = null,
   config = null,
   provider,
+  activeContextResolver = resolveCommandActiveContext,
 } = {}) {
   const initialResolution = resolution || resolveProjectVault({ input });
   const matched = matchingProjectBinding(initialResolution, input);
@@ -158,7 +159,7 @@ export function resolveHookOperatingProfile({
   let contextError = null;
   if (!bindingError && identity.state === 'resolved') {
     try {
-      activeContext = resolveCommandActiveContext({
+      activeContext = activeContextResolver({
         vaultBase: vaultResolution.base,
         projectRoot: input?.cwd || vaultResolution.projectRoot || process.cwd(),
         sessionId: identity.canonicalConversationId,
