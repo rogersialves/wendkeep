@@ -76,6 +76,41 @@ test('[req:CLI-SCOPE-2] classifica capacidades Git independentemente', () => {
   assert.equal(scopeActionForCommand('git merge main'), 'git:merge');
   assert.equal(scopeActionForCommand('git status --short'), null);
   assert.equal(scopeActionForCommand('git reset --hard HEAD'), 'git:destructive');
+  assert.equal(
+    scopeActionForCommand('node bin/wendkeep.mjs context switch wk/nova --create --session session-a'),
+    'git:destructive',
+  );
+});
+
+test('[req:CLI-SCOPE-2] troca de branch Git crua é negada e restore de path preserva a política existente', () => {
+  const expected = {
+    schemaVersion: 1, complete: true, projectId: 'project-a', projectRoot: 'C:/projects/a',
+    repoRoot: 'C:/projects/a', remote: 'https://example.com/acme/a.git', branch: 'main',
+    worktree: 'C:/projects/a/.git', provider: 'codex', sessionId: 'session-a',
+  };
+
+  for (const command of [
+    'git switch wk/nova',
+    'git switch -c wk/nova',
+    'git checkout wk/nova',
+    'git checkout -b wk/nova',
+  ]) {
+    const denied = scopeDecision({ command, expectedScope: expected, actualScope: expected, host: 'codex' });
+    assert.equal(denied.permissionDecision, 'deny', command);
+    assert.match(denied.permissionDecisionReason, /WENDKEEP_CONTEXT_SWITCH_REQUIRED/);
+    assert.match(denied.permissionDecisionReason, /wendkeep context switch/);
+  }
+
+  for (const command of [
+    'git checkout -- arquivo.txt',
+    'git checkout HEAD -- arquivo.txt',
+  ]) {
+    assert.equal(
+      scopeDecision({ command, expectedScope: expected, actualScope: expected, host: 'codex' }),
+      null,
+      command,
+    );
+  }
 });
 
 test('[req:CLI-SCOPE-2] publicação e ações compostas não herdam autorização entre si', () => {
@@ -185,6 +220,11 @@ test('[req:VAULT-6] sessão concorrente bloqueia mesma raiz/branch e aceita work
     assert.match(denied.permissionDecisionReason, /CONFLICT|worktree|lease/i);
     const distinct = { ...blocker, project_scope: { ...blocker.project_scope, worktree: `${blocker.project_scope.worktree}-other` } };
     assert.deepEqual(concurrentScopeConflicts(expected, [['session-b', distinct]], 'session-a'), []);
+    const incompleteDistinct = {
+      ...distinct,
+      project_scope: { ...distinct.project_scope, complete: false, projectId: '' },
+    };
+    assert.deepEqual(concurrentScopeConflicts(expected, [['session-b', incompleteDistinct]], 'session-a'), []);
     const unknown = scopeDecision({
       command: 'git commit -m x', expectedScope: expected, actualScope: expected, host: 'codex',
       activeSessions: [['session-b', { status: 'active' }]], currentSessionId: 'session-a',

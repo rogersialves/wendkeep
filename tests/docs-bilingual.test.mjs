@@ -21,6 +21,7 @@ const GUIDES = [
   'retroactive-import.md',
   'observer.md',
   'worktrees.md',
+  'context.md',
 ];
 const GUIDE_DIR = {
   pt: join(ROOT, 'docs', 'pt-BR', 'commands'),
@@ -41,6 +42,7 @@ const REQUIRED_SECTIONS = {
 const README_GROUPS = [
   { pt: 'Instalação e atualização', en: 'Installation and updates', guide: 'getting-started.md' },
   { pt: 'Worktrees gerenciadas', en: 'Managed worktrees', guide: 'worktrees.md' },
+  { pt: 'Contexto ativo', en: 'Active context', guide: 'context.md' },
   { pt: 'Perfis de operação', en: 'Operating profiles', guide: 'operating-profiles.md' },
   { pt: 'Changes e verificação', en: 'Changes and verification', guide: 'changes-and-verification.md' },
   { pt: 'Memória compartilhada', en: 'Shared memory', guide: 'memory.md' },
@@ -55,6 +57,7 @@ const GUIDE_FOR_FAMILY = new Map([
   ['wendkeep init', 'getting-started.md'], ['wendkeep sync', 'getting-started.md'],
   ['wendkeep worktree create', 'worktrees.md'], ['wendkeep worktree list', 'worktrees.md'],
   ['wendkeep worktree status', 'worktrees.md'], ['wendkeep worktree open', 'worktrees.md'],
+  ['wendkeep context switch', 'context.md'],
   ['wendkeep profile', 'operating-profiles.md'], ['wendkeep flow', 'operating-profiles.md'],
   ['wendkeep delivery', 'operating-profiles.md'],
   ['wendkeep hook', 'sessions-and-import.md'], ['wendkeep doctor', 'maintenance-and-diagnostics.md'],
@@ -88,6 +91,7 @@ const SEMANTIC_CONCEPTS = {
   'retroactive-import.md': { pt: [/retroativ/i, /deduplic|duplicata/i, /fork/i], en: [/retroactive/i, /deduplic|duplicate/i, /fork/i] },
   'observer.md': { pt: [/Observer/i, /snapshot/i, /outbox/i], en: [/Observer/i, /snapshot/i, /outbox/i] },
   'worktrees.md': { pt: [/worktree/i, /Vault/i, /registry/i], en: [/worktree/i, /Vault/i, /registry/i] },
+  'context.md': { pt: [/contexto/i, /branch/i, /rollback|reversão/i], en: [/context/i, /branch/i, /rollback/i] },
 };
 
 const markdownLinks = (text) => [...text.matchAll(/\[[^\]]*\]\(([^)]+)\)/g)].map((m) => m[1]);

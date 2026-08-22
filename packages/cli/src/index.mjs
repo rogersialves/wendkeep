@@ -57,6 +57,8 @@ Usage:
   wendkeep worktree status [slug] [--json]
   wendkeep worktree open <slug> [--editor vscode] [--json]
                            Managed linked worktrees under .worktrees (branch default wk/<slug>).
+  wendkeep context switch <branch> [--create] [--session <id>] [--json]
+                           Switch Git branch and the causal session scope in the same worktree.
   wendkeep change <sub>        Change lifecycle: new [--simple|--guide] | use | bind <slug> --session <id> | continue | list | show |
                            status | done <id> | undone <id> | diff | archive [--force] | abandon | relink | backlink.
                            archive exige verdict (rode verify --deep); abandon descarta sem ADR.
@@ -200,6 +202,9 @@ async function main(argv) {
     } else if (cmd === 'profile') {
       const { PROFILE_HELP } = await import('../../../src/profile.mjs');
       process.stdout.write(PROFILE_HELP);
+    } else if (cmd === 'context') {
+      const { CONTEXT_HELP } = await import('../../../src/context.mjs');
+      process.stdout.write(CONTEXT_HELP);
     } else {
       process.stdout.write(HELP);
     }
@@ -239,6 +244,11 @@ async function main(argv) {
     case 'worktree': {
       const { runWorktree } = await import('../../../src/worktree.mjs');
       process.exit(runWorktree(rest));
+      break;
+    }
+    case 'context': {
+      const { runContext } = await import('../../../src/context.mjs');
+      process.exit(runContext(rest));
       break;
     }
     case 'sync': {
