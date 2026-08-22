@@ -10,6 +10,13 @@ import {
 import { dirname, join, relative, resolve } from 'node:path';
 
 import { resolveProjectVault } from './project-vault.mjs';
+import {
+  cleanupMergedWorktrees,
+  diagnoseManagedWorktreeCleanups,
+  finishManagedWorktree,
+  pruneManagedWorktrees,
+  removeManagedWorktree,
+} from './worktree-cleanup.mjs';
 import { getLocale } from '../packages/vault/src/locale.mjs';
 import {
   discoverWorktreeRepository,
@@ -150,12 +157,29 @@ function vscodeWorktreeTasks() {
         args: ['--no-install', 'wendkeep', 'worktree', 'open', '${input:wendkeepWorktreeSlug}'],
         problemMatcher: [],
       },
+      {
+        label: 'WendKeep: Finish merged worktree',
+        type: 'process',
+        command: 'npx',
+        args: [
+          '--no-install', 'wendkeep', 'worktree', 'finish',
+          '${input:wendkeepWorktreeSlug}', '--pr', '${input:wendkeepPullRequest}', '--open-main',
+        ],
+        problemMatcher: [],
+      },
     ],
-    inputs: [{
-      id: 'wendkeepWorktreeSlug',
-      type: 'promptString',
-      description: 'Managed worktree slug',
-    }],
+    inputs: [
+      {
+        id: 'wendkeepWorktreeSlug',
+        type: 'promptString',
+        description: 'Managed worktree slug',
+      },
+      {
+        id: 'wendkeepPullRequest',
+        type: 'promptString',
+        description: 'Merged pull request number or URL',
+      },
+    ],
   };
 }
 
@@ -312,18 +336,26 @@ export function diagnoseManagedWorktrees({ startDir = process.cwd(), spawn = spa
     throw error;
   }
   const issues = listed.worktrees
-    .filter((entry) => entry.state !== 'ready' || !entry.binding.healthy)
+    .filter((entry) => (
+      !['ready', 'cleaning', 'cleanup-failed', 'cleaned'].includes(entry.state)
+      || (entry.state === 'ready' && !entry.binding.healthy)
+    ))
     .map((entry) => ({
       slug: entry.slug,
       state: entry.state,
       errorCode: entry.errorCode || entry.binding.errorCode || 'WENDKEEP_WORKTREE_UNHEALTHY',
       repair: entry.recovery || `wendkeep worktree status ${entry.slug}`,
     }));
-  return { initialized: true, issues };
+  const cleanup = diagnoseManagedWorktreeCleanups({ startDir, spawn });
+  return { initialized: true, issues: [...issues, ...cleanup.issues] };
 }
 
-const WORKTREE_VALUE_OPTIONS = new Set(['--base', '--branch', '--open', '--editor', '--project']);
-const WORKTREE_FLAG_OPTIONS = new Set(['--json']);
+const WORKTREE_VALUE_OPTIONS = new Set([
+  '--base', '--branch', '--open', '--editor', '--project', '--pr', '--reason',
+]);
+const WORKTREE_FLAG_OPTIONS = new Set([
+  '--json', '--delete-remote', '--open-main', '--merged', '--dry-run', '--apply',
+]);
 
 function parseWorktreeArgv(argv) {
   const values = new Map();
@@ -360,13 +392,22 @@ function parseWorktreeArgv(argv) {
 
 function assertCommandOptions(command, parsed) {
   const allowed = {
-    create: new Set(['--base', '--branch', '--open', '--project']),
-    list: new Set(['--project']),
-    status: new Set(['--project']),
-    open: new Set(['--editor', '--project']),
+    create: new Set(['--base', '--branch', '--open', '--project', '--json']),
+    list: new Set(['--project', '--json']),
+    status: new Set(['--project', '--json']),
+    open: new Set(['--editor', '--project', '--json']),
+    finish: new Set(['--pr', '--project', '--delete-remote', '--open-main', '--json']),
+    cleanup: new Set(['--project', '--merged', '--dry-run', '--apply', '--json']),
+    remove: new Set(['--reason', '--project', '--json']),
+    prune: new Set(['--project', '--dry-run', '--apply', '--json']),
   }[command];
   if (!allowed) return;
   for (const name of parsed.values.keys()) {
+    if (!allowed.has(name)) {
+      throw worktreeError('WENDKEEP_WORKTREE_USAGE', `${name} não é válido para worktree ${command}.`);
+    }
+  }
+  for (const name of parsed.flags) {
     if (!allowed.has(name)) {
       throw worktreeError('WENDKEEP_WORKTREE_USAGE', `${name} não é válido para worktree ${command}.`);
     }
@@ -401,6 +442,15 @@ const ERROR_TEXT = {
     WENDKEEP_WORKTREE_EDITOR_UNSUPPORTED: 'Unsupported worktree editor.',
     WENDKEEP_WORKTREE_NOT_FOUND: 'Managed worktree was not found.',
     WENDKEEP_WORKTREE_NOT_READY: 'Managed worktree is not ready.',
+    WENDKEEP_WORKTREE_PR_INVALID: 'Pull Request reference is invalid or missing.',
+    WENDKEEP_WORKTREE_PR_UNAVAILABLE: 'Pull Request proof is unavailable.',
+    WENDKEEP_WORKTREE_PR_NOT_MERGED: 'Pull Request is not merged.',
+    WENDKEEP_WORKTREE_PR_MISMATCH: 'Pull Request does not match the managed branch.',
+    WENDKEEP_WORKTREE_PR_MERGE_UNREACHABLE: 'Pull Request merge commit is not reachable from the local base.',
+    WENDKEEP_WORKTREE_CLEANUP_BUSY: 'Worktree cleanup is already running.',
+    WENDKEEP_WORKTREE_REASON_REQUIRED: 'Worktree removal requires a reason.',
+    WENDKEEP_WORKTREE_REMOTE_UNAVAILABLE: 'Remote branch state is unavailable.',
+    WENDKEEP_WORKTREE_REMOTE_DIVERGED: 'Remote branch diverged from the proven head.',
     WENDKEEP_WORKTREE_USAGE: 'Invalid worktree command usage.',
   },
   'pt-BR': {
@@ -430,6 +480,15 @@ const ERROR_TEXT = {
     WENDKEEP_WORKTREE_EDITOR_UNSUPPORTED: 'Editor de worktree não suportado.',
     WENDKEEP_WORKTREE_NOT_FOUND: 'Worktree gerenciada não encontrada.',
     WENDKEEP_WORKTREE_NOT_READY: 'Worktree gerenciada ainda não está pronta.',
+    WENDKEEP_WORKTREE_PR_INVALID: 'Referência de Pull Request inválida ou ausente.',
+    WENDKEEP_WORKTREE_PR_UNAVAILABLE: 'A prova do Pull Request está indisponível.',
+    WENDKEEP_WORKTREE_PR_NOT_MERGED: 'O Pull Request não está merged.',
+    WENDKEEP_WORKTREE_PR_MISMATCH: 'O Pull Request não corresponde à branch gerenciada.',
+    WENDKEEP_WORKTREE_PR_MERGE_UNREACHABLE: 'O merge commit do Pull Request não está alcançável pela base local.',
+    WENDKEEP_WORKTREE_CLEANUP_BUSY: 'A limpeza da worktree já está em andamento.',
+    WENDKEEP_WORKTREE_REASON_REQUIRED: 'A remoção da worktree exige um motivo.',
+    WENDKEEP_WORKTREE_REMOTE_UNAVAILABLE: 'O estado da branch remota está indisponível.',
+    WENDKEEP_WORKTREE_REMOTE_DIVERGED: 'A branch remota divergiu do head comprovado.',
     WENDKEEP_WORKTREE_USAGE: 'Uso inválido do comando worktree.',
   },
 };
@@ -464,17 +523,23 @@ function writeWorktreeResult(payload, { json, locale, action }) {
     process.stdout.write(`${JSON.stringify({ ok: true, ...payload })}\n`);
     return;
   }
-  const subject = payload.worktree?.slug || `${payload.worktrees?.length || 0}`;
+  const subject = payload.worktree?.slug
+    || payload.receipt?.slug
+    || `${payload.worktrees?.length ?? payload.actions?.length ?? 0}`;
   const messages = locale === 'en'
-    ? { create: `worktree created: ${subject}`, list: `managed worktrees: ${subject}`, status: `worktree status: ${subject}`, open: `worktree opened: ${subject}` }
-    : { create: `worktree criada: ${subject}`, list: `worktrees gerenciadas: ${subject}`, status: `status da worktree: ${subject}`, open: `worktree aberta: ${subject}` };
+    ? { create: `worktree created: ${subject}`, list: `managed worktrees: ${subject}`, status: `worktree status: ${subject}`, open: `worktree opened: ${subject}`, finish: `worktree finished: ${subject}`, cleanup: `merged worktree cleanup: ${subject}`, remove: `worktree removed: ${subject}`, prune: `worktree prune: ${subject}` }
+    : { create: `worktree criada: ${subject}`, list: `worktrees gerenciadas: ${subject}`, status: `status da worktree: ${subject}`, open: `worktree aberta: ${subject}`, finish: `worktree finalizada: ${subject}`, cleanup: `limpeza de worktrees merged: ${subject}`, remove: `worktree removida: ${subject}`, prune: `prune de worktrees: ${subject}` };
   const details = action === 'list'
     ? payload.worktrees.map(renderWorktreeLine)
-    : (action === 'status' ? [renderWorktreeLine(payload.worktree)] : []);
+    : (action === 'status'
+      ? [renderWorktreeLine(payload.worktree)]
+      : (payload.actions || []).map((item) => [
+        `slug=${item.slug || ''}`, `path=${item.path || ''}`, `outcome=${item.outcome || item.action || ''}`,
+      ].join(' ')));
   process.stdout.write(`${messages[action]}${details.length ? `\n${details.join('\n')}` : ''}\n`);
 }
 
-export function runWorktree(argv = []) {
+export async function runWorktree(argv = [], dependencies = {}) {
   let parsed;
   let locale = 'pt-BR';
   try {
@@ -484,6 +549,9 @@ export function runWorktree(argv = []) {
     const startDir = parsed.values.get('--project') || process.cwd();
     locale = commandLocale(startDir);
     const json = parsed.flags.has('--json');
+    if (parsed.flags.has('--dry-run') && parsed.flags.has('--apply')) {
+      throw worktreeError('WENDKEEP_WORKTREE_USAGE', 'Use apenas --dry-run ou --apply.');
+    }
     if (command === 'create') {
       if (positionals.length !== 1) throw worktreeError('WENDKEEP_WORKTREE_USAGE', 'create requer <slug>.');
       const worktree = createManagedWorktree({
@@ -518,7 +586,50 @@ export function runWorktree(argv = []) {
       writeWorktreeResult({ worktree }, { json, locale, action: 'open' });
       return 0;
     }
-    throw worktreeError('WENDKEEP_WORKTREE_USAGE', 'Use create, list, status ou open.');
+    if (command === 'finish') {
+      if (positionals.length !== 1) throw worktreeError('WENDKEEP_WORKTREE_USAGE', 'finish requer <slug>.');
+      const operation = dependencies.finishManagedWorktree || finishManagedWorktree;
+      const result = await operation({
+        startDir,
+        slug: positionals[0],
+        pullRequest: parsed.values.get('--pr') || '',
+        deleteRemote: parsed.flags.has('--delete-remote'),
+      });
+      if (parsed.flags.has('--open-main')) {
+        const main = discoverWorktreeRepository({ startDir }).mainWorktree;
+        const openMain = dependencies.openMain
+          || ((path) => openWorktreePath(path, 'vscode', spawnSync));
+        openMain(main);
+      }
+      writeWorktreeResult(result, { json, locale, action: 'finish' });
+      return 0;
+    }
+    if (command === 'cleanup') {
+      if (positionals.length || !parsed.flags.has('--merged')) {
+        throw worktreeError('WENDKEEP_WORKTREE_USAGE', 'cleanup exige --merged e não aceita slug.');
+      }
+      const operation = dependencies.cleanupMergedWorktrees || cleanupMergedWorktrees;
+      const result = await operation({ startDir, apply: parsed.flags.has('--apply') });
+      writeWorktreeResult(result, { json, locale, action: 'cleanup' });
+      return result.actions.some((item) => item.outcome === 'blocked') ? 2 : 0;
+    }
+    if (command === 'remove') {
+      if (positionals.length !== 1) throw worktreeError('WENDKEEP_WORKTREE_USAGE', 'remove requer <slug>.');
+      const operation = dependencies.removeManagedWorktree || removeManagedWorktree;
+      const result = await operation({
+        startDir, slug: positionals[0], reason: parsed.values.get('--reason') || '',
+      });
+      writeWorktreeResult(result, { json, locale, action: 'remove' });
+      return 0;
+    }
+    if (command === 'prune') {
+      if (positionals.length) throw worktreeError('WENDKEEP_WORKTREE_USAGE', 'prune não aceita slug.');
+      const operation = dependencies.pruneManagedWorktrees || pruneManagedWorktrees;
+      const result = await operation({ startDir, apply: parsed.flags.has('--apply') });
+      writeWorktreeResult(result, { json, locale, action: 'prune' });
+      return 0;
+    }
+    throw worktreeError('WENDKEEP_WORKTREE_USAGE', 'Use create, list, status, open, finish, cleanup, remove ou prune.');
   } catch (error) {
     process.stderr.write(`${renderWorktreeError(error, locale)}\n`);
     return 2;

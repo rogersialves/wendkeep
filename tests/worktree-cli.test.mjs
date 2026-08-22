@@ -25,6 +25,7 @@ import {
   listManagedWorktrees,
   managedWorktreeStatus,
   openManagedWorktree,
+  runWorktree,
 } from '../src/worktree.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -408,6 +409,7 @@ test('[req:WT-8] tarefas opcionais do VS Code são locais, idempotentes e não s
     assert.equal(first.state, 'created');
     assert.equal(existsSync(tasksPath), true);
     assert.match(readFileSync(tasksPath, 'utf8'), /WendKeep: Create worktree/);
+    assert.match(readFileSync(tasksPath, 'utf8'), /WendKeep: Finish merged worktree/);
     assert.equal(git(fixture.main, ['check-ignore', '.vscode/tasks.json']), '.vscode/tasks.json');
 
     const before = readFileSync(tasksPath, 'utf8');
@@ -425,6 +427,57 @@ test('[req:WT-8] tarefas opcionais do VS Code são locais, idempotentes e não s
     assert.equal(installVscodeWorktreeTasks({ projectRoot: fixture.main }).state, 'conflict');
     assert.equal(existsSync(tasksPath), false);
   } finally {
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test('[req:WT-17] CLI encaminha finish/cleanup/remove/prune e mantém remote delete explícito', async () => {
+  const fixture = managedRepositoryFixture();
+  const calls = [];
+  const writes = [];
+  const originalWrite = process.stdout.write;
+  process.stdout.write = (chunk) => { writes.push(String(chunk)); return true; };
+  const dependencies = {
+    finishManagedWorktree: async (options) => {
+      calls.push(['finish', options]);
+      return { state: 'completed', receipt: { id: 'finish-receipt' } };
+    },
+    cleanupMergedWorktrees: async (options) => {
+      calls.push(['cleanup', options]);
+      return { dryRun: !options.apply, actions: [] };
+    },
+    removeManagedWorktree: async (options) => {
+      calls.push(['remove', options]);
+      return { state: 'completed', receipt: { id: 'remove-receipt' } };
+    },
+    pruneManagedWorktrees: (options) => {
+      calls.push(['prune', options]);
+      return { dryRun: !options.apply, actions: [] };
+    },
+    openMain: (path) => calls.push(['open-main', { path }]),
+  };
+  try {
+    assert.equal(await runWorktree([
+      'finish', 'merged', '--pr', '72', '--delete-remote', '--open-main',
+      '--project', fixture.main, '--json',
+    ], dependencies), 0);
+    assert.equal(await runWorktree([
+      'cleanup', '--merged', '--dry-run', '--project', fixture.main, '--json',
+    ], dependencies), 0);
+    assert.equal(await runWorktree([
+      'remove', 'abandoned', '--reason', 'cancelado', '--project', fixture.main, '--json',
+    ], dependencies), 0);
+    assert.equal(await runWorktree([
+      'prune', '--apply', '--project', fixture.main, '--json',
+    ], dependencies), 0);
+    assert.equal(calls[0][1].deleteRemote, true);
+    assert.deepEqual(calls[1], ['open-main', { path: realpathSync.native(fixture.main) }]);
+    assert.equal(calls[2][1].apply, false);
+    assert.equal(calls[3][1].reason, 'cancelado');
+    assert.equal(calls[4][1].apply, true);
+    assert.equal(writes.length, 4);
+  } finally {
+    process.stdout.write = originalWrite;
     rmSync(fixture.root, { recursive: true, force: true });
   }
 });

@@ -145,7 +145,7 @@ npx wendkeep init --no-companions --no-mcp --yes              # zero companions,
 | `--no-companions` | Não fixa nenhum companion. |
 | `--no-mcp` | Pula o MCP de cofre **do próprio wendkeep** (`wendkeep-vault`). Os MCPs de companion seguem `--companions`. |
 | `--no-colors` | Pula o sistema de cores do Obsidian (snippet `.obsidian` + grupos do grafo). |
-| `--vscode-worktree-tasks` | Cria `.vscode/tasks.json` local e ignorado pelo Git para criar/listar/abrir worktrees; não sobrescreve arquivo existente. Também é aceito por `sync`. |
+| `--vscode-worktree-tasks` | Cria `.vscode/tasks.json` local e ignorado pelo Git para criar/listar/abrir/finalizar worktrees; não sobrescreve arquivo existente. Também é aceito por `sync`. |
 | `--yes`, `-y` | Não-interativo; aceita os padrões (pula os prompts de idioma / cofre / companion). |
 | `--force` | Sobrescreve os blocos de config do wendkeep existentes. |
 
@@ -235,7 +235,7 @@ O README mostra o mapa; os guias trazem sintaxe, opções, códigos de saída, e
 | Grupo | Use para | Guia detalhado |
 |---|---|---|
 | **Instalação e atualização** | `init`, `sync`, companions e primeiro vínculo projeto↔cofre | [Instalação e primeiro uso](https://github.com/rogersialves/wendkeep/blob/main/docs/pt-BR/commands/getting-started.md) |
-| **Worktrees gerenciadas** | `worktree create/list/status/open`, vínculo de Vault e recuperação | [Worktrees gerenciadas](https://github.com/rogersialves/wendkeep/blob/main/docs/pt-BR/commands/worktrees.md) |
+| **Worktrees gerenciadas** | `worktree create/list/status/open/finish/cleanup/remove/prune`, prova de merge, preflight e receipts | [Worktrees gerenciadas](https://github.com/rogersialves/wendkeep/blob/main/docs/pt-BR/commands/worktrees.md) |
 | **Contexto ativo** | `active_contexts` por `repository_id`/`worktree_id`/`work_session_id`, transição causal, quarentena e recuperação explícita | [Contexto ativo](https://github.com/rogersialves/wendkeep/blob/main/docs/pt-BR/commands/context.md) |
 | **Perfis de operação** | `profile`, `flow`, Keep Core sempre ativo e governança do Wend Runtime | [Perfis de Operação](https://github.com/rogersialves/wendkeep/blob/main/docs/pt-BR/commands/operating-profiles.md) |
 | **Changes e verificação** | `change`, specs, sensores, TDD, evidência e archive | [Changes e verificação](https://github.com/rogersialves/wendkeep/blob/main/docs/pt-BR/commands/changes-and-verification.md) |
