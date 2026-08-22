@@ -10,6 +10,7 @@ import {
 } from 'node:fs';
 import { join } from 'node:path';
 import {
+  parseSharedMemory,
   renderSharedMemory,
   sanitizeMemoryText,
   validateMemoryEvent,
@@ -1007,6 +1008,7 @@ export function prepareMemoryProjection(vaultBase, allEvents) {
     stateHash: reduced.stateHash,
     updatedAt,
   });
+  const sharedMetadata = parseSharedMemory(shared).metadata;
   const candidates = reduced.candidates.map((item) => canonicalMemoryJson(item)).join('\n')
     + (reduced.candidates.length ? '\n' : '');
   return {
@@ -1018,6 +1020,8 @@ export function prepareMemoryProjection(vaultBase, allEvents) {
     stateHash: reduced.stateHash,
     checkpoint: reduced.checkpoint,
     candidates: reduced.candidates.length,
+    projectedEvents: sharedMetadata.projected_events ?? reduced.activeEvents.length,
+    omittedEvents: sharedMetadata.omitted_events ?? 0,
   };
 }
 

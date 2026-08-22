@@ -4,6 +4,19 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.76.2] — 2026-08-21
+
+### Fixed
+
+- **Projeção SHARED bounded na origem.** O projector agora admite eventos completos de forma
+  determinística e priorizada, nunca publica `SHARED_MEMORY.md` acima de 48 linhas/6144 bytes e
+  declara as contagens projetada/omitida sem perder a autoridade integral do ledger.
+- **Omissão bounded verificável.** O gate semântico rederiva a seleção esperada; apenas o recorte
+  exato é aceito como aviso operacional, enquanto IDs ou contagens divergentes continuam bloqueando.
+- **Recuperação antes de rescope.** Com memória estruturalmente bloqueada, o doctor orienta
+  `memory repair` e novo `memory status --gate` antes de voltar ao dry-run, sem recomendar
+  `memory rescope --apply` sobre uma projeção inválida.
+
 ## [0.76.1] — 2026-08-21
 
 ### Added

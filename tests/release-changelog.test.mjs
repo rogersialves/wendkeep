@@ -84,9 +84,15 @@ test('extractReleaseNotes: throws when the version is absent', () => {
 test('[sensor:release-tests] current release notes are extractable and match the package', () => {
   const release = extractReleaseNotes(CHANGELOG, PACKAGE.version);
   assert.equal(release.date, '2026-08-21');
+  assert.match(release.notes, /Projeção SHARED bounded na origem/i);
+  assert.match(release.notes, /memory rescope --apply/i);
+  assert.doesNotMatch(release.notes, /019f[0-9a-f-]+/i);
+});
+
+test('[sensor:release-tests] 0.76.1 causal branch transition notes remain extractable', () => {
+  const release = extractReleaseNotes(CHANGELOG, '0.76.1');
   assert.match(release.notes, /Transição causal de branch/i);
   assert.match(release.notes, /context switch <branch>/i);
-  assert.doesNotMatch(release.notes, /019f[0-9a-f-]+/i);
 });
 
 test('[sensor:release-tests] 0.76.0 managed worktree notes remain extractable', () => {

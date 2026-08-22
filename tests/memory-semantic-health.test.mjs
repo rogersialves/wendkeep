@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -101,6 +101,68 @@ test('v2 reports a conflict-free ledger key missing from SHARED without exposing
     assert.equal(status.status, 'blocked');
     assert.equal(status.metrics.semanticCode, 'MEMORY_SEMANTIC_COVERAGE_MISSING');
     assert.deepEqual(status.metrics.semanticMissingKeys, ['next.action']);
+  } finally { rmSync(vault, { recursive: true, force: true }); }
+});
+
+test('[req:MEM-HYB-7] v2 accepts only the deterministic bounded omission declared by SHARED', () => {
+  const events = Array.from({ length: 64 }, (_, index) => memoryEvent(
+    `mem-semantic-bounded-${String(index).padStart(2, '0')}`,
+    `${index % 2 ? 'next' : 'blocker'}.bounded-${String(index).padStart(2, '0')}`,
+    `PRIVATE_BOUNDED_VALUE_${index}_${'z'.repeat(180)}`,
+  ));
+  const vault = writeBundle({ events });
+  try {
+    const result = validateMemoryBundle(vault);
+    assert.equal(result.ok, true, result.errors.join('; '));
+    assert.equal(result.semantic.status, 'bounded');
+    assert.equal(result.semantic.code, 'MEMORY_SEMANTIC_BOUNDED_PROJECTION');
+    assert.ok(result.semantic.counts.missingKeys > 0);
+    assert.ok(result.semantic.counts.projectedKeys > 0);
+    assert.ok(result.warnings.some((warning) => /MEMORY_SEMANTIC_BOUNDED_PROJECTION/.test(warning)));
+    assert.doesNotMatch(diagnostics(result), /PRIVATE_BOUNDED_VALUE/);
+  } finally { rmSync(vault, { recursive: true, force: true }); }
+});
+
+test('[req:MEM-HYB-7] bounded metadata cannot legitimize an arbitrary projected event set', () => {
+  const events = Array.from({ length: 64 }, (_, index) => memoryEvent(
+    `mem-semantic-tamper-${String(index).padStart(2, '0')}`,
+    `${index % 2 ? 'next' : 'blocker'}.tamper-${String(index).padStart(2, '0')}`,
+    `PRIVATE_TAMPER_VALUE_${index}_${'q'.repeat(180)}`,
+  ));
+  const vault = writeBundle({ events });
+  const sharedPath = join(vault, '.brain', 'SHARED_MEMORY.md');
+  try {
+    const shared = readFileSync(sharedPath, 'utf8');
+    const projectedIds = [...shared.matchAll(/^\s*-\s+\[([^\]]+)\]/gm)].map((match) => match[1]);
+    const omittedId = events.map((event) => event.event_id).find((id) => !projectedIds.includes(id));
+    writeFileSync(sharedPath, shared.replace(`[${projectedIds[0]}]`, `[${omittedId}]`));
+
+    const result = validateMemoryBundle(vault);
+    assert.equal(result.ok, false);
+    assert.equal(result.semantic.code, 'MEMORY_SEMANTIC_COVERAGE_MISSING');
+    assert.doesNotMatch(diagnostics(result), /PRIVATE_TAMPER_VALUE/);
+  } finally { rmSync(vault, { recursive: true, force: true }); }
+});
+
+test('[req:MEM-HYB-7] bounded metadata with divergent counts is blocking', () => {
+  const events = Array.from({ length: 64 }, (_, index) => memoryEvent(
+    `mem-semantic-count-${String(index).padStart(2, '0')}`,
+    `${index % 2 ? 'next' : 'blocker'}.count-${String(index).padStart(2, '0')}`,
+    `PRIVATE_COUNT_VALUE_${index}_${'r'.repeat(180)}`,
+  ));
+  const vault = writeBundle({ events });
+  const sharedPath = join(vault, '.brain', 'SHARED_MEMORY.md');
+  try {
+    const shared = readFileSync(sharedPath, 'utf8');
+    writeFileSync(sharedPath, shared.replace(
+      /^omitted_events: (\d+)$/m,
+      (_, count) => `omitted_events: ${Number(count) + 1}`,
+    ));
+
+    const result = validateMemoryBundle(vault);
+    assert.equal(result.ok, false);
+    assert.equal(result.semantic.code, 'MEMORY_SEMANTIC_COVERAGE_MISSING');
+    assert.doesNotMatch(diagnostics(result), /PRIVATE_COUNT_VALUE/);
   } finally { rmSync(vault, { recursive: true, force: true }); }
 });
 

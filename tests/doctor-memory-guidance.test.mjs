@@ -254,12 +254,52 @@ test('[req:MEM-HANDOFF-4] doctor separates terminal handoff debt from actionable
     assert.equal(result.metrics.memory.repairableHandoffs, 1);
     const warning = result.warnings.find((item) => /handoff/i.test(item));
     assert.match(warning, /histórico.*reparável/i);
-    assert.ok(warning.includes(`npx --no-install wendkeep memory rescope --vault "${vault}"`));
-    assert.ok(warning.includes(`npx --no-install wendkeep memory curate --all --vault "${vault}"`));
+    const dryRun = `npx --no-install wendkeep memory rescope --vault "${vault}"`;
+    const apply = `npx --no-install wendkeep memory rescope --apply --vault "${vault}"`;
+    const curate = `npx --no-install wendkeep memory curate --all --vault "${vault}"`;
+    assert.ok(warning.includes(dryRun));
+    assert.ok(warning.includes(apply));
+    assert.ok(warning.includes(curate));
+    assert.ok(warning.indexOf(dryRun) < warning.indexOf(apply));
+    assert.ok(warning.indexOf(apply) < warning.indexOf(curate));
 
     const rendered = renderVaultHealthLines(result).join('\n');
     assert.match(rendered, /conflitos: 0/);
     assert.match(rendered, /handoffs reparáveis: 1/);
+  } finally {
+    rmSync(project, { recursive: true, force: true });
+  }
+});
+
+test('[req:MEM-BOUND-3] doctor repairs structural memory before suggesting rescope apply', () => {
+  const { project, vault } = fixture();
+  const brain = join(vault, '.brain');
+  try {
+    writeFileSync(join(brain, 'SESSION_REGISTRY.json'), `${JSON.stringify({
+      version: 2,
+      sessions: {
+        'session-a': { status: 'done', change_slug: 'change-a' },
+        'session-b': { status: 'superseded', change_slug: 'change-b' },
+      },
+    })}\n`);
+    writeFileSync(join(brain, 'MEMORY_CANDIDATES.jsonl'), `${JSON.stringify({
+      candidate_id: 'historical-blocked', reason: 'conflict', status: 'active',
+      memory_key: 'handoff.latest', event_ids: ['event-a', 'event-b'],
+      events: [
+        { event_id: 'event-a', value: 'old A', canonical_session_id: 'session-a' },
+        { event_id: 'event-b', value: 'old B', canonical_session_id: 'session-b' },
+      ],
+    })}\n`);
+    const sharedPath = join(brain, 'SHARED_MEMORY.md');
+    writeFileSync(sharedPath, `${readFileSync(sharedPath, 'utf8')}${'oversized\n'.repeat(50)}`);
+
+    const result = runVaultHealth({ vaultBase: vault });
+    assert.equal(result.memoryStatus, 'blocked');
+    assert.equal(result.metrics.memory.repairableHandoffs, 1);
+    const warning = result.warnings.find((item) => /handoff/i.test(item));
+    assert.ok(warning.includes(`npx --no-install wendkeep memory repair --vault "${vault}"`));
+    assert.ok(warning.includes(`npx --no-install wendkeep memory status --gate --vault "${vault}"`));
+    assert.doesNotMatch(warning, /memory rescope --apply/);
   } finally {
     rmSync(project, { recursive: true, force: true });
   }

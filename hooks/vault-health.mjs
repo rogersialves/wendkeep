@@ -523,12 +523,21 @@ export function checkMemoryBundle(vaultBase, { registry } = {}) {
     const label = historicalHandoffs.length === 1
       ? '1 handoff histórico reparável'
       : `${historicalHandoffs.length} handoffs históricos reparáveis`;
-    warnings.push(
-      `${label}; sessões de origem estão encerradas e nenhuma versão precisa virar estado atual. `
-      + `Execute primeiro o dry-run: ${memoryRescopeCommand(vaultBase)}. `
-      + `Se a prévia estiver correta: ${memoryRescopeCommand(vaultBase, { apply: true })}. `
-      + `Dívida restante: ${memoryCurateAllCommand(vaultBase)}.`,
-    );
+    if (!bundle.ok) {
+      warnings.push(
+        `${label}; a memória está bloqueada e rescope não deve ampliar uma projeção inválida. `
+        + `Repare primeiro: ${memoryRepairCommand(vaultBase)}. `
+        + `Confirme a recuperação: ${memoryStatusCommand(vaultBase)}. `
+        + 'Somente depois de um gate verde reexecute o doctor para revisar o dry-run de rescope.',
+      );
+    } else {
+      warnings.push(
+        `${label}; sessões de origem estão encerradas e nenhuma versão precisa virar estado atual. `
+        + `Execute primeiro o dry-run: ${memoryRescopeCommand(vaultBase)}. `
+        + `Se a prévia estiver correta: ${memoryRescopeCommand(vaultBase, { apply: true })}. `
+        + `Dívida restante: ${memoryCurateAllCommand(vaultBase)}.`,
+      );
+    }
   }
   if (outbox.count) warnings.push(`${outbox.count} evento(s) pendente(s) na outbox; execute o projector quando seguro.`);
   if (ordinaryCandidates.length) warnings.push(`${ordinaryCandidates.length} candidate(s) aguardando curadoria humana.`);
