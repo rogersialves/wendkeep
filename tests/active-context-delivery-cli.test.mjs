@@ -24,7 +24,7 @@ function fixture() {
   git(project, ['config', 'user.email', 'delivery@example.invalid']);
   git(project, ['config', 'user.name', 'Delivery CLI Test']);
   git(project, ['branch', '-M', 'main']);
-  git(project, ['remote', 'add', 'origin', 'https://example.com/acme/delivery-cli.git']);
+  git(project, ['remote', 'add', 'origin', 'https://github.com/acme/delivery-cli.git']);
   writeFileSync(join(project, 'package.json'), JSON.stringify({ name: 'fixture', version: '1.0.0' }));
   git(project, ['add', 'package.json']);
   git(project, ['commit', '-m', 'fixture']);

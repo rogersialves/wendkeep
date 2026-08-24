@@ -13,11 +13,21 @@ import {
   mutateWorktreeRegistry,
   readWorktreeRegistry,
 } from '../packages/vault/src/worktree-metadata.mjs';
-import { readSessionRegistry, writeSessionRegistry } from '../hooks/obsidian-common.mjs';
-import { activeContextKey } from '../hooks/active-context-store.mjs';
+import {
+  mutateSessionRegistry,
+  readSessionRegistry,
+  upsertSessionRegistry,
+  writeSessionRegistry,
+} from '../hooks/obsidian-common.mjs';
+import {
+  activeContextKey,
+  mutateActiveContext,
+  reserveActiveContextCleanup,
+} from '../hooks/active-context-store.mjs';
 import { createManagedWorktree, diagnoseManagedWorktrees } from '../src/worktree.mjs';
 import {
   cleanupMergedWorktrees,
+  cleanupReceiptLegacyPath,
   cleanupReceiptPath,
   diagnoseManagedWorktreeCleanups,
   finishManagedWorktree,
@@ -73,11 +83,23 @@ function mergedPr(f, mergeCommit, overrides = {}) {
     state: 'MERGED',
     mergedAt: '2026-08-22T12:00:00.000Z',
     headRefName: f.worktree.branch,
+    headRefOid: git(f.main, [
+      'rev-parse', '--verify', `refs/heads/${f.worktree.branch}`,
+    ], { ok: false }),
     baseRefName: 'main',
     mergeCommitOid: mergeCommit,
     isCrossRepository: false,
     ...overrides,
   });
+}
+
+function mergedSibling(f, slug) {
+  const sibling = createManagedWorktree({ startDir: f.main, slug });
+  writeFileSync(join(sibling.path, `${slug}.txt`), `${slug}\n`);
+  git(sibling.path, ['add', `${slug}.txt`]);
+  git(sibling.path, ['commit', '-m', `${slug} feature`]);
+  git(f.main, ['merge', '--no-ff', sibling.branch, '-m', `merge ${slug}`]);
+  return { sibling, mergeCommit: git(f.main, ['rev-parse', 'HEAD']) };
 }
 
 test('[req:WT-11] merge proof trusts the merged PR result but requires branch and reachable merge commit', async () => {
@@ -97,6 +119,15 @@ test('[req:WT-11] merge proof trusts the merged PR result but requires branch an
       assert.equal(proof.mergeMode, mergeMode);
       assert.equal(proof.mergeCommitOid, mergeCommit);
     }
+    await assert.rejects(
+      verifyMergedPullRequest({
+        startDir: f.main,
+        entry,
+        pullRequest: '72',
+        github: mergedPr(f, mergeCommit, { headRefOid: '0'.repeat(40) }),
+      }),
+      (error) => error?.code === 'WENDKEEP_WORKTREE_PR_HEAD_MISMATCH',
+    );
     await assert.rejects(
       verifyMergedPullRequest({
         startDir: f.main,
@@ -283,15 +314,50 @@ test('[req:WT-12] preflight reports dirty, active session, outbox, delivery and 
   } finally { rmSync(f.root, { recursive: true, force: true }); }
 });
 
+test('[req:PROV-4] a foreign active context is a blocking mismatch and is never closed by cleanup', async () => {
+  const f = fixture('foreign-context');
+  try {
+    const repository = discoverWorktreeRepository({ startDir: f.main });
+    const registry = readWorktreeRegistry(repository).registry;
+    const foreign = {
+      project_id: 'foreign-project',
+      repository_id: 'foreign-repository',
+      worktree_id: f.worktree.worktreeId,
+      work_session_id: 'foreign-session',
+      branch: f.worktree.branch,
+      head_sha: f.worktree.head,
+      change_slug: 'foreign-change',
+      state: 'active', revision: 1, updated_at: '2026-08-22T12:00:00.000Z',
+    };
+    writeSessionRegistry(f.vault, {
+      version: 2,
+      sessions: { foreign: { status: 'active', work_session_id: foreign.work_session_id } },
+      active_contexts_schema: 1,
+      active_contexts_revision: 1,
+      active_contexts: { foreign: foreign },
+    });
+    const report = inspectWorktreeCleanup({ startDir: f.main, slug: f.slug });
+    assert.ok(report.blockers.some((item) => item.code === 'WENDKEEP_WORKTREE_CONTEXT_MISMATCH'));
+    await assert.rejects(
+      removeManagedWorktree({ startDir: f.main, slug: f.slug, reason: 'foreign context' }),
+      (error) => error?.code === 'WENDKEEP_WORKTREE_CONTEXT_MISMATCH',
+    );
+    assert.equal(readSessionRegistry(f.vault).active_contexts.foreign.state, 'active');
+    assert.equal(readSessionRegistry(f.vault).active_contexts.foreign.project_id, 'foreign-project');
+    assert.equal(readWorktreeRegistry(repository).registry.entries[f.slug].state, 'ready');
+  } finally { rmSync(f.root, { recursive: true, force: true }); }
+});
+
 test('[req:WT-13] finish removes a merged worktree, closes only its context and appends one idempotent receipt', async () => {
   const f = fixture('finish');
   try {
-    const { mergeCommit } = mergedFeature(f);
+    const { head, mergeCommit } = mergedFeature(f);
     const repository = discoverWorktreeRepository({ startDir: f.main });
     const registry = readWorktreeRegistry(repository).registry;
-    mkdirSync(dirname(cleanupReceiptPath(repository)), { recursive: true });
+    const legacyPath = cleanupReceiptLegacyPath(repository);
     const priorReceipt = `${JSON.stringify({ id: 'prior-receipt', slug: 'sibling', outcome: 'completed' })}\n`;
-    writeFileSync(cleanupReceiptPath(repository), priorReceipt);
+    mkdirSync(dirname(legacyPath), { recursive: true });
+    writeFileSync(legacyPath, priorReceipt);
     const evidencePath = join(f.vault, 'evidence-preserved.md');
     writeFileSync(evidencePath, 'historical evidence\n');
     const target = {
@@ -306,6 +372,12 @@ test('[req:WT-13] finish removes a merged worktree, closes only its context and 
       branch: 'wk/sibling', head_sha: 'abcdef1', change_slug: 'sibling-change',
       state: 'active', revision: 1, updated_at: '2026-08-22T12:00:00.000Z',
     };
+    const targetSecondary = {
+      ...target,
+      work_session_id: 'work-target-secondary',
+      change_slug: 'finish-change-secondary',
+      revision: 1,
+    };
     writeSessionRegistry(f.vault, {
       version: 2,
       sessions: {},
@@ -313,24 +385,43 @@ test('[req:WT-13] finish removes a merged worktree, closes only its context and 
       active_contexts_revision: 2,
       active_contexts: {
         [activeContextKey(target)]: target,
+        [activeContextKey(targetSecondary)]: targetSecondary,
         [activeContextKey(sibling)]: sibling,
       },
     });
     const first = await finishManagedWorktree({
       startDir: f.main, slug: 'finish', pullRequest: '72', github: mergedPr(f, mergeCommit),
+      actorContext: 'actor-finish',
       now: () => '2026-08-22T13:00:00.000Z',
     });
     assert.equal(first.state, 'completed');
     assert.equal(first.idempotent, false);
+    assert.equal(first.receipt.project_id, registry.projectId);
+    assert.equal(first.receipt.worktree_id, f.worktree.worktreeId);
+    assert.equal(first.receipt.work_session_id, 'work-target');
+    assert.equal(first.receipt.change_slug, 'finish-change');
+    assert.equal(first.receipt.authority, 'acme/repo#72');
+    assert.equal(first.receipt.pull_request_repository, 'acme/repo');
+    assert.equal(first.receipt.pull_request_number, '72');
+    assert.equal(first.receipt.head_ref_oid, head);
+    assert.equal(first.receipt.merge_commit_oid, mergeCommit);
+    assert.deepEqual(first.receipt.target_context_ids, [
+      activeContextKey(target), activeContextKey(targetSecondary),
+    ].sort());
+    assert.deepEqual(first.receipt.target_change_slugs, [
+      'finish-change', 'finish-change-secondary',
+    ]);
+    assert.equal(first.receipt.actor_context_id, 'actor-finish');
     assert.equal(existsSync(f.worktree.path), false);
     assert.equal(git(f.main, ['branch', '--list', f.worktree.branch]), '');
     const contexts = readSessionRegistry(f.vault).active_contexts;
     assert.equal(contexts[activeContextKey(target)].state, 'closed');
+    assert.equal(contexts[activeContextKey(targetSecondary)].state, 'closed');
     assert.equal(contexts[activeContextKey(sibling)].state, 'active');
     const receiptLines = readFileSync(cleanupReceiptPath(repository), 'utf8').trim().split(/\r?\n/);
-    assert.equal(receiptLines.length, 2);
-    assert.equal(`${receiptLines[0]}\n`, priorReceipt);
-    assert.equal(JSON.parse(receiptLines[1]).pull_request.number, 72);
+    assert.equal(receiptLines.length, 1);
+    assert.equal(JSON.parse(receiptLines[0]).claims.pull_request.number, 72);
+    assert.equal(readFileSync(legacyPath, 'utf8'), priorReceipt);
     assert.equal(readFileSync(evidencePath, 'utf8'), 'historical evidence\n');
     assert.equal(git(f.main, ['worktree', 'list', '--porcelain']).includes(f.worktree.path), false);
     assert.equal(git(f.main, ['worktree', 'prune', '--dry-run', '--verbose']), '');
@@ -339,7 +430,136 @@ test('[req:WT-13] finish removes a merged worktree, closes only its context and 
       startDir: f.main, slug: 'finish', pullRequest: '72', github: mergedPr(f, mergeCommit),
     });
     assert.equal(second.idempotent, true);
-    assert.equal(readFileSync(cleanupReceiptPath(repository), 'utf8').trim().split(/\r?\n/).length, 2);
+    assert.equal(readFileSync(cleanupReceiptPath(repository), 'utf8').trim().split(/\r?\n/).length, 1);
+  } finally { rmSync(f.root, { recursive: true, force: true }); }
+});
+
+test('[req:PROV-2] cleanup keeps the v1 receipt ledger as a read-only legacy anchor', async () => {
+  const f = fixture('legacy-anchor');
+  try {
+    const { mergeCommit } = mergedFeature(f);
+    const repository = discoverWorktreeRepository({ startDir: f.main });
+    const legacyPath = cleanupReceiptLegacyPath(repository);
+    const legacyBytes = `${JSON.stringify({
+      schemaVersion: 1,
+      id: 'legacy-foreign-receipt',
+      repository_id: 'foreign-repository',
+      slug: f.slug,
+      mode: 'finish',
+      outcome: 'completed',
+      branch: 'wk/foreign-branch',
+      head: '0'.repeat(40),
+    })}\n`;
+    mkdirSync(dirname(legacyPath), { recursive: true });
+    writeFileSync(legacyPath, legacyBytes);
+
+    const completed = await finishManagedWorktree({
+      startDir: f.main,
+      slug: f.slug,
+      pullRequest: '72',
+      github: mergedPr(f, mergeCommit),
+    });
+
+    assert.equal(completed.idempotent, false);
+    assert.equal(existsSync(f.worktree.path), false);
+    assert.equal(readFileSync(legacyPath, 'utf8'), legacyBytes);
+    assert.notEqual(cleanupReceiptPath(repository), legacyPath);
+    assert.equal(existsSync(cleanupReceiptPath(repository)), true);
+  } finally { rmSync(f.root, { recursive: true, force: true }); }
+});
+
+test('[req:PROV-7] an intermediate cleanup receipt tamper blocks cleanup before removal and finalize', async () => {
+  const f = fixture('tamper-ledger');
+  try {
+    const { mergeCommit: firstMerge } = mergedFeature(f);
+    const first = await finishManagedWorktree({
+      startDir: f.main,
+      slug: f.slug,
+      pullRequest: '72',
+      github: mergedPr(f, firstMerge),
+    });
+    assert.equal(first.idempotent, false);
+
+    const second = mergedSibling(f, 'tamper-ledger-second');
+    const secondFixture = {
+      ...f,
+      slug: 'tamper-ledger-second',
+      worktree: second.sibling,
+    };
+    const receiptPath = cleanupReceiptPath(discoverWorktreeRepository({ startDir: f.main }));
+    const lines = readFileSync(receiptPath, 'utf8').trim().split(/\r?\n/);
+    assert.equal(lines.length, 1);
+
+    // Keep a valid first record while introducing a second record through the product path.
+    await finishManagedWorktree({
+      startDir: f.main,
+      slug: secondFixture.slug,
+      pullRequest: '72',
+      github: mergedPr(secondFixture, second.mergeCommit),
+    });
+    const twoReceipts = readFileSync(receiptPath, 'utf8').trim().split(/\r?\n/);
+    assert.equal(twoReceipts.length, 2);
+    const tampered = JSON.parse(twoReceipts[0]);
+    tampered.slug = 'foreign-worktree';
+    twoReceipts[0] = JSON.stringify(tampered);
+    writeFileSync(receiptPath, `${twoReceipts.join('\n')}\n`);
+
+    const third = mergedSibling(f, 'tamper-ledger-third');
+    const thirdFixture = { ...f, slug: 'tamper-ledger-third', worktree: third.sibling };
+    await assert.rejects(
+      finishManagedWorktree({
+        startDir: f.main,
+        slug: thirdFixture.slug,
+        pullRequest: '72',
+        github: mergedPr(thirdFixture, third.mergeCommit),
+      }),
+      (error) => error?.code === 'WENDKEEP_RECEIPT_LEDGER_CORRUPT',
+    );
+    assert.equal(existsSync(third.sibling.path), true);
+    assert.equal(
+      readWorktreeRegistry(discoverWorktreeRepository({ startDir: f.main }))
+        .registry.entries[thirdFixture.slug].state,
+      'ready',
+    );
+  } finally { rmSync(f.root, { recursive: true, force: true }); }
+});
+
+test('[req:PROV-7] cleanup checkpoint detects a truncated receipt tail and prevents finalize', async () => {
+  const f = fixture('truncated-ledger');
+  try {
+    const { mergeCommit } = mergedFeature(f);
+    await finishManagedWorktree({
+      startDir: f.main,
+      slug: f.slug,
+      pullRequest: '72',
+      github: mergedPr(f, mergeCommit),
+    });
+    const second = mergedSibling(f, 'truncated-ledger-second');
+    const repository = discoverWorktreeRepository({ startDir: f.main });
+    const receiptPath = cleanupReceiptPath(repository);
+    const checkpointPath = `${receiptPath}.checkpoint.json`;
+    assert.equal(existsSync(checkpointPath), true);
+    writeFileSync(receiptPath, '');
+
+    const third = mergedSibling(f, 'truncated-ledger-third');
+    const thirdFixture = { ...f, slug: 'truncated-ledger-third', worktree: third.sibling };
+    await assert.rejects(
+      finishManagedWorktree({
+        startDir: f.main,
+        slug: thirdFixture.slug,
+        pullRequest: '72',
+        github: mergedPr(thirdFixture, third.mergeCommit),
+      }),
+      (error) => error?.code === 'WENDKEEP_RECEIPT_LEDGER_TRUNCATED',
+    );
+    assert.equal(existsSync(third.sibling.path), true);
+    assert.equal(
+      readWorktreeRegistry(repository).registry.entries[thirdFixture.slug].state,
+      'ready',
+    );
+    assert.equal(readFileSync(checkpointPath, 'utf8').length > 0, true);
+    // The valid receipt history remains recoverable; cleanup did not rewrite it.
+    assert.equal(readFileSync(receiptPath, 'utf8'), '');
   } finally { rmSync(f.root, { recursive: true, force: true }); }
 });
 
@@ -394,6 +614,9 @@ test('[req:WT-14] cleanup merged and prune are deterministic dry-run by default 
       state: 'MERGED',
       mergedAt: '2026-08-22T12:00:00.000Z',
       headRefName: entry.branch,
+      headRefOid: git(f.main, [
+        'rev-parse', '--verify', `refs/heads/${entry.branch}`,
+      ], { ok: false }),
       baseRefName: 'main',
       mergeCommitOid: entry.branch === blocked.branch ? blockedMergeCommit : mergeCommit,
       isCrossRepository: false,
@@ -452,10 +675,30 @@ test('[req:WT-14] cleanup merged and prune are deterministic dry-run by default 
   } finally { rmSync(f.root, { recursive: true, force: true }); }
 });
 
+test('[req:PROV-7] prune --apply validates the receipt ledger before mutating git metadata', () => {
+  const f = fixture('prune-invalid-ledger');
+  try {
+    const repository = discoverWorktreeRepository({ startDir: f.main });
+    rmSync(f.worktree.path, { recursive: true, force: true });
+    mkdirSync(dirname(cleanupReceiptPath(repository)), { recursive: true });
+    writeFileSync(cleanupReceiptPath(repository), '{"schema_version":2,"sequence":1}\n');
+    const before = git(f.main, ['worktree', 'list', '--porcelain']);
+    assert.throws(
+      () => pruneManagedWorktrees({ startDir: f.main, apply: true }),
+      (error) => error?.code === 'WENDKEEP_RECEIPT_LEDGER_TRUNCATED',
+    );
+    assert.equal(
+      diagnoseManagedWorktreeCleanups({ startDir: f.main }).issues[0].errorCode,
+      'WENDKEEP_RECEIPT_LEDGER_TRUNCATED',
+    );
+    assert.equal(git(f.main, ['worktree', 'list', '--porcelain']), before);
+  } finally { rmSync(f.root, { recursive: true, force: true }); }
+});
+
 test('[req:WT-15] interrupted cleanup resumes only after the path vanished and concurrent cleanup stays blocked', async () => {
   const crashed = fixture('crashed');
   try {
-    const { mergeCommit } = mergedFeature(crashed);
+    const { head, mergeCommit } = mergedFeature(crashed);
     const repository = discoverWorktreeRepository({ startDir: crashed.main });
     const registry = readWorktreeRegistry(repository).registry;
     const target = {
@@ -490,7 +733,17 @@ test('[req:WT-15] interrupted cleanup resumes only after the path vanished and c
       registry.entries.crashed = {
         ...registry.entries.crashed,
         state: 'cleaning',
-        pullRequest: { number: 72, url: 'https://github.com/acme/repo/pull/72' },
+        pullRequest: {
+          number: 72,
+          url: 'https://github.com/acme/repo/pull/72',
+          state: 'MERGED',
+          mergedAt: '2026-08-22T12:00:00.000Z',
+          headRefName: crashed.worktree.branch,
+          headRefOid: head,
+          baseRefName: 'main',
+          mergeCommitOid: mergeCommit,
+          isCrossRepository: false,
+        },
         cleanup: {
           schemaVersion: 1, operationId: 'interrupted-op', state: 'cleaning', mode: 'finish',
           authority: 'https://github.com/acme/repo/pull/72', startedAt: '2026-08-22T12:00:00.000Z',
@@ -509,6 +762,11 @@ test('[req:WT-15] interrupted cleanup resumes only after the path vanished and c
     assert.equal(contexts[activeContextKey(target)].state, 'closed');
     assert.equal(contexts[activeContextKey(target)].delivery_id, '');
     assert.equal(contexts[activeContextKey(sibling)].state, 'active');
+    assert.equal(
+      readSessionRegistry(crashed.vault).sessions.crashed.status,
+      'done',
+      'retry sem path deve fechar a sessão causal, não apenas o active context',
+    );
   } finally { rmSync(crashed.root, { recursive: true, force: true }); }
 
   const busy = fixture('busy');
@@ -535,6 +793,49 @@ test('[req:WT-15] interrupted cleanup resumes only after the path vanished and c
     assert.equal(existsSync(busy.worktree.path), true);
     assert.equal(existsSync(cleanupReceiptPath(repository)), false);
   } finally { rmSync(busy.root, { recursive: true, force: true }); }
+});
+
+test('[req:PROV-4] an orphaned reservation with a dead owner resumes before path removal', async () => {
+  const f = fixture('orphaned-reservation');
+  try {
+    const { head, mergeCommit } = mergedFeature(f);
+    const repository = discoverWorktreeRepository({ startDir: f.main });
+    mutateWorktreeRegistry(repository, (registry) => {
+      registry.entries[f.slug] = {
+        ...registry.entries[f.slug],
+        state: 'cleaning',
+        pullRequest: {
+          number: 72,
+          url: 'https://github.com/acme/repo/pull/72',
+          state: 'MERGED',
+          mergedAt: '2026-08-22T12:00:00.000Z',
+          headRefName: f.worktree.branch,
+          headRefOid: head,
+          baseRefName: 'main',
+          mergeCommitOid: mergeCommit,
+          isCrossRepository: false,
+        },
+        cleanup: {
+          schemaVersion: 1,
+          operationId: 'orphaned-operation',
+          ownerPid: 999999,
+          state: 'cleaning',
+          mode: 'finish',
+          authority: 'acme/repo#72',
+          startedAt: '2026-08-22T12:00:00.000Z',
+        },
+      };
+      return registry;
+    });
+    const resumed = await finishManagedWorktree({
+      startDir: f.main,
+      slug: f.slug,
+      github: async () => { throw new Error('orphan retry must use reserved proof'); },
+    });
+    assert.equal(resumed.state, 'completed');
+    assert.equal(resumed.receipt.operationId, 'orphaned-operation');
+    assert.equal(existsSync(f.worktree.path), false);
+  } finally { rmSync(f.root, { recursive: true, force: true }); }
 });
 
 test('[req:WT-13] branch deletion is CAS-safe when the ref moves after worktree removal', async () => {
@@ -599,6 +900,43 @@ test('[req:WT-15] Git removal failure preserves path and branch, records recover
   } finally { rmSync(f.root, { recursive: true, force: true }); }
 });
 
+test('[req:PROV-8] cleanup diagnostics redact stderr secrets, paths and shell metacharacters', async () => {
+  const f = fixture('sanitize-cleanup');
+  try {
+    const { mergeCommit } = mergedFeature(f);
+    let failed = false;
+    const secret = 'ghp_0123456789abcdefghijklmnopqrstuvwxyz';
+    const privatePath = 'C:\\Users\\Roger Alves\\private\\token.txt';
+    const failingSpawn = (command, args, options) => {
+      if (!failed && command === 'git' && args[0] === 'worktree' && args[1] === 'remove') {
+        failed = true;
+        return {
+          status: 1,
+          stdout: '',
+          stderr: `fatal: ${privatePath}; token=${secret} && echo 'leak'`,
+        };
+      }
+      return spawnSync(command, args, options);
+    };
+    await assert.rejects(
+      finishManagedWorktree({
+        startDir: f.main,
+        slug: f.slug,
+        pullRequest: '72',
+        github: mergedPr(f, mergeCommit),
+        spawn: failingSpawn,
+      }),
+      (error) => error?.code === 'WENDKEEP_WORKTREE_GIT_FAILED',
+    );
+    const entry = readWorktreeRegistry(
+      discoverWorktreeRepository({ startDir: f.main }),
+    ).registry.entries[f.slug];
+    const diagnostic = `${entry.cleanup.error.message}\n${entry.cleanup.error.code}`;
+    assert.doesNotMatch(diagnostic, /ghp_|token=|C:\\Users|[;&|`$]/);
+    assert.match(diagnostic, /WENDKEEP_WORKTREE_GIT_FAILED/);
+  } finally { rmSync(f.root, { recursive: true, force: true }); }
+});
+
 test('[req:WT-15] failure after path removal leaves the branch and resumes missing prune/receipt steps', async () => {
   const f = fixture('prune-failure');
   try {
@@ -633,6 +971,50 @@ test('[req:WT-15] failure after path removal leaves the branch and resumes missi
     assert.equal(resumed.state, 'completed');
     assert.equal(git(f.main, ['branch', '--list', f.worktree.branch]), '');
   } finally { rmSync(f.root, { recursive: true, force: true }); }
+});
+
+test('[req:PROV-4] cleanup retries append/finalize faults with the reserved operation and no PR re-fetch', async () => {
+  for (const phase of ['beforeAppend', 'afterAppend', 'beforeFinalize', 'afterFinalize']) {
+    const f = fixture(`fault-${phase.toLowerCase()}`);
+    try {
+      const { mergeCommit } = mergedFeature(f);
+      let injected = true;
+      await assert.rejects(
+        finishManagedWorktree({
+          startDir: f.main,
+          slug: f.slug,
+          pullRequest: '72',
+          github: mergedPr(f, mergeCommit),
+          faultInjection: {
+            [phase]: () => {
+              if (injected) {
+                injected = false;
+                throw new Error(`fault ${phase}`);
+              }
+            },
+          },
+        }),
+      );
+      const repository = discoverWorktreeRepository({ startDir: f.main });
+      const failed = readWorktreeRegistry(repository).registry.entries[f.slug];
+      const operationId = failed.cleanup.operationId;
+      assert.ok(operationId);
+      assert.equal(failed.cleanup.state, phase === 'afterFinalize' ? 'completed' : 'failed');
+      assert.equal(
+        readSessionRegistry(f.vault).cleanup_reservations?.[`${failed.cleanup.repositoryId}:${failed.cleanup.worktreeId}`]?.operation_id,
+        operationId,
+      );
+      const retried = await finishManagedWorktree({
+        startDir: f.main,
+        slug: f.slug,
+        github: async () => { throw new Error('PR re-fetch must not occur'); },
+      });
+      assert.equal(retried.state, 'completed');
+      assert.equal(retried.receipt.operationId, operationId);
+      assert.equal(readWorktreeRegistry(repository).registry.entries[f.slug].state, 'cleaned');
+      assert.equal(readSessionRegistry(f.vault).cleanup_reservations, undefined);
+    } finally { rmSync(f.root, { recursive: true, force: true }); }
+  }
 });
 
 test('[req:WT-15] concurrent finish calls remove and append exactly once', async () => {
@@ -787,5 +1169,792 @@ test('[req:WT-17] cleanup diagnostics identify an interrupted reservation with a
     assert.ok(doctor.issues.some((item) => (
       item.slug === 'diagnose' && item.errorCode === 'WENDKEEP_WORKTREE_CLEANUP_INTERRUPTED'
     )));
+  } finally { rmSync(f.root, { recursive: true, force: true }); }
+});
+
+test('[req:PROV-2] diagnostics expose v1 cleanup receipts as legacy-unbound without rewriting them', () => {
+  const f = fixture('legacy-diagnostic');
+  try {
+    const repository = discoverWorktreeRepository({ startDir: f.main });
+    const legacyPath = cleanupReceiptLegacyPath(repository);
+    const legacyBytes = `${JSON.stringify({
+      schemaVersion: 1,
+      id: 'legacy-cleanup',
+      slug: f.slug,
+      mode: 'finish',
+      outcome: 'completed',
+      branch: f.worktree.branch,
+      head: f.worktree.head,
+    })}\n`;
+    mkdirSync(dirname(legacyPath), { recursive: true });
+    writeFileSync(legacyPath, legacyBytes);
+    mutateWorktreeRegistry(repository, (registry) => {
+      registry.entries[f.slug] = {
+        ...registry.entries[f.slug],
+        state: 'cleaned',
+        cleanup: {
+          schemaVersion: 1,
+          state: 'completed',
+          mode: 'finish',
+          receiptId: 'legacy-cleanup',
+        },
+      };
+      return registry;
+    });
+    const report = diagnoseManagedWorktreeCleanups({ startDir: f.main });
+    assert.ok(report.issues.some((item) => (
+      item.slug === f.slug
+      && item.state === 'legacy-unbound'
+      && item.errorCode === 'WENDKEEP_WORKTREE_CLEANUP_RECEIPT_LEGACY_UNBOUND'
+    )));
+    assert.equal(readFileSync(legacyPath, 'utf8'), legacyBytes);
+    assert.equal(existsSync(cleanupReceiptPath(repository)), false);
+  } finally { rmSync(f.root, { recursive: true, force: true }); }
+});
+
+test('[req:PROV-2] empty or corrupt v1 anchors never authorize a cleaned worktree', () => {
+  for (const [slug, bytes] of [
+    ['legacy-empty', ''],
+    ['legacy-corrupt', '{not-json\n'],
+  ]) {
+    const f = fixture(slug);
+    try {
+      const repository = discoverWorktreeRepository({ startDir: f.main });
+      const legacyPath = cleanupReceiptLegacyPath(repository);
+      mkdirSync(dirname(legacyPath), { recursive: true });
+      writeFileSync(legacyPath, bytes, 'utf8');
+      mutateWorktreeRegistry(repository, (registry) => {
+        registry.entries[slug] = {
+          ...registry.entries[slug],
+          state: 'cleaned',
+          cleanup: {
+            schemaVersion: 1, mode: 'finish', receiptId: 'legacy-unbound-proof',
+          },
+        };
+        return registry;
+      });
+      const issue = diagnoseManagedWorktreeCleanups({ startDir: f.main }).issues[0];
+      assert.equal(issue.errorCode, 'WENDKEEP_WORKTREE_CLEANUP_RECEIPT_MISSING');
+      assert.notEqual(issue.state, 'legacy-unbound');
+    } finally { rmSync(f.root, { recursive: true, force: true }); }
+  }
+});
+
+test('[req:PROV-2] completed cleanup receipts use the common provenance gate for registry drift', async () => {
+  const f = fixture('receipt-gate-drift');
+  try {
+    const { mergeCommit } = mergedFeature(f);
+    await finishManagedWorktree({
+      startDir: f.main,
+      slug: f.slug,
+      pullRequest: '72',
+      github: mergedPr(f, mergeCommit),
+    });
+    const repository = discoverWorktreeRepository({ startDir: f.main });
+    mutateWorktreeRegistry(repository, (registry) => {
+      registry.entries[f.slug] = {
+        ...registry.entries[f.slug],
+        worktreeId: 'foreign-worktree',
+        cleanup: { ...registry.entries[f.slug].cleanup, worktreeId: 'foreign-worktree' },
+      };
+      return registry;
+    });
+    const diagnosis = diagnoseManagedWorktreeCleanups({ startDir: f.main });
+    assert.equal(diagnosis.issues[0].errorCode, 'WENDKEEP_PROVENANCE_GATE_BLOCKED');
+    await assert.rejects(
+      finishManagedWorktree({
+        startDir: f.main,
+        slug: f.slug,
+        github: async () => { throw new Error('drift must block before PR proof'); },
+      }),
+      (error) => error?.code === 'WENDKEEP_PROVENANCE_GATE_BLOCKED',
+    );
+  } finally { rmSync(f.root, { recursive: true, force: true }); }
+});
+
+test('[req:PROV-2] initial cleanup requires the common gate before its first registry or Git mutation', async () => {
+  const f = fixture('pre-mutation-gate');
+  try {
+    const { mergeCommit } = mergedFeature(f);
+    const calls = [];
+    const recordingSpawn = (command, args, options) => {
+      calls.push([command, ...args]);
+      return spawnSync(command, args, options);
+    };
+    await assert.rejects(
+      finishManagedWorktree({
+        startDir: f.main,
+        slug: f.slug,
+        pullRequest: '72',
+        github: mergedPr(f, mergeCommit),
+        spawn: recordingSpawn,
+        provenanceGate: () => ({
+          ok: false,
+          state: 'conflict',
+          reasonCodes: ['WENDKEEP_PROVENANCE_CONTEXT_MISMATCH'],
+          diagnostics: [{
+            blocker: 'WENDKEEP_PROVENANCE_CONTEXT_MISMATCH',
+            expected: { project_id: 'fixture' },
+            observed: { project_id: 'foreign' },
+          }],
+          repair: { command: 'wendkeep verify --deep' },
+        }),
+      }),
+      (error) => error?.code === 'WENDKEEP_PROVENANCE_GATE_BLOCKED',
+    );
+    assert.equal(existsSync(f.worktree.path), true);
+    assert.equal(calls.some((args) => args[0] === 'git' && args[1] === 'worktree'
+      && args[2] === 'remove'), false);
+    assert.equal(readWorktreeRegistry(
+      discoverWorktreeRepository({ startDir: f.main }),
+    ).registry.entries[f.slug].state, 'ready');
+  } finally { rmSync(f.root, { recursive: true, force: true }); }
+});
+
+test('[req:PROV-2] newly appended receipt is classified before finalize', async () => {
+  const f = fixture('receipt-before-finalize-gate');
+  try {
+    const { mergeCommit } = mergedFeature(f);
+    let classified = 0;
+    await assert.rejects(
+      finishManagedWorktree({
+        startDir: f.main,
+        slug: f.slug,
+        pullRequest: '72',
+        github: mergedPr(f, mergeCommit),
+        receiptClassifier: () => {
+          classified += 1;
+          return {
+            kind: 'worktree-cleanup',
+            ok: false,
+            state: 'conflict',
+            reasonCodes: ['PROV_RECEIPT_CONFLICT'],
+            diagnostics: [{ blocker: 'PROV_RECEIPT_CONFLICT' }],
+          };
+        },
+      }),
+      (error) => error?.code === 'WENDKEEP_PROVENANCE_GATE_BLOCKED',
+    );
+    assert.equal(classified, 1);
+    assert.equal(existsSync(f.worktree.path), false);
+    assert.equal(readWorktreeRegistry(
+      discoverWorktreeRepository({ startDir: f.main }),
+    ).registry.entries[f.slug].cleanup.state, 'failed');
+  } finally { rmSync(f.root, { recursive: true, force: true }); }
+});
+
+test('[req:PROV-2] cleaned state without a v2 receipt is a structured provenance block', async () => {
+  const f = fixture('cleaned-without-receipt');
+  try {
+    const repository = discoverWorktreeRepository({ startDir: f.main });
+    mutateWorktreeRegistry(repository, (registry) => {
+      registry.entries[f.slug] = {
+        ...registry.entries[f.slug],
+        state: 'cleaned',
+        cleanup: { schemaVersion: 1, mode: 'finish', receiptId: 'missing-receipt' },
+      };
+      return registry;
+    });
+    await assert.rejects(
+      finishManagedWorktree({
+        startDir: f.main,
+        slug: f.slug,
+        github: async () => { throw new Error('missing receipt must block before PR proof'); },
+      }),
+      (error) => error?.code === 'WENDKEEP_PROVENANCE_GATE_BLOCKED'
+        && error?.state === 'unproven',
+    );
+    const result = await cleanupMergedWorktrees({ startDir: f.main, apply: true });
+    assert.equal(result.ok, false);
+    assert.equal(result.actions[0].outcome, 'blocked');
+    assert.equal(result.actions[0].blockers[0], 'WENDKEEP_PROVENANCE_GATE_BLOCKED');
+  } finally { rmSync(f.root, { recursive: true, force: true }); }
+});
+
+test('[req:PROV-4] a context added after the cleanup gate blocks removal and retry stays causal', async () => {
+  for (const mode of ['finish', 'remove']) {
+    const f = fixture(`context-race-${mode}`);
+    try {
+      const merged = mode === 'finish' ? mergedFeature(f) : null;
+      const repository = discoverWorktreeRepository({ startDir: f.main });
+      const initialRegistry = readWorktreeRegistry(repository).registry;
+      const target = {
+        project_id: initialRegistry.projectId,
+        repository_id: initialRegistry.repositoryId,
+        worktree_id: f.worktree.worktreeId,
+        work_session_id: `session-${mode}-target`,
+        branch: f.worktree.branch,
+        head_sha: merged?.head || f.worktree.head,
+        change_slug: `change-${mode}-target`,
+        state: 'active',
+        revision: 1,
+        updated_at: '2026-08-23T12:00:00.000Z',
+      };
+      const late = {
+        ...target,
+        work_session_id: `session-${mode}-late`,
+        change_slug: `change-${mode}-late`,
+      };
+      writeSessionRegistry(f.vault, {
+        version: 2,
+        sessions: {},
+        active_contexts_schema: 1,
+        active_contexts_revision: 1,
+        active_contexts: { [activeContextKey(target)]: target },
+      });
+      let injected = false;
+      const gate = () => {
+        if (!injected) {
+          injected = true;
+          const current = readSessionRegistry(f.vault);
+          writeSessionRegistry(f.vault, {
+            ...current,
+            active_contexts: {
+              ...current.active_contexts,
+              [activeContextKey(late)]: late,
+            },
+          });
+        }
+        return { ok: true, state: 'verified', reasonCodes: [], diagnostics: [] };
+      };
+      const first = mode === 'finish'
+        ? finishManagedWorktree({
+          startDir: f.main, slug: f.slug, pullRequest: '72',
+          github: mergedPr(f, merged.mergeCommit), provenanceGate: gate,
+        })
+        : removeManagedWorktree({
+          startDir: f.main, slug: f.slug, reason: 'context race', provenanceGate: gate,
+        });
+      await assert.rejects(
+        first,
+        (error) => error?.code === 'WENDKEEP_PROVENANCE_GATE_BLOCKED'
+          && error?.blocker === 'WENDKEEP_PROVENANCE_CONTEXT_MISMATCH',
+      );
+      assert.equal(existsSync(f.worktree.path), true);
+      const failed = readWorktreeRegistry(repository).registry.entries[f.slug];
+      assert.equal(failed.cleanup.state, 'failed');
+      assert.equal(existsSync(cleanupReceiptPath(repository)), false);
+      assert.equal(readSessionRegistry(f.vault).active_contexts[activeContextKey(late)].state, 'active');
+
+      const repaired = readSessionRegistry(f.vault);
+      delete repaired.active_contexts[activeContextKey(late)];
+      writeSessionRegistry(f.vault, repaired);
+      const retry = mode === 'finish'
+        ? await finishManagedWorktree({
+          startDir: f.main, slug: f.slug, github: mergedPr(f, merged.mergeCommit),
+        })
+        : await removeManagedWorktree({ startDir: f.main, slug: f.slug, reason: 'context race' });
+      assert.equal(retry.state, 'completed');
+      assert.equal(retry.idempotent, false);
+      const again = mode === 'finish'
+        ? await finishManagedWorktree({
+          startDir: f.main, slug: f.slug, github: mergedPr(f, merged.mergeCommit),
+        })
+        : await removeManagedWorktree({ startDir: f.main, slug: f.slug, reason: 'context race' });
+      assert.equal(again.idempotent, true);
+    } finally { rmSync(f.root, { recursive: true, force: true }); }
+  }
+});
+
+test('[req:PROV-4] a context introduced before finalize cannot survive a removed worktree', async () => {
+  const f = fixture('context-before-finalize');
+  try {
+    const { head, mergeCommit } = mergedFeature(f);
+    const repository = discoverWorktreeRepository({ startDir: f.main });
+    const registry = readWorktreeRegistry(repository).registry;
+    const target = {
+      project_id: registry.projectId,
+      repository_id: registry.repositoryId,
+      worktree_id: f.worktree.worktreeId,
+      work_session_id: 'session-before-finalize-target',
+      branch: f.worktree.branch,
+      head_sha: head,
+      change_slug: 'change-before-finalize-target',
+      state: 'active', revision: 1, updated_at: '2026-08-23T12:00:00.000Z',
+    };
+    const late = {
+      ...target,
+      work_session_id: 'session-before-finalize-late',
+      change_slug: 'change-before-finalize-late',
+    };
+    writeSessionRegistry(f.vault, {
+      version: 2,
+      sessions: {},
+      active_contexts_schema: 1,
+      active_contexts_revision: 1,
+      active_contexts: { [activeContextKey(target)]: target },
+    });
+    let injected = false;
+    await assert.rejects(
+      finishManagedWorktree({
+        startDir: f.main,
+        slug: f.slug,
+        pullRequest: '72',
+        github: mergedPr(f, mergeCommit),
+        faultInjection: {
+          beforeFinalize: () => {
+            if (injected) return;
+            injected = true;
+            mutateActiveContext(f.vault, late, (current) => ({
+              ...current,
+              change_slug: late.change_slug,
+              state: 'active',
+            }), { projectLegacy: false });
+          },
+        },
+      }),
+      (error) => error?.code === 'WENDKEEP_ACTIVE_CONTEXT_CLEANUP_RESERVED',
+    );
+    assert.equal(existsSync(f.worktree.path), false);
+    assert.equal(readWorktreeRegistry(repository).registry.entries[f.slug].cleanup.state, 'failed');
+    assert.equal(readSessionRegistry(f.vault).active_contexts[activeContextKey(late)], undefined);
+
+    const repaired = readSessionRegistry(f.vault);
+    delete repaired.active_contexts[activeContextKey(late)];
+    writeSessionRegistry(f.vault, repaired);
+    const retry = await finishManagedWorktree({
+      startDir: f.main, slug: f.slug, github: mergedPr(f, mergeCommit),
+    });
+    assert.equal(retry.state, 'completed');
+    assert.equal(retry.idempotent, false);
+    const again = await finishManagedWorktree({
+      startDir: f.main, slug: f.slug, github: mergedPr(f, mergeCommit),
+    });
+    assert.equal(again.idempotent, true);
+  } finally { rmSync(f.root, { recursive: true, force: true }); }
+});
+
+test('[req:PROV-4] cleanup reservation blocks context creation before path removal and preserves retry identity', async () => {
+  for (const mode of ['finish', 'remove']) {
+    const f = fixture(`reserved-context-${mode}`);
+    try {
+      const merged = mode === 'finish' ? mergedFeature(f) : null;
+      const repository = discoverWorktreeRepository({ startDir: f.main });
+      const registry = readWorktreeRegistry(repository).registry;
+      const target = {
+        project_id: registry.projectId,
+        repository_id: registry.repositoryId,
+        worktree_id: f.worktree.worktreeId,
+        work_session_id: `reserved-${mode}-target`,
+        branch: f.worktree.branch,
+        head_sha: merged?.head || f.worktree.head,
+        change_slug: `reserved-${mode}-target`,
+        state: 'active', revision: 1, updated_at: '2026-08-23T12:00:00.000Z',
+      };
+      const late = {
+        ...target,
+        work_session_id: `reserved-${mode}-late`,
+        change_slug: `reserved-${mode}-late`,
+      };
+      writeSessionRegistry(f.vault, {
+        version: 2,
+        sessions: {},
+        active_contexts_schema: 1,
+        active_contexts_revision: 1,
+        active_contexts: { [activeContextKey(target)]: target },
+      });
+      let attempted = false;
+      const first = mode === 'finish'
+        ? finishManagedWorktree({
+          startDir: f.main, slug: f.slug, pullRequest: '72',
+          github: mergedPr(f, merged.mergeCommit),
+          faultInjection: {
+            beforePathRemoval: () => {
+              attempted = true;
+              mutateActiveContext(f.vault, late, (current) => ({
+                ...current, change_slug: late.change_slug, state: 'active',
+              }), { projectLegacy: false });
+            },
+          },
+        })
+        : removeManagedWorktree({
+          startDir: f.main, slug: f.slug, reason: 'reserved context',
+          faultInjection: {
+            beforePathRemoval: () => {
+              attempted = true;
+              mutateActiveContext(f.vault, late, (current) => ({
+                ...current, change_slug: late.change_slug, state: 'active',
+              }), { projectLegacy: false });
+            },
+          },
+        });
+      let firstError;
+      await assert.rejects(first, (error) => {
+        firstError = error;
+        return error?.code === 'WENDKEEP_ACTIVE_CONTEXT_CLEANUP_RESERVED';
+      });
+      assert.equal(attempted, true);
+      assert.equal(existsSync(f.worktree.path), true);
+      assert.equal(readSessionRegistry(f.vault).active_contexts[activeContextKey(late)], undefined);
+      assert.equal(readSessionRegistry(f.vault).cleanup_reservations, undefined);
+      const failed = readWorktreeRegistry(repository).registry.entries[f.slug];
+      assert.equal(failed.cleanup.state, 'failed');
+      assert.ok(firstError.operationId);
+
+      const retry = mode === 'finish'
+        ? await finishManagedWorktree({
+          startDir: f.main, slug: f.slug, github: mergedPr(f, merged.mergeCommit),
+        })
+        : await removeManagedWorktree({ startDir: f.main, slug: f.slug, reason: 'reserved context' });
+      assert.equal(retry.state, 'completed');
+      assert.equal(retry.idempotent, false);
+      assert.equal(retry.receipt.operationId, firstError.operationId);
+      assert.deepEqual(retry.receipt.target_context_ids, [activeContextKey(target)]);
+      assert.equal(retry.receipt.work_session_id, target.work_session_id);
+      assert.equal(retry.receipt.change_slug, target.change_slug);
+      assert.equal(readFileSync(cleanupReceiptPath(repository), 'utf8').trim().split(/\r?\n/).length, 1);
+      const again = mode === 'finish'
+        ? await finishManagedWorktree({ startDir: f.main, slug: f.slug, github: mergedPr(f, merged.mergeCommit) })
+        : await removeManagedWorktree({ startDir: f.main, slug: f.slug, reason: 'reserved context' });
+      assert.equal(again.idempotent, true);
+    } finally { rmSync(f.root, { recursive: true, force: true }); }
+  }
+});
+
+test('[req:PROV-4] an orphaned cleanup reservation is adopted before worktree reservation', async () => {
+  const f = fixture('orphaned-reservation');
+  try {
+    const { head, mergeCommit } = mergedFeature(f);
+    const repository = discoverWorktreeRepository({ startDir: f.main });
+    const report = inspectWorktreeCleanup({ startDir: f.main, slug: f.slug });
+    reserveActiveContextCleanup(f.vault, {
+      operationId: 'orphaned-cleanup-operation',
+      projectId: report.registry.projectId,
+      repositoryId: report.registry.repositoryId,
+      worktreeId: report.entry.worktreeId,
+      worktreePath: report.entry.path,
+      mode: 'finish',
+      authority: 'acme/repo#72',
+      head,
+      slug: f.slug,
+      pullRequestNumber: '72',
+      pullRequestRepository: 'acme/repo',
+      headRefOid: head,
+      mergeCommitOid: mergeCommit,
+      ownerPid: 999999,
+      phase: 'reserved-before-worktree',
+    });
+
+    const result = await finishManagedWorktree({
+      startDir: f.main,
+      slug: f.slug,
+      pullRequest: '72',
+      github: mergedPr(f, mergeCommit),
+    });
+    assert.equal(result.state, 'completed');
+    assert.equal(result.receipt.operationId, 'orphaned-cleanup-operation');
+    assert.equal(readFileSync(cleanupReceiptPath(repository), 'utf8').trim().split(/\r?\n/).length, 1);
+  } finally { rmSync(f.root, { recursive: true, force: true }); }
+});
+
+test('[req:PROV-4] a cleaned worktree leaves a terminal barrier for late contexts and sessions', async () => {
+  const f = fixture('terminal-barrier');
+  try {
+    const { mergeCommit } = mergedFeature(f);
+    const repository = discoverWorktreeRepository({ startDir: f.main });
+    await finishManagedWorktree({
+      startDir: f.main,
+      slug: f.slug,
+      pullRequest: '72',
+      github: mergedPr(f, mergeCommit),
+    });
+    const registry = readWorktreeRegistry(repository).registry;
+    const late = {
+      project_id: registry.projectId,
+      repository_id: registry.repositoryId,
+      worktree_id: f.worktree.worktreeId,
+      work_session_id: 'late-terminal-session',
+      branch: f.worktree.branch,
+      head_sha: f.worktree.head,
+    };
+    assert.throws(
+      () => mutateActiveContext(f.vault, late, (current) => ({
+        ...current, change_slug: 'late-terminal-change', state: 'active',
+      }), { projectLegacy: false }),
+      (error) => error?.code === 'WENDKEEP_ACTIVE_CONTEXT_CLEANUP_TERMINAL',
+    );
+    assert.throws(
+      () => upsertSessionRegistry(f.vault, 'late-terminal-session', {
+        status: 'active',
+        work_session_id: late.work_session_id,
+        project_scope: { complete: true, repoRoot: f.worktree.path },
+      }),
+      (error) => error?.code === 'WENDKEEP_ACTIVE_CONTEXT_CLEANUP_TERMINAL',
+    );
+    assert.equal(readSessionRegistry(f.vault).active_contexts, undefined);
+  } finally { rmSync(f.root, { recursive: true, force: true }); }
+});
+
+test('[req:PROV-4] finalize uses operation and subject CAS before marking cleaned', async () => {
+  const f = fixture('finalize-cas');
+  try {
+    const { mergeCommit } = mergedFeature(f);
+    const repository = discoverWorktreeRepository({ startDir: f.main });
+    await assert.rejects(
+      finishManagedWorktree({
+        startDir: f.main,
+        slug: f.slug,
+        pullRequest: '72',
+        github: mergedPr(f, mergeCommit),
+        faultInjection: {
+          beforeFinalize: () => {
+            mutateWorktreeRegistry(repository, (registry) => {
+              const entry = registry.entries[f.slug];
+              registry.entries[f.slug] = {
+                ...entry,
+                cleanup: { ...entry.cleanup, operationId: 'foreign-operation' },
+              };
+              return registry;
+            });
+          },
+        },
+      }),
+      (error) => error?.code === 'WENDKEEP_WORKTREE_CLEANUP_CAS_CONFLICT',
+    );
+    const entry = readWorktreeRegistry(repository).registry.entries[f.slug];
+    assert.notEqual(entry.state, 'cleaned');
+  } finally { rmSync(f.root, { recursive: true, force: true }); }
+});
+
+test('[req:PROV-4] finalize subject CAS rederives identity instead of trusting operation id', async () => {
+  const f = fixture('finalize-subject-cas');
+  try {
+    const { mergeCommit } = mergedFeature(f);
+    const repository = discoverWorktreeRepository({ startDir: f.main });
+    await assert.rejects(
+      finishManagedWorktree({
+        startDir: f.main,
+        slug: f.slug,
+        pullRequest: '72',
+        github: mergedPr(f, mergeCommit),
+        faultInjection: {
+          beforeFinalize: () => {
+            mutateWorktreeRegistry(repository, (registry) => {
+              const entry = registry.entries[f.slug];
+              registry.entries[f.slug] = {
+                ...entry,
+                path: `${entry.path}-tampered`,
+                branch: `${entry.branch}-tampered`,
+                cleanup: { ...entry.cleanup, head: 'tampered-head' },
+              };
+              return registry;
+            });
+          },
+        },
+      }),
+      (error) => error?.code === 'WENDKEEP_WORKTREE_CLEANUP_CAS_CONFLICT',
+    );
+    assert.notEqual(readWorktreeRegistry(repository).registry.entries[f.slug].state, 'cleaned');
+  } finally { rmSync(f.root, { recursive: true, force: true }); }
+});
+
+test('[req:PROV-4] finalize and terminal reject a stale same-operation attempt owner', async () => {
+  const f = fixture('finalize-owner-cas');
+  try {
+    const { mergeCommit } = mergedFeature(f);
+    await assert.rejects(
+      finishManagedWorktree({
+        startDir: f.main,
+        slug: f.slug,
+        pullRequest: '72',
+        github: mergedPr(f, mergeCommit),
+        faultInjection: {
+          beforeFinalize: ({ operationId }) => {
+            mutateSessionRegistry(f.vault, (registry) => {
+              const key = Object.keys(registry.cleanup_reservations || {})[0];
+              registry.cleanup_reservations[key] = {
+                ...registry.cleanup_reservations[key],
+                attempt_token: 'stale-owner-token',
+              };
+              return registry;
+            }, { cleanupOperationId: operationId });
+          },
+        },
+      }),
+      (error) => error?.code === 'WENDKEEP_ACTIVE_CONTEXT_CLEANUP_BUSY',
+    );
+    assert.notEqual(
+      readWorktreeRegistry(discoverWorktreeRepository({ startDir: f.main }))
+        .registry.entries[f.slug].state,
+      'cleaned',
+    );
+  } finally { rmSync(f.root, { recursive: true, force: true }); }
+});
+
+test('[req:PROV-4] orphan adoption rejects actor and target snapshot drift', async () => {
+  const f = fixture('orphaned-subject-mismatch');
+  try {
+    const { head, mergeCommit } = mergedFeature(f);
+    const repository = discoverWorktreeRepository({ startDir: f.main });
+    const report = inspectWorktreeCleanup({ startDir: f.main, slug: f.slug });
+    reserveActiveContextCleanup(f.vault, {
+      operationId: 'orphaned-subject-operation',
+      projectId: report.registry.projectId,
+      repositoryId: report.registry.repositoryId,
+      worktreeId: report.entry.worktreeId,
+      worktreePath: report.entry.path,
+      mode: 'finish',
+      authority: 'acme/repo#72',
+      head,
+      slug: f.slug,
+      ownerPid: 999999,
+      actorContextId: 'foreign-actor',
+      targetContextIds: ['foreign-target'],
+      targetChangeSlugs: ['foreign-change'],
+      allowClosedContexts: true,
+      phase: 'reserved-before-worktree',
+    });
+    await assert.rejects(
+      finishManagedWorktree({
+        startDir: f.main,
+        slug: f.slug,
+        pullRequest: '72',
+        github: mergedPr(f, mergeCommit),
+      }),
+      (error) => error?.code === 'WENDKEEP_ACTIVE_CONTEXT_CLEANUP_BUSY',
+    );
+    assert.equal(existsSync(cleanupReceiptPath(repository)), false);
+  } finally { rmSync(f.root, { recursive: true, force: true }); }
+});
+
+test('[req:PROV-4] an empty first subject stays frozen across retry', async () => {
+  const f = fixture('empty-subject-retry');
+  try {
+    const { mergeCommit } = mergedFeature(f);
+    await assert.rejects(
+      finishManagedWorktree({
+        startDir: f.main,
+        slug: f.slug,
+        pullRequest: '72',
+        github: mergedPr(f, mergeCommit),
+        actorContext: '',
+        faultInjection: { beforeAppend: () => { throw new Error('empty subject retry'); } },
+      }),
+    );
+    const repository = discoverWorktreeRepository({ startDir: f.main });
+    const failed = readWorktreeRegistry(repository).registry.entries[f.slug];
+    assert.equal(failed.cleanup.workSessionId, '');
+    assert.equal(failed.cleanup.changeSlug, '');
+    assert.deepEqual(failed.cleanup.targetContextIds, []);
+    assert.deepEqual(failed.cleanup.targetChangeSlugs, []);
+    assert.deepEqual(failed.cleanup.targetContextSnapshot, []);
+    assert.equal(failed.cleanup.actorContextId, '');
+    const retry = await finishManagedWorktree({
+      startDir: f.main,
+      slug: f.slug,
+      actorContext: 'late-actor',
+      github: async () => { throw new Error('retry must use stored proof'); },
+    });
+    assert.equal(retry.receipt.actor_context_id, '');
+    assert.deepEqual(retry.receipt.target_context_ids, []);
+  } finally { rmSync(f.root, { recursive: true, force: true }); }
+});
+
+test('[req:PROV-4] orphan adoption rejects pull request subject drift', async () => {
+  const f = fixture('orphaned-pr-subject-mismatch');
+  try {
+    const { head, mergeCommit } = mergedFeature(f);
+    const repository = discoverWorktreeRepository({ startDir: f.main });
+    const report = inspectWorktreeCleanup({ startDir: f.main, slug: f.slug });
+    reserveActiveContextCleanup(f.vault, {
+      operationId: 'orphaned-pr-operation',
+      projectId: report.registry.projectId,
+      repositoryId: report.registry.repositoryId,
+      worktreeId: report.entry.worktreeId,
+      worktreePath: report.entry.path,
+      mode: 'finish',
+      authority: 'acme/repo#72',
+      head,
+      slug: f.slug,
+      ownerPid: 999999,
+      phase: 'reserved-before-worktree',
+    });
+    mutateSessionRegistry(f.vault, (registry) => {
+      const key = `${report.registry.repositoryId}:${report.entry.worktreeId}`;
+      registry.cleanup_reservations[key] = {
+        ...registry.cleanup_reservations[key],
+        pull_request_number: '73',
+        pull_request_repository: 'foreign/repo',
+        head_ref_oid: 'foreign-head',
+        merge_commit_oid: 'foreign-merge',
+      };
+      return registry;
+    }, { cleanupOperationId: 'orphaned-pr-operation' });
+    await assert.rejects(
+      finishManagedWorktree({
+        startDir: f.main,
+        slug: f.slug,
+        pullRequest: '72',
+        github: mergedPr(f, mergeCommit),
+      }),
+      (error) => error?.code === 'WENDKEEP_ACTIVE_CONTEXT_CLEANUP_BUSY',
+    );
+    assert.equal(existsSync(cleanupReceiptPath(repository)), false);
+  } finally { rmSync(f.root, { recursive: true, force: true }); }
+});
+
+test('[req:PROV-4] retry preserves the original actor context in the receipt subject', async () => {
+  const f = fixture('actor-retry');
+  try {
+    const { mergeCommit } = mergedFeature(f);
+    await assert.rejects(
+      finishManagedWorktree({
+        startDir: f.main,
+        slug: f.slug,
+        pullRequest: '72',
+        github: mergedPr(f, mergeCommit),
+        actorContext: 'actor-original',
+        faultInjection: { beforeFinalize: () => { throw new Error('retry actor fault'); } },
+      }),
+    );
+    const retry = await finishManagedWorktree({
+      startDir: f.main,
+      slug: f.slug,
+      actorContext: 'actor-retry',
+      github: async () => { throw new Error('retry must use stored proof'); },
+    });
+    assert.equal(retry.receipt.actor_context_id, 'actor-original');
+  } finally { rmSync(f.root, { recursive: true, force: true }); }
+});
+
+test('[req:PROV-4] retry adopts a tombstone left by a crash immediately before finalize', async () => {
+  const f = fixture('tombstone-finalize-retry');
+  try {
+    const { mergeCommit } = mergedFeature(f);
+    const repository = discoverWorktreeRepository({ startDir: f.main });
+    let firstError;
+    await assert.rejects(
+      finishManagedWorktree({
+        startDir: f.main,
+        slug: f.slug,
+        pullRequest: '72',
+        github: mergedPr(f, mergeCommit),
+        faultInjection: {
+          afterTerminal: () => { throw new Error('crash after terminal tombstone'); },
+        },
+      }),
+      (error) => {
+        firstError = error;
+        return error?.message.includes('crash after terminal tombstone');
+      },
+    );
+    const firstRegistry = readSessionRegistry(f.vault);
+    const [key, oldTombstone] = Object.entries(firstRegistry.cleanup_tombstones || {})[0] || [];
+    assert.equal(firstError.operationId, readWorktreeRegistry(repository).registry.entries[f.slug]
+      .cleanup.operationId);
+    assert.ok(oldTombstone?.attempt_token);
+    assert.equal(oldTombstone.operation_id, firstError.operationId);
+
+    const retry = await finishManagedWorktree({
+      startDir: f.main,
+      slug: f.slug,
+      github: async () => { throw new Error('retry must use stored proof'); },
+    });
+    assert.equal(retry.state, 'completed');
+    assert.equal(retry.receipt.operationId, firstError.operationId);
+    assert.equal(readFileSync(cleanupReceiptPath(repository), 'utf8').trim().split(/\r?\n/).length, 1);
+    const finalTombstone = readSessionRegistry(f.vault).cleanup_tombstones?.[key];
+    assert.equal(finalTombstone.operation_id, firstError.operationId);
+    assert.notEqual(finalTombstone.attempt_token, oldTombstone.attempt_token);
   } finally { rmSync(f.root, { recursive: true, force: true }); }
 });

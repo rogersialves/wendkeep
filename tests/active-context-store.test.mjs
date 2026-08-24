@@ -4,12 +4,20 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { readSessionRegistry, writeSessionRegistry } from '../hooks/obsidian-common.mjs';
+import {
+  readSessionRegistry,
+  upsertSessionRegistry,
+  writeSessionRegistry,
+} from '../hooks/obsidian-common.mjs';
 import {
   activeContextKey,
   clearActiveContextChange,
+  markActiveContextCleanupTerminal,
   migrateLegacyActiveContext,
+  mutateActiveContext,
   projectLegacyActiveChange,
+  releaseActiveContextCleanup,
+  reserveActiveContextCleanup,
   resolveActiveContext,
   setActiveContextChange,
 } from '../hooks/active-context-store.mjs';
@@ -60,6 +68,300 @@ test('[req:ACTX-9] two worktrees retain independent active changes under one ato
       activeContextKey(identity('worktree-a', 'work-a')),
       activeContextKey(identity('worktree-b', 'work-b')),
     ].sort());
+  } finally { rmSync(f.vault, { recursive: true, force: true }); }
+});
+
+test('[req:PROV-4] a cleanup reservation blocks foreign context creation under the registry lock', () => {
+  const f = fixture();
+  try {
+    const target = identity('worktree-a', 'work-a');
+    reserveActiveContextCleanup(f.vault, {
+      operationId: 'cleanup-operation-1',
+      projectId: target.projectId,
+      repositoryId: target.repositoryId,
+      worktreeId: target.worktreeId,
+      workSessionId: target.workSessionId,
+      changeSlug: 'change-a',
+    });
+    assert.throws(
+      () => setActiveContextChange(f.vault, identity('worktree-a', 'work-late'), 'late-change'),
+      (error) => error?.code === 'WENDKEEP_ACTIVE_CONTEXT_CLEANUP_RESERVED',
+    );
+    assert.equal(readSessionRegistry(f.vault).active_contexts, undefined);
+    mutateActiveContext(f.vault, target, (current) => ({
+      ...current, change_slug: 'change-a', state: 'active',
+    }), { cleanupOperationId: 'cleanup-operation-1', projectLegacy: false });
+    setActiveContextChange(f.vault, identity('worktree-b', 'work-b'), 'sibling-change');
+    releaseActiveContextCleanup(f.vault, 'cleanup-operation-1');
+    setActiveContextChange(f.vault, identity('worktree-a', 'work-late'), 'late-change');
+    assert.equal(resolveActiveContext(f.vault, identity('worktree-a', 'work-late')).change_slug, 'late-change');
+  } finally { rmSync(f.vault, { recursive: true, force: true }); }
+});
+
+test('[req:PROV-4] a cleanup reservation blocks active session activation for its worktree', () => {
+  const f = fixture();
+  try {
+    const target = identity('worktree-a', 'work-a');
+    const worktreePath = join(f.vault, 'worktree-a');
+    reserveActiveContextCleanup(f.vault, {
+      operationId: 'cleanup-operation-session',
+      projectId: target.projectId,
+      repositoryId: target.repositoryId,
+      worktreeId: target.worktreeId,
+      workSessionId: target.workSessionId,
+      changeSlug: 'change-a',
+      worktreePath,
+    });
+
+    assert.throws(
+      () => upsertSessionRegistry(f.vault, 'session-late', {
+        status: 'active',
+        work_session_id: 'work-late',
+        project_scope: { complete: true, repoRoot: worktreePath },
+      }),
+      (error) => error?.code === 'WENDKEEP_ACTIVE_CONTEXT_CLEANUP_RESERVED',
+    );
+    assert.throws(
+      () => writeSessionRegistry(f.vault, {
+        ...readSessionRegistry(f.vault),
+        sessions: {
+          ...readSessionRegistry(f.vault).sessions,
+          'session-raw-late': {
+            status: 'active',
+            work_session_id: 'work-raw-late',
+            project_scope: { complete: true, repoRoot: worktreePath },
+          },
+        },
+      }),
+      (error) => error?.code === 'WENDKEEP_ACTIVE_CONTEXT_CLEANUP_RESERVED',
+    );
+    assert.equal(readSessionRegistry(f.vault).sessions['session-late'], undefined);
+
+    releaseActiveContextCleanup(f.vault, 'cleanup-operation-session');
+    upsertSessionRegistry(f.vault, 'session-late', {
+      status: 'active',
+      work_session_id: 'work-late',
+      project_scope: { complete: true, repoRoot: worktreePath },
+    });
+    assert.equal(readSessionRegistry(f.vault).sessions['session-late'].status, 'active');
+  } finally { rmSync(f.vault, { recursive: true, force: true }); }
+});
+
+test('[req:PROV-4] cleanup reservation rejects a same-worktree context from another repository', () => {
+  const f = fixture();
+  try {
+    const target = identity('worktree-collision', 'work-a');
+    reserveActiveContextCleanup(f.vault, {
+      operationId: 'cleanup-cross-repo',
+      projectId: target.projectId,
+      repositoryId: target.repositoryId,
+      worktreeId: target.worktreeId,
+      workSessionId: target.workSessionId,
+      changeSlug: 'change-a',
+    });
+    assert.throws(
+      () => setActiveContextChange(f.vault, identity(target.worktreeId, 'foreign-session', {
+        repositoryId: 'repository-foreign',
+      }), 'foreign-change'),
+      (error) => error?.code === 'WENDKEEP_ACTIVE_CONTEXT_CLEANUP_RESERVED',
+    );
+    assert.equal(Object.keys(readSessionRegistry(f.vault).active_contexts || {}).length, 0);
+  } finally { rmSync(f.vault, { recursive: true, force: true }); }
+});
+
+test('[req:PROV-4] same-operation concurrent attempts use an attempt token and CAS release', () => {
+  const f = fixture();
+  try {
+    const target = identity('worktree-attempt', 'work-a');
+    const base = {
+      projectId: target.projectId,
+      repositoryId: target.repositoryId,
+      worktreeId: target.worktreeId,
+      workSessionId: target.workSessionId,
+      changeSlug: 'change-a',
+      ownerPid: process.pid,
+      mode: 'finish',
+      authority: 'acme/repo#72',
+      slug: target.worktreeId,
+    };
+    reserveActiveContextCleanup(f.vault, {
+      ...base, operationId: 'cleanup-attempt', attemptToken: 'attempt-a',
+    });
+    assert.throws(
+      () => reserveActiveContextCleanup(f.vault, {
+        ...base, operationId: 'cleanup-attempt', attemptToken: 'attempt-b',
+      }),
+      (error) => error?.code === 'WENDKEEP_ACTIVE_CONTEXT_CLEANUP_BUSY',
+    );
+    assert.equal(
+      readSessionRegistry(f.vault).cleanup_reservations?.['repository-1:worktree-attempt']?.attempt_token,
+      'attempt-a',
+    );
+    assert.equal(
+      releaseActiveContextCleanup(f.vault, 'cleanup-attempt', {
+        repositoryId: target.repositoryId,
+        worktreeId: target.worktreeId,
+        attemptToken: 'attempt-b',
+      }),
+      false,
+    );
+    assert.ok(readSessionRegistry(f.vault).cleanup_reservations?.['repository-1:worktree-attempt']);
+    assert.equal(
+      releaseActiveContextCleanup(f.vault, 'cleanup-attempt', {
+        repositoryId: target.repositoryId,
+        worktreeId: target.worktreeId,
+        attemptToken: 'attempt-a',
+      }),
+      true,
+    );
+  } finally { rmSync(f.vault, { recursive: true, force: true }); }
+});
+
+test('[req:PROV-4] release removes only the matching repository/worktree reservation', () => {
+  const f = fixture();
+  try {
+    reserveActiveContextCleanup(f.vault, {
+      operationId: 'shared-operation', projectId: 'project-1', repositoryId: 'repository-a',
+      worktreeId: 'worktree-a', mode: 'remove', authority: 'reason:abc',
+    });
+    reserveActiveContextCleanup(f.vault, {
+      operationId: 'shared-operation', projectId: 'project-1', repositoryId: 'repository-b',
+      worktreeId: 'worktree-b', mode: 'remove', authority: 'reason:abc',
+    });
+    assert.equal(
+      releaseActiveContextCleanup(f.vault, 'shared-operation', {
+      repositoryId: 'repository-a', worktreeId: 'worktree-a',
+      }),
+      true,
+    );
+    assert.ok(readSessionRegistry(f.vault).cleanup_reservations?.['repository-b:worktree-b']);
+  } finally { rmSync(f.vault, { recursive: true, force: true }); }
+});
+
+test('[req:PROV-4] a same-operation reservation cannot collide across repositories by worktree id', () => {
+  const f = fixture();
+  try {
+    reserveActiveContextCleanup(f.vault, {
+      operationId: 'cross-repository-operation', projectId: 'project-1',
+      repositoryId: 'repository-a', worktreeId: 'shared-worktree',
+    });
+    assert.throws(
+      () => reserveActiveContextCleanup(f.vault, {
+        operationId: 'cross-repository-operation', projectId: 'project-1',
+        repositoryId: 'repository-b', worktreeId: 'shared-worktree',
+      }),
+      (error) => error?.code === 'WENDKEEP_ACTIVE_CONTEXT_CLEANUP_RESERVED',
+    );
+    assert.ok(readSessionRegistry(f.vault).cleanup_reservations?.['repository-a:shared-worktree']);
+    assert.equal(readSessionRegistry(f.vault).cleanup_reservations?.['repository-b:shared-worktree'], undefined);
+  } finally { rmSync(f.vault, { recursive: true, force: true }); }
+});
+
+test('[req:PROV-4] terminal tombstone requires the reservation owner attempt token', () => {
+  const f = fixture();
+  try {
+    const target = identity('worktree-terminal-owner', 'work-a');
+    reserveActiveContextCleanup(f.vault, {
+      operationId: 'terminal-owner-operation',
+      projectId: target.projectId,
+      repositoryId: target.repositoryId,
+      worktreeId: target.worktreeId,
+      workSessionId: target.workSessionId,
+      attemptToken: 'owner-a',
+      ownerPid: process.pid,
+    });
+    assert.throws(
+      () => markActiveContextCleanupTerminal(f.vault, {
+        operationId: 'terminal-owner-operation',
+        projectId: target.projectId,
+        repositoryId: target.repositoryId,
+        worktreeId: target.worktreeId,
+        workSessionId: target.workSessionId,
+        subjectHash: 'subject-a',
+        attemptToken: 'owner-b',
+      }),
+      (error) => error?.code === 'WENDKEEP_ACTIVE_CONTEXT_CLEANUP_BUSY',
+    );
+    assert.equal(readSessionRegistry(f.vault).cleanup_tombstones, undefined);
+  } finally { rmSync(f.vault, { recursive: true, force: true }); }
+});
+
+test('[req:PROV-4] terminal tombstone rejects full-subject drift even with the same owner token', () => {
+  const f = fixture();
+  try {
+    const target = identity('worktree-terminal-subject', 'work-a');
+    const path = join(f.vault, 'worktree-terminal-subject');
+    reserveActiveContextCleanup(f.vault, {
+      operationId: 'terminal-subject-operation',
+      projectId: target.projectId,
+      repositoryId: target.repositoryId,
+      worktreeId: target.worktreeId,
+      workSessionId: target.workSessionId,
+      changeSlug: 'original-change',
+      targetContextIds: ['original-context'],
+      targetChangeSlugs: ['original-change'],
+      targetContextSnapshot: [{ key: 'original-context', state: 'active' }],
+      actorContextId: 'original-actor',
+      worktreePath: path,
+      mode: 'finish',
+      authority: 'acme/repo#72',
+      head: 'original-head',
+      slug: 'terminal-subject',
+      allowClosedContexts: true,
+      attemptToken: 'owner-a',
+      ownerPid: process.pid,
+    });
+    assert.throws(
+      () => markActiveContextCleanupTerminal(f.vault, {
+        operationId: 'terminal-subject-operation',
+        projectId: target.projectId,
+        repositoryId: target.repositoryId,
+        worktreeId: target.worktreeId,
+        workSessionId: target.workSessionId,
+        worktreePath: path,
+        subjectHash: 'subject-a',
+        actorContextId: 'tampered-actor',
+        attemptToken: 'owner-a',
+      }),
+      (error) => error?.code === 'WENDKEEP_ACTIVE_CONTEXT_CLEANUP_CAS_CONFLICT',
+    );
+    assert.equal(readSessionRegistry(f.vault).cleanup_tombstones, undefined);
+  } finally { rmSync(f.vault, { recursive: true, force: true }); }
+});
+
+test('[req:PROV-4] stale whole-registry writes cannot erase a terminal tombstone', () => {
+  const f = fixture();
+  try {
+    const target = identity('worktree-stale-writer', 'work-a');
+    reserveActiveContextCleanup(f.vault, {
+      operationId: 'stale-writer-operation',
+      projectId: target.projectId,
+      repositoryId: target.repositoryId,
+      worktreeId: target.worktreeId,
+      workSessionId: target.workSessionId,
+      worktreePath: join(f.vault, 'worktree-stale-writer'),
+      attemptToken: 'owner-a',
+      ownerPid: process.pid,
+    });
+    const stale = readSessionRegistry(f.vault);
+    markActiveContextCleanupTerminal(f.vault, {
+      operationId: 'stale-writer-operation',
+      projectId: target.projectId,
+      repositoryId: target.repositoryId,
+      worktreeId: target.worktreeId,
+      workSessionId: target.workSessionId,
+      worktreePath: join(f.vault, 'worktree-stale-writer'),
+      subjectHash: 'stale-subject',
+      attemptToken: 'owner-a',
+    });
+    assert.throws(
+      () => writeSessionRegistry(f.vault, stale),
+      (error) => error?.code === 'WENDKEEP_ACTIVE_CONTEXT_CLEANUP_TERMINAL',
+    );
+    assert.equal(
+      readSessionRegistry(f.vault).cleanup_tombstones?.['repository-1:worktree-stale-writer']?.subject_hash,
+      'stale-subject',
+    );
   } finally { rmSync(f.vault, { recursive: true, force: true }); }
 });
 

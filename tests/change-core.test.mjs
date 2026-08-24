@@ -76,7 +76,6 @@ import {
   allChangesState,
   renderOpenChanges,
   buildActiveChangeInjection,
-  archiveChange,
   activeChangeLink,
   appendFixTasks,
   setTaskDone,
@@ -146,18 +145,10 @@ test('newChange --guide: scaffold compacto declara impacto e não cria design/sp
   } finally { rmSync(vault, { recursive: true, force: true }); }
 });
 
-test('archiveChange: GUIDE compacta arquiva evidência sem criar ADR', () => {
-  const vault = mkdtempSync(join(tmpdir(), 'wk-guide-archive-'));
-  mkdirSync(join(vault, '.brain'), { recursive: true });
-  try {
-    newChange(vault, 'compacta', { dateStr: '2026-08-20', guide: true });
-    const result = archiveChange(vault, 'compacta', { dateStr: '2026-08-20', adrNum: 1 });
-    assert.equal(result.ok, true);
-    assert.equal(result.adrRel, '');
-    assert.equal(existsSync(join(vault, '04-Decisões')), false);
-    assert.equal(existsSync(join(vault, '08-Mudanças', '_arquivo', '2026-08-20-compacta', 'proposta.md')), true);
-  } finally { rmSync(vault, { recursive: true, force: true }); }
-});
+
+
+
+
 
 // CGRAPH-1 — artefatos gerados linkam o hub proposta (full-path, archive-safe)
 test('renderChangeScaffold: design + tarefas link the change hub (proposta)', () => {
@@ -178,55 +169,7 @@ test('renderChangeScaffold en: hub link uses the 08-Changes folder', () => {
 });
 
 // CGRAPH-1 — o backlink full-path é reescrito pelo move do archive
-test('archiveChange: artifact backlink survives the move to _arquivo', () => {
-  const vault = mkdtempSync(join(tmpdir(), 'wk-arc-link-'));
-  try {
-    mkdirSync(join(vault, '.brain'), { recursive: true });
-    mkdirSync(join(vault, '04-Decisões'), { recursive: true });
-    newChange(vault, 'dm', { dateStr: '2026-07-05' });
-    const r = archiveChange(vault, 'dm', { dateStr: '2026-07-05', adrNum: 5 });
-    assert.equal(r.ok, true);
-    const design = readFileSync(join(vault, '08-Mudanças', '_arquivo', '2026-07-05-dm', 'design.md'), 'utf8');
-    const tarefas = readFileSync(join(vault, '08-Mudanças', '_arquivo', '2026-07-05-dm', 'tarefas.md'), 'utf8');
-    assert.ok(design.includes('[[08-Mudanças/_arquivo/2026-07-05-dm/proposta]]'), 'design backlink rewritten');
-    assert.ok(tarefas.includes('[[08-Mudanças/_arquivo/2026-07-05-dm/proposta]]'), 'tarefas backlink rewritten');
-    assert.doesNotMatch(design, /\[\[08-Mudanças\/dm\/proposta\]\]/, 'stale open-path link gone');
-  } finally { rmSync(vault, { recursive: true, force: true }); }
-});
 
-test('[req:OP-7] archive preflight rejeita _arquivo redirecionado antes de rename ou ADR', (t) => {
-  const vault = mkdtempSync(join(tmpdir(), 'wk-archive-safe-root-'));
-  const outside = mkdtempSync(join(tmpdir(), 'wk-archive-safe-outside-'));
-  try {
-    mkdirSync(join(vault, '.brain'), { recursive: true });
-    newChange(vault, 'safe-archive', { dateStr: '2026-07-26' });
-    const archiveRoot = join(vault, '08-Mudanças', '_arquivo');
-    writeFileSync(join(outside, 'sentinel.txt'), 'preservado\n');
-    try {
-      symlinkSync(outside, archiveRoot, process.platform === 'win32' ? 'junction' : 'dir');
-    } catch (error) {
-      if (['EPERM', 'EACCES', 'ENOTSUP'].includes(error?.code)) {
-        t.skip(`links indisponíveis neste filesystem: ${error.code}`);
-        return;
-      }
-      throw error;
-    }
-
-    assert.throws(
-      () => archiveChange(vault, 'safe-archive', {
-        dateStr: '2026-07-26', adrNum: 9,
-      }),
-      /Vault|link simbólico|junction|reparse|redirecion/i,
-    );
-    assert.equal(existsSync(join(vault, '08-Mudanças', 'safe-archive', 'proposta.md')), true);
-    assert.equal(existsSync(join(vault, '04-Decisões')), false);
-    assert.deepEqual(readdirSync(outside), ['sentinel.txt']);
-    assert.equal(readFileSync(join(outside, 'sentinel.txt'), 'utf8'), 'preservado\n');
-  } finally {
-    rmSync(vault, { recursive: true, force: true });
-    rmSync(outside, { recursive: true, force: true });
-  }
-});
 
 // CGRAPH-2 — auto-heal do backlink em spec.md (escrito à mão), idempotente
 test('healSpecBacklinks: adds proposta backlink to spec.md, idempotent', () => {
@@ -266,22 +209,6 @@ test('healSpecBacklinks: preserves leading YAML frontmatter (inserts after it)',
 });
 
 // CGRAPH-2 — o archive heala o spec.md antes de mover (fica linkado no _arquivo)
-test('archiveChange: heals orphan spec.md backlink through the move', () => {
-  const vault = mkdtempSync(join(tmpdir(), 'wk-arc-spec-'));
-  try {
-    mkdirSync(join(vault, '.brain'), { recursive: true });
-    mkdirSync(join(vault, '04-Decisões'), { recursive: true });
-    const dir = join(vault, '08-Mudanças', 'sp');
-    mkdirSync(join(dir, 'specs', 'cap'), { recursive: true });
-    writeFileSync(join(dir, 'proposta.md'), '---\ntype: change\nspecs:\n  - cap\n---\n# sp\n');
-    writeFileSync(join(dir, 'tarefas.md'), '- [x] 1.1 done\n');
-    writeFileSync(join(dir, 'specs', 'cap', 'spec.md'), '## ADDED Requirements\n### Requisito: X-1 — n\nbody\n\n## MODIFIED Requirements\n\n## REMOVED Requirements\n');
-    const r = archiveChange(vault, 'sp', { dateStr: '2026-07-05', adrNum: 6 });
-    assert.equal(r.ok, true, r.failing && r.failing.join('; '));
-    const spec = readFileSync(join(vault, '08-Mudanças', '_arquivo', '2026-07-05-sp', 'specs', 'cap', 'spec.md'), 'utf8');
-    assert.ok(spec.includes('[[08-Mudanças/_arquivo/2026-07-05-sp/proposta]]'), 'spec backlink healed + rewritten');
-  } finally { rmSync(vault, { recursive: true, force: true }); }
-});
 
 // CGRAPH-3 — backfill dos órfãos existentes (open + _arquivo), dry-run default, idempotente
 test('backfillArtifactLinks: heals open + archived orphans, dry-run default, idempotent', () => {
@@ -485,58 +412,15 @@ test('[req:OP-7] newChange preflight cobre CURRENT_CHANGE e todos os targets de 
   }
 });
 
-test('[req:OP-7] archive multi-spec falha antes da primeira mutação quando target tardio é hardlink', (t) => {
-  const vault = mkdtempSync(join(tmpdir(), 'wk-archive-spec-preflight-'));
-  const outside = mkdtempSync(join(tmpdir(), 'wk-archive-spec-preflight-outside-'));
-  try {
-    const change = join(vault, '08-Mudanças', 'multi-spec');
-    mkdirSync(join(change, 'specs', 'alpha'), { recursive: true });
-    mkdirSync(join(change, 'specs', 'beta'), { recursive: true });
-    mkdirSync(join(vault, '07-Specs'), { recursive: true });
-    writeFileSync(join(change, 'proposta.md'), [
-      '---', 'type: change', 'status: active', 'specs:', '  - alpha', '  - beta', '---', '# multi', '',
-    ].join('\n'));
-    writeFileSync(join(change, 'tarefas.md'), '- [x] 1.1 pronto\n');
-    writeFileSync(join(change, 'specs', 'alpha', 'spec.md'), [
-      '## ADDED Requirements', '### Requisito: ALPHA-2 — novo', 'novo',
-      '## MODIFIED Requirements', '', '## REMOVED Requirements', '',
-    ].join('\n'));
-    writeFileSync(join(change, 'specs', 'beta', 'spec.md'), [
-      '## ADDED Requirements', '### Requisito: BETA-2 — novo', 'novo',
-      '## MODIFIED Requirements', '', '## REMOVED Requirements', '',
-    ].join('\n'));
-    const alphaPath = join(vault, '07-Specs', 'alpha.md');
-    const alphaOriginal = '### Requisito: ALPHA-1 — existente\nantigo\n';
-    writeFileSync(alphaPath, alphaOriginal);
-    const external = join(outside, 'beta.md');
-    const betaOriginal = '### Requisito: BETA-1 — externo\npreservado\n';
-    writeFileSync(external, betaOriginal);
-    try {
-      linkSync(external, join(vault, '07-Specs', 'beta.md'));
-    } catch (error) {
-      if (['EPERM', 'EACCES', 'ENOTSUP', 'EXDEV'].includes(error?.code)) {
-        t.skip(`hardlinks indisponíveis neste filesystem: ${error.code}`);
-        return;
-      }
-      throw error;
-    }
 
-    const result = archiveChange(vault, 'multi-spec', {
-      dateStr: '2026-07-26', adrNum: 99,
-    });
-    assert.equal(result.ok, false);
-    assert.match(result.failing.join('\n'), /hardlink|nlink|Vault/i);
-    assert.equal(readFileSync(alphaPath, 'utf8'), alphaOriginal, 'primeira capability fica byte-idêntica');
-    assert.equal(readFileSync(external, 'utf8'), betaOriginal, 'origem externa fica byte-idêntica');
-    assert.equal(existsSync(join(vault, '07-Specs', 'README.md')), false);
-    assert.equal(existsSync(join(vault, '.brain', 'SPECS_STATE.json')), false);
-    assert.equal(existsSync(change), true, 'change não é movida parcialmente');
-    assert.equal(existsSync(join(vault, '08-Mudanças', '_arquivo')), false);
-  } finally {
-    rmSync(vault, { recursive: true, force: true });
-    rmSync(outside, { recursive: true, force: true });
-  }
-});
+
+
+
+
+
+
+
+
 
 test('parseTasks: numbered checklist with done state', () => {
   const md = '# t\n\n- [ ] 1.1 do thing\n- [x] 1.2 done thing\nnot a task\n';
@@ -623,36 +507,6 @@ test('buildActiveChangeInjection: block with all open changes; empty otherwise',
   finally { rmSync(empty, { recursive: true, force: true }); }
 });
 
-test('archiveChange: moves to _arquivo, mints ADR, clears active (gate ok); gate red blocks', () => {
-  const vault = mkdtempSync(join(tmpdir(), 'wk-arch-'));
-  try {
-    mkdirSync(join(vault, '.brain'), { recursive: true });
-    mkdirSync(join(vault, '04-Decisões'), { recursive: true });
-    mkdirSync(join(vault, '08-Mudanças', 'dark-mode'), { recursive: true });
-    const sessionRel = '02-Sessões/2026/07-JUL/DIA 05/sessao.md';
-    mkdirSync(join(vault, '02-Sessões', '2026', '07-JUL', 'DIA 05'), { recursive: true });
-    writeFileSync(join(vault, sessionRel), '# Sessão\n\n## Mudanças\n\n- [[08-Mudanças/dark-mode/proposta]]\n');
-    writeFileSync(join(vault, '08-Mudanças', 'dark-mode', 'proposta.md'), `---\ntype: change\nsource:\n  - "[[${sessionRel.replaceAll('\\\\', '/').replace(/\.md$/, '')}]]"\n---\n# dark-mode\n`);
-    writeFileSync(join(vault, '.brain', 'CURRENT_CHANGE.md'), 'change: dark-mode\n');
-    const r = archiveChange(vault, 'dark-mode', { dateStr: '2026-07-05', adrNum: 20 });
-    assert.equal(r.ok, true);
-    assert.ok(existsSync(join(vault, '08-Mudanças', '_arquivo', '2026-07-05-dark-mode', 'proposta.md')));
-    assert.ok(!existsSync(join(vault, '08-Mudanças', 'dark-mode')), 'original moved');
-    assert.match(readFileSync(join(vault, r.adrRel), 'utf8'), /dark-mode/);
-    const session = readFileSync(join(vault, sessionRel), 'utf8');
-    assert.match(session, /08-Mudanças\/_arquivo\/2026-07-05-dark-mode\/proposta/);
-    assert.doesNotMatch(session, /\[\[08-Mudanças\/dark-mode\/proposta\]\]/);
-    assert.equal(activeChange(vault), '');
-
-    mkdirSync(join(vault, '08-Mudanças', 'x'), { recursive: true });
-    writeFileSync(join(vault, '08-Mudanças', 'x', 'proposta.md'), '# x\n');
-    const red = archiveChange(vault, 'x', { dateStr: '2026-07-05', adrNum: 1, gate: () => ({ ok: false, failing: ['tests'] }) });
-    assert.equal(red.ok, false);
-    assert.ok(existsSync(join(vault, '08-Mudanças', 'x')), 'not moved when gate red');
-  } finally {
-    rmSync(vault, { recursive: true, force: true });
-  }
-});
 
 test('activeChangeLink: wikilink to active change proposta, empty when none', () => {
   const vault = mkdtempSync(join(tmpdir(), 'wk-link-'));

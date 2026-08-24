@@ -58,6 +58,31 @@ interrompido/failed e uma recuperação objetiva.
 head comprovado; divergência ou rede indisponível bloqueia. Branch já ausente é sucesso idempotente.
 `--open-main` abre a worktree principal somente depois da conclusão.
 
+### Cleanup pós-fix: retomada crash-safe
+
+A operação de cleanup é **crash-safe** e retomável antes do receipt, depois do receipt e antes do
+finalize, e depois do finalize: um crash em qualquer fronteira preserva operation/state e permite
+repetir a mesma prova sem duplicar remoção ou receipt. O subject de cada operação inclui todos os
+active contexts, actor, pr, head e merge. O PR canônico é a autoridade resolvida pelo adapter
+GitHub; texto fornecido pelo chamador não substitui essa autoridade.
+
+O HEAD é rederivado antes do finalize, a partir do checkout, e comparado ao head/merge comprovado. O reason
+fica sanitizado e recebe digest para auditoria, sem armazenar path privado, token ou stderr.
+Checkpoint ausente ou inválido é WENDKEEP_RECEIPT_LEDGER_TRUNCATED. Receipt v1 continua
+legacy-unbound e nunca autoriza cleanup.
+
+Texto e --json expõem sempre operation, state, blocker, recovery e os códigos estáveis
+WENDKEEP_WORKTREE_CLEANUP_BUSY, WENDKEEP_RECEIPT_LEDGER_CORRUPT e
+WENDKEEP_RECEIPT_LEDGER_TRUNCATED; a recuperação retoma a reserva ou indica o reparo objetivo.
+
+O gate comum classifica a operação de cleanup e bloqueia antes da mutação, inclusive em finish,
+remove e cleanup --apply. Depois do append, o receipt é classificado pelo mesmo gate antes do
+finalize; falha de proveniência não finaliza nem marca sucesso. Um estado cleaned sem receipt v2
+fica bloqueado como unproven; um receipt v1 não autoriza e permanece legacy-unbound.
+
+Texto e --json de bloqueio mantêm o diagnóstico equivalente e sanitizado: code, operation, state,
+blocker, expected, observed, recovery, reason_codes, diagnostics e repair.
+
 ## Cleanup, remove e prune
 
 `cleanup --merged` e `prune` são dry-run por padrão. `--dry-run` apenas torna essa intenção
@@ -70,9 +95,19 @@ mas mantém todo o preflight e preserva as branches local e remota.
 
 O registry fica no Git common-dir, em `wendkeep/worktrees-v1.json`, sob lock multiprocesso. Ele
 guarda identidade do repositório/worktree, binding canônico, PR e estado transitório de cleanup;
-`.wendkeep.json` permanece inalterado. Receipts ficam em
-`wendkeep/worktree-cleanup-receipts-v1.jsonl`. `.worktrees/` entra no ignore versionado e no exclude
-privado. A saída JSON de `list`/`status` não expõe path nem conteúdo do Vault.
+`.wendkeep.json` permanece inalterado. Novos receipts ficam em
+`wendkeep/worktree-cleanup-receipts-v2.jsonl`: cada linha inclui `previous_hash` e `receipt_hash`, e
+um checkpoint separado fixa a sequência/hash/tamanho validado. O v1 permanece legível como
+`legacy-unbound`, sem append ou reescrita silenciosa. `WENDKEEP_RECEIPT_LEDGER_CORRUPT` indica
+adulteração/JSON parcial; `WENDKEEP_RECEIPT_LEDGER_TRUNCATED` indica cauda removida. Ambos bloqueiam
+antes da remoção e exigem diagnosticar o store, nunca inventar receipt. `.worktrees/` entra no
+ ignore versionado e no exclude privado; JSON de `list`/`status` não expõe path/conteúdo do Vault.
+O gate de cleanup usa `verified`, `reported`, `legacy-unbound`, `stale`, `conflict` e `unproven`;
+`WENDKEEP_PROVENANCE_GATE_BLOCKED` e os códigos `WENDKEEP_RECEIPT_LEDGER_BUSY`,
+`WENDKEEP_RECEIPT_LEDGER_CONFLICT`, `WENDKEEP_RECEIPT_LEDGER_CORRUPT` e
+`WENDKEEP_RECEIPT_LEDGER_TRUNCATED` falham fechados. O recovery objetivo lê o JSON sanitizado de
+`worktree status <slug> --json`, executa `repair.command` quando presente e recaptura a prova; não
+edite ledger/checkpoint nem exponha stderr, tokens, URLs privadas ou paths do Vault.
 
 `create` é idempotente quando slug, path e branch já correspondem. Colisões falham fechadas.
 Falhas depois da reserva ficam como `failed`; rode `worktree status <slug>` e siga `recovery`.

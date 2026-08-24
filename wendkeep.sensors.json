@@ -632,6 +632,30 @@
       "severity": "critical",
       "type": "command",
       "command": "node --test tests/worktree-cleanup.test.mjs tests/worktree-cli.test.mjs"
+    },
+    {
+      "id": "provenance-gate",
+      "name": "provenance-gate",
+      "description": "node --test tests/provenance-gate.test.mjs tests/provenance-sources.test.mjs tests/provenance-schema.test.mjs tests/release-provenance.test.mjs",
+      "severity": "critical",
+      "type": "command",
+      "command": "node --test tests/provenance-gate.test.mjs tests/provenance-sources.test.mjs tests/provenance-schema.test.mjs tests/release-provenance.test.mjs"
+    },
+    {
+      "id": "receipt-ledger",
+      "name": "receipt-ledger",
+      "description": "node --test tests/receipt-ledger.test.mjs",
+      "severity": "critical",
+      "type": "command",
+      "command": "node --test tests/receipt-ledger.test.mjs"
+    },
+    {
+      "id": "provenance-consumers",
+      "name": "provenance-consumers",
+      "description": "node --test tests/change-cli.test.mjs tests/delivery.test.mjs tests/release-provenance.test.mjs tests/worktree-cleanup.test.mjs tests/provenance-integration.test.mjs tests/provenance-e2e.test.mjs",
+      "severity": "critical",
+      "type": "command",
+      "command": "node --test tests/change-cli.test.mjs tests/delivery.test.mjs tests/release-provenance.test.mjs tests/worktree-cleanup.test.mjs tests/provenance-integration.test.mjs tests/provenance-e2e.test.mjs"
     }
   ]
 }

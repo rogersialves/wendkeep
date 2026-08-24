@@ -90,6 +90,44 @@ reviewer must preserve both.
 V1 evidence remains readable as `legacy-unbound`, never as equivalent authority. Run
 `wendkeep change status <slug>` to inspect `bound`, `stale`, or `context-mismatch`.
 
+The provenance gate normalizes that legacy view into one taxonomy: `verified` when every required
+proof is fresh and bound; `reported` for a recorded claim without an authoritative observation;
+`legacy-unbound` for v1; `stale` for an earlier snapshot; `conflict` for incompatible identity or
+content; and `unproven` for missing or insufficient proof. Precedence is `conflict` > `stale` >
+`legacy-unbound` > `unproven` > `reported` > `verified`, and only `verified` closes the gate.
+
+For post-fix archive, the final pass is `wendkeep verify --deep --change <slug>`. It must leave a
+complete and canonical package and verdict bound to the same checkout, change, tasks, spec, and
+sensors. Archive writes the authorization receipt before mutation to the separate
+`change-archive-receipts-v2` ledger. Its `change archive --json` output is serializable and
+exposes `state`, `reason_codes`, `diagnostics`, and `repair`; ledger corruption or truncation
+fails closed. `--force` does not bypass provenance or integrity. The exact recovery is to repeat
+`wendkeep verify --deep --change <slug>` after stabilizing the context.
+
+Archive uses a `directory lock` with a token-specific marker and lease. Acquisition prepares a
+sibling `.pending` directory and publishes it by atomic rename, uses no hardlink, and allows at most
+3 topology attempts. A live owner produces `WENDKEEP_ARCHIVE_BUSY`; a dead owner is reaped only
+after safe observation; invalid marker/structure produces `WENDKEEP_ARCHIVE_LOCK_UNAVAILABLE`;
+ownership loss produces `WENDKEEP_ARCHIVE_LOCK_OWNERSHIP_LOST`. The `archive-transaction.json`
+manifest records `prepared` → `isolated` → `copied` → `sealed` → `published` → `promotion-prepared` →
+`promotion-applied` → `completed` or `recovery-required`. A pending journal blocks a new archive for
+the same slug before the gate. On a
+collision or post-publication failure, `original` is retained and the
+`published-recovery-required` state blocks destructive retry. `operation_id` and `transaction_phase`
+are sanitized fields. Inspect it with
+`wendkeep change archive recover <operation-id> --change <slug> [--spec-action rollback|resume] [--json]`:
+without `--spec-action`, this is a read-only, fail-closed, idempotent operation with no promotion,
+deletion, or invented reconciliation. `rollback` restores before-images and `resume` converges
+after-images for a `promotion-prepared` promotion while retaining the journal for reconciliation.
+When an operation ID exists, `repair.command` points to `wendkeep change archive recover <operation-id>
+--change <slug>`; do not treat `command:null` as the normal flow.
+
+Multi-spec promotion is one atomic unit: it captures before-images/digests for every capability,
+rolls back every target (including state/README) on a before- or after-write failure, and permits a
+retry only after journal reconciliation and fresh verification. The post-release finalizer validates
+original/destination digests, but the `completed` journal keeps the `original` retained; no
+destructive cleanup is automatic. A failure retains `published-recovery-required`.
+
 ## Common errors and diagnosis
 
 - `no change`: this is exit 2 and a valid idle state; create/use a change or skip verify.
@@ -102,6 +140,13 @@ V1 evidence remains readable as `legacy-unbound`, never as equivalent authority.
   The previous evidence was not replaced.
 - `legacy-unbound`, `stale`, or `context-mismatch`: return to the correct worktree/session, recover
   the context when needed, and rerun `verify` plus `verify --deep`.
+- `WENDKEEP_PROVENANCE_GATE_BLOCKED`: inspect `state`, `reasonCodes`, and `repair`; do not reuse
+  proof from another branch/worktree/session. Run the proposed command and recapture the envelope.
+- `WENDKEEP_RECEIPT_LEDGER_BUSY`, `WENDKEEP_RECEIPT_LEDGER_CONFLICT`,
+  `WENDKEEP_RECEIPT_LEDGER_CORRUPT`, and `WENDKEEP_RECEIPT_LEDGER_TRUNCATED` require preserving
+  the ledger/checkpoint and executing the objective recovery in `repair.command` (or
+  `npx --no-install wendkeep verify --deep --json` for fresh proof); text/JSON output remains
+  sanitized and contains no raw stderr, tokens, private URLs, or Vault paths.
 - Surviving mutants: strengthen the discriminating test; after three rounds, review manually.
 
 ## Next steps

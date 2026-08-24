@@ -30,7 +30,8 @@ npx wendkeep change status [slug] [--session <id>]
 npx wendkeep spec effective [--change <slug>] [--session <id>]
 npx wendkeep sensors list
 npx wendkeep verify [--deep] [--change <slug>] [--session <id>]
-npx wendkeep change archive <slug> [--session <id>]
+npx wendkeep change archive <slug> [--json] [--session <id>]
+npx wendkeep change archive recover <operation-id> --change <slug> [--spec-action rollback|resume] [--json]
 ```
 
 ## Options and exit codes
@@ -47,6 +48,10 @@ npx wendkeep change archive <slug> [--session <id>]
   only one unambiguous active context for the worktree is accepted; ambiguity returns exit `2`.
 - `change relink [--apply]` and `change backlink [--apply]` repair graph links; preview is default.
 - `change abandon <slug>` drops work without an ADR; `archive --force` needs explicit human choice.
+- `change archive recover <operation-id> --change <slug> [--spec-action rollback|resume]` inspects a
+  pending transaction by default; with `rollback` or `resume`, it converges only the spec
+  promotion prepared in the journal, under the operation lock and validation. It never promotes the
+  change, deletes the journal, or invents reconciliation.
 - `wendkeep spec list|show|effective|migrate|rebase` manages living contracts and deltas.
 - `wendkeep sensors list|add` manages executable proof.
 - Exit `0` means completion; gates use exit `1` for red proof and exit `2` for invalid
@@ -82,6 +87,66 @@ Archive compares the package/verdict `evidenceEnvelopeId` and complete `evidence
 proven checkout. On a mismatch, return to the correct worktree/session and rerun `verify`,
 `verify --deep`, and `wk-verify`. Fields, text/binary normalization, error codes, and recovery are
 detailed in the [verify guide](verify.md).
+
+The common gate reclassifies the envelope, package, and verdict as `verified`, `reported`,
+`legacy-unbound`, `stale`, `conflict`, or `unproven`; only `verified` permits archive. A block
+returns `WENDKEEP_PROVENANCE_GATE_BLOCKED`: stabilize/recover the context, run `verify`, then
+`verify --deep`, and request a fresh `wk-verify` pass. `--force` may waive only an open task; for
+provenance, integrity, package, and verdict it does **not** change the result or promote a spec/ADR.
+Ledger errors are `WENDKEEP_RECEIPT_LEDGER_BUSY`, `WENDKEEP_RECEIPT_LEDGER_CONFLICT`,
+`WENDKEEP_RECEIPT_LEDGER_CORRUPT`, and `WENDKEEP_RECEIPT_LEDGER_TRUNCATED`. On a block, use the
+sanitized `--json` output (`state`, `reasonCodes`, `diagnostics`, `repair.command`), execute the
+indicated recovery, and run `npx --no-install wendkeep verify --deep --json`; preserve and recapture
+proof without editing the ledger/checkpoint or exposing stderr, tokens, private URLs, or Vault paths.
+
+### Post-fix archive contract
+
+Before mutation, perform the final recapture with `wendkeep verify --deep --change <slug>`. The
+package and verdict must be complete and canonical, bound to the same checkout, change, tasks,
+spec, and sensors. Archive first writes an authorization receipt to the separate
+`change-archive-receipts-v2` ledger; only after it validates may it promote the spec/ADR or move
+the change. `change archive --json` returns the serializable `state`, `reason_codes`,
+`diagnostics`, and `repair` fields. Corruption or truncation in the proof or archive ledger fails
+closed before any write. `--force` does not bypass provenance or integrity, package/verdict,
+corruption, or truncation. The exact recovery is to repeat
+`wendkeep verify --deep --change <slug>` in the correct checkout.
+
+The mutation acquires the runtime lock `.brain/runtime/change-archive-operation.lock` and opens a
+private ASCII transaction at `.brain/runtime/archive-transactions/<uuid>/{original,authorized}`.
+It atomically renames the live change to `original`, checks the digest, and promotes only the
+`authorized` copy; the public namespace is never a publication source. On a seal or divergence
+failure with `WENDKEEP_ARCHIVE_INPUT_CHANGED` before promotion, the `authorized` snapshot is
+removed and `original` is restored without partial promotion. A successful archive keeps the
+`completed` journal; the post-release finalizer validates the digests of `original` and the
+published destination but retains `original` and the transaction, with no automatic destructive
+cleanup.
+
+The archive lock is a `directory lock`: the canonical directory contains a token-specific marker
+and lease. Acquisition prepares a sibling `.pending` directory, writes owner/lease, and publishes
+it by atomic rename; it uses no hardlink and re-observes collisions for at most 3 topology attempts.
+A live owner returns `WENDKEEP_ARCHIVE_BUSY`; a dead owner may be safely reaped without deleting a
+successor. Invalid structure or marker returns `WENDKEEP_ARCHIVE_LOCK_UNAVAILABLE`; ownership loss
+returns `WENDKEEP_ARCHIVE_LOCK_OWNERSHIP_LOST`.
+
+Each operation keeps an `archive-transaction.json` manifest with phases `prepared` → `isolated` →
+`copied` → `sealed` → `published` → `promotion-prepared` → `promotion-applied` → `completed` or
+`recovery-required`. A pending journal blocks a new archive for the same slug before the gate. On a
+collision or post-publication failure, `original` is retained and the state is
+`published-recovery-required`. Use the fail-closed, idempotent inspection
+`wendkeep change archive recover <operation-id> --change <slug> [--spec-action rollback|resume] [--json]`;
+without `--spec-action` it only returns sanitized actions. `rollback` converges before-images and
+`resume` converges after-images for a `promotion-prepared` promotion; both retain the journal for
+further reconciliation.
+
+Multi-spec promotion is one atomic unit: it captures before-images/digests for every capability,
+rolls back every target (including state/README) on a before- or after-write failure, and permits a
+retry only after journal reconciliation and fresh verification. The post-release finalizer validates
+the original/destination digests but retains the `completed` journal and `original`; no destructive
+cleanup is automatic. Sanitized `operation_id` and
+`transaction_phase` fields accompany the diagnostic; `repair.command` points to
+`wendkeep change archive recover <operation-id> --change <slug>` when an operation is identified.
+Text and --json use the same sanitized diagnostic with code, operation, state, blocker, expected,
+observed, recovery, reason_codes, diagnostics, and repair.
 
 ## Tool-scope fence
 

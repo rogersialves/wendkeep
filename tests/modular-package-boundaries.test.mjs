@@ -111,7 +111,8 @@ function assertAdapterSiblings(graph) {
 test('[req:MOD-1] root declares all six internal workspaces exactly once', () => {
   const root = json(join(ROOT, 'package.json'));
   const packageDirs = readdirSync(join(ROOT, 'packages'), { withFileTypes: true })
-    .filter((entry) => entry.isDirectory())
+    .filter((entry) => entry.isDirectory()
+      && existsSync(join(ROOT, 'packages', entry.name, 'package.json')))
     .map((entry) => entry.name)
     .sort();
   assert.deepEqual(packageDirs, [...SURFACES].sort());

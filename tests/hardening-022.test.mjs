@@ -63,31 +63,42 @@ test('discoverCodexTranscripts reads a session_meta line larger than 16KB', () =
 test('archiving a non-active change preserves the active pointer (item 2)', async () => {
   const { activeChange } = await import('../hooks/change-core.mjs');
   const vault = mkdtempSync(join(tmpdir(), 'wk-ptr-'));
-  const spawn = (a) => spawnSync(process.execPath, [BIN, 'change', ...a, '--vault', vault], { encoding: 'utf8' });
+  const project = mkdtempSync(join(tmpdir(), 'wk-ptr-project-'));
+  const spawn = (a) => spawnSync(process.execPath, [BIN, 'change', ...a, '--vault', vault, '--project', project], { encoding: 'utf8' });
+  const verify = (a) => spawnSync(process.execPath, [BIN, ...a, '--vault', vault, '--project', project], { encoding: 'utf8' });
   try {
     mkdirSync(join(vault, '04-Decisões'), { recursive: true });
+    initGitRepository(project);
     assert.equal(spawn(['new', 'aaa']).status, 0);
     fill(vault, 'aaa');
     writeFileSync(join(vault, '08-Mudanças', 'aaa', 'tarefas.md'), '- [x] 1.1 feito\n');
-    writeFileSync(join(vault, '08-Mudanças', 'aaa', 'verdict.json'), JSON.stringify({ slug: 'aaa', ok: true, coverage: [] }));
     assert.equal(spawn(['new', 'bbb']).status, 0); // bbb is now the active pointer
     fill(vault, 'bbb');
     assert.equal(activeChange(vault), 'bbb');
+    const verified = verify(['verify', '--deep', '--change', 'aaa']);
+    assert.equal(verified.status, 0, verified.stderr || verified.stdout);
     const r = spawn(['archive', 'aaa']); // archive the NON-active one
     assert.equal(r.status, 0, r.stderr);
     assert.equal(activeChange(vault), 'bbb', 'pointer to the still-active bbb is untouched');
-  } finally { rmSync(vault, { recursive: true, force: true }); }
+  } finally {
+    rmSync(vault, { recursive: true, force: true });
+    rmSync(project, { recursive: true, force: true });
+  }
 });
 
 test('archive is guarded against a pre-existing destination (item 3) + flips status (item 4)', () => {
   const vault = mkdtempSync(join(tmpdir(), 'wk-atomic-'));
-  const spawn = (a) => spawnSync(process.execPath, [BIN, 'change', ...a, '--vault', vault], { encoding: 'utf8' });
+  const project = mkdtempSync(join(tmpdir(), 'wk-atomic-project-'));
+  initGitRepository(project);
+  const spawn = (a) => spawnSync(process.execPath, [BIN, 'change', ...a, '--vault', vault, '--project', project], { encoding: 'utf8' });
+  const verify = (a) => spawnSync(process.execPath, [BIN, ...a, '--vault', vault, '--project', project], { encoding: 'utf8' });
   try {
     mkdirSync(join(vault, '04-Decisões'), { recursive: true });
     assert.equal(spawn(['new', 'x']).status, 0);
     fill(vault, 'x');
     writeFileSync(join(vault, '08-Mudanças', 'x', 'tarefas.md'), '- [x] 1.1 feito\n');
-    writeFileSync(join(vault, '08-Mudanças', 'x', 'verdict.json'), JSON.stringify({ slug: 'x', ok: true, coverage: [] }));
+    const verified = verify(['verify', '--deep', '--change', 'x']);
+    assert.equal(verified.status, 0, verified.stderr || verified.stdout);
     const a1 = spawn(['archive', 'x']);
     assert.equal(a1.status, 0, a1.stderr);
     // archived proposta flipped to status: archived (item 4)
@@ -99,13 +110,16 @@ test('archive is guarded against a pre-existing destination (item 3) + flips sta
     assert.equal(spawn(['new', 'x']).status, 0);
     fill(vault, 'x');
     writeFileSync(join(vault, '08-Mudanças', 'x', 'tarefas.md'), '- [x] 1.1 de novo\n');
-    writeFileSync(join(vault, '08-Mudanças', 'x', 'verdict.json'), JSON.stringify({ slug: 'x', ok: true, coverage: [] }));
+    assert.equal(verify(['verify', '--deep', '--change', 'x']).status, 0);
     const a2 = spawn(['archive', 'x']);
     assert.notEqual(a2.status, 0, 'second same-day archive of x is blocked by the dest guard');
     assert.match(a2.stderr, /já existe|exists/i);
     // and 07-Specs was not half-promoted: the change x still on disk (not moved)
     assert.ok(existsSync(join(vault, '08-Mudanças', 'x', 'proposta.md')), 'change left intact after guarded failure');
-  } finally { rmSync(vault, { recursive: true, force: true }); }
+  } finally {
+    rmSync(vault, { recursive: true, force: true });
+    rmSync(project, { recursive: true, force: true });
+  }
 });
 
 // --- item 1: evidence freshness --------------------------------------------

@@ -139,6 +139,17 @@ test('[req:MOD-4] [req:MOD-8] [req:MOD-10] [req:MOD-11] [req:MOD-12] [req:MOD-13
   }
 });
 
+test('[req:PROV-8] published tarball contains provenance gates, archive lock, sources, ledger, and receipt schema', () => {
+  const published = publishedFiles();
+  for (const path of [
+    'src/provenance-gate.mjs',
+    'src/archive-operation-lock.mjs',
+    'src/provenance-sources.mjs',
+    'src/receipt-ledger.mjs',
+    'schema/wendkeep.provenance-receipt-v2.schema.json',
+  ]) assert.ok(published.has(path), `missing provenance file from package: ${path}`);
+});
+
 test('[req:MOD-14] [req:MOD-16] CLI workspace declares its private runtime without publishing wendkeep/cli', () => {
   const root = JSON.parse(readFileSync(join(pkgRoot, 'package.json'), 'utf8'));
   const cli = JSON.parse(readFileSync(join(pkgRoot, 'packages', 'cli', 'package.json'), 'utf8'));
@@ -211,6 +222,13 @@ test('[req:MOD-4] [req:MOD-6] [req:MOD-9] [req:MOD-10] [req:MOD-11] [req:MOD-12]
     const imported = spawnSync(process.execPath, ['--input-type=module', '--eval', [
       "const vault = await import('wendkeep/vault');",
       "const harness = await import('wendkeep/harness');",
+      "const installedChange = await import('wendkeep/src/change.mjs');",
+      "const installedChangeCore = await import('wendkeep/hooks/change-core.mjs');",
+      "const installedSpecCore = await import('wendkeep/hooks/spec-core.mjs');",
+      "for (const name of ['archiveChange', 'archiveChangeMutation', 'recoverArchiveSpecPromotion', 'applySpecPromotionPlan', 'promoteSpecs']) {",
+      "  if (name in installedChange || name in installedChangeCore || name in installedSpecCore) process.exit(34);",
+      "}",
+      "if (Object.keys(installedChange).join(',') !== 'runChange') process.exit(35);",
       "const path = await import('node:path');",
       "const { pathToFileURL } = await import('node:url');",
       "const installedRoot = path.join(process.cwd(), 'node_modules', 'wendkeep');",

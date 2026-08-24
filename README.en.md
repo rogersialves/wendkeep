@@ -239,7 +239,7 @@ The README is the map; the guides provide syntax, options, exit codes, examples,
 | Group | Use it for | Detailed guide |
 |---|---|---|
 | **Installation and updates** | `init`, `sync`, companions, and the first project↔vault binding | [Installation and first use](https://github.com/rogersialves/wendkeep/blob/main/docs/en/commands/getting-started.md) |
-| **Managed worktrees** | `worktree create/list/status/open/finish/cleanup/remove/prune`, merge proof, preflight, and receipts | [Managed worktrees](https://github.com/rogersialves/wendkeep/blob/main/docs/en/commands/worktrees.md) |
+| **Managed worktrees** | `worktree create/list/status/open/finish/cleanup/remove/prune`, merge proof, preflight, crash-safe cleanup/common gate, and receipts | [Managed worktrees](https://github.com/rogersialves/wendkeep/blob/main/docs/en/commands/worktrees.md) |
 | **Active context** | `active_contexts` by `repository_id`/`worktree_id`/`work_session_id`, causal transition, quarantine, and explicit recovery | [Active context](https://github.com/rogersialves/wendkeep/blob/main/docs/en/commands/context.md) |
 | **Operating profiles** | `profile`, `flow`, always-on Keep Core, and Wend Runtime governance | [Operating profiles](https://github.com/rogersialves/wendkeep/blob/main/docs/en/commands/operating-profiles.md) |
 | **Changes and verification** | `change`, specs, sensors, TDD, evidence, and archive | [Changes and verification](https://github.com/rogersialves/wendkeep/blob/main/docs/en/commands/changes-and-verification.md) |
@@ -352,8 +352,27 @@ an initialized registry never copies a global authorization without proven ident
 ```bash
 npx wendkeep delivery start release-0-74-0 --allow git:merge --allow git:push --allow publish --source-change <slug> --source-commit <sha> --session <id>
 npx wendkeep delivery status release-0-74-0 --session <id>
-npx wendkeep delivery finish release-0-74-0 --target main --ci-url <url> --version 0.74.0 --npm-integrity <sha512> --release-url <url> --session <id>
+npx wendkeep delivery finish release-0-74-0 --target origin/main --ci-url <url> --version 0.74.0 --npm-integrity <sha512> --release-url <url> --session <id>
 ```
+
+For `git:merge` and `git:push` capabilities, `delivery finish` requires
+`--target <remote>/<branch>` (for example, `--target origin/main`). `delivery start` binds the
+`origin` remote to the expected `repository`; during finish, the target is resolved again with
+`git ls-remote`. If the target cannot be resolved or the origin/repository binding diverges, the
+delivery is blocked before provenance adapters run.
+
+The provenance gate re-derives authority against the current subject before archive, delivery,
+release, or cleanup. Its single taxonomy is `verified`, `reported`, `legacy-unbound`, `stale`,
+`conflict`, and `unproven`; only `verified` authorizes required proof. Evidence, a verdict, or a
+receipt captured before amend/rebase, from another branch/worktree/session, or backed only by a
+reported/offline external claim fails closed with objective recovery. New receipts use schema v2,
+`previous_hash`, `receipt_hash`, and a separate checkpoint to detect tampering and truncation.
+Stable codes are `WENDKEEP_PROVENANCE_GATE_BLOCKED`, `WENDKEEP_RECEIPT_LEDGER_BUSY`,
+`WENDKEEP_RECEIPT_LEDGER_CONFLICT`, `WENDKEEP_RECEIPT_LEDGER_CORRUPT`, and
+`WENDKEEP_RECEIPT_LEDGER_TRUNCATED`. Safe recovery reads `state`, `reasonCodes`, `diagnostics`,
+and `repair.command` in `--json` output, runs `npx --no-install wendkeep verify --deep --json` or
+the indicated status command, and recaptures proof; it never prints raw stderr, tokens, private URLs,
+or Vault paths, and never edits the ledger/checkpoint.
 
 If the harness does not record a lease, a small fix remains under the configured profile —
 `GOVERN` by default. `OFF` does not mean “simple task”: it is a persistent human choice that hands
@@ -535,6 +554,42 @@ explore → propose → apply (TDD) → verify → archive
 - **Archive** — `wendkeep change archive <slug>` **gates** on the evidence (blocks unless every declared critical sensor is green), promotes each applicable spec delta (`ADDED`/`MODIFIED`/`REMOVED`) into the living `07-Specs/<capability>.md` and moves the change to `_arquivo/`. GOVERN/ASSURE mint an ADR in `04-Decisões/`; compact GUIDE with no contract impact does not mint one automatically.
 
 > The gate blocks unless the scaffold is filled, no task is open, evidence is fresh, and every declared requirement is covered. **`--force` waives exactly one of those — the open-task check — and is the human's call, never the agent's.** An unfilled scaffold, a red critical sensor, stale evidence, an orphan requirement or a missing verdict block regardless.
+
+After the fix, archive requires a **final** recapture with
+`wendkeep verify --deep --change <slug>`. The package is complete and canonical; the verdict must
+also be complete and canonical, with both bound to the same checkout, change, tasks, spec, and sensors. Before any mutation, the command
+writes an authorization receipt to the separate `change-archive-receipts-v2` ledger; only after
+that receipt is valid may it promote the spec/ADR or move the change. `change archive --json`
+returns the serializable `state`, `reason_codes`, `diagnostics`, and `repair` fields. Corruption
+or truncation in any ledger fails closed before mutation. `--force` does not bypass provenance,
+integrity, package, verdict, corruption, or truncation; the exact recovery is the recapture above.
+
+Archive sealing uses the runtime lock and a private ASCII transaction at
+`.brain/runtime/archive-transactions/<uuid>/{original,authorized}`: it atomically renames the live
+change to `original`, checks the digest, and promotes only `authorized`. On a seal or divergence
+failure, it removes the snapshot and restores `original` without partial promotion. Multi-spec
+promotion is one atomic unit: it captures before-images/digests, rolls back before/after writes,
+and permits retry only after reconciliation and fresh verification. The post-release finalizer
+validates original/destination digests, but the `completed` journal keeps the `original` retained;
+no destructive cleanup is automatic. A failure leaves `published-recovery-required`. Text and --json
+keep the same sanitized diagnostic (code, operation, state, blocker, expected, observed, recovery).
+
+The archive uses a `directory lock` with a token-specific marker and lease: acquisition prepares a
+sibling `.pending` directory and publishes it by atomic rename, uses no hardlink, and allows at most
+3 topology attempts. A live owner returns `WENDKEEP_ARCHIVE_BUSY`, a dead owner is safely reaped,
+an invalid marker returns `WENDKEEP_ARCHIVE_LOCK_UNAVAILABLE`, and ownership loss returns
+`WENDKEEP_ARCHIVE_LOCK_OWNERSHIP_LOST`. The transaction keeps `archive-transaction.json` with
+phases `prepared` → `isolated` → `copied` → `sealed` → `published` → `promotion-prepared` →
+`promotion-applied` → `completed` or `recovery-required`. A pending journal blocks a new archive for
+the same slug before the gate. On
+a collision/post-publication failure, `original` is retained and the state is
+`published-recovery-required`; `operation_id` and `transaction_phase` are sanitized. Inspect it
+with `wendkeep change archive recover <operation-id> --change <slug> [--spec-action rollback|resume] [--json]`:
+without `--spec-action`, this is a read-only, fail-closed, idempotent operation that returns
+sanitized actions without promoting or deleting. `rollback` restores before-images and `resume`
+converges after-images for a `promotion-prepared` promotion, while retaining the journal for
+reconciliation. When an operation ID exists, `repair.command` points to that recovery; do not treat
+`command:null` as the normal flow.
 
 `wendkeep init` seeds process skills into the vault's `.brain/skills` and delivers identical copies to `.claude/skills/` and `.agents/skills/`; Codex gets the agent definitions (`.brain/agents/*.toml` → `.codex/agents/`) plus a managed section in `AGENTS.md` that indexes the skills. Every skill carries source hash/version metadata; `doctor` warns when reseed + agent restart is required.
 

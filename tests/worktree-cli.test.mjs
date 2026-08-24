@@ -482,6 +482,64 @@ test('[req:WT-17] CLI encaminha finish/cleanup/remove/prune e mantém remote del
   }
 });
 
+test('[req:PROV-8] CLI preserva código, operação, estado, blocker e recovery sanitizados em texto e JSON', async () => {
+  const fixture = managedRepositoryFixture();
+  const originalStderr = process.stderr.write;
+  try {
+    const createFailure = () => Object.assign(
+      new Error("fatal: C:\\Users\\Roger Alves\\private\\token.txt; token=ghp_secret && leak"),
+      {
+        code: 'WENDKEEP_RECEIPT_LEDGER_CORRUPT',
+        operationId: 'op-safe-1',
+        state: 'failed',
+        blockers: [{
+          code: 'WENDKEEP_WORKTREE_CONTEXT_MISMATCH',
+          recovery: 'C:\\private\\recover; rm -rf',
+          expected: { project_id: 'wk-project', path: 'C:\\private\\expected' },
+          observed: { project_id: 'foreign-project', path: '/Users/roger/observed' },
+        }],
+        recovery: "wendkeep worktree finish safe --pr 72; echo leak",
+      },
+    );
+    const dependencies = {
+      finishManagedWorktree: async () => { throw createFailure(); },
+    };
+    const jsonWrites = [];
+    process.stderr.write = (chunk) => { jsonWrites.push(String(chunk)); return true; };
+    assert.equal(await runWorktree([
+      'finish', 'safe', '--pr', '72', '--project', fixture.main, '--json',
+    ], dependencies), 2);
+    const payload = JSON.parse(jsonWrites.join(''));
+    assert.equal(payload.ok, false);
+    assert.equal(payload.code, 'WENDKEEP_RECEIPT_LEDGER_CORRUPT');
+    assert.equal(payload.operation, 'finish');
+    assert.equal(payload.operationId, 'op-safe-1');
+    assert.equal(payload.state, 'failed');
+    assert.equal(payload.blocker, 'WENDKEEP_WORKTREE_CONTEXT_MISMATCH');
+    assert.equal(payload.expected.project_id, 'wk-project');
+    assert.equal(payload.observed.project_id, 'foreign-project');
+    assert.equal(payload.blockers[0].code, 'WENDKEEP_WORKTREE_CONTEXT_MISMATCH');
+    assert.doesNotMatch(JSON.stringify(payload), /ghp_|C:\\Users|[;&|`$]/);
+
+    const textWrites = [];
+    process.stderr.write = (chunk) => { textWrites.push(String(chunk)); return true; };
+    assert.equal(await runWorktree([
+      'finish', 'safe', '--pr', '72', '--project', fixture.main,
+    ], dependencies), 2);
+    const text = textWrites.join('');
+    assert.match(text, /WENDKEEP_RECEIPT_LEDGER_CORRUPT/);
+    assert.match(text, /operation=finish/);
+    assert.match(text, /operation_id=op-safe-1/);
+    assert.match(text, /state=failed/);
+    assert.match(text, /blocker=WENDKEEP_WORKTREE_CONTEXT_MISMATCH/);
+    assert.match(text, /recovery=/);
+    assert.doesNotMatch(text, /ghp_|C:\\Users|[;&|`$]/);
+  } finally {
+    process.stderr.write = originalStderr;
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
 test('[req:WT-8] init encaminha a instalação opcional das tarefas locais', () => {
   const fixture = managedRepositoryFixture();
   try {

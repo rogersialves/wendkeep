@@ -26,10 +26,35 @@ import {
   worktreeIdentity,
 } from '../packages/vault/src/worktree-metadata.mjs';
 
+function sanitizeCliText(value) {
+  return String(value || '')
+    .replace(/\b(?:ghp|github_pat|npm_|sk-|xox[baprs]-)[A-Za-z0-9_\-]+/gi, '[redacted-token]')
+    .replace(/\b(?:token|authorization|bearer|password|secret|api[_-]?key)\s*[=:]\s*[^\s,;]+/gi, '[redacted-token]')
+    .replace(/\bBearer\s+[^\s,;]+/gi, '[redacted-token]')
+    .replace(/[A-Za-z]:\\[^\r\n"'`;|&]+/g, '[redacted-path]')
+    .replace(/(?:^|\s)\/[^\s"'`;|&]+/g, ' [redacted-path]')
+    .replace(/[\r\n\t]+/g, ' ')
+    .replace(/[;&|`$<>(){}[\]]/g, ' ')
+    .replace(/\s{2,}/g, ' ')
+    .trim()
+    .slice(0, 240);
+}
+
+function sanitizeCliValue(value) {
+  if (typeof value === 'string') return sanitizeCliText(value);
+  if (Array.isArray(value)) return value.map((item) => sanitizeCliValue(item));
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => [
+      sanitizeCliText(key), sanitizeCliValue(item),
+    ]));
+  }
+  return value;
+}
+
 function worktreeError(code, message, details = {}) {
-  const error = new Error(message);
+  const error = new Error(sanitizeCliText(message));
   error.code = code;
-  Object.assign(error, details);
+  Object.assign(error, sanitizeCliValue(details));
   return error;
 }
 
@@ -446,11 +471,19 @@ const ERROR_TEXT = {
     WENDKEEP_WORKTREE_PR_UNAVAILABLE: 'Pull Request proof is unavailable.',
     WENDKEEP_WORKTREE_PR_NOT_MERGED: 'Pull Request is not merged.',
     WENDKEEP_WORKTREE_PR_MISMATCH: 'Pull Request does not match the managed branch.',
+    WENDKEEP_WORKTREE_PR_HEAD_MISMATCH: 'Pull Request head does not match the managed head.',
     WENDKEEP_WORKTREE_PR_MERGE_UNREACHABLE: 'Pull Request merge commit is not reachable from the local base.',
+    WENDKEEP_WORKTREE_CONTEXT_MISMATCH: 'An active context belongs to another project or repository.',
     WENDKEEP_WORKTREE_CLEANUP_BUSY: 'Worktree cleanup is already running.',
+    WENDKEEP_WORKTREE_BRANCH_UNPROVEN: 'The managed branch head could not be proven.',
     WENDKEEP_WORKTREE_REASON_REQUIRED: 'Worktree removal requires a reason.',
     WENDKEEP_WORKTREE_REMOTE_UNAVAILABLE: 'Remote branch state is unavailable.',
     WENDKEEP_WORKTREE_REMOTE_DIVERGED: 'Remote branch diverged from the proven head.',
+    WENDKEEP_RECEIPT_LEDGER_CORRUPT: 'The cleanup receipt ledger is corrupt.',
+    WENDKEEP_RECEIPT_LEDGER_TRUNCATED: 'The cleanup receipt ledger is truncated.',
+    WENDKEEP_RECEIPT_LEDGER_BUSY: 'The cleanup receipt ledger is busy.',
+    WENDKEEP_RECEIPT_LEDGER_CONFLICT: 'The cleanup receipt ledger has a conflict.',
+    WENDKEEP_PROVENANCE_GATE_BLOCKED: 'Cleanup receipt provenance gate blocked the operation.',
     WENDKEEP_WORKTREE_USAGE: 'Invalid worktree command usage.',
   },
   'pt-BR': {
@@ -484,11 +517,19 @@ const ERROR_TEXT = {
     WENDKEEP_WORKTREE_PR_UNAVAILABLE: 'A prova do Pull Request está indisponível.',
     WENDKEEP_WORKTREE_PR_NOT_MERGED: 'O Pull Request não está merged.',
     WENDKEEP_WORKTREE_PR_MISMATCH: 'O Pull Request não corresponde à branch gerenciada.',
+    WENDKEEP_WORKTREE_PR_HEAD_MISMATCH: 'O head do Pull Request não corresponde ao head gerenciado.',
     WENDKEEP_WORKTREE_PR_MERGE_UNREACHABLE: 'O merge commit do Pull Request não está alcançável pela base local.',
+    WENDKEEP_WORKTREE_CONTEXT_MISMATCH: 'Um contexto ativo pertence a outro projeto ou repositório.',
     WENDKEEP_WORKTREE_CLEANUP_BUSY: 'A limpeza da worktree já está em andamento.',
+    WENDKEEP_WORKTREE_BRANCH_UNPROVEN: 'Não foi possível provar o head da branch gerenciada.',
     WENDKEEP_WORKTREE_REASON_REQUIRED: 'A remoção da worktree exige um motivo.',
     WENDKEEP_WORKTREE_REMOTE_UNAVAILABLE: 'O estado da branch remota está indisponível.',
     WENDKEEP_WORKTREE_REMOTE_DIVERGED: 'A branch remota divergiu do head comprovado.',
+    WENDKEEP_RECEIPT_LEDGER_CORRUPT: 'O ledger de receipts de cleanup está corrompido.',
+    WENDKEEP_RECEIPT_LEDGER_TRUNCATED: 'O ledger de receipts de cleanup está truncado.',
+    WENDKEEP_RECEIPT_LEDGER_BUSY: 'O ledger de receipts de cleanup está ocupado.',
+    WENDKEEP_RECEIPT_LEDGER_CONFLICT: 'O ledger de receipts de cleanup está em conflito.',
+    WENDKEEP_PROVENANCE_GATE_BLOCKED: 'O gate de proveniência do receipt de cleanup bloqueou a operação.',
     WENDKEEP_WORKTREE_USAGE: 'Uso inválido do comando worktree.',
   },
 };
@@ -498,9 +539,54 @@ function commandLocale(startDir) {
   catch { return 'pt-BR'; }
 }
 
-function renderWorktreeError(error, locale) {
+function renderWorktreeError(error, locale, { json = false, operation = '' } = {}) {
   const code = error?.code || 'WENDKEEP_WORKTREE_FAILED';
-  return `${code}: ${ERROR_TEXT[locale]?.[code] || ERROR_TEXT[locale]?.WENDKEEP_WORKTREE_FAILED}`;
+  const safeCode = sanitizeCliText(code) || 'WENDKEEP_WORKTREE_FAILED';
+  const localized = ERROR_TEXT[locale]?.[safeCode]
+    || ERROR_TEXT[locale]?.WENDKEEP_WORKTREE_FAILED;
+  // The renderer receives the CLI command as the authoritative operation
+  // label. Cleanup errors also carry their internal operation name for
+  // structured diagnostics; exposing that name here would make `finish`,
+  // `remove`, and `prune` indistinguishable in the CLI contract.
+  const safeOperation = sanitizeCliText(operation || error?.operation || 'worktree') || 'worktree';
+  const operationId = sanitizeCliText(error?.operationId || error?.operation_id);
+  const state = sanitizeCliText(error?.state);
+  const blockers = sanitizeCliValue(error?.blockers || error?.blocker);
+  const firstBlocker = Array.isArray(blockers) ? blockers[0] : blockers;
+  const blocker = sanitizeCliText(
+    error?.blockerCode
+      || firstBlocker?.code
+      || firstBlocker?.blocker
+      || (typeof firstBlocker === 'string' ? firstBlocker : ''),
+  );
+  const expected = sanitizeCliValue(error?.expected ?? firstBlocker?.expected ?? null);
+  const observed = sanitizeCliValue(error?.observed ?? firstBlocker?.observed ?? null);
+  const recovery = sanitizeCliText(error?.recovery || error?.repair);
+  if (json) {
+    return JSON.stringify({
+      ok: false,
+      code: safeCode,
+      error: localized,
+      operation: safeOperation,
+      ...(operationId ? { operationId, operation_id: operationId } : {}),
+      ...(state ? { state } : {}),
+      blocker: blocker || null,
+      ...(blockers ? { blockers } : {}),
+      expected,
+      observed,
+      ...(recovery ? { recovery } : {}),
+    });
+  }
+  const details = [
+    `operation=${safeOperation}`,
+    operationId && `operation_id=${operationId}`,
+    state && `state=${state}`,
+    blocker && `blocker=${blocker}`,
+    expected && `expected=${sanitizeCliText(JSON.stringify(expected))}`,
+    observed && `observed=${sanitizeCliText(JSON.stringify(observed))}`,
+    recovery && `recovery=${recovery}`,
+  ].filter(Boolean);
+  return `${safeCode}: ${localized}${details.length ? ` (${details.join(' ')})` : ''}`;
 }
 
 function renderWorktreeLine(worktree) {
@@ -542,6 +628,7 @@ function writeWorktreeResult(payload, { json, locale, action }) {
 export async function runWorktree(argv = [], dependencies = {}) {
   let parsed;
   let locale = 'pt-BR';
+  const jsonRequested = argv.some((arg) => arg === '--json');
   try {
     parsed = parseWorktreeArgv(argv);
     const [command, ...positionals] = parsed.positional;
@@ -631,7 +718,9 @@ export async function runWorktree(argv = [], dependencies = {}) {
     }
     throw worktreeError('WENDKEEP_WORKTREE_USAGE', 'Use create, list, status, open, finish, cleanup, remove ou prune.');
   } catch (error) {
-    process.stderr.write(`${renderWorktreeError(error, locale)}\n`);
+    const json = Boolean(parsed?.flags?.has('--json') || jsonRequested);
+    const operation = parsed?.positional?.[0] || 'worktree';
+    process.stderr.write(`${renderWorktreeError(error, locale, { json, operation })}\n`);
     return 2;
   }
 }

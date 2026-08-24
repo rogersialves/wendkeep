@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'fs';
 import { LOCK_BUSY, mutateSessionNote, withPathLock } from './session-note-io.mjs';
-import { basename, dirname, join, relative } from 'path';
+import { basename, dirname, join, relative, resolve } from 'path';
 import { getLocale } from './locale.mjs';
 import { resolveProjectVault } from '../src/project-vault.mjs';
 import {
@@ -288,17 +288,183 @@ export function readSessionRegistry(vaultBase) {
   }
 }
 
-export function writeSessionRegistry(vaultBase, registry) {
-  const path = registryPath(vaultBase);
-  mkdirVaultPath(vaultBase, dirname(path), { label: 'diretório do SESSION_REGISTRY' });
-  // Escrita atômica: grava em tmp e renomeia (rename é atômico no mesmo volume),
-  // evitando registry truncado/corrompido quando dois hooks gravam ao mesmo tempo.
-  writeVaultFileAtomic(vaultBase, path, `${JSON.stringify(registry, null, 2)}\n`, 'utf-8', {
-    label: 'SESSION_REGISTRY.json',
-  });
+function cleanupReservations(registry) {
+  return registry?.cleanup_reservations
+    && typeof registry.cleanup_reservations === 'object'
+    && !Array.isArray(registry.cleanup_reservations)
+    ? registry.cleanup_reservations : {};
 }
 
-export function mutateSessionRegistry(vaultBase, mutator, { timeoutMs = 2000 } = {}) {
+function cleanupTombstones(registry) {
+  return registry?.cleanup_tombstones
+    && typeof registry.cleanup_tombstones === 'object'
+    && !Array.isArray(registry.cleanup_tombstones)
+    ? registry.cleanup_tombstones : {};
+}
+
+export function comparableCleanupPath(value) {
+  const raw = String(value || '').trim().replaceAll('\\', '/').replace(/\/+$/, '');
+  const normalized = raw ? resolve(raw).replaceAll('\\', '/') : '';
+  return process.platform === 'win32' ? normalized.toLowerCase() : normalized;
+}
+
+function sessionsForCleanupReservation(registry, reservation) {
+  const workSessionId = String(reservation?.work_session_id || '');
+  const worktreePath = comparableCleanupPath(reservation?.worktree_path);
+  return Object.entries(registry?.sessions || {})
+    .filter(([, session]) => {
+      if (session?.status !== 'active') return false;
+      const sameSession = workSessionId && String(session.work_session_id || '') === workSessionId;
+      const samePath = worktreePath && comparableCleanupPath(session?.project_scope?.repoRoot) === worktreePath;
+      return sameSession || samePath;
+    })
+    .map(([key, session]) => [String(key), structuredClone(session)])
+    .sort(([left], [right]) => left.localeCompare(right));
+}
+
+export function cleanupReservationForWorktree(registry, worktreeId, repositoryId = '') {
+  const key = String(worktreeId || '').trim();
+  const repository = String(repositoryId || '').trim();
+  const reservations = cleanupReservations(registry);
+  const composite = repository ? `${repository}:${key}` : '';
+  const reservation = (composite && reservations[composite])
+    || reservations[key]
+    || (!repository
+      ? Object.values(reservations).find((item) => String(item?.worktree_id || '') === key)
+      : null);
+  return reservation?.state === 'cleaning' ? reservation : null;
+}
+
+export function cleanupTombstoneForWorktree(registry, worktreeId, repositoryId = '') {
+  const key = String(worktreeId || '').trim();
+  const repository = String(repositoryId || '').trim();
+  const tombstones = cleanupTombstones(registry);
+  const composite = repository ? `${repository}:${key}` : '';
+  const tombstone = (composite && tombstones[composite])
+    || tombstones[key]
+    || (!repository
+      ? Object.values(tombstones).find((item) => String(item?.worktree_id || '') === key)
+      : null);
+  return tombstone?.state === 'cleaned' ? tombstone : null;
+}
+
+function activeContextsForCleanupWorktree(registry, worktreeId) {
+  return Object.entries(registry?.active_contexts || {})
+    .filter(([, context]) => context?.state === 'active'
+      && String(context?.worktree_id || '') === String(worktreeId || ''));
+}
+
+export function assertCleanupReservationMutation(previous, next, cleanupOperationId = '') {
+  const reservations = cleanupReservations(previous);
+  const operationId = String(cleanupOperationId || '');
+  for (const [worktreeId, reservation] of Object.entries(reservations)) {
+    if (reservation?.state !== 'cleaning') continue;
+    const reservedWorktreeId = String(reservation?.worktree_id || worktreeId);
+    const repositoryId = String(reservation?.repository_id || '');
+    const before = activeContextsForCleanupWorktree(previous, reservedWorktreeId);
+    const after = activeContextsForCleanupWorktree(next, reservedWorktreeId);
+    const contextsChanged = JSON.stringify(before) !== JSON.stringify(after);
+    const sessionsChanged = JSON.stringify(
+      sessionsForCleanupReservation(previous, reservation),
+    ) !== JSON.stringify(sessionsForCleanupReservation(next, reservation));
+    const nextReservation = cleanupReservations(next)[worktreeId];
+    const reservationChanged = JSON.stringify(reservation) !== JSON.stringify(nextReservation);
+    if ((contextsChanged || sessionsChanged || reservationChanged)
+      && operationId !== String(reservation.operation_id || '')) {
+      const error = new Error('active context está reservado por um cleanup em andamento');
+      error.code = 'WENDKEEP_ACTIVE_CONTEXT_CLEANUP_RESERVED';
+      throw error;
+    }
+  }
+}
+
+export function assertCleanupTombstoneMutation(previous, next, cleanupOperationId = '') {
+  const operationId = String(cleanupOperationId || '');
+  const nextTombstones = cleanupTombstones(next);
+  for (const [worktreeId, tombstone] of Object.entries(cleanupTombstones(previous))) {
+    if (tombstone?.state !== 'cleaned') continue;
+    const reservedWorktreeId = String(tombstone?.worktree_id || worktreeId);
+    const before = activeContextsForCleanupWorktree(previous, reservedWorktreeId);
+    const after = activeContextsForCleanupWorktree(next, reservedWorktreeId);
+    const sessionsChanged = JSON.stringify(
+      sessionsForCleanupReservation(previous, tombstone),
+    ) !== JSON.stringify(sessionsForCleanupReservation(next, tombstone));
+    const nextTombstone = nextTombstones[worktreeId];
+    const tombstoneChanged = JSON.stringify(tombstone) !== JSON.stringify(nextTombstone);
+    const sameTerminalSubject = nextTombstone
+      && String(nextTombstone.state || '') === 'cleaned'
+      && String(nextTombstone.operation_id || '') === String(tombstone.operation_id || '')
+      && String(nextTombstone.project_id || '') === String(tombstone.project_id || '')
+      && String(nextTombstone.repository_id || '') === String(tombstone.repository_id || '')
+      && String(nextTombstone.worktree_id || '') === String(tombstone.worktree_id || '')
+      && String(nextTombstone.work_session_id || '') === String(tombstone.work_session_id || '')
+      && String(nextTombstone.change_slug || '') === String(tombstone.change_slug || '')
+      && JSON.stringify(nextTombstone.target_context_ids || [])
+        === JSON.stringify(tombstone.target_context_ids || [])
+      && JSON.stringify(nextTombstone.target_change_slugs || [])
+        === JSON.stringify(tombstone.target_change_slugs || [])
+      && JSON.stringify(nextTombstone.target_context_snapshot || [])
+        === JSON.stringify(tombstone.target_context_snapshot || [])
+      && String(nextTombstone.worktree_path || '') === String(tombstone.worktree_path || '')
+      && String(nextTombstone.actor_context_id || '') === String(tombstone.actor_context_id || '')
+      && String(nextTombstone.mode || '') === String(tombstone.mode || '')
+      && String(nextTombstone.authority || '') === String(tombstone.authority || '')
+      && String(nextTombstone.head || '') === String(tombstone.head || '')
+      && String(nextTombstone.slug || '') === String(tombstone.slug || '')
+      && String(nextTombstone.pull_request_number || '') === String(tombstone.pull_request_number || '')
+      && String(nextTombstone.pull_request_repository || '') === String(tombstone.pull_request_repository || '')
+      && String(nextTombstone.head_ref_oid || '') === String(tombstone.head_ref_oid || '')
+      && String(nextTombstone.merge_commit_oid || '') === String(tombstone.merge_commit_oid || '')
+      && String(nextTombstone.subject_hash || '') === String(tombstone.subject_hash || '');
+    const nextReservation = next?.cleanup_reservations?.[
+      `${String(tombstone.repository_id || '')}:${String(tombstone.worktree_id || '')}`
+    ];
+    const adoptedTerminalIdentity = sameTerminalSubject
+      && String(nextTombstone.attempt_token || '')
+      && String(nextTombstone.attempt_token || '') !== String(tombstone.attempt_token || '')
+      && nextReservation
+      && String(nextReservation.operation_id || '') === String(tombstone.operation_id || '')
+      && String(nextReservation.attempt_token || '') === String(nextTombstone.attempt_token || '');
+    const sameTerminalIdentity = (sameTerminalSubject
+      && String(nextTombstone.attempt_token || '') === String(tombstone.attempt_token || ''))
+      || adoptedTerminalIdentity;
+    if ((JSON.stringify(before) !== JSON.stringify(after) || sessionsChanged
+      || tombstoneChanged)
+      && (!sameTerminalIdentity || operationId !== String(tombstone.operation_id || ''))) {
+      const error = new Error('worktree cleaned permanece sob tombstone terminal');
+      error.code = 'WENDKEEP_ACTIVE_CONTEXT_CLEANUP_TERMINAL';
+      throw error;
+    }
+  }
+}
+
+export function writeSessionRegistry(vaultBase, registry, {
+  cleanupOperationId = '', timeoutMs = 2000, locked = false,
+} = {}) {
+  const path = registryPath(vaultBase);
+  const write = () => {
+    const previous = readSessionRegistry(vaultBase);
+    assertCleanupReservationMutation(previous, registry, cleanupOperationId);
+    assertCleanupTombstoneMutation(previous, registry, cleanupOperationId);
+    mkdirVaultPath(vaultBase, dirname(path), { label: 'diretório do SESSION_REGISTRY' });
+    // Escrita atômica: grava em tmp e renomeia (rename é atômico no mesmo volume),
+    // evitando registry truncado/corrompido quando dois hooks gravam ao mesmo tempo.
+    writeVaultFileAtomic(vaultBase, path, `${JSON.stringify(registry, null, 2)}\n`, 'utf-8', {
+      label: 'SESSION_REGISTRY.json',
+    });
+  };
+  if (locked) return write();
+  mkdirVaultPath(vaultBase, dirname(path), { label: 'diretório do SESSION_REGISTRY' });
+  const outcome = withPathLock(path, write, { timeoutMs, vaultBase });
+  if (outcome === LOCK_BUSY) {
+    throw new Error('SESSION_REGISTRY lock indisponível: lock ocupado até o timeout.');
+  }
+  return outcome;
+}
+
+export function mutateSessionRegistry(vaultBase, mutator, {
+  timeoutMs = 2000, cleanupOperationId = '',
+} = {}) {
   const path = registryPath(vaultBase);
   mkdirVaultPath(vaultBase, dirname(path), { label: 'diretório do SESSION_REGISTRY' });
   const outcome = withPathLock(path, () => {
@@ -307,7 +473,7 @@ export function mutateSessionRegistry(vaultBase, mutator, { timeoutMs = 2000 } =
     registry.version = 2;
     const result = mutator(registry);
     if (JSON.stringify(registry) !== before) {
-      writeSessionRegistry(vaultBase, registry);
+      writeSessionRegistry(vaultBase, registry, { cleanupOperationId, locked: true });
     }
     return result;
   }, { timeoutMs, vaultBase });

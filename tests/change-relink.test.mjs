@@ -22,7 +22,6 @@ function vaultWithSessionLink(slug) {
   writeFileSync(join(dir, 'proposta.md'), `---\ntype: change\nstatus: active\nspec_impact: none\nspec_impact_reason: "teste"\nspecs: []\n---\n\n# ${slug}\n\n## Por quê\n\nreal\n\n## O que muda\n\nreal\n`);
   writeFileSync(join(dir, 'design.md'), `# ${slug} — design\n\nreal\n`);
   writeFileSync(join(dir, 'tarefas.md'), '- [x] 1.1 feito\n');
-  writeFileSync(join(dir, 'verdict.json'), JSON.stringify({ slug, ok: true, coverage: [] }));
   // sessão FECHADA que linkou a change (full-path e com alias)
   const sessDir = join(vault, '02-Sessões', '2026', '07-JUL', 'DIA 11');
   mkdirSync(sessDir, { recursive: true });
@@ -40,6 +39,8 @@ function vaultWithSessionLink(slug) {
 test('archive reescreve os wikilinks da change no vault inteiro (alias preservado)', () => {
   const { vault, sess } = vaultWithSessionLink('x');
   try {
+    const verified = run(vault, ['verify', '--deep', '--change', 'x']);
+    assert.equal(verified.status, 0, verified.stderr || verified.stdout);
     const r = run(vault, ['change', 'archive', 'x']);
     assert.equal(r.status, 0, r.stderr);
     const arch = readdirSync(join(vault, '08-Mudanças', '_arquivo')).find((d) => d.endsWith('-x'));
