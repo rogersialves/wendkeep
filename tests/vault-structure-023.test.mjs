@@ -86,13 +86,15 @@ test('slugify truncates on a word boundary, not mid-word', () => {
 test('archive writes the ADR under the dated month folder, not the year root', () => {
   const vault = mkdtempSync(join(tmpdir(), 'wk-adr-'));
   const spawn = (a) => spawnSync(process.execPath, [BIN, 'change', ...a, '--vault', vault], { encoding: 'utf8' });
+  const run = (a) => spawnSync(process.execPath, [BIN, ...a, '--vault', vault], { encoding: 'utf8' });
   try {
     mkdirSync(join(vault, '04-Decisões'), { recursive: true });
     assert.equal(spawn(['new', 'x']).status, 0);
     writeFileSync(join(vault, '08-Mudanças', 'x', 'proposta.md'), '---\ntype: change\nstatus: active\nspec_impact: none\nspec_impact_reason: "Fixture sem impacto de contrato"\nspecs: []\n---\n\n# x\n\n## Por quê\n\nA.\n\n## O que muda\n\nB.\n');
     writeFileSync(join(vault, '08-Mudanças', 'x', 'design.md'), '# x — design\n\n## Abordagem\n\nC.\n');
     writeFileSync(join(vault, '08-Mudanças', 'x', 'tarefas.md'), '- [x] 1.1 feito\n');
-    writeFileSync(join(vault, '08-Mudanças', 'x', 'verdict.json'), JSON.stringify({ slug: 'x', ok: true, coverage: [] }));
+    const verified = run(['verify', '--deep', '--change', 'x']);
+    assert.equal(verified.status, 0, verified.stderr || verified.stdout);
     const r = spawn(['archive', 'x']);
     assert.equal(r.status, 0, r.stderr);
     // ADR path: 04-Decisões/<year>/<MM-MMM>/ADR-...  (month folder present, not year root)

@@ -89,6 +89,21 @@ Liga identidade causal, `HEAD`, árvore do índice, digest normalizado da worktr
 configuração de sensores por SHA-256. Evidência v1 é apenas `legacy-unbound`; mudança de HEAD durante
 os sensores preserva a evidência anterior e falha com `WENDKEEP_EVIDENCE_HEAD_CHANGED`.
 
+## Gate de proveniência e receipt v2
+
+Archive, delivery, release e cleanup rederivam a autoridade pelo mesmo gate. Estados válidos são
+`verified`, `reported`, `legacy-unbound`, `stale`, `conflict` e `unproven`; somente `verified`
+satisfaz prova obrigatória. O receipt público segue
+[`schema/wendkeep.provenance-receipt-v2.schema.json`](../schema/wendkeep.provenance-receipt-v2.schema.json)
+e exige `schema_version`, `sequence`, `receipt_id`, `previous_hash`, `receipt_hash`, `kind`,
+`subject`, `claims`, `observations` e `recorded_at`. Ledger e checkpoint são autoridades locais;
+v1 continua somente como prefixo `legacy-unbound`, sem promoção implícita.
+Os códigos estáveis são `WENDKEEP_PROVENANCE_GATE_BLOCKED`, `WENDKEEP_RECEIPT_LEDGER_BUSY`,
+`WENDKEEP_RECEIPT_LEDGER_CONFLICT`, `WENDKEEP_RECEIPT_LEDGER_CORRUPT` e
+`WENDKEEP_RECEIPT_LEDGER_TRUNCATED`. O recovery textual/JSON expõe apenas `state`, `reasonCodes`,
+`diagnostics` sanitizados e `repair.command`; execute o comando objetivo indicado ou
+`npx --no-install wendkeep verify --deep --json`, recapture a prova e nunca edite ledger/checkpoint.
+
 ## Pacote de verificação — `08-Mudanças/<slug>/verificacao.json`
 Escrito por `wendkeep verify --deep`; consumido pela skill `wk-verify`.
 ```json
@@ -116,6 +131,21 @@ Change sem `[req:]` = trivial: `verify --deep` auto-escreve o verdict; o gate pa
 `tasksHash` divergente do `tarefas.md` atual = verdict **stale**, gate bloqueia (verdicts
 pré-0.6.1 sem o campo são aceitos). O gate também bloqueia **tarefas abertas** (`- [ ]`,
 inclui fix-tasks `M.n`); escape explícito: `change archive --force`.
+
+## Archive pós-fix — ordem de autorização e recovery
+
+Antes de arquivar, `wendkeep verify --deep --change <slug>` deve fazer a recaptura final. O
+package (`verificacao.json`) e o verdict precisam estar completos e canônicos e ligados ao mesmo
+checkout, change, tarefas, spec e sensores. A autorização é um receipt separado no ledger
+`change-archive-receipts-v2`, gravado **antes da mutação**; spec, ADR e `_arquivo/` só podem ser
+alterados depois que esse receipt for válido. `change archive --json` é a superfície serializável
+do gate e contém `state`, `reason_codes`, `diagnostics` e `repair`.
+
+Corrupção ou truncamento no ledger de prova ou no ledger de archive bloqueia fechado, sem publicar
+qualquer mutação. O `--force` mantém apenas a exceção de tarefa aberta: não bypassa proveniência,
+integridade, package, verdict, corrupção ou truncamento. Para recovery, preserve os ledgers e
+execute exatamente `wendkeep verify --deep --change <slug>`; não edite checkpoint/ledger nem use
+uma prova de outro contexto.
 
 ## Skill — `.brain/skills/<name>/SKILL.md`
 ```markdown

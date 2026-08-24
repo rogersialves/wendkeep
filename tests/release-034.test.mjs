@@ -5,11 +5,12 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
+import { initGitRepository } from './helpers/git-fixture.mjs';
 
 const BIN = join(dirname(fileURLToPath(import.meta.url)), '..', 'bin', 'wendkeep.mjs');
 
-function run(vault, args) {
-  return spawnSync(process.execPath, [BIN, ...args, '--vault', vault], { encoding: 'utf8' });
+function run(vault, args, project = '') {
+  return spawnSync(process.execPath, [BIN, ...args, '--vault', vault, ...(project ? ['--project', project] : [])], { encoding: 'utf8' });
 }
 
 test('0.34 CLI: spec effective/migrate and change use/continue', () => {
@@ -47,12 +48,13 @@ test('0.34 CLI: spec effective/migrate and change use/continue', () => {
 // só bloqueia quando toca o MESMO requisito; `spec rebase --accept-current` destrava.
 test('0.34 e2e: changes concorrentes na mesma capability — conflito real bloqueia, rebase destrava', () => {
   const vault = mkdtempSync(join(tmpdir(), 'wk-034c-'));
+  const project = mkdtempSync(join(tmpdir(), 'wk-034c-project-'));
+  initGitRepository(project);
   const fill = (slug) => {
     const dir = join(vault, '08-Mudanças', slug);
     writeFileSync(join(dir, 'proposta.md'), `---\ntype: change\nstatus: active\nspec_impact: required\nspecs: [auth]\n---\n\n# ${slug}\n\n## Por quê\n\nreal\n\n## O que muda\n\nreal\n`);
     writeFileSync(join(dir, 'design.md'), `# ${slug} — design\n\nreal\n`);
     writeFileSync(join(dir, 'tarefas.md'), '- [x] 1.1 feito\n');
-    writeFileSync(join(dir, 'verdict.json'), JSON.stringify({ slug, ok: true, coverage: [] }));
   };
   try {
     mkdirSync(join(vault, '04-Decisões'), { recursive: true });
@@ -69,7 +71,8 @@ test('0.34 e2e: changes concorrentes na mesma capability — conflito real bloqu
     mkdirSync(join(vault, '08-Mudanças', 'c2', 'specs', 'auth'), { recursive: true });
 
     // c1 arquiva primeiro (sem conflito) e promove AUTH-1
-    const a1 = run(vault, ['change', 'archive', 'c1']);
+    assert.equal(run(vault, ['verify', '--deep', '--change', 'c1'], project).status, 0);
+    const a1 = run(vault, ['change', 'archive', 'c1'], project);
     assert.equal(a1.status, 0, a1.stderr);
     assert.match(readFileSync(join(vault, '07-Specs', 'auth.md'), 'utf8'), /c1 muda login/);
 
@@ -77,7 +80,8 @@ test('0.34 e2e: changes concorrentes na mesma capability — conflito real bloqu
     writeFileSync(join(vault, '08-Mudanças', 'c2', 'specs', 'auth', 'spec.md'), '## MODIFIED Requirements\n### Requisito: AUTH-2 — logout\nc2 muda logout\n');
     // c2 toca o MESMO requisito (AUTH-1) → conflito real bloqueia
     writeFileSync(join(vault, '08-Mudanças', 'c2', 'specs', 'auth', 'spec.md'), '## MODIFIED Requirements\n### Requisito: AUTH-1 — login\nc2 também muda login\n');
-    const blocked = run(vault, ['change', 'archive', 'c2']);
+    assert.equal(run(vault, ['verify', '--deep', '--change', 'c2'], project).status, 0);
+    const blocked = run(vault, ['change', 'archive', 'c2'], project);
     assert.equal(blocked.status, 1, 'conflito real bloqueia');
     assert.match(blocked.stderr, /conflito de spec.*AUTH-1|AUTH-1.*mudou/i);
     assert.match(blocked.stderr, /rebase/i, 'mensagem aponta o rebase');
@@ -85,7 +89,8 @@ test('0.34 e2e: changes concorrentes na mesma capability — conflito real bloqu
     // rebase explícito aceita o estado atual e destrava
     const rebase = run(vault, ['spec', 'rebase', '--change', 'c2', '--accept-current']);
     assert.equal(rebase.status, 0, rebase.stderr);
-    const a2 = run(vault, ['change', 'archive', 'c2']);
+    assert.equal(run(vault, ['verify', '--deep', '--change', 'c2'], project).status, 0);
+    const a2 = run(vault, ['change', 'archive', 'c2'], project);
     assert.equal(a2.status, 0, a2.stderr);
     assert.match(readFileSync(join(vault, '07-Specs', 'auth.md'), 'utf8'), /c2 também muda login/);
 
@@ -94,7 +99,11 @@ test('0.34 e2e: changes concorrentes na mesma capability — conflito real bloqu
     fill('c3');
     mkdirSync(join(vault, '08-Mudanças', 'c3', 'specs', 'auth'), { recursive: true });
     writeFileSync(join(vault, '08-Mudanças', 'c3', 'specs', 'auth', 'spec.md'), '## MODIFIED Requirements\n### Requisito: AUTH-2 — logout\nc3 muda logout\n');
-    const a3 = run(vault, ['change', 'archive', 'c3']);
+    assert.equal(run(vault, ['verify', '--deep', '--change', 'c3'], project).status, 0);
+    const a3 = run(vault, ['change', 'archive', 'c3'], project);
     assert.equal(a3.status, 0, `não-relacionado não bloqueia: ${a3.stderr}`);
-  } finally { rmSync(vault, { recursive: true, force: true }); }
+  } finally {
+    rmSync(vault, { recursive: true, force: true });
+    rmSync(project, { recursive: true, force: true });
+  }
 });

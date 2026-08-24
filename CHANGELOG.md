@@ -4,6 +4,42 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.79.0] — 2026-08-23
+
+### Added
+
+- **Gate único de proveniência.** Archive, delivery, release e cleanup rederivam a autoridade no
+  subject atual com a taxonomia `verified`, `reported`, `legacy-unbound`, `stale`, `conflict` e
+  `unproven`; somente `verified` satisfaz prova obrigatória, com códigos e recovery sanitizados.
+- **Fontes verificáveis.** Adapters injetáveis ligam Git, CI, tag, NPM e GitHub Release ao
+  repositório, target commit, package/version, integrity e notas esperados sem confiar em URL/claim
+  fornecida nem na worktree incidental.
+- **Receipt Ledger v2.** Autorizações de archive e receipts de delivery/cleanup ganham sequência,
+  `previous_hash`, `receipt_hash`, lock, publicação atômica e checkpoint separado, com schema
+  público e replay idempotente.
+
+### Changed
+
+- **Archive fail-closed.** Evidence Envelope v2, pacote deep e verdict completos/canônicos agora
+  são exigidos mesmo sem sensores; uma autorização v2 é encadeada antes da mutação e `--force`
+  continua limitado a tarefa aberta, sem pular proveniência.
+- **Delivery e release ligadas ao destino.** Merge/push observam `<remote>/<branch>`, exigem
+  ancestralidade e preservam origin/worktree/branch do start; tag/publish derivam package e artefato
+  do target e verificam CI → commit → tag → versão/integrity → GitHub Release. Offline
+  permanece `reported` e não grava completion receipt.
+- **Cleanup retomável e causal.** Finish/remove/prune validam o ledger antes da mutação, vinculam
+  todos os contextos, PR/head/merge e ator disponível, e retomam o mesmo operation ID após crash
+  antes/depois do append ou finalize; texto e `--json` preservam códigos e recovery sanitizados.
+- **Compatibilidade explícita.** Ledgers v1 permanecem read-only como prefixo `legacy-unbound`;
+  README, contrato do harness e guias de changes/verify/profiles/worktrees foram atualizados em
+  PT-BR/EN.
+
+### Security
+
+- Adulteração intermediária, JSON parcial, cauda/checkpoint removidos, colisão de ID, locks
+  trocados por outro owner, writer concorrente e escape por symlink/junction passam a bloquear antes
+  da mutação; diagnósticos não persistem tokens nem paths privados.
+
 ## [0.78.0] — 2026-08-22
 
 ### Added

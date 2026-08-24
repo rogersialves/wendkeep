@@ -1889,7 +1889,7 @@ function legacyCheckpointMigration(vault, sessionId, entry, authority, fullRepla
 }
 
 export function migrateLegacyMemoryCheckpoints(vault, {
-  now = new Date().toISOString(), memoryLock = {},
+  now = new Date().toISOString(), memoryLock = {}, beforeRegistryMutation,
 } = {}) {
   const expectedAuthority = readMemoryAuthority(vault);
   const outcome = withMemoryLock(vault, () => {
@@ -1910,6 +1910,7 @@ export function migrateLegacyMemoryCheckpoints(vault, {
       status: 'unchanged', migrated: 0, sessions: [], backupPath: null,
     };
 
+    if (beforeRegistryMutation) beforeRegistryMutation();
     let backupPath = null;
     let backupCreated = false;
     try {

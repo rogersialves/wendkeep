@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import {
   existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync,
 } from 'node:fs';
@@ -7,6 +8,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
+  collectArtifactAtCommit,
   evaluateReleaseProvenance,
   packIntegrityInIsolatedCopy,
   parsePackIntegrity,
@@ -127,6 +129,76 @@ writeFileSync('README.md', process.argv[2] === 'pre' ? 'published artifact\\n' :
     });
     assert.equal(isolated, 'sha512-lifecycle');
     assert.equal(readFileSync(join(root, 'README.md'), 'utf8'), 'working tree\n');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('[req:PROV-6] wrapper público avalia a cadeia externa completa pelo gate compartilhado', () => {
+  const commit = 'a'.repeat(40);
+  const chain = {
+    commit: { sha: commit },
+    tag: { name: 'v1.2.3', commit },
+    package: { name: 'fixture', version: '1.2.3', commit },
+    artifact: { integrity: 'sha512-target', commit },
+    npm: { name: 'fixture', version: '1.2.3', integrity: 'sha512-target', commit, repository: 'example/project' },
+    ci: { conclusion: 'success', commit, repository: 'example/project' },
+    release: {
+      tag: 'v1.2.3', version: '1.2.3', commit, repository: 'example/project', status: 'published',
+    },
+  };
+  const context = {
+    target_commit: commit,
+    package_name: 'fixture',
+    package_version: '1.2.3',
+    repository: 'example/project',
+    tag: 'v1.2.3',
+  };
+  assert.equal(evaluateReleaseProvenance({ chain, context }).state, 'verified');
+  assert.equal(
+    evaluateReleaseProvenance({ chain }).state,
+    'unproven',
+    'a chain cannot derive its own trusted context',
+  );
+  assert.equal(evaluateReleaseProvenance({
+    chain: { ...chain, ci: { ...chain.ci, commit: 'b'.repeat(40) } }, context,
+  }).state, 'conflict');
+});
+
+test('[req:PROV-6] tarball é calculado de clone detached do target, não do checkout incidental', () => {
+  const root = mkdtempSync(join(tmpdir(), 'wk-provenance-target-'));
+  try {
+    execFileSync('git', ['init'], { cwd: root });
+    execFileSync('git', ['config', 'user.email', 'release@example.test'], { cwd: root });
+    execFileSync('git', ['config', 'user.name', 'Release Test'], { cwd: root });
+    writeFileSync(join(root, 'package.json'), JSON.stringify({ name: 'fixture', version: '1.2.3' }));
+    execFileSync('git', ['add', 'package.json'], { cwd: root });
+    execFileSync('git', ['commit', '-m', 'target'], { cwd: root });
+    const targetCommit = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();
+    writeFileSync(join(root, 'package.json'), JSON.stringify({ name: 'fixture', version: '9.9.9' }));
+    execFileSync('git', ['add', 'package.json'], { cwd: root });
+    execFileSync('git', ['commit', '-m', 'incidental'], { cwd: root });
+
+    const result = collectArtifactAtCommit({
+      repoRoot: root,
+      targetCommit,
+      execute(command, args, options = {}) {
+        if (/^npm(?:\.cmd)?$/.test(command)) {
+          const pkg = JSON.parse(readFileSync(join(options.cwd, 'package.json'), 'utf8'));
+          assert.equal(pkg.version, '1.2.3');
+          return '[{"integrity":"sha512-target"}]';
+        }
+        return execFileSync(command, args, options);
+      },
+    });
+    assert.deepEqual(result, {
+      ok: true,
+      state: 'verified',
+      commit: targetCommit,
+      integrity: 'sha512-target',
+      reasonCodes: [],
+    });
+    assert.equal(JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).version, '9.9.9');
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

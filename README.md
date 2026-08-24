@@ -235,7 +235,7 @@ O README mostra o mapa; os guias trazem sintaxe, opções, códigos de saída, e
 | Grupo | Use para | Guia detalhado |
 |---|---|---|
 | **Instalação e atualização** | `init`, `sync`, companions e primeiro vínculo projeto↔cofre | [Instalação e primeiro uso](https://github.com/rogersialves/wendkeep/blob/main/docs/pt-BR/commands/getting-started.md) |
-| **Worktrees gerenciadas** | `worktree create/list/status/open/finish/cleanup/remove/prune`, prova de merge, preflight e receipts | [Worktrees gerenciadas](https://github.com/rogersialves/wendkeep/blob/main/docs/pt-BR/commands/worktrees.md) |
+| **Worktrees gerenciadas** | `worktree create/list/status/open/finish/cleanup/remove/prune`, prova de merge, preflight, cleanup crash-safe/gate comum e receipts | [Worktrees gerenciadas](https://github.com/rogersialves/wendkeep/blob/main/docs/pt-BR/commands/worktrees.md) |
 | **Contexto ativo** | `active_contexts` por `repository_id`/`worktree_id`/`work_session_id`, transição causal, quarentena e recuperação explícita | [Contexto ativo](https://github.com/rogersialves/wendkeep/blob/main/docs/pt-BR/commands/context.md) |
 | **Perfis de operação** | `profile`, `flow`, Keep Core sempre ativo e governança do Wend Runtime | [Perfis de Operação](https://github.com/rogersialves/wendkeep/blob/main/docs/pt-BR/commands/operating-profiles.md) |
 | **Changes e verificação** | `change`, specs, sensores, TDD, evidência e archive | [Changes e verificação](https://github.com/rogersialves/wendkeep/blob/main/docs/pt-BR/commands/changes-and-verification.md) |
@@ -349,8 +349,27 @@ registry inicializado nunca copia uma autorização global sem identidade provad
 ```bash
 npx wendkeep delivery start release-0-74-0 --allow git:merge --allow git:push --allow publish --source-change <slug> --source-commit <sha> --session <id>
 npx wendkeep delivery status release-0-74-0 --session <id>
-npx wendkeep delivery finish release-0-74-0 --target main --ci-url <url> --version 0.74.0 --npm-integrity <sha512> --release-url <url> --session <id>
+npx wendkeep delivery finish release-0-74-0 --target origin/main --ci-url <url> --version 0.74.0 --npm-integrity <sha512> --release-url <url> --session <id>
 ```
+
+Para as capabilities `git:merge` e `git:push`, `delivery finish` exige `--target <remote>/<branch>`
+(por exemplo, `--target origin/main`). O `delivery start` vincula o remote `origin` ao
+`repository` esperado; no finish, o destino é resolvido novamente por `git ls-remote`. Se o destino
+não puder ser resolvido ou o binding de origin/repository divergir, a delivery bloqueia antes dos
+adapters de proveniência.
+
+O gate de proveniência rederiva a autoridade no subject atual antes de archive, delivery, release
+ou cleanup. A taxonomia única é `verified`, `reported`, `legacy-unbound`, `stale`, `conflict` e
+`unproven`; somente `verified` autoriza uma prova obrigatória. Evidence, verdict ou receipt de antes
+de amend/rebase, de outra branch/worktree/sessão, ou uma claim externa apenas informada/offline,
+falha fechado com recovery objetivo. Novos receipts usam schema v2, `previous_hash`,
+`receipt_hash` e checkpoint separado para detectar adulteração e truncamento.
+Os códigos estáveis são `WENDKEEP_PROVENANCE_GATE_BLOCKED`,
+`WENDKEEP_RECEIPT_LEDGER_BUSY`, `WENDKEEP_RECEIPT_LEDGER_CONFLICT`,
+`WENDKEEP_RECEIPT_LEDGER_CORRUPT` e `WENDKEEP_RECEIPT_LEDGER_TRUNCATED`. O recovery seguro lê
+`state`, `reasonCodes`, `diagnostics` e `repair.command` no modo `--json`, executa
+`npx --no-install wendkeep verify --deep --json` ou o comando de status indicado e recaptura a
+prova; não imprime stderr bruto, tokens, URLs privadas ou paths do Vault, nem edita ledger/checkpoint.
 
 Se o harness não registrar a lease, uma correção pequena continua sob o perfil configurado — por
 padrão, `GOVERN`. `OFF` não significa “tarefa simples”: é uma escolha humana persistente que entrega
@@ -531,6 +550,43 @@ explore → propose → apply (TDD) → verify → archive
 - **Archive** — `wendkeep change archive <slug>` faz **gate** na evidência (bloqueia a não ser que todo sensor crítico declarado esteja verde), promove cada delta aplicável (`ADDED`/`MODIFIED`/`REMOVED`) pro `07-Specs/<capability>.md` vivo e move a change pro `_arquivo/`. GOVERN/ASSURE cunham ADR em `04-Decisões/`; GUIDE compacta sem impacto de contrato não gera ADR automático.
 
 > O gate bloqueia a não ser que o scaffold esteja preenchido, nenhuma tarefa aberta, evidência fresca e todo requisito declarado coberto. **O `--force` dispensa exatamente uma dessas — a checagem de tarefa aberta — e é decisão do humano, nunca do agente.** Scaffold não preenchido, sensor crítico vermelho, evidência stale, requisito órfão ou verdict ausente bloqueiam de qualquer jeito.
+
+No archive pós-fix, a prova precisa de uma recaptura **final** com
+`wendkeep verify --deep --change <slug>`. O pacote é completo e canônico; o verdict também deve
+ser completo e canônico, ambos vinculados ao mesmo checkout, change, tarefas, spec e sensores. Antes de qualquer
+mutação, o comando grava um receipt de autorização no ledger separado
+`change-archive-receipts-v2`; somente após esse receipt válido a promoção do spec/ADR e o
+movimento da change podem ocorrer. `change archive --json` expõe o resultado serializável com
+`state`, `reason_codes`, `diagnostics` e `repair`. Corrupção ou truncamento de qualquer ledger
+bloqueia fechado antes da mutação. `--force` não bypassa proveniência, integridade, package,
+verdict, corrupção ou truncamento; a recuperação exata é a recaptura acima.
+
+A selagem do archive usa o lock do runtime e uma transação privada ASCII em
+`.brain/runtime/archive-transactions/<uuid>/{original,authorized}`: renomeia atomicamente a change
+viva para `original`, confere o digest e promove somente `authorized`. Em falha de selagem ou
+divergência, remove o snapshot e restaura `original` sem promoção parcial. A promoção multi-spec
+é uma unidade atômica: captura before-images/digests, faz rollback antes/depois da escrita e só
+permite retry após reconciliação e nova verificação. O finalizer pós-release valida os digests do
+original e do destino, mas o `completed` journal mantém o `original` retido; sem cleanup destrutivo
+automático. Falha deixa `published-recovery-required`. Texto e --json mantêm o diagnóstico
+sanitizado equivalente (code, operation, state, blocker, expected, observed, recovery).
+
+O archive usa um `directory lock` com marker específico do token e lease: a aquisição prepara um
+diretório irmão `.pending` e o publica por rename atômico, sem hardlink, com no máximo 3 tentativas
+de topologia. Owner vivo retorna `WENDKEEP_ARCHIVE_BUSY`, owner morto tem reap seguro, marker
+inválido retorna `WENDKEEP_ARCHIVE_LOCK_UNAVAILABLE` e perda de ownership retorna
+`WENDKEEP_ARCHIVE_LOCK_OWNERSHIP_LOST`. A transação mantém `archive-transaction.json` e as fases
+`prepared` → `isolated` → `copied` → `sealed` → `published` → `promotion-prepared` →
+`promotion-applied` → `completed` ou `recovery-required`.
+Um journal pending bloqueia novo archive do mesmo slug antes do gate. Em colisão/falha
+pós-publicação, `original` fica retido e o estado é `published-recovery-required`.
+`operation_id` e `transaction_phase` são sanitizados. Inspecione esse estado com
+`wendkeep change archive recover <operation-id> --change <slug> [--spec-action rollback|resume] [--json]`:
+sem `--spec-action`, é inspeção somente-leitura, fail-closed e idempotente, que retorna ações
+sanitizadas sem promover ou apagar. `rollback` restaura before-images e `resume` converge
+after-images de uma promoção `promotion-prepared`, sempre retendo o journal para reconciliação.
+Quando há operation ID, `repair.command` aponta para esse recovery; não trate `command:null` como
+fluxo normal.
 
 O `wendkeep init` também semeia **skills de processo nativas** (`wk-workflow`, `wk-tdd`, `wk-debugging`, `wk-brainstorming`, `wk-planning`, `wk-verify`) no `.brain/skills` do cofre e as entrega em `.claude/skills/` e `.agents/skills/` — a camada do *como*, zero‑dep. O Codex recebe as definições de agent (`.brain/agents/*.toml` → `.codex/agents/`) mais uma seção gerenciada no `AGENTS.md` que indexa as skills. Cada skill carrega metadados de hash/versão da fonte; o `doctor` avisa quando é preciso ressemear e reiniciar o agente. Companions opcionais (`context-mode`, `dotcontext`, `understand-anything`, `caveman`) ficam como camada extra opt‑in.
 

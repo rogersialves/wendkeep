@@ -2,6 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { cpSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
+import { evaluateReleaseChain } from './provenance-gate.mjs';
 
 const DEPENDENCY_FIELDS = Object.freeze([
   'dependencies',
@@ -52,6 +53,50 @@ export function packIntegrityInIsolatedCopy(root, { execute = execFileSync } = {
   }
 }
 
+/**
+ * Calculate the publishable tarball from an immutable target commit. A local,
+ * detached clone keeps lifecycle mutations and an incidental worktree out of
+ * the observation.
+ */
+export function collectArtifactAtCommit({
+  repoRoot,
+  targetCommit,
+  execute = execFileSync,
+} = {}) {
+  if (!repoRoot || !/^[0-9a-f]{40}$/i.test(String(targetCommit || ''))) {
+    return { ok: false, state: 'unproven', reasonCodes: ['PROVENANCE_COMMIT_MISSING'] };
+  }
+  const tempRoot = mkdtempSync(join(tmpdir(), 'wendkeep-release-target-'));
+  const targetRoot = join(tempRoot, 'target');
+  try {
+    execute('git', ['clone', '--quiet', '--no-checkout', '--local', repoRoot, targetRoot], {
+      encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], shell: false,
+    });
+    execute('git', ['checkout', '--quiet', '--detach', targetCommit], {
+      cwd: targetRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], shell: false,
+    });
+    const integrity = packIntegrityInIsolatedCopy(targetRoot, { execute });
+    if (!integrity) return {
+      ok: false, state: 'unproven', commit: targetCommit,
+      reasonCodes: ['PROVENANCE_INTEGRITY_UNOBSERVED'],
+    };
+    return {
+      ok: true,
+      state: 'verified',
+      commit: targetCommit,
+      integrity,
+      reasonCodes: [],
+    };
+  } catch {
+    return {
+      ok: false, state: 'reported', commit: targetCommit,
+      reasonCodes: ['PROVENANCE_SOURCE_UNAVAILABLE'],
+    };
+  } finally {
+    rmSync(tempRoot, { recursive: true, force: true });
+  }
+}
+
 export function packageHasSelfDependency(pkg = {}) {
   const name = String(pkg.name || '');
   if (!name) return false;
@@ -66,7 +111,10 @@ export function evaluateReleaseProvenance({
   publishedIntegrity = '',
   localIntegrity = '',
   requirePublished = false,
+  chain = null,
+  context = null,
 } = {}) {
+  if (chain) return evaluateReleaseChain({ chain, context: context || {} });
   const tag = `v${version}`;
   if (tagCommit && tagCommit !== headCommit) {
     return {

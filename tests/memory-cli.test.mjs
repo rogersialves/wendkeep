@@ -1,7 +1,7 @@
 // [req:MEM-HYB-3] [req:MEM-HYB-7] [req:MEM-HYB-9]
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { spawn, spawnSync } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import {
   existsSync, linkSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync,
@@ -326,65 +326,6 @@ function historicalLegacyCheckpointFixture({
     vault, brain, physicalLedger, attemptPrefix, legacyCheckpoint, registryPath,
     currentCheckpoint: current.checkpoint,
   };
-}
-
-function startCheckpointMirrorRace({
-  vault, registryPath: registryFile, checkpointValue, sessionId = 'current-session',
-}) {
-  const safetyUrl = new URL('../packages/vault/src/vault-path-safety.mjs', import.meta.url).href;
-  const registryUrl = new URL('../hooks/obsidian-common.mjs', import.meta.url).href;
-  const code = [
-    "import { existsSync } from 'node:fs';",
-    `import { withVaultPathLock } from ${JSON.stringify(safetyUrl)};`,
-    `import { readSessionRegistry, writeSessionRegistry } from ${JSON.stringify(registryUrl)};`,
-    'const signal = new Int32Array(new SharedArrayBuffer(4));',
-    'withVaultPathLock(process.env.WK_RACE_VAULT, process.env.WK_RACE_REGISTRY, () => {',
-    "  process.stdout.write('ready\\n');",
-    '  const deadline = Date.now() + 5000;',
-    '  while (!existsSync(process.env.WK_RACE_MEMORY_LOCK)) {',
-    "    if (Date.now() >= deadline) throw new Error('memory lock was not observed');",
-    '    Atomics.wait(signal, 0, 0, 10);',
-    '  }',
-    '  Atomics.wait(signal, 0, 0, 250);',
-    '  const registry = readSessionRegistry(process.env.WK_RACE_VAULT);',
-    '  registry.sessions[process.env.WK_RACE_SESSION].memory_checkpoint = JSON.parse(process.env.WK_RACE_CHECKPOINT);',
-    '  writeSessionRegistry(process.env.WK_RACE_VAULT, registry);',
-    "  process.stdout.write('mutated\\n');",
-    '}, { timeoutMs: 2000 });',
-  ].join('\n');
-  const child = spawn(process.execPath, ['--input-type=module', '-e', code], {
-    env: {
-      ...process.env,
-      WK_RACE_VAULT: vault,
-      WK_RACE_REGISTRY: registryFile,
-      WK_RACE_MEMORY_LOCK: join(vault, '.brain', 'MEMORY.lock'),
-      WK_RACE_CHECKPOINT: JSON.stringify(checkpointValue),
-      WK_RACE_SESSION: sessionId,
-    },
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
-  let stdout = '';
-  let stderr = '';
-  let readyResolve;
-  let readyReject;
-  const ready = new Promise((resolve, reject) => {
-    readyResolve = resolve;
-    readyReject = reject;
-  });
-  child.stdout.on('data', (chunk) => {
-    stdout += chunk;
-    if (stdout.includes('ready\n')) readyResolve();
-  });
-  child.stderr.on('data', (chunk) => { stderr += chunk; });
-  child.on('error', readyReject);
-  const closed = new Promise((resolve, reject) => {
-    child.on('error', reject);
-    child.on('close', (codeValue) => {
-      if (!stdout.includes('ready\n')) readyReject(new Error(stderr || `race writer exited ${codeValue}`));
-      resolve({ code: codeValue, stdout, stderr });
-    });
-  });
-  return { ready, closed };
 }
 
 function reconciliationArtifacts(vault) {
@@ -2185,21 +2126,19 @@ test('[req:MEM-CUR-2] migração do replay deferred assert faz CAS antes do back
   } = deferredAssertReplayCheckpointFixture();
   const registryBefore = JSON.parse(readFileSync(registryPath, 'utf8'));
   const ledgerBefore = readFileSync(join(brain, 'MEMORY_EVENTS.jsonl'));
-  const race = startCheckpointMirrorRace({
-    vault,
-    registryPath,
-    checkpointValue: fullReplay.checkpoint,
-    sessionId: 'bridge-session',
-  });
   try {
-    await race.ready;
     const { migrateLegacyMemoryCheckpoints } = await import('../src/memory.mjs');
     assert.throws(
-      () => migrateLegacyMemoryCheckpoints(vault, { now: '2026-07-30T12:03:00.000Z' }),
+      () => migrateLegacyMemoryCheckpoints(vault, {
+        now: '2026-07-30T12:03:00.000Z',
+        beforeRegistryMutation() {
+          const registry = JSON.parse(readFileSync(registryPath, 'utf8'));
+          registry.sessions['bridge-session'].memory_checkpoint = fullReplay.checkpoint;
+          writeFileSync(registryPath, `${JSON.stringify(registry, null, 2)}\n`);
+        },
+      }),
       /CAS perdido: memory_checkpoint/i,
     );
-    const outcome = await race.closed;
-    assert.equal(outcome.code, 0, outcome.stderr || outcome.stdout);
 
     registryBefore.sessions['bridge-session'].memory_checkpoint = fullReplay.checkpoint;
     assert.deepEqual(JSON.parse(readFileSync(registryPath, 'utf8')), registryBefore);
@@ -2209,7 +2148,6 @@ test('[req:MEM-CUR-2] migração do replay deferred assert faz CAS antes do back
       false,
     );
   } finally {
-    await race.closed.catch(() => {});
     rmSync(vault, { recursive: true, force: true });
   }
 });
@@ -2286,18 +2224,19 @@ test('[req:MOD-7] migração faz CAS do espelho memory_checkpoint antes de criar
   const registryBefore = JSON.parse(readFileSync(registryPath, 'utf8'));
   const ledgerBefore = readFileSync(join(brain, 'MEMORY_EVENTS.jsonl'));
   const coreBefore = readFileSync(join(brain, 'CORE.md'));
-  const race = startCheckpointMirrorRace({
-    vault, registryPath, checkpointValue: currentCheckpoint,
-  });
   try {
-    await race.ready;
     const { migrateLegacyMemoryCheckpoints } = await import('../src/memory.mjs');
     assert.throws(
-      () => migrateLegacyMemoryCheckpoints(vault, { now: '2026-07-28T12:33:00.000Z' }),
+      () => migrateLegacyMemoryCheckpoints(vault, {
+        now: '2026-07-28T12:33:00.000Z',
+        beforeRegistryMutation() {
+          const registry = JSON.parse(readFileSync(registryPath, 'utf8'));
+          registry.sessions['current-session'].memory_checkpoint = currentCheckpoint;
+          writeFileSync(registryPath, `${JSON.stringify(registry, null, 2)}\n`);
+        },
+      }),
       /CAS perdido: memory_checkpoint/i,
     );
-    const outcome = await race.closed;
-    assert.equal(outcome.code, 0, outcome.stderr || outcome.stdout);
 
     registryBefore.sessions['current-session'].memory_checkpoint = currentCheckpoint;
     assert.deepEqual(JSON.parse(readFileSync(registryPath, 'utf8')), registryBefore);
@@ -2308,7 +2247,6 @@ test('[req:MOD-7] migração faz CAS do espelho memory_checkpoint antes de criar
       false,
     );
   } finally {
-    await race.closed.catch(() => {});
     rmSync(vault, { recursive: true, force: true });
   }
 });

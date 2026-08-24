@@ -1,14 +1,20 @@
 // hooks/change-core.mjs
 // Native change/spec lifecycle in the vault (Pilar B). Vault-facing lib consumed by
 // the `wendkeep change` CLI (src/change.mjs) and the brain-inject hook. No external deps.
-import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
-import { dirname, join, relative } from 'node:path';
+import { createHash } from 'node:crypto';
+import {
+  existsSync, lstatSync, readFileSync, readdirSync, rmSync, statSync,
+} from 'node:fs';
+import { dirname, isAbsolute, join, relative, sep } from 'node:path';
 import { wikilinkFromRel, monthFolderRelFromDateStr } from './obsidian-common.mjs';
-import { parseSpecsList, promoteSpecs, discoverSpecDeltas, tasksHashOf, captureSpecBaseline, REQ_ID_RE_SRC } from './spec-core.mjs';
+import {
+  assertSpecPromotionTargetsSafe, captureSpecBaseline, discoverSpecDeltas, parseSpecsList,
+  REQ_ID_RE_SRC, tasksHashOf,
+} from './spec-core.mjs';
 import { getLocale, LOCALES } from './locale.mjs';
 import {
   assertVaultPathSafe, assertVaultPathsSafe, mkdirVaultPath, renameVaultPath,
-  unlinkVaultFile, writeVaultFileSync,
+  unlinkVaultFile, writeVaultFileAtomic, writeVaultFileSync,
 } from './vault-path-safety.mjs';
 import {
   clearActiveContextChange,
@@ -554,138 +560,211 @@ export function gateGreen() {
   return { ok: true, failing: [] };
 }
 
-export function archiveChange(vaultBase, slug, {
-  gate = gateGreen, dateStr, adrNum, adrFlags = {}, context,
-}) {
-  const loc = getLocale(vaultBase);
-  const chDir = loc.folders.changes;
-  const src = join(vaultBase, chDir, slug);
-  const createAdr = !isGuideCompactChange(src);
-  const verdict = gate(src);
-  if (!verdict.ok) return { ok: false, failing: verdict.failing || [] };
-
-  const destRel = join(chDir, ARCHIVE_DIR, `${dateStr}-${slug}`);
-  const destAbs = join(vaultBase, destRel);
-  const changeWikilink = wikilinkFromRel(join(destRel, 'proposta'));
-  const archiveRoot = join(vaultBase, chDir, ARCHIVE_DIR);
-  const adrDirRel = monthFolderRelFromDateStr(loc.folders.decisions, dateStr, vaultBase);
-  const num = String(adrNum).padStart(4, '0');
-  const adrRel = join(adrDirRel, `ADR-${num}-${slug}.md`);
-
-  // Validate every later mutation target before spec promotion can change living state.
-  const mutationTargets = [
-    { path: src, allowMissing: false, expectedType: 'directory', label: 'change a arquivar' },
-    { path: destAbs, expectedType: 'directory', label: 'destino da change arquivada' },
-    { path: archiveRoot, expectedType: 'directory', label: 'raiz de changes arquivadas' },
-    { path: join(vaultBase, POINTER), expectedType: 'file', label: 'ponteiro CURRENT_CHANGE.md' },
-    ...(createAdr ? [
-      { path: join(vaultBase, adrDirRel), expectedType: 'directory', label: 'pasta mensal de ADR' },
-      { path: join(vaultBase, adrRel), expectedType: 'file', label: 'ADR da change arquivada' },
-    ] : []),
-  ];
-  const [checkedSource, checkedDestination] = assertVaultPathsSafe(vaultBase, mutationTargets);
-  assertVaultPathsSafe(vaultBase, [
-    { path: join(checkedSource.target, 'proposta.md'), expectedType: 'file', label: 'proposta da change' },
-    { path: join(checkedSource.target, 'tarefas.md'), expectedType: 'file', label: 'tarefas da change' },
-  ]);
-
-  // Atomicity guard: fail BEFORE promoting specs if the destination already exists (e.g. a slug
-  // reused after a same-day archive). Otherwise promoteSpecs would commit to 07-Specs and the
-  // later renameSync would fail, leaving a half-archived state.
-  if (checkedDestination.exists) {
-    return { ok: false, failing: [`destino de arquivo já existe: ${destRel} — renomeie o slug ou remova o arquivo antigo`] };
-  }
-
-  // Promote spec deltas into the living 07-Specs BEFORE moving (deltas live in src).
-  // UNIÃO frontmatter + disco (0.31.0): o scaffold deixa `specs: []`, então um delta real
-  // preenchido em specs/<cap>/ mas não listado era silenciosamente ignorado. Deltas ainda em
-  // placeholder (o `exemplo` do scaffold) são filtrados por discoverSpecDeltas.
-  let promoted = [];
-  let specWarnings = [];
-  try {
-    let listed = [];
-    try { listed = parseSpecsList(readFileSync(join(src, 'proposta.md'), 'utf8')); } catch { /* proposta ilegível */ }
-    const onDisk = discoverSpecDeltas(src);
-    const union = [...new Set([...listed, ...onDisk])];
-    if (union.length) {
-      const res = promoteSpecs(vaultBase, src, union, { changeWikilink, dateStr });
-      promoted = res.promoted;
-      specWarnings = [
-        ...onDisk.filter((c) => !listed.includes(c)).map((c) => `spec no disco não listada no frontmatter da proposta: ${c} — promovida assim mesmo`),
-        ...res.warnings,
-      ];
+export function pendingArchiveRecovery(vaultBase, slug) {
+  const root = join(vaultBase, '.brain', 'runtime', 'archive-transactions');
+  const checkedRoot = assertVaultPathSafe(vaultBase, root, {
+    expectedType: 'directory', label: 'runtime de recovery do archive',
+  });
+  if (!checkedRoot.exists) return null;
+  const invalid = (entryName) => ({
+    kind: 'archive-transaction-recovery',
+    operation_id: /^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(entryName) ? entryName : null,
+    phase: 'unknown',
+    blocker: 'PROV_ARCHIVE_RECOVERY_JOURNAL_INVALID',
+    invalid: true,
+  });
+  for (const entry of readdirSync(checkedRoot.target, { withFileTypes: true })) {
+    if (!entry.isDirectory() || entry.isSymbolicLink()) return invalid(entry.name);
+    const manifestPath = join(checkedRoot.target, entry.name, 'archive-transaction.json');
+    let manifest;
+    try {
+      const checked = assertVaultPathSafe(vaultBase, manifestPath, {
+        allowMissing: false, expectedType: 'file', label: 'manifest de recovery do archive',
+      });
+      manifest = JSON.parse(readFileSync(checked.target, 'utf8'));
+    } catch {
+      return invalid(entry.name);
     }
-  } catch (error) {
-    return { ok: false, failing: [`falha ao promover specs: ${error.message}`] };
+    if (manifest?.schema_version !== 1 || manifest.operation !== 'archive'
+      || manifest.operation_id !== entry.name
+      || !/^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(manifest.operation_id || '')
+      || typeof manifest.change_slug !== 'string' || !/^[a-z0-9][a-z0-9._-]*$/i.test(manifest.change_slug)
+      || typeof manifest.phase !== 'string') return invalid(entry.name);
+    if (manifest.change_slug !== slug) continue;
+    if (manifest.phase === 'completed') {
+      try {
+        const original = assertVaultPathSafe(vaultBase, join(checkedRoot.target, entry.name, 'original'), {
+          allowMissing: false, expectedType: 'directory', label: 'original completed do archive',
+        }).target;
+        const destination = assertVaultPathSafe(vaultBase, join(vaultBase, manifest.destination_rel || ''), {
+          allowMissing: false, expectedType: 'directory', label: 'destino completed do archive',
+        }).target;
+        if (!/^sha256:[a-f0-9]{64}$/.test(manifest.source_digest || '')
+          || archiveSourceDigest(original) !== manifest.source_digest
+          || !/^sha256:[a-f0-9]{64}$/.test(manifest.destination_digest || '')
+          || archiveSourceDigest(destination) !== manifest.destination_digest) return invalid(entry.name);
+      } catch { return invalid(entry.name); }
+      continue;
+    }
+    return {
+      kind: 'archive-transaction-recovery',
+      operation_id: typeof manifest.operation_id === 'string' ? manifest.operation_id : entry.name,
+      phase: typeof manifest.phase === 'string' ? manifest.phase : 'unknown',
+      blocker: typeof manifest.blocker === 'string' ? manifest.blocker : 'PROV_ARCHIVE_INCOMPLETE_TRANSACTION',
+    };
   }
+  return null;
+}
 
-  let reqIds = [];
-  try { reqIds = [...new Set(parseTasks(readFileSync(join(src, 'tarefas.md'), 'utf8')).flatMap((t) => t.reqs ?? []))]; } catch { /* sem tarefas */ }
-
-  // Backlink dos artefatos escritos à mão (spec.md) ANTES do move — o rewriteChangeLinks
-  // abaixo retargeta o wikilink pro _arquivo junto com os demais. Fail-quiet.
-  try { healSpecBacklinks(src, vaultBase); } catch { /* heal é bônus */ }
-
-  mkdirVaultPath(vaultBase, archiveRoot, { label: 'raiz de changes arquivadas' });
+export function inspectArchiveRecovery(vaultBase, { operationId, slug }) {
+  if (!/^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(operationId || '') || !slug) {
+    const error = new Error('recovery de archive inválido');
+    error.code = 'PROV_ARCHIVE_RECOVERY_NOT_FOUND';
+    throw error;
+  }
+  const transactionRoot = join(vaultBase, '.brain', 'runtime', 'archive-transactions', operationId);
   try {
-    renameVaultPath(vaultBase, src, destAbs, {
-      sourceType: 'directory', label: 'archive da change',
+    const manifestPath = assertVaultPathSafe(vaultBase, join(transactionRoot, 'archive-transaction.json'), {
+      allowMissing: false, expectedType: 'file', label: 'manifest consultado para recovery',
+    }).target;
+    const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+    if (manifest?.schema_version !== 1 || manifest.operation !== 'archive'
+      || manifest.operation_id !== operationId || manifest.change_slug !== slug) throw new Error('binding inválido');
+    const original = assertVaultPathSafe(vaultBase, join(transactionRoot, 'original'), {
+      expectedType: 'directory', label: 'original consultado para recovery',
     });
+    const published = ['published', 'promotion-prepared', 'promotion-applied', 'completed', 'recovery-required'].includes(manifest.phase)
+      && (manifest.publication_state === 'published-recovery-required'
+        || typeof manifest.destination_digest === 'string');
+    return {
+      ok: false,
+      code: 'PROV_ARCHIVE_RECOVERY_REQUIRED',
+      operation: 'archive-recover',
+      state: 'recovery-required',
+      operation_id: operationId,
+      change_slug: slug,
+      transaction_phase: manifest.phase,
+      blocker: /^PROV_[A-Z0-9_]+$/.test(manifest.blocker || '')
+        ? manifest.blocker : 'PROV_ARCHIVE_INCOMPLETE_TRANSACTION',
+      original_retained: original.exists,
+      publication_state: published ? 'published-recovery-required' : 'not-published',
+      actions: published
+        ? ['preserve-published-archive', 'compare-retained-original', 'reconcile-spec-adr-pointer', 'rerun-verify-before-new-archive']
+        : ['preserve-open-change', 'compare-retained-original', 'reconcile-concurrent-bytes', 'rerun-verify-before-new-archive'],
+    };
   } catch (error) {
-    return { ok: false, failing: [`falha ao mover a mudança para ${destRel}: ${error.message} (07-Specs pode ter sido promovido — verifique)`] };
+    if (error?.code === 'PROV_ARCHIVE_RECOVERY_NOT_FOUND') throw error;
+    const failure = new Error('journal de recovery não encontrado ou inseguro');
+    failure.code = 'PROV_ARCHIVE_RECOVERY_NOT_FOUND';
+    throw failure;
   }
+}
 
-  // Flip the archived proposta's frontmatter status so it no longer reads as active.
+
+export function archiveSourceDigest(root) {
+  const digest = createHash('sha256');
+  const walk = (absolute, relativePath = '') => {
+    const entries = readdirSync(absolute, { withFileTypes: true })
+      .sort((left, right) => left.name.localeCompare(right.name));
+    for (const entry of entries) {
+      const path = join(absolute, entry.name);
+      const rel = join(relativePath, entry.name).replaceAll('\\', '/');
+      const stat = lstatSync(path);
+      if (stat.isSymbolicLink() || (!stat.isDirectory() && stat.nlink !== 1)) {
+        const error = new Error('Fonte do archive contém alias físico inseguro.');
+        error.code = 'PROV_ARCHIVE_SOURCE_UNSAFE';
+        throw error;
+      }
+      if (stat.isDirectory()) {
+        digest.update(`dir\0${rel}\0`);
+        walk(path, rel);
+      } else if (stat.isFile()) {
+        const bytes = readFileSync(path);
+        digest.update(`file\0${rel}\0${bytes.length}\0`);
+        digest.update(bytes);
+      } else {
+        const error = new Error('Fonte do archive contém tipo de arquivo inseguro.');
+        error.code = 'PROV_ARCHIVE_SOURCE_UNSAFE';
+        throw error;
+      }
+    }
+  };
+  walk(root);
+  return `sha256:${digest.digest('hex')}`;
+}
+
+
+export function finalizeArchiveTransaction(vaultBase, { operationId, slug }) {
+  if (!/^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(operationId || '') || !slug) {
+    const error = new Error('transação de archive inválida');
+    error.code = 'PROV_ARCHIVE_TRANSACTION_CLEANUP_FAILED';
+    throw error;
+  }
+  const transactionsRoot = join(vaultBase, '.brain', 'runtime', 'archive-transactions');
+  const transactionRoot = join(transactionsRoot, operationId);
+  const validate = (root) => {
+    const manifestPath = assertVaultPathSafe(vaultBase, join(root, 'archive-transaction.json'), {
+      allowMissing: false, expectedType: 'file', label: 'manifest completed do archive',
+    }).target;
+    const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+    if (manifest?.schema_version !== 1 || manifest.operation !== 'archive'
+      || manifest.operation_id !== operationId || manifest.change_slug !== slug
+      || manifest.phase !== 'completed') {
+      const error = new Error('manifest de archive não está completed');
+      error.code = 'PROV_ARCHIVE_RECOVERY_JOURNAL_INVALID';
+      throw error;
+    }
+    const original = assertVaultPathSafe(vaultBase, join(root, 'original'), {
+      allowMissing: false, expectedType: 'directory', label: 'original retido do archive',
+    }).target;
+    if (archiveSourceDigest(original) !== manifest.source_digest) {
+      const error = new Error('original retido divergiu do manifest');
+      error.code = 'PROV_ARCHIVE_ORIGINAL_DIVERGED';
+      throw error;
+    }
+    const publicSource = assertVaultPathSafe(vaultBase,
+      join(vaultBase, getLocale(vaultBase).folders.changes, slug), {
+        expectedType: 'directory', label: 'namespace público da change completed',
+      });
+    if (publicSource.exists) {
+      const error = new Error('namespace público foi recriado após completed');
+      error.code = 'PROV_ARCHIVE_PUBLIC_NAMESPACE_RECREATED';
+      throw error;
+    }
+    const destination = assertVaultPathSafe(vaultBase, join(vaultBase, manifest.destination_rel || ''), {
+      allowMissing: false, expectedType: 'directory', label: 'destino publicado do archive',
+    }).target;
+    if (!/^sha256:[a-f0-9]{64}$/.test(manifest.destination_digest || '')
+      || archiveSourceDigest(destination) !== manifest.destination_digest) {
+      const error = new Error('destino publicado divergiu do manifest completed');
+      error.code = 'PROV_ARCHIVE_PUBLICATION_DIVERGED';
+      throw error;
+    }
+  };
   try {
-    const pp = join(destAbs, 'proposta.md');
-    const c = readFileSync(pp, 'utf8').replace(/^status:\s*active\s*$/m, 'status: archived');
-    writeVaultFileSync(vaultBase, pp, c, 'utf8', { label: 'proposta arquivada' });
-  } catch { /* proposta ilegível — segue */ }
-
-  // O move quebrava TODO wikilink gravado antes (sessões fechadas, decisões, outras changes —
-  // links cinza no grafo, visto em produção). Reescreve vault-wide; fail-quiet.
-  let linksRewritten = 0;
-  try { linksRewritten = rewriteChangeLinks(vaultBase, `${chDir}/${slug}`, destRel.replaceAll('\\', '/')); } catch { /* archive já íntegro */ }
-
-  // ADR goes in the same dated month folder as session-derived decisions (04-Decisões/ano/MM-MMM/)
-  // — not the year root — so all ADRs sit together in the vault's convention.
-  if (createAdr) mkdirVaultPath(vaultBase, join(vaultBase, adrDirRel), { label: 'pasta mensal de ADR' });
-  const capLine = promoted.length
-    ? `\n\nCapabilities: ${promoted.map((c) => wikilinkFromRel(join(loc.folders.specs, c))).join(', ')}.`
-    : '';
-  const reqLine = reqIds.length ? `\n\nRequisitos: ${reqIds.join(', ')}.` : '';
-  // Rastro auditável (0.31.0): um archive forçado ou sem prova declarada fica marcado no ADR.
-  const flagLines = `${adrFlags.forced ? '\nforced: true' : ''}${adrFlags.trivial ? '\ntrivial: true' : ''}`;
-  const forcedNote = adrFlags.forced ? '\n\n> ⚠️ Arquivada com --force — havia tarefa(s) aberta(s) pulada(s) no gate.' : '';
-  if (createAdr) writeVaultFileSync(vaultBase, join(vaultBase, adrRel), `---
-type: decision
-status: accepted
-date: ${dateStr}${flagLines}
-cssclasses:
-  - topic-decision
-tags:
-  - decisao
----
-
-# ADR-${num} — ${slug}
-
-## Decisão
-
-Mudança ${changeWikilink} concluída e arquivada.${capLine}${reqLine}${forcedNote}
-`, 'utf8', { label: 'ADR da change arquivada' });
-
-  // Only clear the pointer when the archived change IS the active one — archiving some other
-  // slug explicitly must not blank the pointer of a different, still-active change.
-  if (activeChange(vaultBase, { context }) === slug) clearActiveChange(vaultBase, { context });
-  return { ok: true, failing: [], archivedRel: destRel, adrRel: createAdr ? adrRel : '', promoted, specWarnings, linksRewritten };
+    validate(transactionRoot);
+    // Retain completed authority. Validation followed by recursive deletion cannot be atomic
+    // against an uncooperative writer, so normal archive never destroys the original/journal.
+    return { retained: true, phase: 'completed' };
+  } catch (error) {
+    if (error?.code) throw error;
+    const failure = new Error('cleanup da transação de archive requer recovery');
+    failure.code = 'PROV_ARCHIVE_TRANSACTION_CLEANUP_FAILED';
+    throw failure;
+  }
 }
 
 // --- reescrita de wikilinks pós-move (0.35.0) ----------------------------------
 // Todo .md do vault (inclui .brain e _arquivo — uma change arquivada pode linkar outra).
-function allVaultMarkdown(vaultBase) {
+function allVaultMarkdown(vaultBase, { excludeRoots = [] } = {}) {
   const out = [];
   const skip = new Set(['.git', '.obsidian', 'node_modules']);
+  const excluded = (target) => excludeRoots.some((root) => {
+    const rel = relative(root, target);
+    return rel === '' || (!isAbsolute(rel) && rel !== '..' && !rel.startsWith(`..${sep}`));
+  });
   const walk = (dir) => {
+    if (excluded(dir)) return;
     try {
       assertVaultPathSafe(vaultBase, dir, {
         allowMissing: false, expectedType: 'directory', label: 'diretório varrido para wikilinks',
@@ -707,9 +786,9 @@ function allVaultMarkdown(vaultBase) {
 
 // Reescreve `[[fromRel/...]]`, `[[fromRel]]` e `[[fromRel|alias]]` em todo o vault.
 // NUNCA por basename: `proposta`/`design` existem em toda change — só full-path é seguro.
-function rewriteChangeLinks(vaultBase, fromRel, toRel) {
+function rewriteChangeLinks(vaultBase, fromRel, toRel, options = {}) {
   let touched = 0;
-  for (const abs of allVaultMarkdown(vaultBase)) {
+  for (const abs of allVaultMarkdown(vaultBase, options)) {
     let content;
     try { content = readFileSync(abs, 'utf8'); } catch { continue; }
     const next = content
@@ -754,9 +833,9 @@ function insertBacklink(content, backlinkLine) {
 // Auto-heal (0.47): garante o backlink pro proposta em cada specs/<cap>/spec.md do change.
 // Idempotente (pula quem já tem o link exato). Chamado no verify e no archive (antes do move,
 // pra o rewriteChangeLinks retargetar pro _arquivo). Retorna quantos arquivos healou.
-export function healSpecBacklinks(changeDir, vaultBase) {
+export function healSpecBacklinks(changeDir, vaultBase, { proposalChangeDir = changeDir } = {}) {
   const loc = getLocale(vaultBase);
-  const propRel = `${relative(vaultBase, changeDir).replaceAll('\\', '/')}/proposta`;
+  const propRel = `${relative(vaultBase, proposalChangeDir).replaceAll('\\', '/')}/proposta`;
   const link = `[[${propRel}]]`;
   const line = `> ${backlinkLabel(loc)} ${link}`;
   let caps = [];

@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/rogersialves/wendkeep/blob/main/schema/wendkeep.provenance-receipt-v2.schema.json",
+  "title": "WendKeep Provenance Receipt v2",
+  "description": "A canonical, hash-chained receipt for a provenance-gated operation.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "sequence",
+    "receipt_id",
+    "previous_hash",
+    "receipt_hash",
+    "kind",
+    "subject",
+    "claims",
+    "observations",
+    "recorded_at"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 2
+    },
+    "sequence": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "receipt_id": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    },
+    "previous_hash": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$",
+      "description": "Hash of the previous v2 receipt, or the canonical legacy/empty prefix for genesis."
+    },
+    "receipt_hash": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$",
+      "description": "SHA-256 of the canonical receipt without receipt_hash."
+    },
+    "kind": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9._-]{1,63}$"
+    },
+    "subject": {
+      "type": "object",
+      "description": "Sanitized identity and current operation target.",
+      "additionalProperties": true
+    },
+    "claims": {
+      "type": "object",
+      "description": "Sanitized claims made by the operation.",
+      "additionalProperties": true
+    },
+    "observations": {
+      "type": "object",
+      "description": "Sanitized source observations keyed by adapter/kind.",
+      "additionalProperties": true
+    },
+    "recorded_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}

@@ -6,6 +6,7 @@ import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { initGitRepository } from './helpers/git-fixture.mjs';
 
 const BIN = join(dirname(fileURLToPath(import.meta.url)), '..', 'bin', 'wendkeep.mjs');
 
@@ -92,7 +93,10 @@ test('derived notes: numbered builders emit bug:/apr: frontmatter and prefixed H
 
 test('en vault: change loop end-to-end (scaffold, requirement heading, ADR in 04-Decisions)', () => {
   const vault = mkdtempSync(join(tmpdir(), 'wk-enloop-'));
-  const spawn = (a) => spawnSync(process.execPath, [BIN, 'change', ...a, '--vault', vault], { encoding: 'utf8' });
+  const project = mkdtempSync(join(tmpdir(), 'wk-enloop-project-'));
+  initGitRepository(project);
+  const spawn = (a) => spawnSync(process.execPath, [BIN, 'change', ...a, '--vault', vault, '--project', project], { encoding: 'utf8' });
+  const verify = (a) => spawnSync(process.execPath, [BIN, ...a, '--vault', vault, '--project', project], { encoding: 'utf8' });
   try {
     mkdirSync(join(vault, '.brain'), { recursive: true });
     writeFileSync(join(vault, '.brain', 'config.json'), '{ "locale": "en" }');
@@ -105,13 +109,17 @@ test('en vault: change loop end-to-end (scaffold, requirement heading, ADR in 04
     writeFileSync(join(dir, 'proposta.md'), '---\ntype: change\nstatus: active\nspec_impact: required\nspec_impact_reason: ""\nspecs: [auth]\n---\n# x\n');
     writeFileSync(join(dir, 'design.md'), '# x — design\n\n## Approach\n\nTest approach.\n');
     writeFileSync(join(dir, 'tarefas.md'), '- [x] 1.1 done\n');
-    writeFileSync(join(dir, 'verdict.json'), JSON.stringify({ slug: 'x', ok: true, coverage: [] }));
     mkdirSync(join(dir, 'specs', 'auth'), { recursive: true });
     writeFileSync(join(dir, 'specs', 'auth', 'spec.md'), '## ADDED Requirements\n### Requirement: AUTH-1 — login\nuser signs in\n');
+    const verified = verify(['verify', '--deep', '--change', 'x']);
+    assert.equal(verified.status, 0, verified.stderr || verified.stdout);
     const arch = spawn(['archive', 'x']);
     assert.equal(arch.status, 0, arch.stderr);
     const live = readFileSync(join(vault, '07-Specs', 'auth.md'), 'utf8');
     assert.match(live, /### Requirement: AUTH-1 — login/, 'living spec renders en heading');
     assert.ok(existsSync(join(vault, '04-Decisions')), 'ADR dir en');
-  } finally { rmSync(vault, { recursive: true, force: true }); }
+  } finally {
+    rmSync(vault, { recursive: true, force: true });
+    rmSync(project, { recursive: true, force: true });
+  }
 });

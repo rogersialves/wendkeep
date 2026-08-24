@@ -1,11 +1,12 @@
 // hooks/spec-core.mjs — living spec (07-Specs) + change delta merge (OpenSpec native).
-// Pure parsing/merge + promoteSpecs (fs). No import from change-core (avoids a cycle).
-import { createHash } from 'node:crypto';
+// Pure parsing/merge + read-only promotion planning. No import from change-core (avoids a cycle).
+import { createHash, randomUUID } from 'node:crypto';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, relative } from 'node:path';
 import { getLocale } from './locale.mjs';
 import {
-  assertVaultPathSafe, assertVaultPathsSafe, mkdirVaultPath, writeVaultFileAtomic, writeVaultFileSync,
+  assertVaultPathSafe, assertVaultPathsSafe, mkdirVaultPath,
+  writeVaultFileAtomic, writeVaultFileSync,
 } from './vault-path-safety.mjs';
 
 // Canonical SHA-256 fingerprint of tarefas.md — freshness binding between package/verdict and gate.
@@ -148,9 +149,20 @@ export function checkSpecsState(vaultBase) {
   return { ok: changed.length === 0, missing: false, changed, current, recorded };
 }
 
-function recordPromotedSpecs(vaultBase, capabilities) {
+function recordPromotedSpecs(vaultBase, capabilities, { writeAtomic = writeVaultFileSync } = {}) {
   const existing = readSpecsState(vaultBase);
-  if (!existing) return adoptSpecsState(vaultBase);
+  if (!existing) {
+    const state = { version: 1, generatedAt: new Date().toISOString(), specs: readLivingSpecs(vaultBase) };
+    mkdirVaultPath(vaultBase, join(vaultBase, '.brain'), { label: 'raiz do estado de specs' });
+    writeAtomic(
+      vaultBase,
+      join(vaultBase, SPECS_STATE_FILE),
+      `${JSON.stringify(state, null, 2)}\n`,
+      'utf8',
+      { label: 'estado consolidado de specs' },
+    );
+    return state;
+  }
   const current = readLivingSpecs(vaultBase);
   const specs = { ...(existing.specs || {}) };
   for (const capability of capabilities) {
@@ -158,7 +170,7 @@ function recordPromotedSpecs(vaultBase, capabilities) {
     else delete specs[capability];
   }
   const state = { version: 1, generatedAt: new Date().toISOString(), specs };
-  writeVaultFileSync(
+  writeAtomic(
     vaultBase,
     join(vaultBase, SPECS_STATE_FILE),
     `${JSON.stringify(state, null, 2)}\n`,
@@ -348,12 +360,10 @@ export function discoverSpecDeltas(changeDir) {
 // per-change (many changes promote into the same file; the per-change record lives in
 // _arquivo). Generated + read-only. Written on init and refreshed on every archive so
 // existing vaults self-heal. Bilingual by vault locale.
-export function ensureSpecsReadme(vaultBase) {
+function specsReadmeBody(vaultBase) {
   const loc = getLocale(vaultBase);
   const en = loc.id === 'en';
-  const dir = join(vaultBase, loc.folders.specs);
-  mkdirVaultPath(vaultBase, dir, { label: 'raiz de specs consolidadas' });
-  const body = en
+  return en
     ? `# Specs — generated living contract
 
 **One file per _capability_, not per change.** Each file is the current, cumulative contract
@@ -382,7 +392,18 @@ Pense como código-fonte vs commits: esta pasta é o *código atual* de cada cap
   \`wendkeep change archive\` promove para esta pasta.
 - Histórico por mudança → \`${loc.folders.changes}/_arquivo/\`. Contrato atual → aqui.
 `;
-  writeVaultFileSync(vaultBase, join(dir, 'README.md'), body, 'utf8', { label: 'README de specs' });
+}
+
+export function renderSpecsReadme(vaultBase) {
+  return specsReadmeBody(vaultBase);
+}
+
+export function ensureSpecsReadme(vaultBase, { writeAtomic = writeVaultFileSync } = {}) {
+  const loc = getLocale(vaultBase);
+  const dir = join(vaultBase, loc.folders.specs);
+  mkdirVaultPath(vaultBase, dir, { label: 'raiz de specs consolidadas' });
+  const body = specsReadmeBody(vaultBase);
+  writeAtomic(vaultBase, join(dir, 'README.md'), body, 'utf8', { label: 'README de specs' });
 }
 
 export function assertSpecPromotionTargetsSafe(vaultBase, changeDir, specs) {
@@ -426,8 +447,14 @@ export function assertSpecPromotionTargetsSafe(vaultBase, changeDir, specs) {
   return { specsRoot: checkedRoot.target };
 }
 
-// Merge each capability's delta (in the change) into the living spec in 07-Specs.
-export function promoteSpecs(vaultBase, changeDir, specs, { changeWikilink, dateStr } = {}) {
+// Derive the immutable before/postimage plan used by the archive CLI. This helper
+// is deliberately read-only: publication is private to src/change.mjs, after the
+// provenance gate, receipt, recapture, and operation lock have all succeeded.
+export function buildSpecPromotionPlan(vaultBase, changeDir, specs, {
+  changeWikilink,
+  dateStr,
+  recoveryRoot,
+} = {}) {
   const loc = getLocale(vaultBase);
   const specsDir = loc.folders.specs;
   const promoted = [];
@@ -459,25 +486,62 @@ export function promoteSpecs(vaultBase, changeDir, specs, { changeWikilink, date
       content: renderSpec(cap, applied.reqs, { footer, reqHeading: loc.reqHeading }),
     });
   }
-  mkdirVaultPath(vaultBase, specsRoot, { label: 'raiz de specs consolidadas' });
+  const statePath = join(vaultBase, SPECS_STATE_FILE);
+  const readmePath = join(specsRoot, 'README.md');
+  const existingState = readSpecsState(vaultBase);
+  const nextSpecs = existingState ? { ...(existingState.specs || {}) } : readLivingSpecs(vaultBase);
   for (const item of materialized) {
-    writeVaultFileSync(
-      vaultBase,
-      item.livePath,
-      item.content,
-      'utf8',
-      { label: `spec consolidada ${item.capability}` },
-    );
-    promoted.push(item.capability);
+    nextSpecs[item.capability] = {
+      hash: contentHashOf(item.content),
+      requirements: Object.fromEntries(parseRequirements(item.content)
+        .map((requirement) => [requirement.id || requirement.name, contentHashOf(JSON.stringify(requirement))])),
+    };
   }
-  recordPromotedSpecs(vaultBase, promoted);
-  ensureSpecsReadme(vaultBase); // self-heal the explainer so existing vaults get it on archive
-  return { promoted, warnings };
+  const stateContent = `${JSON.stringify({
+    version: 1,
+    generatedAt: new Date().toISOString(),
+    specs: nextSpecs,
+  }, null, 2)}\n`;
+  const planned = [
+    ...materialized.map((item) => ({
+      kind: 'capability', capability: item.capability, path: item.livePath, content: item.content,
+    })),
+    { kind: 'state', path: statePath, content: stateContent },
+    { kind: 'readme', path: readmePath, content: specsReadmeBody(vaultBase) },
+  ];
+  const image = (content, exists = true) => ({
+    exists,
+    content_base64: Buffer.from(content, 'utf8').toString('base64'),
+    digest: `sha256:${contentHashOf(content)}`,
+  });
+  const promotionRecoveryRoot = recoveryRoot
+    || join(vaultBase, '.brain', 'runtime', 'spec-promotion-plans', randomUUID());
+  const plan = {
+    schema_version: 1,
+    entries: planned.map((entry, index) => {
+      const beforeExists = existsSync(entry.path);
+      const beforeContent = beforeExists ? readFileSync(entry.path, 'utf8') : '';
+      return {
+        kind: entry.kind,
+        capability: entry.capability || null,
+        target: relative(vaultBase, entry.path).replaceAll('\\', '/'),
+        claim_target: relative(vaultBase, join(promotionRecoveryRoot, `${index}-${randomUUID()}.before`)).replaceAll('\\', '/'),
+        candidate_target: relative(vaultBase, join(promotionRecoveryRoot, `${index}-${randomUUID()}.candidate`)).replaceAll('\\', '/'),
+        before: image(beforeContent, beforeExists),
+        after: image(entry.content, true),
+      };
+    }),
+  };
+  const changes = materialized.map((item) => ({
+    capability: item.capability,
+    before_digest: plan.entries.find((entry) => entry.capability === item.capability).before.digest,
+    after_digest: `sha256:${contentHashOf(item.content)}`,
+  }));
+  plan.changes = changes;
+  promoted.push(...materialized.map((item) => item.capability));
+  return { promoted, warnings, changes, plan };
 }
 
-// Gate check for the independent verdict (Wave A). A requirement-bearing change must have
-// a verdict that is ok and covers every declared req id. A requirement-less change passes:
-// nothing for an independent verifier to check — the sensor gate is already the proof.
 export function evaluateVerdict(verdict, reqIds, {
   tasksHash,
   effectiveSpecHash,

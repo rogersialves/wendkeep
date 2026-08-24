@@ -59,7 +59,7 @@ npx wendkeep flow finish <id> [--session <id>]
 npx wendkeep flow promote <id> [--change-slug <slug>] [--session <id>]
 npx wendkeep delivery start [id] --allow <capability> [--source-change <slug>] [--source-commit <sha>] [--session <id>]
 npx wendkeep delivery status [id] [--session <id>]
-npx wendkeep delivery finish [id] [--target <ref>] [--ci-url <url>] [--version <x.y.z>] [--npm-integrity <sha512>] [--release-url <url>] [--session <id>]
+npx wendkeep delivery finish [id] [--target <remote>/<branch>] [--ci-url <url>] [--version <x.y.z>] [--npm-integrity <sha512>] [--release-url <url>] [--session <id>]
 npx wendkeep delivery abandon [id] --reason <texto> [--session <id>]
 ```
 
@@ -179,13 +179,38 @@ harness nativo da LLM.
   `contract_impact` e `operation_risk` são dimensões independentes. `delivery start` captura repo,
   branch/worktree, SHA, change de origem e capabilities em `.brain/runtime/deliveries/`; não cria
   pasta em `08-Mudanças`, delta, spec ou ADR.
-- `delivery finish` exige working tree limpa, comprova que o target contém o commit de origem e,
-  para capability `publish`, exige CI, versão, integridade npm e GitHub Release. O receipt é
-  append-only em `.brain/runtime/delivery-receipts.jsonl`. Se código/config precisar mudar, a
-  delivery para com `WENDKEEP_DELIVERY_IMPLEMENTATION_REQUIRED` e o trabalho volta a implementation.
+- Para as capabilities `git:merge` e `git:push`, `delivery finish` exige `--target
+  <remote>/<branch>` (por exemplo, `--target origin/main`). `delivery start` vincula o remote
+  `origin` ao `repository` esperado; `finish` resolve o destino com `git ls-remote` e bloqueia a
+  delivery antes dos adapters de proveniência se o target não puder ser resolvido ou o binding
+  divergir.
+- `delivery finish` exige working tree limpa e rederiva source/target. Merge/push prova
+  ancestralidade; tag prova package/version e tag no target; `publish` consulta CI, NPM e GitHub
+  Release ligados ao mesmo commit, versão, integrity e notas. No modo offline, uma claim fica
+  `reported` e não vira `verified`; a conclusão bloqueia sem gravar receipt. Novos receipts formam
+  `.brain/runtime/delivery-receipts-v2.jsonl`, com hash chain e checkpoint; o v1 é somente
+  `legacy-unbound`. `WENDKEEP_PROVENANCE_GATE_BLOCKED` traz o recovery. Se código/config precisar
+  mudar, `WENDKEEP_DELIVERY_IMPLEMENTATION_REQUIRED` devolve o trabalho a implementation.
+  O gate usa a mesma taxonomia `verified`, `reported`, `legacy-unbound`, `stale`, `conflict` e
+  `unproven`. Os erros do ledger são `WENDKEEP_RECEIPT_LEDGER_BUSY`,
+  `WENDKEEP_RECEIPT_LEDGER_CONFLICT`, `WENDKEEP_RECEIPT_LEDGER_CORRUPT` e
+  `WENDKEEP_RECEIPT_LEDGER_TRUNCATED`; consulte `state`, `reasonCodes`, `diagnostics` e
+  `repair.command` sanitizados em `--json`, execute o recovery indicado e recapture a prova, sem editar
+  ledger/checkpoint ou expor stderr, tokens, URLs privadas e paths do Vault.
 - Em Vault multi-contexto, `active_contexts[].delivery_id` é a autoridade. `--session <id>` escolhe
   explicitamente a work session; sem ela, somente um active context inequívoco da worktree pode ser
   usado. Status, finish e abandon implícitos consultam esse binding, não um ponteiro global.
+- Falhas de `delivery`, tanto em texto quanto em `delivery --json`, expõem o mesmo diagnóstico
+  PROV-8: `code` estável, `operation`, `state`, primeiro `blocker`, `expected`/`observed`
+  sanitizados e `recovery` objetivo. Stderr do Git, tokens, URLs privadas e caminhos privados não
+  são propagados.
+- Receipts `delivery.completed` e `delivery.abandoned` vinculam `repository_id`, o `repository`
+  público no formato `owner/repo`, `worktree_id`, `work_session_id`, `change_slug` e `branch`.
+  O path privado da worktree nunca entra no receipt. Na finalização contextual, o receipt entra no
+  ledger e o `state` durável é gravado antes de limpar `active_contexts[].delivery_id`. Um retry
+  converge para o mesmo receipt quando o binding já está limpo ou ainda vinculado. Em
+  `delivery abandon`, o motivo livre vira `reason_digest`; o texto bruto não entra no ledger nem no
+  estado.
 - `CURRENT_DELIVERY` é somente uma projeção derivada: contém o ID quando existe um único contexto
   ativo inequívoco com delivery e fica vazio com zero ou múltiplos contextos.
   `WENDKEEP_DELIVERY_CONTEXT_MISMATCH` indica que o ID explícito pertence a outro contexto; nenhum
@@ -273,6 +298,27 @@ change context/warn/nag/guard e captura de plano automáticos ficam inativos. Os
 continuam disponíveis e executam seus próprios contratos. Um FLOW concluído deixa recibo durável e
 consultável; um FLOW promovido passa a seguir o lifecycle normal de change. Uma delivery concluída
 deixa receipt sem gerar ADR; GUIDE compacto arquiva o resultado sem spec/design/ADR artificiais.
+
+Para archive em GOVERN/ASSURE, o `directory lock` usa marker específico do token e lease: a
+aquisição prepara um diretório irmão `.pending` e publica por rename atômico, sem hardlink, com no
+máximo 3 tentativas de topologia. Owner vivo retorna `WENDKEEP_ARCHIVE_BUSY`, owner morto pode ser
+reapado com segurança, marker inválido retorna `WENDKEEP_ARCHIVE_LOCK_UNAVAILABLE` e perda de
+ownership retorna `WENDKEEP_ARCHIVE_LOCK_OWNERSHIP_LOST`. O journal `archive-transaction.json`
+percorre `prepared` → `isolated` → `copied` → `sealed` → `published` → `promotion-prepared` →
+`promotion-applied` → `completed` ou `recovery-required`; um journal pending bloqueia novo archive
+do mesmo slug antes do gate.
+`original` fica retido em collision/falha pós-publicação e `published-recovery-required` exige
+inspeção. `operation_id` e `transaction_phase` aparecem apenas sanitizados. Use
+`wendkeep change archive recover <operation-id> --change <slug> [--spec-action rollback|resume] [--json]`:
+sem `--spec-action`, inspeção somente-leitura, fail-closed e idempotente, sem promoção, deleção ou
+reconciliação inventada; `rollback` restaura before-images e `resume` converge after-images de
+`promotion-prepared`, retendo o journal. Quando há operation ID, `repair.command` aponta para esse
+recovery; não trate `command:null` como fluxo normal.
+
+A promoção multi-spec é atômica, com before-images/digests, rollback dos alvos antes/depois da
+escrita e retry somente após reconciliação e nova verificação. O finalizer pós-release valida os
+digests do original e do destino publicado, mas o `completed` journal mantém o `original` retido;
+sem cleanup destrutivo automático.
 
 ## Erros comuns e diagnóstico
 

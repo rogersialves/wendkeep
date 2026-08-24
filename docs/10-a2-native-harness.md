@@ -67,11 +67,29 @@ specs:  ["[[07-Specs/<capability>]]"]                       # spec(s) afetada(s)
 - `wendkeep change new <slug>` — scaffold das 3 notas com frontmatter + **wikilink pra sessão atual** (lê `.brain/CURRENT_SESSION`). Marca `status: active`, grava ponteiro `.brain/CURRENT_CHANGE.md`.
 - `wendkeep change list` — lista ativas + arquivadas (lê status).
 - `wendkeep change show <slug>` — imprime tarefas + status (o `apply` em si é dirigido pela skill `/wk:apply`, que implementa; CLI não implementa).
-- `wendkeep change archive <slug>` — chama `gate(changeDir)`; se verde: move pra `_arquivo/<data>-<slug>/`, promove deltas de spec pra `07-Specs/`, grava **ADR em `04-Decisões`** (reusa `getNextAdrNumber` + builder de ADR do `linked-notes.mjs`) wikilinkando `[[change]]`+`[[sessão]]`, limpa `CURRENT_CHANGE`.
+- `wendkeep change archive <slug>` — chama o gate e, se verde, prepara a transação de archive; promove
+  deltas de spec pra `07-Specs/`, grava **ADR em `04-Decisões`** (reusa `getNextAdrNumber` + builder
+  de ADR do `linked-notes.mjs`) wikilinkando `[[change]]`+`[[sessão]]`, move a change e limpa
+  `CURRENT_CHANGE`.
+- `wendkeep change archive recover <operation-id> --change <slug> [--spec-action rollback|resume] [--json]`
+  — sem `--spec-action`, inspeciona a transação pendente de forma somente-leitura, fail-closed e
+  idempotente; com `rollback` ou `resume`, converge somente a promoção de specs preparada no
+  journal, sob lock e validação. Retém journal/original e não inventa reconciliação.
 
 ### Seam do gate (fronteira B↔C)
 
 `archive` chama `gate(changeDir) → { ok, failing[] }`. **Em B sozinho:** `gate` é stub que retorna `{ ok: true }`. **Pilar C** substitui pela checagem real (roda sensores, lê `evidencia.json`). Interface pura = B e C independentes/testáveis.
+
+O archive mantém `archive-transaction.json` com as fases `prepared` → `isolated` → `copied` →
+`sealed` → `published` → `promotion-prepared` → `promotion-applied` → `completed` ou
+`recovery-required`. Journal pending bloqueia novo archive do mesmo slug antes do gate;
+colisão/falha pós-publicação retém `original` em `published-recovery-required`. O lock prepara um
+diretório irmão `.pending` e publica por rename atômico, sem hardlink e com no máximo 3 tentativas de
+topologia. O finalizer pós-release valida os digests do original e do destino, mas o `completed`
+journal mantém o `original` retido; sem cleanup destrutivo automático. A promoção multi-spec
+captura before-images/digests e faz rollback de todos os alvos antes/depois da escrita, permitindo
+retry apenas após reconciliação e nova verificação. `promotion-prepared` converge por
+`--spec-action rollback|resume`.
 
 ### Conectividade de grafo (requisito de 1ª classe)
 
@@ -88,7 +106,11 @@ specs:  ["[[07-Specs/<capability>]]"]                       # spec(s) afetada(s)
 
 - `renderChangeScaffold({slug, sessionRel, date})` → conteúdo das 3 notas.
 - `parseTasks(tarefasMd)` → `[{id, text, done, sensor?}]`.
-- `archiveChange(vaultBase, slug, {gate, now})` → move+promove+ADR (fs; `gate`/`now` injetados).
+- `wendkeep change archive <slug>` → única superfície pública de mutação: gateia, sela e publica a
+  change pelo CLI; os seams de autorização/lock permanecem internos ao comando.
+- `buildSpecPromotionPlan(vaultBase, changeDir, specs, options)` → helper público somente-leitura
+  que deriva before/after-images e digests para o archive; não promove arquivos nem substitui o
+  comando CLI.
 - `buildActiveChangeInjection(vaultBase)` → bloco do SessionStart.
 - `activeChange(vaultBase)` / `setActiveChange` → ponteiro `.brain/CURRENT_CHANGE.md`.
 

@@ -732,6 +732,178 @@ test('[req:WT-17] DOC-21: cleanup de worktrees mantém flags, erros e exemplos P
   assert.match(readmeEn, /worktree create\/list\/status\/open\/finish\/cleanup\/remove\/prune/);
 });
 
+test('[req:WT-18] DOC-26: cleanup pós-fix documenta resume crash-safe, subject canônico e saída sanitizada', () => {
+  const docs = {
+    pt: readFileSync(join(GUIDE_DIR.pt, 'worktrees.md'), 'utf8'),
+    en: readFileSync(join(GUIDE_DIR.en, 'worktrees.md'), 'utf8'),
+  };
+  const shared = [
+    'operation', 'state', 'blocker', 'recovery',
+    'actor', 'pr', 'head', 'merge', 'finalize',
+    'WENDKEEP_RECEIPT_LEDGER_CORRUPT',
+    'WENDKEEP_RECEIPT_LEDGER_TRUNCATED',
+    'WENDKEEP_WORKTREE_CLEANUP_BUSY',
+  ];
+  for (const [locale, text] of Object.entries(docs)) {
+    for (const token of shared) assert.ok(text.includes(token), locale + ': cleanup sem ' + token);
+    assert.match(text, /(?:text|texto)[^]*(?:--json)[^]*(?:operation)[^]*(?:state)[^]*(?:blocker)[^]*(?:recovery)/i,
+      locale + ': saída textual/JSON sem campos de diagnóstico');
+    assert.match(text, /(?:all[^]*active contexts|todos os[^]*active contexts|todos os contextos)[^]*(?:actor)[^]*(?:pr)[^]*(?:head)[^]*(?:merge)/i,
+      locale + ': subject não cobre todos os contextos/ator/PR/head/merge');
+    assert.match(text, /(?:canonical PR|PR canônico)[^]*(?:authority|autoridade)[^]*(?:GitHub|adapter)/i,
+      locale + ': autoridade canônica do PR ausente');
+    assert.match(text, /(?:sanitized reason|reason sanitizado|reason[^]*(?:sanitiz|sanitizad))[^]*(?:digest|hash)/i,
+      locale + ': reason sanitizado sem digest');
+    assert.match(text, /(?:HEAD|head)[^]*(?:re-deriv|rederiv|derivad)[^]*(?:before|antes)[^]*(?:finalize|finaliza)/i,
+      locale + ': HEAD não é rederivado antes do finalize');
+    assert.match(text, /(?:(?:checkpoint)[^]*(?:absent|ausente)|(?:absent|ausente)[^]*(?:checkpoint))[^]*(?:TRUNCATED|truncado)/i,
+      locale + ': checkpoint ausente não vira TRUNCATED');
+    assert.match(text, /v1[^]*(?:legacy-unbound)[^]*(?:never authoriz|não autoriza|nunca autoriza)/i,
+      locale + ': v1 ainda pode autorizar cleanup');
+    assert.match(text, /(?:crash-safe)[^]*(?:before|antes)[^]*(?:receipt)[^]*(?:after|depois)[^]*(?:finalize|finaliza)/i,
+      locale + ': resume crash-safe não cobre as fronteiras receipt/finalize');
+  }
+});
+
+test('[req:PROV-3] [req:PROV-8] [req:WT-18] DOC-28: archive e cleanup expõem selagem, gates e diagnósticos equivalentes', () => {
+  const docs = {
+    pt: {
+      archive: [
+        readFileSync(join(ROOT, 'README.md'), 'utf8'),
+        readFileSync(join(GUIDE_DIR.pt, 'changes-and-verification.md'), 'utf8'),
+      ].join('\n'),
+      cleanup: [
+        readFileSync(join(ROOT, 'README.md'), 'utf8'),
+        readFileSync(join(GUIDE_DIR.pt, 'worktrees.md'), 'utf8'),
+      ].join('\n'),
+    },
+    en: {
+      archive: [
+        readFileSync(join(ROOT, 'README.en.md'), 'utf8'),
+        readFileSync(join(GUIDE_DIR.en, 'changes-and-verification.md'), 'utf8'),
+      ].join('\n'),
+      cleanup: [
+        readFileSync(join(ROOT, 'README.en.md'), 'utf8'),
+        readFileSync(join(GUIDE_DIR.en, 'worktrees.md'), 'utf8'),
+      ].join('\n'),
+    },
+  };
+  for (const [locale, content] of Object.entries(docs)) {
+    assert.match(content.archive, /change-archive-operation\.lock/i,
+      locale + ': archive sem lock do runtime');
+    assert.match(content.archive, /\.brain[\\/`]?runtime[\\/`]?archive-transactions/i,
+      locale + ': archive sem transação privada no runtime');
+    assert.match(content.archive, /(?:transa[cç][aã]o|transaction)[^]*(?:privad|private)[^]*(?:ascii)/i,
+      locale + ': archive sem transação ASCII privada');
+    assert.match(content.archive, /archive-transactions[^]*(?:original)[^]*(?:authorized)/i,
+      locale + ': archive sem snapshots original/authorized');
+    assert.match(content.archive, /(?:(?:renomeia|renames)[^]*(?:at[oô]mic|atomic)|(?:at[oô]mic|atomic)[^]*(?:renomeia|renames))[^]*(?:change|mudan[cç]a)[^]*(?:original)/i,
+      locale + ': archive sem rename atômico da change para original');
+    assert.match(content.archive, /(?:promov|promot)[^]*(?:somente|only)[^]*(?:authorized)/i,
+      locale + ': archive não promove somente authorized');
+    assert.match(content.archive, /(?:restaur|restor)[^]*(?:original)[^]*(?:falha|failure)/i,
+      locale + ': archive sem restauração do original na falha');
+    assert.match(content.archive, /finalizer[^]*(?:valid|validac)[^]*(?:completed)[^]*(?:original)[^]*(?:cleanup|limp)/i,
+      locale + ': archive sem finalizer que valida e retém journal/original sem cleanup destrutivo');
+    assert.match(content.archive, /(?:rollback|rollback)[^]*(?:promot|promotion)/i,
+      locale + ': divergência sem rollback antes da promoção');
+    assert.match(content.archive, /WENDKEEP_ARCHIVE_INPUT_CHANGED/i,
+      locale + ': divergência do source sem código estável');
+    assert.match(content.archive, /(?:code|código)[^]*(?:operation|opera[cç][aã]o)[^]*(?:state|estado)[^]*(?:blocker|bloqueador)[^]*(?:expected|esperado)[^]*(?:observed|observado)[^]*(?:recovery|recupera)/i,
+      locale + ': diagnóstico PROV-8 incompleto');
+    assert.match(content.archive, /(?:diagnostic|diagnóstico)[^]*(?:sanitiz|sanitizad)[^]*(?:text|texto|--json)/i,
+      locale + ': diagnóstico não sanitizado em texto/JSON');
+
+    assert.match(content.cleanup, /(?:common gate|gate comum)[^]*(?:before mutation|antes da muta[cç][aã]o)/i,
+      locale + ': cleanup não documenta gate comum antes da mutação');
+    assert.match(content.cleanup, /(?:classifies|classifica)[^]*(?:receipt)[^]*(?:before|antes)[^]*(?:finalize|finaliza)/i,
+      locale + ': receipt não é classificado antes do finalize');
+    assert.match(content.cleanup, /cleaned[^]*(?:without|sem)[^]*(?:v2 )?receipt[^]*(?:unproven|legacy-unbound)/i,
+      locale + ': cleaned sem receipt não fica unproven/legacy-unbound');
+    assert.match(content.cleanup, /(?:code|código)[^]*(?:operation|opera[cç][aã]o)[^]*(?:state|estado)[^]*(?:blocker|bloqueador)[^]*(?:expected|esperado)[^]*(?:observed|observado)[^]*(?:recovery|recupera)/i,
+      locale + ': cleanup sem diagnóstico PROV-8 equivalente');
+  }
+});
+
+test('[req:PROV-3] [req:PROV-8] [req:OP-9] DOC-29: archive documenta lock, journal de transação e recovery fail-closed bilíngues', () => {
+  const docs = {
+    pt: {
+      readme: readFileSync(join(ROOT, 'README.md'), 'utf8'),
+      changes: readFileSync(join(GUIDE_DIR.pt, 'changes-and-verification.md'), 'utf8'),
+      verify: readFileSync(join(GUIDE_DIR.pt, 'verify.md'), 'utf8'),
+      profiles: readFileSync(join(GUIDE_DIR.pt, 'operating-profiles.md'), 'utf8'),
+    },
+    en: {
+      readme: readFileSync(join(ROOT, 'README.en.md'), 'utf8'),
+      changes: readFileSync(join(GUIDE_DIR.en, 'changes-and-verification.md'), 'utf8'),
+      verify: readFileSync(join(GUIDE_DIR.en, 'verify.md'), 'utf8'),
+      profiles: readFileSync(join(GUIDE_DIR.en, 'operating-profiles.md'), 'utf8'),
+    },
+  };
+  for (const [locale, content] of Object.entries(docs)) {
+    const archive = [content.readme, content.changes].join('\n');
+    const diagnostics = [content.changes, content.verify, content.profiles].join('\n');
+    assert.match(archive, /(?:directory lock|lock de diret[oó]rio)[^]*(?:marker)[^]*(?:token-specific|espec[ií]fico do token)[^]*(?:lease)/i,
+      locale + ': archive sem directory lock/marker token-specific/lease');
+    assert.match(archive, /(?:owner vivo|live owner)[^]*(?:BUSY)[^]*(?:owner morto|dead owner)[^]*(?:reap|reaped)/i,
+      locale + ': archive sem BUSY de owner vivo e reap seguro de owner morto');
+    assert.match(archive, /archive-transaction\.json[^]*(?:prepared)[^]*(?:isolated)[^]*(?:copied)[^]*(?:sealed)[^]*(?:published)[^]*(?:completed)[^]*(?:recovery-required)/i,
+      locale + ': archive sem manifest ou fases completas');
+    assert.match(archive, /(?:original)[^]*(?:retido|retained)[^]*(?:colis[aã]o|collision)[^]*(?:p[oó]s-publica[cç][aã]o|post-publication)/i,
+      locale + ': archive sem retenção do original em collision/pós-publicação');
+    assert.match(archive, /published-recovery-required/i,
+      locale + ': archive sem estado published-recovery-required');
+    for (const code of [
+      'WENDKEEP_ARCHIVE_BUSY', 'WENDKEEP_ARCHIVE_LOCK_UNAVAILABLE',
+      'WENDKEEP_ARCHIVE_LOCK_OWNERSHIP_LOST',
+    ]) assert.match(diagnostics, new RegExp(code), `${locale}: archive sem ${code}`);
+    assert.match(diagnostics, /operation_id[^]*(?:transaction_phase)[^]*(?:sanitiz|sanitizad)/i,
+      locale + ': operation_id/transaction_phase sem sanitização');
+    assert.match(diagnostics, /repair\.command[^]*(?:change archive recover|archive recover)[^]*(?:inspe[cç][aã]o|inspecione|inspect(?:ion)?)[^]*(?:fail[- ]closed|bloqueia fechado)[^]*(?:idempotent|idempotente)/i,
+      locale + ': recovery sem comando archive recover, inspeção fail-closed ou idempotência');
+  }
+});
+
+test('[req:PROV-3] [req:PROV-8] DOC-30: archive final documenta CLI-only, recovery de promoção e retenção pós-release', () => {
+  const docs = {
+    pt: {
+      readme: readFileSync(join(ROOT, 'README.md'), 'utf8'),
+      changes: readFileSync(join(GUIDE_DIR.pt, 'changes-and-verification.md'), 'utf8'),
+      verify: readFileSync(join(GUIDE_DIR.pt, 'verify.md'), 'utf8'),
+      profiles: readFileSync(join(GUIDE_DIR.pt, 'operating-profiles.md'), 'utf8'),
+      harness: readFileSync(join(ROOT, 'docs', '10-a2-native-harness.md'), 'utf8'),
+    },
+    en: {
+      readme: readFileSync(join(ROOT, 'README.en.md'), 'utf8'),
+      changes: readFileSync(join(GUIDE_DIR.en, 'changes-and-verification.md'), 'utf8'),
+      verify: readFileSync(join(GUIDE_DIR.en, 'verify.md'), 'utf8'),
+      profiles: readFileSync(join(GUIDE_DIR.en, 'operating-profiles.md'), 'utf8'),
+      harness: readFileSync(join(ROOT, 'docs', '10-a2-native-harness.md'), 'utf8'),
+    },
+  };
+  for (const [locale, content] of Object.entries(docs)) {
+    const publicDocs = [content.readme, content.changes, content.verify, content.profiles].join('\n');
+    assert.match(publicDocs, /change archive recover <operation-id> --change <slug>[^\n]*(?:spec-action rollback\|resume)/i,
+      locale + ': comando archive recover/spec-action ausente');
+    assert.match(publicDocs, /(?:pending journal|journal pending)[^]*(?:blocks|bloqueia)[^]*(?:new archive|novo archive)/i,
+      locale + ': journal pending não bloqueia novo archive');
+    assert.match(publicDocs, /pending[^]*(?:rename|renome)[^]*(?:hardlink|hard link)[^]*(?:attempt|tentativ)/i,
+      locale + ': lock pending não documenta rename sem hardlink e tentativas limitadas');
+    assert.match(publicDocs, /completed[^]*journal[^]*(?:retain|ret[eêé]m|keeps|mant[eêé]m)[^]*original[^]*(?:no destructive cleanup|sem cleanup destrutivo|not removed|n[aã]o remov)/i,
+      locale + ': finalizer não documenta retenção não destrutiva de journal/original');
+    assert.match(publicDocs, /promotion-prepared[^]*(?:spec-action)[^]*(?:rollback|resume)/i,
+      locale + ': recovery não converge promotion-prepared com rollback/resume');
+    assert.match(publicDocs, /(?:multi-spec|multi-spec)[^]*(?:atomic|at[oô]mic)[^]*(?:before-image|before-image|imagem antes)[^]*(?:rollback|revert)[^]*(?:retry|retry)/i,
+      locale + ': promoção multi-spec sem before-images/rollback/retry');
+    assert.doesNotMatch(content.harness, /\b(?:archiveChange|promoteSpecs)\b/,
+      locale + ': harness expõe API mutável interna como pública');
+    assert.match(content.harness, /buildSpecPromotionPlan[^]*(?:read-only|somente-leitura)/i,
+      locale + ': helper público read-only buildSpecPromotionPlan ausente');
+    assert.match(content.harness, /change archive recover <operation-id> --change <slug>[^\n]*(?:spec-action rollback\|resume)/i,
+      locale + ': harness sem recovery CLI/spec-action');
+  }
+});
+
 test('[req:EVID-8] DOC-22: Evidence Envelope v2 has semantic PT-BR/EN parity', () => {
   const cases = {
     pt: {
@@ -769,5 +941,140 @@ test('[req:EVID-8] DOC-22: Evidence Envelope v2 has semantic PT-BR/EN parity', (
     assert.match(docs.changes, /\]\(verify\.md\)/);
     assert.match(docs.readme, /Evidence Envelope v2/);
     assert.match(docs.readme, /bound[\s\S]*stale[\s\S]*context-mismatch[\s\S]*legacy-unbound/);
+  }
+});
+
+test('[req:PROV-2] [req:PROV-8] DOC-23: provenance gates and receipt ledger v2 have semantic PT-BR/EN parity', () => {
+  const cases = {
+    pt: {
+      readme: readFileSync(join(ROOT, 'README.md'), 'utf8'),
+      changes: readFileSync(join(GUIDE_DIR.pt, 'changes-and-verification.md'), 'utf8'),
+      verify: readFileSync(join(GUIDE_DIR.pt, 'verify.md'), 'utf8'),
+      profiles: readFileSync(join(GUIDE_DIR.pt, 'operating-profiles.md'), 'utf8'),
+      worktrees: readFileSync(join(GUIDE_DIR.pt, 'worktrees.md'), 'utf8'),
+      contract: readFileSync(join(ROOT, 'docs', '14-harness-contract.md'), 'utf8'),
+      offline: /offline[\s\S]*`reported`[\s\S]*(?:não|nunca)[\s\S]*`verified`/i,
+      recovery: /`WENDKEEP_PROVENANCE_GATE_BLOCKED`[\s\S]*`verify`[\s\S]*`verify --deep`/i,
+    },
+    en: {
+      readme: readFileSync(join(ROOT, 'README.en.md'), 'utf8'),
+      changes: readFileSync(join(GUIDE_DIR.en, 'changes-and-verification.md'), 'utf8'),
+      verify: readFileSync(join(GUIDE_DIR.en, 'verify.md'), 'utf8'),
+      profiles: readFileSync(join(GUIDE_DIR.en, 'operating-profiles.md'), 'utf8'),
+      worktrees: readFileSync(join(GUIDE_DIR.en, 'worktrees.md'), 'utf8'),
+      offline: /offline[\s\S]*`reported`[\s\S]*(?:does not|never)[\s\S]*`verified`/i,
+      recovery: /`WENDKEEP_PROVENANCE_GATE_BLOCKED`[\s\S]*`verify`[\s\S]*`verify --deep`/i,
+    },
+  };
+  const states = ['verified', 'reported', 'legacy-unbound', 'stale', 'conflict', 'unproven'];
+  for (const [locale, docs] of Object.entries(cases)) {
+    for (const text of [docs.readme, docs.changes, docs.verify]) {
+      for (const state of states) assert.ok(text.includes(state), `${locale}: taxonomia sem ${state}`);
+    }
+    assert.match(docs.changes, docs.recovery, `${locale}: recovery do archive ausente`);
+    assert.match(docs.changes, /--force[\s\S]*(?:proveniência|provenance)[\s\S]*(?:não|not)/i);
+    assert.match(docs.profiles, docs.offline, `${locale}: autoridade offline ausente`);
+    for (const token of ['CI', 'NPM', 'delivery-receipts-v2.jsonl']) {
+      assert.ok(docs.profiles.includes(token), `${locale}: delivery sem ${token}`);
+    }
+    assert.match(docs.profiles, /GitHub\s+Release/, `${locale}: delivery sem GitHub Release`);
+    for (const token of [
+      'worktree-cleanup-receipts-v2.jsonl', 'previous_hash', 'receipt_hash',
+      'WENDKEEP_RECEIPT_LEDGER_CORRUPT', 'WENDKEEP_RECEIPT_LEDGER_TRUNCATED',
+    ]) assert.ok(docs.worktrees.includes(token), `${locale}: worktrees sem ${token}`);
+    assert.match(docs.worktrees, /checkpoint/i);
+    for (const [name, text] of Object.entries(docs)) {
+      if (name === 'offline' || name === 'recovery') continue;
+      for (const code of [
+        'WENDKEEP_RECEIPT_LEDGER_BUSY', 'WENDKEEP_RECEIPT_LEDGER_CONFLICT',
+        'WENDKEEP_RECEIPT_LEDGER_CORRUPT', 'WENDKEEP_RECEIPT_LEDGER_TRUNCATED',
+      ]) assert.ok(text.includes(code), `${locale}/${name}: código de ledger ausente: ${code}`);
+      assert.match(text, /repair\.command/i, `${locale}/${name}: recovery objetivo ausente`);
+      assert.match(text, /sanitiz|sanitizad/i, `${locale}/${name}: recovery não sanitizado`);
+    }
+  }
+});
+
+test('[req:PROV-3] [req:PROV-8] DOC-25: archive pós-fix exige recaptura, ledger separado e recovery fail-closed', () => {
+  const docs = {
+    pt: [
+      readFileSync(join(ROOT, 'README.md'), 'utf8'),
+      readFileSync(join(ROOT, 'docs', '14-harness-contract.md'), 'utf8'),
+      readFileSync(join(GUIDE_DIR.pt, 'changes-and-verification.md'), 'utf8'),
+      readFileSync(join(GUIDE_DIR.pt, 'verify.md'), 'utf8'),
+    ].join('\n'),
+    en: [
+      readFileSync(join(ROOT, 'README.en.md'), 'utf8'),
+      readFileSync(join(GUIDE_DIR.en, 'changes-and-verification.md'), 'utf8'),
+      readFileSync(join(GUIDE_DIR.en, 'verify.md'), 'utf8'),
+    ].join('\n'),
+  };
+  const shared = [
+    'change archive --json', 'state', 'reason_codes', 'diagnostics', 'repair',
+    'change-archive-receipts-v2', 'wendkeep verify --deep --change <slug>',
+    'package', 'verdict', 'final',
+  ];
+  for (const [locale, text] of Object.entries(docs)) {
+    for (const token of shared) assert.ok(text.includes(token), `${locale}: archive sem ${token}`);
+  }
+  assert.match(docs.pt, /pacote[^]*(?:completo|canônic)[^]*verdict/i, 'PT: package/verdict não são completos e canônicos');
+  assert.match(docs.en, /package[^]*(?:complete|canonical)[^]*verdict/i, 'EN: package/verdict are not complete and canonical');
+  assert.match(docs.pt, /receipt[^]*(?:autoriza|autoriza[cç][aã]o)[^]*(?:antes|primeiro)[^]*(?:muta[cç][aã]o|escrita)/i, 'PT: autorização antes da mutação ausente');
+  assert.match(docs.en, /authorization receipt[^]*(?:before|prior to)[^]*mutation/i, 'EN: authorization before mutation is absent');
+  assert.match(docs.pt, /corrup[cç][aã]o[^]*truncamento[^]*bloque/i, 'PT: corrupção/truncamento não bloqueiam');
+  assert.match(docs.en, /corruption[^]*truncation[^]*(?:block|fail closed)/i, 'EN: corruption/truncation do not block');
+  assert.match(docs.pt, /--force[^]*(?:n[aã]o|nunca)[^]*(?:bypass|contorna)[^]*(?:proveni[eê]ncia|integridade)/i, 'PT: --force contorna o gate');
+  assert.match(docs.en, /--force[^]*(?:does not|cannot|never)[^]*bypass[^]*(?:provenance|integrity)/i, 'EN: --force bypasses the gate');
+});
+
+test('[req:PROV-4] [req:PROV-5] DOC-24: delivery remote-target binding has semantic PT-BR/EN parity', () => {
+  const docs = {
+    pt: {
+      readme: readFileSync(join(ROOT, 'README.md'), 'utf8'),
+      profiles: readFileSync(join(GUIDE_DIR.pt, 'operating-profiles.md'), 'utf8'),
+      blocked: /bloqueia[^]*antes dos adapters/i,
+    },
+    en: {
+      readme: readFileSync(join(ROOT, 'README.en.md'), 'utf8'),
+      profiles: readFileSync(join(GUIDE_DIR.en, 'operating-profiles.md'), 'utf8'),
+      blocked: /blocked[^]*before provenance adapters/i,
+    },
+  };
+  for (const [locale, content] of Object.entries(docs)) {
+    const combined = `${content.readme}\n${content.profiles}`;
+    assert.match(content.readme, /delivery finish[^\n]*--target origin\/main/, `${locale}: exemplo sem target remoto`);
+    assert.match(content.profiles, /delivery finish[^\n]*--target <remote>\/<branch>/, `${locale}: sintaxe sem remote/branch`);
+    assert.match(combined, /git:merge[\s\S]*git:push/, `${locale}: capabilities git ausentes`);
+    assert.match(combined, /git ls-remote/, `${locale}: resolução ls-remote ausente`);
+    assert.match(combined, /origin[\s\S]*repository/, `${locale}: binding origin/repository ausente`);
+    assert.match(combined, content.blocked, `${locale}: bloqueio antes dos adapters ausente`);
+  }
+});
+
+test('[req:PROV-4] [req:PROV-8] DOC-27: delivery receipts, failures, and crash recovery have semantic PT-BR/EN parity', () => {
+  const docs = {
+    pt: {
+      text: readFileSync(join(GUIDE_DIR.pt, 'operating-profiles.md'), 'utf8'),
+      persistence: /(?:ledger|receipt)[^]*(?:estado|state)[^]*(?:antes|s[oó] depois)[^]*active_contexts\[\]\.delivery_id/i,
+      convergence: /retry[^]*converge[^]*mesmo receipt[^]*(?:j[aá] est[aá] limpo|ainda vinculado)/i,
+      privateReason: /motivo[^]*(?:texto bruto|conte[uú]do bruto)[^]*(?:n[aã]o|nunca)[^]*(?:ledger|estado|state)/i,
+    },
+    en: {
+      text: readFileSync(join(GUIDE_DIR.en, 'operating-profiles.md'), 'utf8'),
+      persistence: /(?:ledger|receipt)[^]*state[^]*(?:before|only then)[^]*active_contexts\[\]\.delivery_id/i,
+      convergence: /retry[^]*converges[^]*same receipt[^]*(?:already clear|still bound)/i,
+      privateReason: /reason[^]*raw (?:text|content)[^]*(?:does not|never)[^]*(?:ledger|state)/i,
+    },
+  };
+  const shared = [
+    'delivery --json', 'operation', 'state', 'blocker', 'expected', 'observed', 'recovery',
+    'repository_id', 'worktree_id', 'work_session_id', 'change_slug', 'branch', 'reason_digest',
+  ];
+  for (const [locale, doc] of Object.entries(docs)) {
+    for (const token of shared) assert.ok(doc.text.includes(token), `${locale}: delivery sem ${token}`);
+    assert.match(doc.text, doc.persistence, `${locale}: clear antes da durabilidade`);
+    assert.match(doc.text, doc.convergence, `${locale}: retry contextual não converge`);
+    assert.match(doc.text, doc.privateReason, `${locale}: motivo livre pode vazar`);
+    assert.match(doc.text, /(?:private path|path privado|caminho privado)/i, `${locale}: receipt pode expor worktree path`);
   }
 });
