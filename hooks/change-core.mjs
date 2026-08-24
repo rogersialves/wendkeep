@@ -283,18 +283,36 @@ export function parseTasks(md) {
   const re = /^-\s+\[( |x)\]\s+(\S+)\s+(.*)$/gm;
   const sensorReG = /\[sensor:\s*([\w.-]+)\]/g;
   const reqReG = new RegExp(`\\[req:\\s*(${REQ_ID_RE_SRC})\\]`, 'g');
+  const dependencyReG = /\[depends:\s*([\w.-]+)\]/g;
+  const artifactReG = /\[artifact:\s*([\w.-]+)\]/g;
+  const phaseReG = /\[phase:\s*([\w.-]+)\]/g;
   let m;
   while ((m = re.exec(String(md))) !== null) {
     let text = m[3].trim();
     const sensors = [...new Set([...text.matchAll(sensorReG)].map((entry) => entry[1]))];
     const reqs = [...text.matchAll(reqReG)].map((r) => r[1]);
+    const dependencies = [...new Set([...text.matchAll(dependencyReG)].map((entry) => entry[1]))];
+    const artifacts = [...new Set([...text.matchAll(artifactReG)].map((entry) => entry[1]))];
+    const phases = [...new Set([...text.matchAll(phaseReG)].map((entry) => entry[1]))];
     const sensor = sensors[0];
     if (sensors.length) text = text.replace(sensorReG, '');
     if (reqs.length) text = text.replace(reqReG, '');
+    if (dependencies.length) text = text.replace(dependencyReG, '');
+    if (artifacts.length) text = text.replace(artifactReG, '');
+    if (phases.length) text = text.replace(phaseReG, '');
     text = text.replace(/\s+/g, ' ').trim();
     // `sensor` stays as alias of the first id — older consumers keep working.
     // `req` stays as alias of the first id — older consumers keep working.
-    tasks.push({ id: m[2], text, done: m[1] === 'x', ...(sensor ? { sensor, sensors } : {}), ...(reqs.length ? { req: reqs[0], reqs } : {}) });
+    tasks.push({
+      id: m[2],
+      text,
+      done: m[1] === 'x',
+      ...(sensor ? { sensor, sensors } : {}),
+      ...(reqs.length ? { req: reqs[0], reqs } : {}),
+      ...(dependencies.length ? { dependencies } : {}),
+      ...(artifacts.length ? { artifacts } : {}),
+      ...(phases.length ? { phase: phases[0] } : {}),
+    });
   }
   return tasks;
 }

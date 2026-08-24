@@ -11,6 +11,7 @@ import {
 } from '../src/observer-memory-publish.mjs';
 import { registerObserverProject } from '../src/observer-store.mjs';
 import { buildSessionMemoryEvents } from '../packages/vault/src/memory-handoff.mjs';
+import { deriveHandoffContract } from '../src/task-contracts.mjs';
 import { makeDataDir, makeObserverFixture } from './helpers/observer-fixture.mjs';
 import { makeSyntheticHandoff } from './fixtures/synthetic-memory-lifecycle.mjs';
 
@@ -91,6 +92,50 @@ test('[req:EVID-7] Observer projection carries stale classification and recovery
     assert.match(projected.content, /reabra a change.*verify --deep.*wk-verify/);
     assert.doesNotMatch(projected.content, /private raw sensor output must not cross/);
     assert.doesNotMatch(projected.content, /output_tail/);
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test('[req:TC-8] structured handoff reaches the durable Observer outbox as a sanitized projection', async () => {
+  const fixture = makeObserverFixture();
+  try {
+    const contract = deriveHandoffContract({
+      from: 'session-a',
+      to: 'next-session',
+      activeContextId: 'context-a',
+      taskId: '7.1',
+      taskContractId: 'c'.repeat(64),
+      artifacts: ['report'],
+      evidence: ['envelope-1'],
+      decisions: ['keep one authority'],
+      nextActions: ['TOKEN=hunter2 C:\\Users\\private\\transcript.jsonl'],
+      blockers: [],
+      headSha: 'a'.repeat(40),
+      tasksSha256: '1'.repeat(64),
+      specSha256: '2'.repeat(64),
+    });
+    const events = buildSessionMemoryEvents({
+      ...makeSyntheticHandoff({ summary: 'legacy fallback' }),
+      shared: { work_session_id: 'work-a', handoff_contract: contract },
+    });
+    const brain = join(fixture.vaultBase, '.brain');
+    mkdirSync(brain, { recursive: true });
+    writeFileSync(join(brain, 'MEMORY_EVENTS.jsonl'), `${events.map(JSON.stringify).join('\n')}\n`);
+
+    const result = await publishObserverMemory({
+      vaultBase: fixture.vaultBase,
+      projectId: fixture.projectId,
+      url: 'http://127.0.0.1:1',
+      now: '2026-08-24T02:30:00.000Z',
+    });
+    assert.equal(result.queued, true);
+    const queued = JSON.parse(readFileSync(listMemoryOutbox(fixture.vaultBase)[0], 'utf8'));
+    const projection = queued.events.find((event) => event.logical_path === '.brain/MEMORY_EVENTS.jsonl');
+    assert.ok(projection);
+    assert.match(projection.content, /"schema_version":1/);
+    assert.match(projection.content, /"task_id":"7\.1"/);
+    assert.doesNotMatch(projection.content, /hunter2|C:\\\\Users|transcript\.jsonl/i);
   } finally {
     fixture.cleanup();
   }

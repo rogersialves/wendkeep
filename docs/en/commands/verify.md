@@ -154,3 +154,12 @@ destructive cleanup is automatic. A failure retains `published-recovery-required
 Return to the [change lifecycle](changes-and-verification.md) for archive, review
 [Operating profiles](operating-profiles.md), or use [maintenance](maintenance-and-diagnostics.md)
 when no change exists.
+# Task Contract gate
+
+After running sensors and writing the current Evidence Envelope, `verify` evaluates Task Contracts
+for the causal active context. An open checkbox, missing requirement/sensor/artifact, open
+dependency, or stale binding returns exit `1`, preserves `evidencia.json`, writes
+`task-evaluation.json`, and does not create the deep package. Tasks explicitly authored with
+`[phase:verify]` are excluded only from this transition because they depend on the deep package;
+they remain open for the archive gate. See
+[Changes and verification](changes-and-verification.md).

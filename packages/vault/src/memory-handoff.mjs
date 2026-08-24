@@ -61,6 +61,10 @@ export function normalizeSharedHandoff(shared) {
     const value = sanitizeValue(shared[field]);
     if (hasMeaningfulValue(value)) normalized[field] = value;
   }
+  if (Object.hasOwn(shared, 'handoff_contract')) {
+    const contract = sanitizeValue(shared.handoff_contract);
+    if (hasMeaningfulValue(contract)) normalized.handoff_contract = contract;
+  }
 
   return Object.keys(normalized).length ? normalized : null;
 }
@@ -257,6 +261,17 @@ export function buildSessionMemoryEvents({
   const events = [];
 
   if (normalizedShared) {
+    if (normalizedShared.handoff_contract) {
+      const contract = normalizedShared.handoff_contract;
+      events.push(makeEvent(context, {
+        memoryKey: 'handoff.latest',
+        value: contract,
+        authority: contract.schema_version === 1 && contract.authority === 'verified'
+          ? 'verified' : 'reported',
+        evidence: Array.isArray(contract.evidence) && contract.evidence.length
+          ? contract.evidence : [noteRel],
+      }));
+    }
     for (const [field, memoryKey] of SHARED_HANDOFF_FIELDS) {
       if (!Object.hasOwn(normalizedShared, field)) continue;
       events.push(makeEvent(context, {

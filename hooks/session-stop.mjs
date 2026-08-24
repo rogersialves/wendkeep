@@ -27,6 +27,11 @@ import {
 import { enqueueMemoryEvent, projectMemoryOutbox } from './memory-store.mjs';
 import { detectMemoryMode } from './memory-mode.mjs';
 import { sanitizeMemoryText } from './memory-schema.mjs';
+import {
+  buildStructuredTaskHandoff,
+  buildTaskContractSnapshot,
+  evaluateTaskContracts,
+} from '../src/task-contracts.mjs';
 import { assertVaultPathSafe } from './vault-path-safety.mjs';
 import {
   projectStopMemoryAttempt,
@@ -1406,6 +1411,40 @@ export async function main({
       summary: finalSummary,
       noteRel: sessionRel,
     });
+    let structuredSharedHandoff = sharedHandoff;
+    const effectiveProfile = String(
+      handoffEvidenceAuthority?.context?.operating_profile_task?.profile
+      || entry?.operating_profile_task?.profile
+      || 'GOVERN',
+    ).toUpperCase();
+    if (handoffEvidenceAuthority?.mode === 'contextual') {
+      try {
+        const taskSnapshot = activeContextChangeSlug
+          ? buildTaskContractSnapshot({
+            vaultBase,
+            projectRoot: input.cwd || process.cwd(),
+            changeSlug: activeContextChangeSlug,
+            identity: handoffEvidenceAuthority.identity,
+          })
+          : null;
+        structuredSharedHandoff = buildStructuredTaskHandoff({
+          profile: effectiveProfile,
+          sessionId,
+          snapshot: taskSnapshot,
+          evaluations: taskSnapshot ? evaluateTaskContracts(taskSnapshot) : [],
+          context: handoffEvidenceAuthority.context,
+          shared: sharedHandoff,
+        });
+      } catch (error) {
+        if (effectiveProfile === 'ASSURE') {
+          const detail = `${error?.code || 'HANDOFF_STRUCTURED_REQUIRED'}: ${error?.message || error}`;
+          process.stderr.write(`[wendkeep] Stop ASSURE bloqueado: ${detail}\n`);
+          writeHookOutput({ systemMessage: `wendkeep: Stop ASSURE exige handoff estruturado: ${detail}` });
+          return;
+        }
+        structuredSharedHandoff = sharedHandoff;
+      }
+    }
     memoryHandoff = {
       projectId,
       identity,
@@ -1418,7 +1457,7 @@ export async function main({
       observedAt: turnIdentity.observedAt || new Date(0).toISOString(),
       summary: finalSummary,
       evidence: memoryEvidence,
-      ...(sharedHandoff ? { shared: sharedHandoff } : {}),
+      ...(structuredSharedHandoff ? { shared: structuredSharedHandoff } : {}),
     };
     memoryAttempt = stageMemory(vaultBase, {
       handoff: memoryHandoff,
