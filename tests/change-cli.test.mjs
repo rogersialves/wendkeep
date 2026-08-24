@@ -686,16 +686,23 @@ test('[req:PROV-3] default limita falha persistente de publicação a três tent
   }
 });
 
-test('[req:PROV-3] release nunca apaga lock sucessor substituído após a última checagem', () => {
+test('[req:PROV-3] release nunca apaga lock sucessor substituído após a última checagem', (t) => {
   const root = mkdtempSync(join(tmpdir(), 'wk-archive-release-replace-'));
   const lockPath = join(root, 'runtime', 'change-archive-operation.lock');
   let successor;
+  let replacementUnsupported = false;
   try {
     const owner = acquireArchiveOperationLock({
       lockPath,
       faultInjection: {
         beforeReleaseCommit: () => {
-          rmSync(lockPath, { recursive: true, force: true });
+          try {
+            rmSync(lockPath, { recursive: true, force: true });
+          } catch (error) {
+            if (!['EPERM', 'EACCES', 'EBUSY', 'ENOTEMPTY'].includes(error?.code)) throw error;
+            replacementUnsupported = true;
+            throw error;
+          }
           successor = acquireArchiveOperationLock({ lockPath });
         },
       },
@@ -704,6 +711,10 @@ test('[req:PROV-3] release nunca apaga lock sucessor substituído após a últim
       () => owner.release(),
       (error) => error?.code === 'WENDKEEP_ARCHIVE_LOCK_OWNERSHIP_LOST',
     );
+    if (replacementUnsupported) {
+      t.skip('runtime Windows não permite substituir marker enquanto o descritor está aberto');
+      return;
+    }
     assert.equal(successor?.active, true, 'replacement volta ao path canônico e não é apagado');
     assert.throws(
       () => acquireArchiveOperationLock({ lockPath }),
@@ -716,13 +727,22 @@ test('[req:PROV-3] release nunca apaga lock sucessor substituído após a últim
   }
 });
 
-test('[req:PROV-3] boundary mutante detecta unlink e replacement físico do operation lock', () => {
+test('[req:PROV-3] boundary mutante detecta unlink e replacement físico do operation lock', (t) => {
   const root = mkdtempSync(join(tmpdir(), 'wk-archive-boundary-replace-'));
   const lockPath = join(root, 'runtime', 'change-archive-operation.lock');
+  let owner;
   let successor;
   try {
-    const owner = acquireArchiveOperationLock({ lockPath });
-    rmSync(lockPath, { recursive: true, force: true });
+    owner = acquireArchiveOperationLock({ lockPath });
+    try {
+      rmSync(lockPath, { recursive: true, force: true });
+    } catch (error) {
+      if (!['EPERM', 'EACCES', 'EBUSY', 'ENOTEMPTY'].includes(error?.code)) throw error;
+      try { owner.release(); } catch { /* partial rm already invalidated ownership */ }
+      owner = undefined;
+      t.skip('runtime Windows não permite substituir marker enquanto o descritor está aberto');
+      return;
+    }
     successor = acquireArchiveOperationLock({ lockPath });
     assert.throws(
       () => owner.assertOwned(),
@@ -731,6 +751,7 @@ test('[req:PROV-3] boundary mutante detecta unlink e replacement físico do oper
     assert.equal(successor.active, true);
     successor.release();
   } finally {
+    try { owner?.release(); } catch { /* cleanup best effort */ }
     try { successor?.release(); } catch { /* cleanup best effort */ }
     rmSync(root, { recursive: true, force: true });
   }

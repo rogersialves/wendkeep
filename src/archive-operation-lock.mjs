@@ -13,8 +13,9 @@ function archiveLockError(code, details = {}) {
 }
 
 function samePhysicalFile(left, right) {
-  return left?.isFile() && right?.isFile()
-    && left.dev === right.dev && left.ino === right.ino;
+  if (!left?.isFile() || !right?.isFile() || left.ino !== right.ino) return false;
+  if (left.dev === right.dev) return true;
+  return process.platform === 'win32' && (left.dev === 0 || right.dev === 0);
 }
 
 function ownerProcessAlive(pid) {
@@ -103,6 +104,7 @@ export function acquireArchiveOperationLock({
   const pending = `${target}.pending.${process.pid}.${token}`;
   const pendingMarker = join(pending, markerName);
   let descriptor;
+  let descriptorIdentity;
   let pendingExists = false;
   let published = false;
   try {
@@ -152,7 +154,8 @@ export function acquireArchiveOperationLock({
       constants.O_RDONLY | (constants.O_NOFOLLOW || 0),
     );
     const identity = readOwnerMarker(markerPath);
-    if (!samePhysicalFile(fstatSync(descriptor), identity.stat)
+    descriptorIdentity = fstatSync(descriptor);
+    if (!samePhysicalFile(descriptorIdentity, identity.stat)
       || identity.record.owner_token !== token) {
       throw archiveLockError('WENDKEEP_ARCHIVE_LOCK_OWNERSHIP_LOST');
     }
@@ -185,10 +188,12 @@ export function acquireArchiveOperationLock({
     let identity;
     try { identity = readOwnerMarker(markerPath); }
     catch { throw archiveLockError('WENDKEEP_ARCHIVE_LOCK_OWNERSHIP_LOST'); }
-    if (!samePhysicalFile(fstatSync(descriptor), identity.stat)
+    const currentDescriptorIdentity = fstatSync(descriptor);
+    if (!samePhysicalFile(currentDescriptorIdentity, identity.stat)
       || identity.record.owner_token !== token) {
       throw archiveLockError('WENDKEEP_ARCHIVE_LOCK_OWNERSHIP_LOST');
     }
+    descriptorIdentity = currentDescriptorIdentity;
     assertionCount += 1;
     if (typeof faultInjection?.afterAssertOwned === 'function') {
       faultInjection.afterAssertOwned({ count: assertionCount, lockPath: target, markerPath });
@@ -201,11 +206,17 @@ export function acquireArchiveOperationLock({
     assertOwned,
     release() {
       if (terminal) return;
-      assertOwned();
-      if (typeof faultInjection?.beforeReleaseCommit === 'function') {
-        faultInjection.beforeReleaseCommit({ lockPath: target, markerPath });
-      }
       try {
+        assertOwned();
+        if (typeof faultInjection?.beforeReleaseCommit === 'function') {
+          faultInjection.beforeReleaseCommit({ lockPath: target, markerPath });
+        }
+        closeHandle();
+        const finalIdentity = readOwnerMarker(markerPath);
+        if (!samePhysicalFile(descriptorIdentity, finalIdentity.stat)
+          || finalIdentity.record.owner_token !== token) {
+          throw archiveLockError('WENDKEEP_ARCHIVE_LOCK_OWNERSHIP_LOST');
+        }
         unlinkSync(markerPath);
         rmdirSync(target);
       } catch {
