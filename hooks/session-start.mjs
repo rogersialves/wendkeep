@@ -32,7 +32,7 @@ import {
   writeHookOutput,
   yamlQuote,
 } from './obsidian-common.mjs';
-import { resolveSessionIdentity } from './session-identity.mjs';
+import { resolveSessionIdentity, sessionWorkSessionPatch } from './session-identity.mjs';
 import { captureProjectScope, projectScopePatch } from './project-scope.mjs';
 
 export function buildSessionContent({ relPath, now, summary = 'session', provider: providerId, sessionId = '' }) {
@@ -183,11 +183,18 @@ function main() {
     readSessionRegistry(vaultBase).sessions?.[canonicalSessionId]?.project_scope,
     { ...initialScope, sessionId: canonicalSessionId },
   );
+  const workSessionPatchFor = (canonicalSessionId) => sessionWorkSessionPatch({
+    input,
+    sessionId: canonicalSessionId,
+    existingWorkSessionId: readSessionRegistry(vaultBase)
+      .sessions?.[canonicalSessionId]?.work_session_id || '',
+  });
   const control = readControl(vaultBase);
   const activationId = input.activation_id || input.activationId || randomUUID();
   const activationStartedAt = formatLocalIso(now);
   const registerActivation = (canonicalSessionId, patch) => upsertSessionRegistry(vaultBase, canonicalSessionId, {
     ...patch,
+    ...workSessionPatchFor(canonicalSessionId),
     ...scopePatchFor(canonicalSessionId),
     activation_id: activationId,
     activation_started_at: activationStartedAt,

@@ -105,6 +105,12 @@ identificada por `repository_id` + `worktree_id` + `work_session_id`; branch, HE
 pertencem a essa entrada. Assim, duas worktrees podem selecionar changes diferentes sem
 sobrescrever o foco uma da outra.
 
+No lifecycle de sessão, `session-start` e `session-ensure` preservam primeiro um
+`work_session_id` explícito do handoff, depois o valor já registrado e, quando o host não fornece
+nenhum deles, derivam a identidade estável do `session_id` canônico. Assim, providers como o Codex
+podem inicializar o active context sem enfraquecer as validações de projeto, repositório, worktree
+ou branch.
+
 Com sessão causal explícita, change, spec e verify resolvem somente a entrada correspondente. Sem
 sessão, uma única entrada ativa da worktree pode ser usada; duas sessões compatíveis causam
 ambiguidade e a operação falha fechada, sem escolher uma change em silêncio.
