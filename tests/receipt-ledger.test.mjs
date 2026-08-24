@@ -66,6 +66,7 @@ function line(record) {
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const LEDGER_MODULE = pathToFileURL(join(ROOT, 'src', 'receipt-ledger.mjs')).href;
+const OPEN_FILE_REPLACEMENT_UNSUPPORTED = new Set(['EPERM', 'EACCES', 'EBUSY', 'ENOTEMPTY']);
 
 function childAppend(f, id, options = {}) {
   const code = `
@@ -560,7 +561,7 @@ test('[req:PROV-7] concurrent writers converge through the leased lock into one 
   } finally { cleanup(f); }
 });
 
-test('[req:PROV-7] lock acquisition retries a replacement observed between open and lstat', () => {
+test('[req:PROV-7] lock acquisition retries a replacement observed between open and lstat', (t) => {
   const f = fixture();
   try {
     writeFileSync(f.lockPath, `${JSON.stringify({
@@ -573,6 +574,7 @@ test('[req:PROV-7] lock acquisition retries a replacement observed between open 
     const originalLstat = f.store.fs.lstatSync;
     let armed = false;
     let replaced = false;
+    let replacementUnsupported = false;
     let lockLstats = 0;
     const store = createFileReceiptStore({
       ledgerPath: f.ledgerPath,
@@ -586,16 +588,22 @@ test('[req:PROV-7] lock acquisition retries a replacement observed between open 
           if (armed && path === f.lockPath) lockLstats += 1;
           if (armed && path === f.lockPath && lockLstats === 2 && !replaced) {
             replaced = true;
-            rmSync(path);
-            writeFileSync(path, `${JSON.stringify({
-              schema_version: 1,
-              owner_token: 'expired-replacement',
-              owner_pid: 999_999_999,
-              acquired_at: '2020-01-01T00:00:00.000Z',
-              lease_expires_at: '2020-01-01T00:00:01.000Z',
-            })}\n`, 'utf8');
-            const replacement = originalLstat(path);
-            return statWithInode(replacement, replacement.ino + 1024);
+            try {
+              rmSync(path);
+              writeFileSync(path, `${JSON.stringify({
+                schema_version: 1,
+                owner_token: 'expired-replacement',
+                owner_pid: 999_999_999,
+                acquired_at: '2020-01-01T00:00:00.000Z',
+                lease_expires_at: '2020-01-01T00:00:01.000Z',
+              })}\n`, 'utf8');
+              const replacement = originalLstat(path);
+              return statWithInode(replacement, replacement.ino + 1024);
+            } catch (error) {
+              if (!OPEN_FILE_REPLACEMENT_UNSUPPORTED.has(error?.code)) throw error;
+              replacementUnsupported = true;
+              throw error;
+            }
           }
           return stat;
         },
@@ -603,13 +611,20 @@ test('[req:PROV-7] lock acquisition retries a replacement observed between open 
     });
     armed = true;
 
-    const receipt = appendReceipt({ store, draft: draft('replacement-retry') });
+    let receipt;
+    try {
+      receipt = appendReceipt({ store, draft: draft('replacement-retry') });
+    } catch (error) {
+      if (!replacementUnsupported) throw error;
+      t.skip('runtime Windows não permite substituir lock enquanto o descritor está aberto');
+      return;
+    }
     assert.equal(replaced, true);
     assert.equal(receipt.record.sequence, 1);
   } finally { cleanup(f); }
 });
 
-test('[req:PROV-7] lock acquisition retries an opened lock unlinked before fstat', () => {
+test('[req:PROV-7] lock acquisition retries an opened lock unlinked before fstat', (t) => {
   const f = fixture();
   try {
     writeFileSync(f.lockPath, `${JSON.stringify({
@@ -622,6 +637,7 @@ test('[req:PROV-7] lock acquisition retries an opened lock unlinked before fstat
     const originalFstat = f.store.fs.fstatSync;
     let armed = false;
     let replaced = false;
+    let replacementUnsupported = false;
     const store = createFileReceiptStore({
       ledgerPath: f.ledgerPath,
       checkpointPath: f.checkpointPath,
@@ -632,14 +648,20 @@ test('[req:PROV-7] lock acquisition retries an opened lock unlinked before fstat
         fstatSync(descriptor) {
           if (armed && !replaced) {
             replaced = true;
-            rmSync(f.lockPath);
-            writeFileSync(f.lockPath, `${JSON.stringify({
-              schema_version: 1,
-              owner_token: 'expired-replacement',
-              owner_pid: 999_999_999,
-              acquired_at: '2020-01-01T00:00:00.000Z',
-              lease_expires_at: '2020-01-01T00:00:01.000Z',
-            })}\n`, 'utf8');
+            try {
+              rmSync(f.lockPath);
+              writeFileSync(f.lockPath, `${JSON.stringify({
+                schema_version: 1,
+                owner_token: 'expired-replacement',
+                owner_pid: 999_999_999,
+                acquired_at: '2020-01-01T00:00:00.000Z',
+                lease_expires_at: '2020-01-01T00:00:01.000Z',
+              })}\n`, 'utf8');
+            } catch (error) {
+              if (!OPEN_FILE_REPLACEMENT_UNSUPPORTED.has(error?.code)) throw error;
+              replacementUnsupported = true;
+              throw error;
+            }
           }
           return originalFstat(descriptor);
         },
@@ -647,7 +669,14 @@ test('[req:PROV-7] lock acquisition retries an opened lock unlinked before fstat
     });
     armed = true;
 
-    const receipt = appendReceipt({ store, draft: draft('unlinked-descriptor-retry') });
+    let receipt;
+    try {
+      receipt = appendReceipt({ store, draft: draft('unlinked-descriptor-retry') });
+    } catch (error) {
+      if (!replacementUnsupported) throw error;
+      t.skip('runtime Windows não permite substituir lock enquanto o descritor está aberto');
+      return;
+    }
     assert.equal(replaced, true);
     assert.equal(receipt.record.sequence, 1);
   } finally { cleanup(f); }
