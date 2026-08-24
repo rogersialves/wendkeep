@@ -561,6 +561,151 @@ test('[req:PROV-7] concurrent writers converge through the leased lock into one 
   } finally { cleanup(f); }
 });
 
+test('[req:PROV-7] Windows lock release revalidates before retrying a transient sharing violation', {
+  skip: process.platform !== 'win32',
+}, () => {
+  const f = fixture();
+  try {
+    const originalUnlink = f.store.fs.unlinkSync;
+    let lockUnlinks = 0;
+    const store = createFileReceiptStore({
+      ledgerPath: f.ledgerPath,
+      checkpointPath: f.checkpointPath,
+      legacyPath: f.legacyPath,
+      lockPath: f.lockPath,
+      fsAdapter: {
+        unlinkSync(path) {
+          if (path === f.lockPath) {
+            lockUnlinks += 1;
+            if (lockUnlinks <= 2) {
+              const error = new Error('simulated Windows sharing violation');
+              error.code = 'EPERM';
+              throw error;
+            }
+          }
+          return originalUnlink(path);
+        },
+      },
+    });
+
+    const receipt = appendReceipt({ store, draft: draft('sharing-violation-retry') });
+    assert.equal(receipt.record.sequence, 1);
+    assert.equal(lockUnlinks, 3);
+    assert.equal(existsSync(f.lockPath), false);
+  } finally { cleanup(f); }
+});
+
+test('[req:PROV-7] Windows treats an exclusive-open sharing violation as contention only when the lock exists', {
+  skip: process.platform !== 'win32',
+}, () => {
+  const f = fixture();
+  try {
+    writeFileSync(f.lockPath, `${JSON.stringify({
+      schema_version: 1,
+      owner_token: 'expired-owner',
+      owner_pid: 999_999_999,
+      acquired_at: '2020-01-01T00:00:00.000Z',
+      lease_expires_at: '2020-01-01T00:00:01.000Z',
+    })}\n`, 'utf8');
+    const originalOpen = f.store.fs.openSync;
+    let sharingViolations = 0;
+    const store = createFileReceiptStore({
+      ledgerPath: f.ledgerPath,
+      checkpointPath: f.checkpointPath,
+      legacyPath: f.legacyPath,
+      lockPath: f.lockPath,
+      fsAdapter: {
+        openSync(path, flags, mode) {
+          if (path === f.lockPath && existsSync(path) && (flags & f.store.fs.constants.O_EXCL)) {
+            sharingViolations += 1;
+            const error = new Error('simulated exclusive-open sharing violation');
+            error.code = 'EPERM';
+            throw error;
+          }
+          return originalOpen(path, flags, mode);
+        },
+      },
+    });
+
+    const receipt = appendReceipt({ store, draft: draft('exclusive-open-contention') });
+    assert.equal(receipt.record.sequence, 1);
+    assert.equal(sharingViolations, 1);
+  } finally { cleanup(f); }
+});
+
+test('[req:PROV-7] Windows retries a sharing violation when the competing lock disappeared before observation', {
+  skip: process.platform !== 'win32',
+}, () => {
+  const f = fixture();
+  try {
+    const originalOpen = f.store.fs.openSync;
+    let sharingViolations = 0;
+    const store = createFileReceiptStore({
+      ledgerPath: f.ledgerPath,
+      checkpointPath: f.checkpointPath,
+      legacyPath: f.legacyPath,
+      lockPath: f.lockPath,
+      fsAdapter: {
+        openSync(path, flags, mode) {
+          if (path === f.lockPath
+            && (flags & f.store.fs.constants.O_EXCL)
+            && sharingViolations < 2) {
+            sharingViolations += 1;
+            const error = new Error('simulated vanished-lock sharing violation');
+            error.code = 'EPERM';
+            throw error;
+          }
+          return originalOpen(path, flags, mode);
+        },
+      },
+    });
+
+    const receipt = appendReceipt({ store, draft: draft('vanished-lock-contention') });
+    assert.equal(receipt.record.sequence, 1);
+    assert.equal(sharingViolations, 2);
+  } finally { cleanup(f); }
+});
+
+test('[req:PROV-7] Windows retries a sharing violation while observing an existing lock', {
+  skip: process.platform !== 'win32',
+}, () => {
+  const f = fixture();
+  try {
+    writeFileSync(f.lockPath, `${JSON.stringify({
+      schema_version: 1,
+      owner_token: 'expired-owner',
+      owner_pid: 999_999_999,
+      acquired_at: '2020-01-01T00:00:00.000Z',
+      lease_expires_at: '2020-01-01T00:00:01.000Z',
+    })}\n`, 'utf8');
+    const originalLstat = f.store.fs.lstatSync;
+    let armed = false;
+    let sharingViolations = 0;
+    const store = createFileReceiptStore({
+      ledgerPath: f.ledgerPath,
+      checkpointPath: f.checkpointPath,
+      legacyPath: f.legacyPath,
+      lockPath: f.lockPath,
+      fsAdapter: {
+        lstatSync(path) {
+          if (armed && path === f.lockPath && sharingViolations < 2) {
+            sharingViolations += 1;
+            const error = new Error('simulated observation sharing violation');
+            error.code = 'EPERM';
+            throw error;
+          }
+          return originalLstat(path);
+        },
+      },
+    });
+    armed = true;
+
+    const receipt = appendReceipt({ store, draft: draft('observation-contention') });
+    assert.equal(receipt.record.sequence, 1);
+    assert.equal(sharingViolations, 2);
+  } finally { cleanup(f); }
+});
+
 test('[req:PROV-7] lock acquisition retries a replacement observed between open and lstat', (t) => {
   const f = fixture();
   try {

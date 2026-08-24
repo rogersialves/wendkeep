@@ -30,6 +30,8 @@ const CHECKPOINT_KEYS = [
 const DEFAULT_LOCK_LEASE_MS = 30_000;
 const DEFAULT_LOCK_WAIT_MS = 5_000;
 const MAX_LOCK_IDENTITY_CHANGE_RETRIES = 64;
+const MAX_LOCK_RELEASE_RETRIES = 100;
+const WINDOWS_SHARING_VIOLATIONS = new Set(['EPERM', 'EACCES', 'EBUSY']);
 const DIRECTORY_FSYNC_UNSUPPORTED = new Set([
   'EISDIR', 'EINVAL', 'ENOSYS', 'ENOTSUP', 'EOPNOTSUPP',
 ]);
@@ -480,11 +482,22 @@ function sameLockSnapshot(expected, observed) {
 }
 
 function removeLockIfUnchanged(store, expected) {
-  const observed = lockState(store);
-  if (!sameLockSnapshot(expected, observed)) return false;
-  store.fs.unlinkSync(store.lockPath);
-  fsyncDirectory(store);
-  return true;
+  for (let attempt = 1; attempt <= MAX_LOCK_RELEASE_RETRIES; attempt += 1) {
+    const observed = lockState(store);
+    if (!sameLockSnapshot(expected, observed)) return false;
+    try {
+      store.fs.unlinkSync(store.lockPath);
+      fsyncDirectory(store);
+      return true;
+    } catch (error) {
+      const retryable = process.platform === 'win32'
+        && WINDOWS_SHARING_VIOLATIONS.has(error?.code)
+        && attempt < MAX_LOCK_RELEASE_RETRIES;
+      if (!retryable) throw error;
+      sleepSync(5);
+    }
+  }
+  return false;
 }
 
 function processIsAlive(pid) {
@@ -515,6 +528,7 @@ function acquireLock(store) {
   const token = randomUUID();
   const deadline = store.now() + store.lockWaitMs;
   let identityChangeRetries = 0;
+  let openSharingRetries = 0;
   for (;;) {
     // Validate the parent chain before the atomic create. O_EXCL/O_NOFOLLOW
     // makes a replacement race fail closed instead of following a symlink.
@@ -530,10 +544,32 @@ function acquireLock(store) {
         | (store.fs.constants.O_NOFOLLOW || 0);
       descriptor = store.fs.openSync(target, flags, 0o600);
     } catch (error) {
-      if (error?.code !== 'EEXIST') throw error;
-      const state = lockState(store, { allowIdentityChange: true });
+      const sharingConflict = process.platform === 'win32'
+        && WINDOWS_SHARING_VIOLATIONS.has(error?.code);
+      if (error?.code !== 'EEXIST' && !sharingConflict) throw error;
       const now = store.now();
-      if (state.status === 'missing') continue;
+      let state;
+      try {
+        state = lockState(store, { allowIdentityChange: true });
+      } catch (inspectionError) {
+        const transientInspection = process.platform === 'win32'
+          && WINDOWS_SHARING_VIOLATIONS.has(inspectionError?.code);
+        if (!transientInspection) throw inspectionError;
+        openSharingRetries += 1;
+        if (now >= deadline || openSharingRetries > MAX_LOCK_IDENTITY_CHANGE_RETRIES) {
+          throw inspectionError;
+        }
+        sleepSync(5);
+        continue;
+      }
+      if (state.status === 'missing') {
+        if (sharingConflict) {
+          openSharingRetries += 1;
+          if (now >= deadline || openSharingRetries > MAX_LOCK_IDENTITY_CHANGE_RETRIES) throw error;
+          sleepSync(5);
+        }
+        continue;
+      }
       if (state.status === 'changed') {
         identityChangeRetries += 1;
         if (now >= deadline || identityChangeRetries > MAX_LOCK_IDENTITY_CHANGE_RETRIES) {
