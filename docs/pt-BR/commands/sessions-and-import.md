@@ -141,3 +141,10 @@ confirmada de um lock ocupado ou de um caminho que foi pulado, sem reabrir a ses
 
 Leia [Perfis de Operação](operating-profiles.md), [importação retroativa](retroactive-import.md),
 [custos e observabilidade](costs-and-observability.md) e [notas](notes-and-knowledge.md).
+# Handoff Contract v1
+
+Em active context causal, o SessionStop projeta um handoff tipado com task, artifacts, Evidence
+Envelope, decisões, próximas ações, blockers e hashes de HEAD/tarefas/spec. ASSURE bloqueia a
+publicação quando esse contrato verificado não pode ser produzido; outros perfis preservam o
+fallback opcional. Handoffs históricos continuam `legacy-reported`. Veja
+[Changes e verificação](changes-and-verification.md).

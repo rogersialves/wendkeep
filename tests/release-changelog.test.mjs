@@ -82,12 +82,12 @@ test('extractReleaseNotes: throws when the version is absent', () => {
 });
 
 test('[sensor:release-tests] current release notes are extractable and match the package', () => {
-  assert.equal(PACKAGE.version, '0.79.0');
+  assert.equal(PACKAGE.version, '0.80.0');
   const release = extractReleaseNotes(CHANGELOG, PACKAGE.version);
-  assert.equal(release.date, '2026-08-23');
-  assert.match(release.notes, /Gate único de proveniência/i);
-  assert.match(release.notes, /Receipt Ledger v2/i);
-  assert.match(release.notes, /Archive fail-closed/i);
+  assert.equal(release.date, '2026-08-24');
+  assert.match(release.notes, /Task Contract v1/i);
+  assert.match(release.notes, /Artifact gates bounded/i);
+  assert.match(release.notes, /Handoff Contract v1/i);
   assert.doesNotMatch(release.notes, /019f[0-9a-f-]+/i);
 });
 

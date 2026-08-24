@@ -656,6 +656,46 @@
       "severity": "critical",
       "type": "command",
       "command": "node --test tests/change-cli.test.mjs tests/delivery.test.mjs tests/release-provenance.test.mjs tests/worktree-cleanup.test.mjs tests/provenance-integration.test.mjs tests/provenance-e2e.test.mjs"
+    },
+    {
+      "id": "task-contracts",
+      "name": "task-contracts",
+      "description": "Validates deterministic Task Contract v1 derivation, staleness and evaluation",
+      "severity": "critical",
+      "type": "command",
+      "command": "node --test tests/task-contracts.test.mjs"
+    },
+    {
+      "id": "task-contracts-artifacts",
+      "name": "task-contracts-artifacts",
+      "description": "Validates bounded and path-safe artifact gates",
+      "severity": "critical",
+      "type": "command",
+      "command": "node --test tests/task-contracts.test.mjs"
+    },
+    {
+      "id": "task-contracts-cli",
+      "name": "task-contracts-cli",
+      "description": "Validates causal task CLI and exclusive recoverable leases",
+      "severity": "critical",
+      "type": "command",
+      "command": "node --test tests/task-cli.test.mjs"
+    },
+    {
+      "id": "task-contracts-integration",
+      "name": "task-contracts-integration",
+      "description": "Validates Execute-to-Verify task gates and causal context integration",
+      "severity": "critical",
+      "type": "command",
+      "command": "node --test tests/task-verify.test.mjs tests/active-context-change-cli.test.mjs"
+    },
+    {
+      "id": "task-contracts-handoff",
+      "name": "task-contracts-handoff",
+      "description": "Validates structured handoff, legacy migration and memory projection",
+      "severity": "critical",
+      "type": "command",
+      "command": "node --test tests/task-handoff.test.mjs tests/memory-handoff.test.mjs tests/active-context-handoff-evidence.test.mjs tests/observer-memory-publish.test.mjs"
     }
   ]
 }

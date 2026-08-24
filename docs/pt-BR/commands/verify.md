@@ -155,3 +155,11 @@ destrutivo automático. Falha mantém `published-recovery-required`.
 Volte ao [ciclo de changes](changes-and-verification.md) para archive, confira os
 [Perfis de Operação](operating-profiles.md) ou consulte
 [manutenção](maintenance-and-diagnostics.md) quando não houver change.
+# Gate de Task Contract
+
+Depois de executar sensores e gravar o Evidence Envelope atual, `verify` avalia os Task Contracts
+do active context causal. Checkbox aberta, requisito/sensor/artifact ausente, dependência aberta ou
+binding stale bloqueia exit `1`, preserva `evidencia.json`, grava `task-evaluation.json` e não cria
+o pacote deep. Tasks explicitamente autoradas com `[phase:verify]` ficam fora apenas desta
+transição porque dependem do pacote deep; continuam abertas para o gate de archive. Veja
+[Changes e verificação](changes-and-verification.md).

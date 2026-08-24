@@ -29,6 +29,8 @@ npx wendkeep change new <slug> [--simple|--guide] [--session <id>]
 npx wendkeep change status [slug] [--session <id>]
 npx wendkeep spec effective [--change <slug>] [--session <id>]
 npx wendkeep sensors list
+npx wendkeep task list [--change <slug>] [--session <id>] [--json]
+npx wendkeep task evaluate <task-id> [--change <slug>] [--session <id>] [--json]
 npx wendkeep verify [--deep] [--change <slug>] [--session <id>]
 npx wendkeep change archive <slug> [--json] [--session <id>]
 npx wendkeep change archive recover <operation-id> --change <slug> [--spec-action rollback|resume] [--json]
@@ -48,6 +50,8 @@ npx wendkeep change archive recover <operation-id> --change <slug> [--spec-actio
   somente um contexto ativo inequívoco da worktree é aceito; ambiguidade retorna exit `2`.
 - `change relink [--apply]` e `change backlink [--apply]` reparam o grafo; dry-run é o padrão.
 - `change abandon <slug>` descarta sem ADR; `archive --force` exige decisão humana explícita.
+- `task list/show/evaluate` projeta contratos read-only da autoria da change. `task claim/release`
+  controla owner/lease no active context causal.
 - `change archive recover <operation-id> --change <slug> [--spec-action rollback|resume]` inspeciona
   uma transação pendente por padrão; com `rollback` ou `resume`, converge somente a promoção de
   specs preparada no journal, sob lock e validação. Não promove a change, não apaga o journal e não
@@ -146,6 +150,52 @@ destrutivo automático. Os campos sanitizados
 `wendkeep change archive recover <operation-id> --change <slug>` quando há operação identificada.
 Texto e --json usam o mesmo diagnóstico sanitizado com code, operation, state, blocker, expected,
 observed, recovery, reason_codes, diagnostics e repair.
+
+## Task Contracts, artifacts e handoffs
+
+Task Contract v1 é uma projeção reconstruível cuja autoria permanece em `tarefas.md`, na spec
+efetiva e no `artifacts.json` da change. O contrato não copia a spec nem infere requisito do chat.
+Projeto, active context, HEAD e hashes de tarefas/spec/manifesto vinculam a projeção; divergência
+resulta em `stale`.
+
+```markdown
+- [ ] 2.3 gerar relatório [req:REP-1] [sensor:tests] [depends:2.2] [artifact:report]
+- [ ] 9.1 revisar pacote deep e arquivar [req:REP-1] [phase:verify]
+```
+
+```powershell
+npx wendkeep task list --session <id> [--change <slug>] [--json]
+npx wendkeep task show 2.3 --session <id> [--json]
+npx wendkeep task evaluate 2.3 --session <id> [--json]
+npx wendkeep task claim 2.3 --session <id> [--lease-seconds 900] [--json]
+npx wendkeep task release 2.3 --session <id> [--json]
+```
+
+`list`, `show` e `evaluate` não escrevem. `claim` e `release` usam o lock atômico do
+`SESSION_REGISTRY`, são escopados por repository/worktree/work session/change/task e recusam owner
+concorrente. Lease expirada pode ser retomada; release por não-owner falha com
+`TASK_LEASE_NOT_OWNER`.
+
+Um manifesto de artifacts usa `schema_version: 1` e uma lista `artifacts`; cada entrada nomeada
+pode ter tipo `name`, `path`, `glob` ou `file-count`. O fallback `fromFilesystem` é explícito, não
+lê conteúdo, ignora `.git`, `.worktrees`, `node_modules` e `dist`, tem limites de tempo/quantidade
+e falha fechado em path escape, symlink ou junction externo.
+
+Checkbox é sinal autoral, não prova. `task evaluate` retorna `can_complete`, requisitos, sensores,
+artifacts e dependências ausentes, além de `blocking_findings`. No active context causal, `verify`
+pode gravar `evidencia.json`, mas não anuncia sucesso nem cria o pacote deep enquanto houver task
+bloqueada na fase padrão `execute`; o diagnóstico fica em `task-evaluation.json`. Use
+`[phase:verify]` somente para a tarefa de revisão/arquivo que necessariamente ocorre depois do
+pacote deep: ela não integra o gate Execute → Verify, permanece bloqueada na avaliação individual
+e ainda precisa ser concluída antes de `change archive`.
+
+SessionStop vincula origem/destino, task, artifacts, Evidence Envelope, decisões, próximas ações,
+blockers e hashes de HEAD/tarefas/spec. ASSURE exige Handoff Contract v1 verificado; nos demais
+perfis ele é opcional. Handoffs históricos permanecem `legacy-reported`. Memória compartilhada,
+brain injection e Observer consomem a mesma projeção sanitizada.
+
+Schemas públicos: `schema/task-contract-v1.schema.json`,
+`schema/artifact-manifest-v1.schema.json` e `schema/handoff-contract-v1.schema.json`.
 
 ## Cerca de escopo para ferramentas
 

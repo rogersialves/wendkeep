@@ -29,6 +29,8 @@ npx wendkeep change new <slug> [--simple|--guide] [--session <id>]
 npx wendkeep change status [slug] [--session <id>]
 npx wendkeep spec effective [--change <slug>] [--session <id>]
 npx wendkeep sensors list
+npx wendkeep task list [--change <slug>] [--session <id>] [--json]
+npx wendkeep task evaluate <task-id> [--change <slug>] [--session <id>] [--json]
 npx wendkeep verify [--deep] [--change <slug>] [--session <id>]
 npx wendkeep change archive <slug> [--json] [--session <id>]
 npx wendkeep change archive recover <operation-id> --change <slug> [--spec-action rollback|resume] [--json]
@@ -48,6 +50,8 @@ npx wendkeep change archive recover <operation-id> --change <slug> [--spec-actio
   only one unambiguous active context for the worktree is accepted; ambiguity returns exit `2`.
 - `change relink [--apply]` and `change backlink [--apply]` repair graph links; preview is default.
 - `change abandon <slug>` drops work without an ADR; `archive --force` needs explicit human choice.
+- `task list/show/evaluate` derives read-only contracts from change authorship. `task claim/release`
+  controls owner/lease in the causal active context.
 - `change archive recover <operation-id> --change <slug> [--spec-action rollback|resume]` inspects a
   pending transaction by default; with `rollback` or `resume`, it converges only the spec
   promotion prepared in the journal, under the operation lock and validation. It never promotes the
@@ -147,6 +151,52 @@ cleanup is automatic. Sanitized `operation_id` and
 `wendkeep change archive recover <operation-id> --change <slug>` when an operation is identified.
 Text and --json use the same sanitized diagnostic with code, operation, state, blocker, expected,
 observed, recovery, reason_codes, diagnostics, and repair.
+
+## Task Contracts, artifacts, and handoffs
+
+Task Contract v1 is a rebuildable projection whose authorship remains in `tarefas.md`, the
+effective spec, and the change's `artifacts.json`. The contract neither copies spec text nor infers
+a requirement from chat. Project, active context, HEAD, and tasks/spec/manifest hashes bind the
+projection; any mismatch yields `stale`.
+
+```markdown
+- [ ] 2.3 produce report [req:REP-1] [sensor:tests] [depends:2.2] [artifact:report]
+- [ ] 9.1 review the deep package and archive [req:REP-1] [phase:verify]
+```
+
+```powershell
+npx wendkeep task list --session <id> [--change <slug>] [--json]
+npx wendkeep task show 2.3 --session <id> [--json]
+npx wendkeep task evaluate 2.3 --session <id> [--json]
+npx wendkeep task claim 2.3 --session <id> [--lease-seconds 900] [--json]
+npx wendkeep task release 2.3 --session <id> [--json]
+```
+
+`list`, `show`, and `evaluate` do not write. `claim` and `release` use the atomic
+`SESSION_REGISTRY` lock, are scoped by repository/worktree/work session/change/task, and reject a
+concurrent owner. An expired lease can be recovered; release by a non-owner fails with
+`TASK_LEASE_NOT_OWNER`.
+
+An artifact manifest uses `schema_version: 1` and an `artifacts` list; each named entry may use
+type `name`, `path`, `glob`, or `file-count`. The `fromFilesystem` fallback is explicit, never reads
+content, ignores `.git`, `.worktrees`, `node_modules`, and `dist`, has time/entry limits, and fails
+closed on path escape or an external symlink/junction.
+
+A checkbox is an authored signal, not proof. `task evaluate` returns `can_complete`, missing
+requirements, sensors, artifacts, dependencies, and `blocking_findings`. In a causal active
+context, `verify` may write `evidencia.json`, but it cannot report success or create the deep
+package while any default `execute` task is blocked; diagnostics live in `task-evaluation.json`.
+Use `[phase:verify]` only for the review/archive task that necessarily runs after the deep package:
+it does not participate in the Execute → Verify gate, remains blocked in individual evaluation,
+and must still be completed before `change archive`.
+
+SessionStop binds source/target, task, artifacts, Evidence Envelope, decisions, next actions,
+blockers, and HEAD/tasks/spec hashes. ASSURE requires a verified Handoff Contract v1; it is optional
+in other profiles. Historical summaries remain `legacy-reported`. Shared memory, brain injection,
+and Observer consume the same sanitized projection.
+
+Public schemas: `schema/task-contract-v1.schema.json`,
+`schema/artifact-manifest-v1.schema.json`, and `schema/handoff-contract-v1.schema.json`.
 
 ## Tool-scope fence
 

@@ -142,3 +142,9 @@ from a busy lock or skipped path without reopening the original session.
 
 Read [Operating profiles](operating-profiles.md), [retroactive import](retroactive-import.md),
 [costs and observability](costs-and-observability.md), and [notes](notes-and-knowledge.md).
+# Handoff Contract v1
+
+In a causal active context, SessionStop projects a typed handoff with task, artifacts, Evidence
+Envelope, decisions, next actions, blockers, and HEAD/tasks/spec hashes. ASSURE blocks publication
+when that verified contract cannot be produced; other profiles preserve the optional fallback.
+Historical handoffs remain `legacy-reported`. See [Changes and verification](changes-and-verification.md).

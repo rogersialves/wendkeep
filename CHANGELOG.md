@@ -4,6 +4,32 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.80.0] — 2026-08-24
+
+### Added
+
+- **Task Contract v1.** `wendkeep task list/show/evaluate/claim/release` deriva contratos tipados
+  da change e do active context, com IDs estáveis, hashes de HEAD/tarefas/spec/manifesto,
+  diagnósticos estruturados e leases exclusivos recuperáveis sob o lock do `SESSION_REGISTRY`.
+- **Artifact gates bounded.** Manifestos v1 suportam `name`, `path`, `glob` e `file-count`, com
+  fallback de filesystem explícito, ignores seguros, limites de tempo/quantidade e bloqueio de
+  path escape, symlink ou junction externo.
+- **Handoff Contract v1.** SessionStop publica handoff causal com task, artifacts, Evidence
+  Envelope, decisões, próximas ações, blockers e hashes; ASSURE exige contrato verificado e
+  handoffs históricos permanecem `legacy-reported`.
+- **Schemas e guias bilíngues.** Schemas públicos de task/handoff/artifacts, README e guias PT-BR/EN
+  documentam comandos, erros, recovery, autoridade e compatibilidade.
+
+### Changed
+
+- **Execute → Verify machine-checkable.** `verify` preserva o Evidence Envelope recém-capturado,
+  grava `task-evaluation.json` e bloqueia sucesso/pacote deep quando checkbox, requisito, sensor,
+  artifact, dependência ou binding causal ainda estiver aberto; `[phase:verify]` separa a tarefa
+  final de revisão/arquivo sem enfraquecer o gate de archive.
+- **Memória e Observer sem autoridade duplicada.** `handoff.latest` passa a transportar o contrato
+  estruturado verificado pela mesma outbox sanitizada; resumos heurísticos continuam apenas como
+  projeção reportada.
+
 ## [0.79.0] — 2026-08-23
 
 ### Added

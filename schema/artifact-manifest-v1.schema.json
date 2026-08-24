@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wendkeep.dev/schema/artifact-manifest-v1.schema.json",
+  "title": "WendKeep Artifact Manifest v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "artifacts"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "artifacts": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/artifact" }
+    }
+  },
+  "$defs": {
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "type"],
+      "properties": {
+        "name": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$" },
+        "type": { "enum": ["name", "path", "glob", "file-count"] },
+        "path": { "type": "string" },
+        "glob": { "type": "string" },
+        "min": { "type": "integer", "minimum": 0 },
+        "max": { "type": "integer", "minimum": 0 },
+        "fromFilesystem": { "type": "boolean" }
+      },
+      "allOf": [
+        { "if": { "properties": { "type": { "const": "path" } } }, "then": { "required": ["path"] } },
+        { "if": { "properties": { "type": { "enum": ["glob", "file-count"] } } }, "then": { "required": ["glob"] } }
+      ]
+    }
+  }
+}

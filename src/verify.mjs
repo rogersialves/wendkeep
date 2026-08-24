@@ -4,6 +4,7 @@
 import { readFileSync, unlinkSync } from 'node:fs';
 import { isAbsolute, join, resolve } from 'node:path';
 import { parseTasks, activeChange, appendFixTasks, healSpecBacklinks } from '../hooks/change-core.mjs';
+import { buildTaskContractSnapshot, evaluateTaskContracts } from './task-contracts.mjs';
 import {
   loadSensorsDetailed,
   findProjectRoot,
@@ -188,6 +189,37 @@ export function runVerify(argv) {
     process.stdout.write(`  ${mark} ${e.id}${e.severity === 'warning' && e.status === 'red' ? ' (warning)' : ''}\n`);
   }
   if (!ok) { process.stderr.write(`verify: critical sensors red: ${failing.join(', ')}\n`); process.exit(1); }
+
+  // Execute -> Verify is a causal transition. Sensor execution above is allowed to capture the
+  // current envelope, but an active typed task contract must satisfy every authored gate before
+  // verify can announce success or assemble the deep package. Legacy projects without an active
+  // context preserve their pre-contract behavior until they migrate.
+  if (commandContext) {
+    const taskSnapshot = buildTaskContractSnapshot({
+      vaultBase,
+      projectRoot,
+      changeSlug: slug,
+      identity: commandContext,
+    });
+    const taskEvaluations = evaluateTaskContracts(taskSnapshot);
+    const executeEvaluations = taskEvaluations.filter((task) => task.phase !== 'verify');
+    const taskGate = {
+      schema_version: 1,
+      change_slug: slug,
+      evidence_envelope_id: envelope.envelope_id,
+      ok: executeEvaluations.every((task) => task.can_complete),
+      execute_task_ids: executeEvaluations.map((task) => task.task_id),
+      tasks: taskEvaluations,
+    };
+    writeAuthority('task-evaluation.json', `${JSON.stringify(taskGate, null, 2)}\n`);
+    if (!taskGate.ok) {
+      const blockers = [...new Set(executeEvaluations.flatMap((task) => (
+        task.blocking_findings.map((finding) => `${task.task_id}:${finding.code}`)
+      )))];
+      process.stderr.write(`verify: task contracts block Execute -> Verify: ${blockers.join(', ')}\n`);
+      process.exit(1);
+    }
+  }
 
   // --deep (Q2=B): assemble the verification package the wk-verify skill judges. A trivial
   // change (no [req:] tasks, sensors green) gets an auto verdict — no agent pass needed.

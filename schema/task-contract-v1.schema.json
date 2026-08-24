@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wendkeep.dev/schema/task-contract-v1.schema.json",
+  "title": "WendKeep Task Contract v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "contract_id", "task_id", "change_slug", "title", "phase", "status",
+    "inputs", "expected_outputs", "acceptance_criteria", "requirement_ids",
+    "required_sensors", "required_artifacts", "dependencies", "owner", "work_session_id",
+    "evidence_envelope_id", "checked", "authored_sha256", "binding"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "contract_id": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "task_id": { "type": "string", "minLength": 1 },
+    "change_slug": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$" },
+    "title": { "type": "string" },
+    "phase": { "enum": ["execute", "verify"] },
+    "status": { "enum": ["ready", "blocked", "pending-evaluation", "completed", "stale"] },
+    "inputs": { "$ref": "#/$defs/stringArray" },
+    "expected_outputs": { "$ref": "#/$defs/stringArray" },
+    "acceptance_criteria": { "$ref": "#/$defs/stringArray" },
+    "requirement_ids": { "$ref": "#/$defs/stringArray" },
+    "required_sensors": { "$ref": "#/$defs/stringArray" },
+    "required_artifacts": { "$ref": "#/$defs/stringArray" },
+    "dependencies": { "$ref": "#/$defs/stringArray" },
+    "owner": { "type": ["string", "null"] },
+    "work_session_id": { "type": ["string", "null"] },
+    "evidence_envelope_id": { "type": ["string", "null"] },
+    "checked": { "type": "boolean" },
+    "authored_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "project_id", "active_context_id", "head_sha", "tasks_sha256",
+        "effective_spec_sha256", "artifact_manifest_sha256"
+      ],
+      "properties": {
+        "project_id": { "type": "string", "minLength": 1 },
+        "active_context_id": { "type": "string", "minLength": 1 },
+        "head_sha": { "type": "string", "minLength": 1 },
+        "tasks_sha256": { "type": "string", "minLength": 1 },
+        "effective_spec_sha256": { "type": "string", "minLength": 1 },
+        "artifact_manifest_sha256": { "type": "string", "minLength": 1 }
+      }
+    }
+  },
+  "$defs": {
+    "stringArray": {
+      "type": "array",
+      "items": { "type": "string" },
+      "uniqueItems": true
+    }
+  }
+}

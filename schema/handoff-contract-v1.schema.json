@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wendkeep.dev/schema/handoff-contract-v1.schema.json",
+  "title": "WendKeep Handoff Contract v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "handoff_id", "from", "to", "active_context_id", "task_id",
+    "task_contract_id", "artifacts", "evidence", "decisions", "next_actions", "blockers",
+    "head_sha", "tasks_sha256", "spec_sha256", "authority"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "handoff_id": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "from": { "type": "string", "minLength": 1 },
+    "to": { "type": "string", "minLength": 1 },
+    "active_context_id": { "type": "string", "minLength": 1 },
+    "task_id": { "type": "string" },
+    "task_contract_id": { "type": "string" },
+    "artifacts": { "$ref": "#/$defs/stringArray" },
+    "evidence": { "$ref": "#/$defs/stringArray" },
+    "decisions": { "$ref": "#/$defs/stringArray" },
+    "next_actions": { "$ref": "#/$defs/stringArray" },
+    "blockers": { "$ref": "#/$defs/stringArray" },
+    "head_sha": { "type": "string", "minLength": 1 },
+    "tasks_sha256": { "type": "string", "minLength": 1 },
+    "spec_sha256": { "type": "string", "minLength": 1 },
+    "authority": { "enum": ["verified", "reported"] }
+  },
+  "$defs": {
+    "stringArray": {
+      "type": "array",
+      "items": { "type": "string" },
+      "uniqueItems": true
+    }
+  }
+}

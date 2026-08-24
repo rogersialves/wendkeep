@@ -99,6 +99,7 @@ test('[req:ACTX-11] implicit spec and verify resolve the change from the selecte
   try {
     assert.equal(runChange(f, ['use', 'change-a', '--session', 'session-a']).status, 0);
     assert.equal(runChange(f, ['use', 'change-b', '--session', 'session-b']).status, 0);
+    assert.equal(runChange(f, ['done', '1.1', '--session', 'session-a']).status, 0);
 
     const spec = runCli(f, ['spec', 'effective', '--session', 'session-b']);
     assert.equal(spec.status, 0, spec.stderr);
