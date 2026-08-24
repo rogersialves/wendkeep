@@ -4,6 +4,17 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.80.1] — 2026-08-24
+
+### Fixed
+
+- **Bootstrap causal das sessões Codex.** `session-start` e `session-ensure` agora derivam um
+  `work_session_id` estável do `session_id` canônico quando o host não envia essa identidade,
+  preservando primeiro handoff explícito e valor já registrado. Novas sessões deixam de falhar em
+  `profile route`, `change new` e active context por identidade ausente, sem relaxar as validações
+  de projeto, repositório, worktree ou branch; README e o guia de contexto foram atualizados em
+  PT-BR/EN.
+
 ## [0.80.0] — 2026-08-24
 
 ### Added

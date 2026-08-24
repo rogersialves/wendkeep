@@ -108,6 +108,11 @@ identified by `repository_id` + `worktree_id` + `work_session_id`; branch, HEAD,
 belong to that entry. Two worktrees can therefore select different changes without overwriting
 each other's operational focus.
 
+During the session lifecycle, `session-start` and `session-ensure` first preserve an explicit
+handoff `work_session_id`, then the already registered value, and, when the host supplies neither,
+derive the stable identity from the canonical `session_id`. Providers such as Codex can therefore
+initialize an active context without weakening project, repository, worktree, or branch checks.
+
 With an explicit causal session, change, spec, and verify resolve only the matching entry. Without
 a session, only one active entry for the worktree is accepted; two sessions produce ambiguity and
 the operation must fail closed without silently selecting a change.

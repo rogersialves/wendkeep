@@ -6,6 +6,26 @@ import {
   resolveSessionIdentitySnapshot,
 } from '../packages/integrations/src/session-identity.mjs';
 import { readCodexRolloutMeta } from './codex-rollout-meta.mjs';
+import { sanitizeMemoryText } from './memory-schema.mjs';
+
+export function sessionWorkSessionPatch({
+  input = {},
+  sessionId = '',
+  existingWorkSessionId = '',
+} = {}) {
+  const shared = input.shared || input.handoff?.shared;
+  const explicit = input.work_session_id
+    || input.workSessionId
+    || shared?.work_session_id
+    || shared?.workSessionId
+    || input.handoff?.work_session_id
+    || input.handoff?.workSessionId
+    || '';
+  const workSessionId = sanitizeMemoryText(
+    explicit || existingWorkSessionId || sessionId,
+  ).trim();
+  return workSessionId ? { work_session_id: workSessionId } : {};
+}
 
 function unknownTranscriptIdentity() {
   return {
