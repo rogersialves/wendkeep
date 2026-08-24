@@ -31,6 +31,9 @@ All notable changes to **wendkeep** are documented here. Format based on
   todos os contextos, PR/head/merge e ator disponível, e retomam o mesmo operation ID após crash
   antes/depois do append ou finalize; texto e `--json` preservam códigos e recovery sanitizados.
 - **Compatibilidade explícita.** Ledgers v1 permanecem read-only como prefixo `legacy-unbound`;
+  no Windows com Node 18–22, `st_dev=0` é tratado como metadado indisponível quando o inode
+  continua idêntico, sem aceitar identificadores de dispositivo não-zero conflitantes, e a
+  aquisição concorrente relê rotações transitórias do lock com limite estrito;
   README, contrato do harness e guias de changes/verify/profiles/worktrees foram atualizados em
   PT-BR/EN.
 

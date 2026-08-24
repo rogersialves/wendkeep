@@ -40,6 +40,26 @@ function cleanup(f) {
   rmSync(f.root, { recursive: true, force: true });
 }
 
+function statWithDeviceId(stat, dev) {
+  return new Proxy(stat, {
+    get(target, property) {
+      if (property === 'dev') return dev;
+      const value = Reflect.get(target, property, target);
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+  });
+}
+
+function statWithInode(stat, ino) {
+  return new Proxy(stat, {
+    get(target, property) {
+      if (property === 'ino') return ino;
+      const value = Reflect.get(target, property, target);
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+  });
+}
+
 function line(record) {
   return `${JSON.stringify(record)}\n`;
 }
@@ -389,6 +409,57 @@ test('[req:PROV-7] every mutable store path must remain below the ledger runtime
   }
 });
 
+test('[req:PROV-7] Windows accepts an unavailable device id when the inode still identifies the opened file', {
+  skip: process.platform !== 'win32',
+}, () => {
+  const f = fixture();
+  try {
+    const originalLstat = f.store.fs.lstatSync;
+    const store = createFileReceiptStore({
+      ledgerPath: f.ledgerPath,
+      checkpointPath: f.checkpointPath,
+      legacyPath: f.legacyPath,
+      lockPath: f.lockPath,
+      fsAdapter: {
+        lstatSync(path) {
+          const stat = originalLstat(path);
+          return statWithDeviceId(stat, 0);
+        },
+      },
+    });
+
+    const receipt = appendReceipt({ store, draft: draft('windows-zero-device') });
+    assert.equal(receipt.record.sequence, 1);
+    assert.equal(readReceiptLedger({ store }).records.length, 1);
+  } finally { cleanup(f); }
+});
+
+test('[req:PROV-7] Windows still rejects a conflicting nonzero device id', {
+  skip: process.platform !== 'win32',
+}, () => {
+  const f = fixture();
+  try {
+    const originalLstat = f.store.fs.lstatSync;
+    const store = createFileReceiptStore({
+      ledgerPath: f.ledgerPath,
+      checkpointPath: f.checkpointPath,
+      legacyPath: f.legacyPath,
+      lockPath: f.lockPath,
+      fsAdapter: {
+        lstatSync(path) {
+          const stat = originalLstat(path);
+          return statWithDeviceId(stat, stat.dev + 1);
+        },
+      },
+    });
+
+    assert.throws(
+      () => appendReceipt({ store, draft: draft('windows-conflicting-device') }),
+      (error) => error?.code === 'WENDKEEP_RECEIPT_LEDGER_CORRUPT',
+    );
+  } finally { cleanup(f); }
+});
+
 test('[req:PROV-7] symlink-like ledger entries are rejected by the path policy on every platform', () => {
   const f = fixture();
   try {
@@ -486,6 +557,99 @@ test('[req:PROV-7] concurrent writers converge through the leased lock into one 
     const ledger = readReceiptLedger({ store: f.store });
     assert.equal(ledger.records.length, 4);
     assert.deepEqual(ledger.records.map((record) => record.sequence), [1, 2, 3, 4]);
+  } finally { cleanup(f); }
+});
+
+test('[req:PROV-7] lock acquisition retries a replacement observed between open and lstat', () => {
+  const f = fixture();
+  try {
+    writeFileSync(f.lockPath, `${JSON.stringify({
+      schema_version: 1,
+      owner_token: 'first-owner',
+      owner_pid: process.pid,
+      acquired_at: new Date().toISOString(),
+      lease_expires_at: new Date(Date.now() + 60_000).toISOString(),
+    })}\n`, 'utf8');
+    const originalLstat = f.store.fs.lstatSync;
+    let armed = false;
+    let replaced = false;
+    let lockLstats = 0;
+    const store = createFileReceiptStore({
+      ledgerPath: f.ledgerPath,
+      checkpointPath: f.checkpointPath,
+      legacyPath: f.legacyPath,
+      lockPath: f.lockPath,
+      lockWaitMs: 5000,
+      fsAdapter: {
+        lstatSync(path) {
+          const stat = originalLstat(path);
+          if (armed && path === f.lockPath) lockLstats += 1;
+          if (armed && path === f.lockPath && lockLstats === 2 && !replaced) {
+            replaced = true;
+            rmSync(path);
+            writeFileSync(path, `${JSON.stringify({
+              schema_version: 1,
+              owner_token: 'expired-replacement',
+              owner_pid: 999_999_999,
+              acquired_at: '2020-01-01T00:00:00.000Z',
+              lease_expires_at: '2020-01-01T00:00:01.000Z',
+            })}\n`, 'utf8');
+            const replacement = originalLstat(path);
+            return statWithInode(replacement, replacement.ino + 1024);
+          }
+          return stat;
+        },
+      },
+    });
+    armed = true;
+
+    const receipt = appendReceipt({ store, draft: draft('replacement-retry') });
+    assert.equal(replaced, true);
+    assert.equal(receipt.record.sequence, 1);
+  } finally { cleanup(f); }
+});
+
+test('[req:PROV-7] lock acquisition retries an opened lock unlinked before fstat', () => {
+  const f = fixture();
+  try {
+    writeFileSync(f.lockPath, `${JSON.stringify({
+      schema_version: 1,
+      owner_token: 'first-owner',
+      owner_pid: process.pid,
+      acquired_at: new Date().toISOString(),
+      lease_expires_at: new Date(Date.now() + 60_000).toISOString(),
+    })}\n`, 'utf8');
+    const originalFstat = f.store.fs.fstatSync;
+    let armed = false;
+    let replaced = false;
+    const store = createFileReceiptStore({
+      ledgerPath: f.ledgerPath,
+      checkpointPath: f.checkpointPath,
+      legacyPath: f.legacyPath,
+      lockPath: f.lockPath,
+      lockWaitMs: 5000,
+      fsAdapter: {
+        fstatSync(descriptor) {
+          if (armed && !replaced) {
+            replaced = true;
+            rmSync(f.lockPath);
+            writeFileSync(f.lockPath, `${JSON.stringify({
+              schema_version: 1,
+              owner_token: 'expired-replacement',
+              owner_pid: 999_999_999,
+              acquired_at: '2020-01-01T00:00:00.000Z',
+              lease_expires_at: '2020-01-01T00:00:01.000Z',
+            })}\n`, 'utf8');
+          }
+          return originalFstat(descriptor);
+        },
+      },
+    });
+    armed = true;
+
+    const receipt = appendReceipt({ store, draft: draft('unlinked-descriptor-retry') });
+    assert.equal(replaced, true);
+    assert.equal(receipt.record.sequence, 1);
   } finally { cleanup(f); }
 });
 

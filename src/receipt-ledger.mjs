@@ -29,6 +29,7 @@ const CHECKPOINT_KEYS = [
 ];
 const DEFAULT_LOCK_LEASE_MS = 30_000;
 const DEFAULT_LOCK_WAIT_MS = 5_000;
+const MAX_LOCK_IDENTITY_CHANGE_RETRIES = 64;
 const DIRECTORY_FSYNC_UNSUPPORTED = new Set([
   'EISDIR', 'EINVAL', 'ENOSYS', 'ENOTSUP', 'EOPNOTSUPP',
 ]);
@@ -317,7 +318,10 @@ function assertSafeFile(store, targetPath, { allowMissing = true } = {}) {
   return { exists: true, target };
 }
 
-function secureReadSnapshot(store, targetPath, { encoding = 'utf8' } = {}) {
+function secureReadSnapshot(store, targetPath, {
+  encoding = 'utf8',
+  allowIdentityChange = false,
+} = {}) {
   const checked = assertSafeFile(store, targetPath);
   if (!checked.exists) {
     return {
@@ -333,16 +337,29 @@ function secureReadSnapshot(store, targetPath, { encoding = 'utf8' } = {}) {
     const opened = store.fs.fstatSync(descriptor);
     const linked = store.fs.lstatSync(checked.target);
     const real = resolve(store.fs.realpathSync(checked.target));
-    if (!opened.isFile() || opened.nlink !== 1
-      || opened.dev !== linked.dev || opened.ino !== linked.ino
-      || !pathInside(store.rootPath, real)) {
+    if (!opened.isFile() || !pathInside(store.rootPath, real)) {
+      throw corrupt(`Arquivo do ${storePathLabel(store, checked.target)} foi trocado ou escapou durante a abertura.`);
+    }
+    if (opened.nlink !== 1) {
+      if (allowIdentityChange && opened.nlink === 0) {
+        return { exists: true, changed: true, content: '', identity: null };
+      }
+      throw corrupt(`Arquivo do ${storePathLabel(store, checked.target)} foi trocado ou escapou durante a abertura.`);
+    }
+    if (!sameFileIdentity(opened, linked)) {
+      if (allowIdentityChange) {
+        return { exists: true, changed: true, content: '', identity: null };
+      }
       throw corrupt(`Arquivo do ${storePathLabel(store, checked.target)} foi trocado ou escapou durante a abertura.`);
     }
     const content = encoding === null
       ? store.fs.readFileSync(descriptor)
       : store.fs.readFileSync(descriptor, encoding);
     const after = store.fs.lstatSync(checked.target);
-    if (opened.dev !== after.dev || opened.ino !== after.ino || after.nlink !== 1) {
+    if (!sameFileIdentity(opened, after) || after.nlink !== 1) {
+      if (allowIdentityChange && after.nlink === 1) {
+        return { exists: true, changed: true, content: '', identity: null };
+      }
       throw corrupt(`Arquivo do ${storePathLabel(store, checked.target)} foi trocado durante a leitura.`);
     }
     return {
@@ -415,16 +432,17 @@ function atomicWrite(store, targetPath, content) {
   }
 }
 
-function lockState(store) {
+function lockState(store, { allowIdentityChange = false } = {}) {
   let snapshot;
   try {
-    snapshot = secureReadSnapshot(store, store.lockPath);
+    snapshot = secureReadSnapshot(store, store.lockPath, { allowIdentityChange });
   } catch (error) {
     if (error?.code === 'ENOENT') {
       return { status: 'missing', exists: false, content: '', identity: null };
     }
     throw error;
   }
+  if (snapshot.changed) return { status: 'changed', ...snapshot };
   if (!snapshot.exists) return { status: 'missing', ...snapshot };
   const raw = snapshot.content;
   if (!raw) return { status: 'publishing', ...snapshot };
@@ -445,7 +463,9 @@ function lockState(store) {
 }
 
 function sameFileIdentity(left, right) {
-  return Boolean(left && right && left.dev === right.dev && left.ino === right.ino);
+  if (!left || !right || left.ino !== right.ino) return false;
+  if (left.dev === right.dev) return true;
+  return process.platform === 'win32' && (left.dev === 0 || right.dev === 0);
 }
 
 function sameLockSnapshot(expected, observed) {
@@ -494,6 +514,7 @@ function acquireLock(store) {
   const target = resolve(store.lockPath);
   const token = randomUUID();
   const deadline = store.now() + store.lockWaitMs;
+  let identityChangeRetries = 0;
   for (;;) {
     // Validate the parent chain before the atomic create. O_EXCL/O_NOFOLLOW
     // makes a replacement race fail closed instead of following a symlink.
@@ -510,9 +531,17 @@ function acquireLock(store) {
       descriptor = store.fs.openSync(target, flags, 0o600);
     } catch (error) {
       if (error?.code !== 'EEXIST') throw error;
-      const state = lockState(store);
+      const state = lockState(store, { allowIdentityChange: true });
       const now = store.now();
       if (state.status === 'missing') continue;
+      if (state.status === 'changed') {
+        identityChangeRetries += 1;
+        if (now >= deadline || identityChangeRetries > MAX_LOCK_IDENTITY_CHANGE_RETRIES) {
+          throw busyLock({ lock: 'changed' });
+        }
+        sleepSync(Math.min(5, Math.max(1, deadline - now)));
+        continue;
+      }
       if (state.status === 'invalid') throw busyLock();
       if (state.status === 'publishing') {
         const safeAfter = state.identity.mtime_ms + store.lockLeaseMs;
