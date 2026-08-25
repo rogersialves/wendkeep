@@ -5,6 +5,7 @@ import { resolveCommandActiveContext } from './active-context-runtime.mjs';
 import { buildTaskContractSnapshot, evaluateTaskContracts } from './task-contracts.mjs';
 import { claimTaskLease, releaseTaskLease } from './task-leases.mjs';
 import { findProjectRoot } from '../packages/harness/src/sensors-core.mjs';
+import { resolveHookOperatingProfile } from '../hooks/operating-profile-runtime.mjs';
 
 const HELP = `wendkeep task <list|show|evaluate|claim|release> [task-id]
 
@@ -46,9 +47,12 @@ function commandState(argv) {
   if (explicitChange && context.change_slug && explicitChange !== context.change_slug) {
     throw Object.assign(new Error('requested change differs from active context'), { code: 'TASK_CHANGE_CONTEXT_MISMATCH' });
   }
+  const runtime = resolveHookOperatingProfile({
+    input: { cwd: projectRoot, session_id: identity.sessionId || sessionId },
+  });
   return {
     json, vaultBase, projectRoot, sessionId: identity.sessionId || sessionId,
-    identity, context, changeSlug,
+    identity, context, changeSlug, profile: runtime.profile,
   };
 }
 

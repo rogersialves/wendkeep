@@ -119,6 +119,19 @@ vermelho pedindo por ele — e nunca escreva um teste que passaria sob a impleme
 3. **Green** — o código mínimo pra passar.
 4. **Refactor** — limpe com os verdes te protegendo.
 
+## Atestação causal no WendKeep
+
+Quando a tarefa declarar \`[tdd]\`, registre o ciclo no mesmo contexto causal:
+
+1. \`wendkeep tdd red <task> --requirement <ID> --test <path> --command "<cmd>" --session <id>\`.
+2. Confirme \`red-observed\`; \`invalid\` por teste já verde, import, sintaxe ou configuração não prova RED.
+3. Implemente e rode \`wendkeep tdd green <task> --command "<cmd>" --session <id>\`.
+4. Depois de refactor ou commit, consulte \`tdd status\` e revalide o GREEN se ficou stale.
+
+GREEN de outra worktree/tarefa/requisito não fecha. Mudança de path do teste exige revisão. Waiver
+somente com \`--reason\` e \`--authority\` humanos explícitos. A atestação não substitui cobertura,
+mutação, sensores ou revisão independente.
+
 ## Derive do spec, não do código
 
 Escreva a asserção a partir do *critério de aceite* da spec efetiva
@@ -381,6 +394,19 @@ would pass under the wrong implementation.
 2. **See it fail** for the right reason (not an import/typo).
 3. **Green** — the minimal code to pass.
 4. **Refactor** with the greens protecting you.
+
+## Causal attestation in WendKeep
+
+When a task declares \`[tdd]\`, record the cycle in the same causal context:
+
+1. \`wendkeep tdd red <task> --requirement <ID> --test <path> --command "<cmd>" --session <id>\`.
+2. Confirm \`red-observed\`; \`invalid\` from an already-green test, import, syntax, or configuration does not prove RED.
+3. Implement and run \`wendkeep tdd green <task> --command "<cmd>" --session <id>\`.
+4. After a refactor or commit, check \`tdd status\` and revalidate GREEN when it is stale.
+
+GREEN from another worktree/task/requirement cannot close. A changed test path requires review. A
+waiver requires explicit human \`--reason\` and \`--authority\`. Attestation does not replace
+coverage, mutation, sensors, or independent review.
 
 ## Derive from the spec, not the code
 Write assertions from the effective requirement (\`wendkeep spec effective --change <slug>\`), not by reading the

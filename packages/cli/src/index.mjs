@@ -66,6 +66,8 @@ Usage:
                            Repair revalidates orphan/removed contexts or expired request leases without deleting history.
   wendkeep task <sub>          Typed task contracts: list | show | evaluate | claim | release.
                            Resolves the change from the causal active context; supports --session/--change/--json.
+  wendkeep tdd <sub>           Causal TDD attestations: red | green | status | waive.
+                           Binds task, requirement, test paths, worktree and work session.
   wendkeep change <sub>        Change lifecycle: new [--simple|--guide] | use | bind <slug> --session <id> | continue | list | show |
                            status | done <id> | undone <id> | diff | archive [--force] | abandon | relink | backlink.
                            --session <id> selects the causal active_context for implicit change operations.
@@ -297,6 +299,11 @@ async function main(argv) {
     case 'task': {
       const { runTask } = await import('../../../src/task.mjs');
       process.exit(runTask(rest));
+      break;
+    }
+    case 'tdd': {
+      const { runTdd } = await import('../../../src/tdd.mjs');
+      process.exit(runTdd(rest));
       break;
     }
     case 'session': {
