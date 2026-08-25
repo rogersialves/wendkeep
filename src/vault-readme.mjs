@@ -49,9 +49,9 @@ export function renderVaultReadme({ projectName, vaultPath, withMcp = true, loca
   const table = [en ? '| Folder | Contents |' : '| Pasta | Conteúdo |', '| --- | --- |', ...rows].join('\n');
 
   if (en) {
-    const mcpIntro = withMcp ? ', and read/written by the **MCPVault** MCP server' : '';
+    const mcpIntro = withMcp ? ', and queried through the native semantic **WendKeep MCP** server' : '';
     const access = [`- **Obsidian:** open this folder with "Open folder as vault" → \`${vaultPath}\``];
-    if (withMcp) access.push('- **Agent (MCP):** the `wendkeep-vault` server (MCPVault) points at this vault (set in `.mcp.json`), giving the agent read/write on the notes.');
+    if (withMcp) access.push('- **Agent (MCP):** the native `wendkeep-vault` server points at this vault (set in `.mcp.json`), exposing bounded semantic reads and capability-gated writes without arbitrary filesystem access.');
     access.push('- **Hooks:** Codex and Claude Code call `npx --no-install wendkeep hook <name>`; the vault is discovered from the project-local `.wendkeep.json` binding and checked against `.brain/PROJECT.json`.');
     return `# Obsidian vault — ${name}
 
@@ -81,9 +81,9 @@ ${access.join('\n')}
 `;
   }
 
-  const mcpIntro = withMcp ? ', e lida/escrita pelo MCP server **MCPVault**' : '';
+  const mcpIntro = withMcp ? ', e consultada pelo servidor semântico nativo **WendKeep MCP**' : '';
   const access = [`- **Obsidian:** abra esta pasta com "Open folder as vault" → \`${vaultPath}\``];
-  if (withMcp) access.push('- **Agente (MCP):** o servidor `wendkeep-vault` (MCPVault) é apontado para este vault pelo `wendkeep init` (em `.mcp.json`), dando ao agente leitura/escrita das notas.');
+  if (withMcp) access.push('- **Agente (MCP):** o servidor nativo `wendkeep-vault` aponta para este vault pelo `wendkeep init` (em `.mcp.json`), expondo leituras semânticas bounded e writes por capability, sem acesso arbitrário ao filesystem.');
   access.push('- **Hooks:** Codex e Claude Code chamam `npx --no-install wendkeep hook <name>`; o vault é descoberto pelo vínculo local `.wendkeep.json` e validado contra `.brain/PROJECT.json`.');
   return `# Vault Obsidian — ${name}
 

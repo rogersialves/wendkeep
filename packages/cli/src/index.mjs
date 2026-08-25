@@ -28,7 +28,7 @@ Usage:
     --vault <path>         Obsidian vault folder (default: <project>/.<project-name>-vault).
     --project <path>       Project root to wire (default: current directory).
     --profile <name>       Operating profile: OFF, FLOW, GUIDE, GOVERN (default), or ASSURE.
-    --no-mcp               Do not add the mcpvault MCP server to .mcp.json.
+    --no-mcp               Do not add the native WendKeep MCP server to .mcp.json.
     --companions <csv>     Companion plugins/MCP to pin: context-mode,caveman,understand-anything
                            (default: none — opt in explicitly). dotcontext is legacy — the native a2 loop replaces it.
     --no-companions        Skip companion plugins/MCP entirely.
@@ -51,6 +51,9 @@ Usage:
                            · --vscode-worktree-tasks.
 
   wendkeep doctor [--vault P]  Health check. --scope core|runtime · --strict for CI/release.
+  wendkeep mcp <serve|config>  Native semantic MCP over stdio, or client config generation.
+                           serve: --vault P · --timeout-ms N.
+                           config: --client generic|claude|codex|cursor · --vault P.
   wendkeep observer <sub>     Local multi-project Observer: serve | register | publish | reconcile | status.
   wendkeep worktree create <slug> [--base ref] [--branch name] [--open vscode|none] [--json]
   wendkeep worktree list [--json]
@@ -213,6 +216,9 @@ async function main(argv) {
     } else if (cmd === 'context') {
       const { CONTEXT_HELP } = await import('../../../src/context.mjs');
       process.stdout.write(CONTEXT_HELP);
+    } else if (cmd === 'mcp') {
+      const { MCP_HELP } = await import('../../../src/mcp.mjs');
+      process.stdout.write(MCP_HELP);
     } else {
       process.stdout.write(HELP);
     }
@@ -226,7 +232,7 @@ async function main(argv) {
     // `sync` starts with `init` and resolves the freshly bound Vault itself. Pre-resolving
     // here would prevent that repair step from reporting a corrupt binding as its own
     // first-stage failure (and could never make it as far as the guarded init).
-    && !['init', 'sync', 'worktree', 'hook', 'observer', '--version', '-v', '--help', '-h', 'help'].includes(cmd)) {
+    && !['init', 'sync', 'worktree', 'hook', 'observer', 'mcp', '--version', '-v', '--help', '-h', 'help'].includes(cmd)) {
     await preferProjectVault(rest);
   }
   switch (cmd) {
@@ -247,6 +253,12 @@ async function main(argv) {
       const { runObserver } = await import('../../../src/observer.mjs');
       const observerExitCode = await runObserver(rest);
       if (rest[0] !== 'serve') process.exit(observerExitCode);
+      break;
+    }
+    case 'mcp': {
+      const { runMcp } = await import('../../../src/mcp.mjs');
+      const mcpExitCode = await runMcp(rest);
+      if (mcpExitCode) process.exit(mcpExitCode);
       break;
     }
     case 'worktree': {

@@ -4,6 +4,32 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.82.0] — 2026-08-25
+
+### Added
+
+- **MCP semântico nativo.** `wendkeep mcp serve` oferece tools bounded para projeto, contexto,
+  memória, changes, specs, tarefas, handoff, evidência e Observer por JSON-RPC/stdio, com schemas
+  versionados, paginação, budgets, timeout, cancelamento, redaction e compatibilidade Core com
+  Node 18; Observer SQL permanece capability separada em Node 22.13+.
+- **Effects, capabilities e writes causais.** Um catálogo versionado com integridade SHA-256
+  distingue read/write/destructive; reads conhecidas deixam de ser bloqueadas apenas pelo prefixo
+  MCP, enquanto desconhecidas e manifestos inválidos falham fechado. Writes exigem capability,
+  ator, sessão, active context, lease e motivo, revalidam o binding causal e reutilizam os gates da
+  CLI; delivery, merge, push, tag, publicação e exclusão ficam fora da superfície padrão.
+- **Auditoria e configuração multi-cliente.** O ledger local registra somente metadados de chamada,
+  nunca argumentos/payload; `wendkeep mcp config` gera configuração para Claude, Codex, Cursor e
+  clientes genéricos, e o tarball instalado prova o handshake e a consulta semântica.
+
+### Changed
+
+- **MCP principal reproduzível.** `init` substitui o servidor de Vault executado com `@latest` por
+  `npx --no-install wendkeep mcp serve --vault <vault>`, preservando o merge não destrutivo de
+  `.mcp.json`; README, arquitetura e guias PT-BR/EN documentam tools, gates, limites e recovery.
+- **Bootstrap stdio desacoplado do checkout.** `mcp serve` inicia sem exigir um Vault no cwd; quando
+  `--vault` não é informado, cada tool resolve e audita somente o binding do `project_root` declarado,
+  preservando isolamento multi-projeto e permitindo handshake empacotado em CI/editores.
+
 ## [0.80.1] — 2026-08-24
 
 ### Fixed

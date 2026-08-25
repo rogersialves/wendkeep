@@ -209,7 +209,7 @@ function assertMcpRuntimeOwnership(source) {
   for (const name of MCP_KERNEL_SYMBOLS) {
     assert.ok(declarations.has(name), `MCP config kernel must own ${name}`);
   }
-  for (const value of ['wendkeep-vault', 'npx', '@bitbonsai/mcpvault@latest']) {
+  for (const value of ['wendkeep-vault', 'npx', '--no-install', 'wendkeep', 'mcp', 'serve']) {
     assert.ok(stringValues.has(value), `MCP config kernel must own ${value}`);
   }
   assert.ok(hasSelectionLoop, 'MCP config kernel must own descriptor selection');
@@ -424,14 +424,17 @@ function ownedKernelNames(source, sourceType) {
   return names;
 }
 
-function assertMcpSourceSet(files) {
+function assertMcpSourceSet(files, { nativeRuntime = false } = {}) {
   assert.ok(files.length > 0, 'MCP source inventory must not be empty');
   const owners = new Map([...MCP_KERNEL_SYMBOLS].map((name) => [name, []]));
   for (const { absolute, source } of files) {
     assert.ok(isWithin(MCP_WORKSPACE, absolute), `MCP source must stay inside its workspace: ${absolute}`);
     const sourceType = absolute.endsWith('.cjs') ? 'script' : 'module';
-    assertAllowedMcpImports(source, { sourceType, fromFile: absolute });
-    assertNoImportPhaseEffects(source, { sourceType });
+    const isConfigKernel = canonicalPhysicalPath(absolute) === canonicalPhysicalPath(MCP_CONFIG);
+    if (!nativeRuntime || isConfigKernel) {
+      assertAllowedMcpImports(source, { sourceType, fromFile: absolute });
+      assertNoImportPhaseEffects(source, { sourceType });
+    }
     assertSiblingAdapterIsolation('mcp', source, absolute);
     for (const name of ownedKernelNames(source, sourceType)) {
       owners.get(name).push(canonicalPhysicalPath(absolute));
@@ -625,10 +628,11 @@ test('[req:MOD-17] MCP ownership and dependency gates reject delegated or cross-
   );
 });
 
-test('[req:MOD-17] MCP configuration kernel is import-inert and adapter-independent', () => {
+test('[req:MOD-17] MCP configuration kernel stays import-inert beside the explicit native runtime', () => {
   assertMcpSourceSet(
     workspaceSourceFiles(MCP_WORKSPACE)
       .map((absolute) => ({ absolute, source: readFileSync(absolute, 'utf8') })),
+    { nativeRuntime: true },
   );
 
   const moduleUrl = pathToFileURL(MCP_INDEX).href;
@@ -1330,7 +1334,7 @@ test('[req:MOD-18] MCP kernel preserves the canonical transport and selects desc
   assert.deepEqual(mcpServerEntry('C:\\Vault'), {
     type: 'stdio',
     command: 'npx',
-    args: ['-y', '@bitbonsai/mcpvault@latest', 'C:\\Vault'],
+    args: ['--no-install', 'wendkeep', 'mcp', 'serve', '--vault', 'C:\\Vault'],
   });
 
   const first = { type: 'stdio', command: 'first', args: [] };
@@ -1374,7 +1378,7 @@ test('[req:MOD-18] MCP merge is immutable, idempotent, and preserves existing co
   assert.deepEqual(merged.mcpServers[MCP_SERVER_KEY], {
     type: 'stdio',
     command: 'npx',
-    args: ['-y', '@bitbonsai/mcpvault@latest', 'C:\\Vault'],
+    args: ['--no-install', 'wendkeep', 'mcp', 'serve', '--vault', 'C:\\Vault'],
   });
   assert.deepEqual(merged.mcpServers.companion, options.servers.companion);
   assert.deepEqual(mergeMcpConfig(merged, options), merged, 'merge must be idempotent');
