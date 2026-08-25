@@ -1,6 +1,7 @@
 import { realpathSync } from 'node:fs';
 import { isAbsolute, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { resolveMcpToolEffect } from '../packages/mcp/src/effects.mjs';
 
 const TOOL_CWD_FIELDS = ['cwd', 'workdir', 'work_dir', 'working_directory', 'directory'];
 const SAFE_GIT_COMMANDS = new Set([
@@ -396,7 +397,7 @@ export function concurrentScopeConflicts(expectedScope, activeSessions = [], cur
 
 function toolIsMutable(input) {
   const name = input?.tool_name || input?.toolName || '';
-  if (/^mcp__/i.test(name)) return true;
+  if (/^mcp__/i.test(name)) return resolveMcpToolEffect(name).effect !== 'read';
   return MUTABLE_TOOL_NAMES.has(name) || /^mcp__.*(?:write|edit|delete|move|rename|apply)/i.test(name);
 }
 

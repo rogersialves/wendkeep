@@ -4,8 +4,29 @@ export function mcpServerEntry(vaultPath) {
   return {
     type: 'stdio',
     command: 'npx',
-    args: ['-y', '@bitbonsai/mcpvault@latest', vaultPath],
+    args: ['--no-install', 'wendkeep', 'mcp', 'serve', '--vault', vaultPath],
   };
+}
+
+function tomlString(value) {
+  return JSON.stringify(String(value));
+}
+
+export function renderMcpClientConfig(client, vaultPath) {
+  const selected = String(client || 'generic').toLowerCase();
+  const entry = mcpServerEntry(vaultPath);
+  if (selected === 'codex') {
+    return [
+      `[mcp_servers.${MCP_SERVER_KEY}]`,
+      `command = ${tomlString(entry.command)}`,
+      `args = [${entry.args.map(tomlString).join(', ')}]`,
+      '',
+    ].join('\n');
+  }
+  if (!['generic', 'claude', 'cursor'].includes(selected)) {
+    throw Object.assign(new Error(`unsupported MCP client: ${client}`), { code: 'MCP_CLIENT_INVALID' });
+  }
+  return `${JSON.stringify({ mcpServers: { [MCP_SERVER_KEY]: entry } }, null, 2)}\n`;
 }
 
 export function selectMcpServers(descriptors, skipIds = []) {

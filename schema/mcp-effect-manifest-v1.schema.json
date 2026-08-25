@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "wendkeep://schema/mcp-effect-manifest-v1",
+  "title": "WendKeep MCP effect manifest v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "catalog_version", "server_aliases", "tools", "integrity"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "catalog_version": { "type": "string", "format": "date" },
+    "server_aliases": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" }
+    },
+    "tools": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "effect", "capability", "effect_version", "input_schema", "output_schema"],
+        "properties": {
+          "name": { "type": "string", "pattern": "^wendkeep_[a-z0-9_]+$" },
+          "effect": { "enum": ["read", "write", "destructive"] },
+          "capability": { "type": "string", "pattern": "^[a-z]+:[a-z]+$" },
+          "effect_version": { "const": 1 },
+          "input_schema": { "const": "wendkeep://schema/mcp-tool-input-v1" },
+          "output_schema": { "const": "wendkeep://schema/mcp-tool-result-v1" }
+        }
+      }
+    },
+    "integrity": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" }
+  }
+}

@@ -86,8 +86,9 @@ cofre efetivamente selecionado.
 
 Quando MCP está habilitado, o `init` preserva propriedades e servidores existentes em `.mcp.json`
 e adiciona `wendkeep-vault`. Se o JSON existente for inválido, o arquivo original permanece byte
-a byte intacto e a proposta reconciliada é gravada em `.mcp.json.new`. Desde a versão 0.65, essa
-composição pertence ao kernel MCP privado, sem alterar comandos, flags ou a superfície npm pública.
+a byte intacto e a proposta reconciliada é gravada em `.mcp.json.new`. A entrada executa o servidor
+semântico instalado com `npx --no-install wendkeep mcp serve --vault <vault>`, sem download
+dinâmico `@latest`. Veja [MCP nativo](mcp.md) para tools, gates, limites e snippets de clientes.
 
 As regras puras que projetam os hooks de Claude/Codex e interpretam envelopes, transcripts, uso e
 identidade pertencem ao workspace privado `@wendkeep/integrations`. As fachadas históricas mantêm

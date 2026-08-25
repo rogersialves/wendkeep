@@ -1,6 +1,6 @@
 // `wendkeep init` — cross-platform replacement for setup-vault.ps1.
 // Creates the vault taxonomy + provider-neutral project binding, NON-DESTRUCTIVELY
-// merges the session hooks into .claude/settings.json, and adds the mcpvault server to
+// merges the session hooks into .claude/settings.json, and adds the native MCP server to
 // .mcp.json. Idempotent: re-running only adds what is missing.
 import { spawnSync } from 'node:child_process';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
@@ -516,7 +516,7 @@ export async function runInit(argv) {
   log(M.header);
   log(`${M.lProject}: ${projectPath}`);
   log(`${M.lVault}: ${vaultPath}`);
-  log(`${M.lMcp}: ${args.mcp ? 'mcpvault (wendkeep-vault)' : M.skipped}`);
+  log(`${M.lMcp}: ${args.mcp ? 'wendkeep native (wendkeep-vault)' : M.skipped}`);
   log(`${M.lCompanions}: ${companions.length ? companions.join(', ') : M.none}`);
   log(`${M.lColors}: ${args.noColors ? M.skipped : M.colorsOn}\n`);
 
@@ -640,7 +640,7 @@ export async function runInit(argv) {
   log(M.codexTrust);
 
   // 3. .mcp.json --------------------------------------------------------------
-  // Written when mcpvault is wanted OR a selected companion ships an MCP server.
+  // Written when the native WendKeep MCP is wanted OR a selected companion ships an MCP server.
   const companionMcp = companionMcpPatch(companions, skipMcp);
   if (args.mcp || Object.keys(companionMcp).length) {
     const mcpPath = join(projectPath, '.mcp.json');

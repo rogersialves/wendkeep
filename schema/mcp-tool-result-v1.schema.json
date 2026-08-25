@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "wendkeep://schema/mcp-tool-result-v1",
+  "title": "WendKeep MCP tool result v1",
+  "type": "object",
+  "required": ["schema_version"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "items": { "type": "array" },
+    "next_cursor": { "type": "string" },
+    "error": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "message", "retryable"],
+      "properties": {
+        "code": { "type": "string", "pattern": "^MCP_[A-Z0-9_]+$" },
+        "message": { "type": "string", "maxLength": 500 },
+        "retryable": { "type": "boolean" }
+      }
+    }
+  }
+}
