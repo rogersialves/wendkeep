@@ -19,7 +19,11 @@ const GUIDE_SLUGS = [
   'sessions-and-import.md', 'notes-and-knowledge.md', 'costs-and-observability.md',
   'maintenance-and-diagnostics.md', 'verify.md', 'memory-migration.md',
   'retroactive-import.md', 'observer.md', 'worktrees.md',
-  'context.md', 'portable.md', 'sync-protocol.md',
+  'context.md',
+  'portable.md',
+  'sync-protocol.md',
+  'mcp.md',
+  'tdd.md',
 ];
 
 function filesUnder(dir, base = dir) {
@@ -170,6 +174,9 @@ test('[req:OP-9] npm pack leva módulos de profile/FLOW/delivery, docs bilíngue
       'src/sync-adapters.mjs',
       'src/sync-protocol-cli.mjs',
       'packages/mcp/src/sync.mjs',
+      'src/tdd.mjs',
+      'src/tdd-attestation.mjs',
+      'src/tdd-attestation-store.mjs',
       'hooks/flow-core.mjs',
       'hooks/operating-profile-task-store.mjs',
       'hooks/vault-path-safety.mjs',
@@ -177,6 +184,15 @@ test('[req:OP-9] npm pack leva módulos de profile/FLOW/delivery, docs bilíngue
       'web/observer/styles.css',
       'web/observer/app.mjs',
       'web/observer/favicon.svg',
+      'packages/mcp/src/audit.mjs',
+      'packages/mcp/src/cli.mjs',
+      'packages/mcp/src/effects.mjs',
+      'packages/mcp/src/executor.mjs',
+      'packages/mcp/src/server.mjs',
+      'packages/mcp/src/stdio.mjs',
+      'schema/mcp-effect-manifest-v1.schema.json',
+      'schema/mcp-tool-input-v1.schema.json',
+      'schema/mcp-tool-result-v1.schema.json',
     ]) {
       assert.ok(
         existsSync(join(pkg, ...modulePath.split('/'))),

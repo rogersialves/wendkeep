@@ -14,6 +14,19 @@ vermelho pedindo por ele — e nunca escreva um teste que passaria sob a impleme
 3. **Green** — o código mínimo pra passar.
 4. **Refactor** — limpe com os verdes te protegendo.
 
+## Atestação causal no WendKeep
+
+Quando a tarefa declarar `[tdd]`, registre o ciclo no mesmo contexto causal:
+
+1. `wendkeep tdd red <task> --requirement <ID> --test <path> --command "<cmd>" --session <id>`.
+2. Confirme `red-observed`; `invalid` por teste já verde, import, sintaxe ou configuração não prova RED.
+3. Implemente e rode `wendkeep tdd green <task> --command "<cmd>" --session <id>`.
+4. Depois de refactor ou commit, consulte `tdd status` e revalide o GREEN se ficou stale.
+
+GREEN de outra worktree/tarefa/requisito não fecha. Mudança de path do teste exige revisão. Waiver
+somente com `--reason` e `--authority` humanos explícitos. A atestação não substitui cobertura,
+mutação, sensores ou revisão independente.
+
 ## Derive do spec, não do código
 
 Escreva a asserção a partir do *critério de aceite* da spec efetiva

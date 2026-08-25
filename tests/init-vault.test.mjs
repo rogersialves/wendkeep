@@ -202,7 +202,7 @@ test('renderVaultReadme: names the real agents, not NutriGym/Copilot specifics',
 
 test('renderVaultReadme: includes MCP by default', () => {
   const md = renderVaultReadme({ projectName: 'AcmeApp', vaultPath: '/x' });
-  assert.match(md, /MCPVault/);
+  assert.match(md, /WendKeep MCP/);
   assert.match(md, /wendkeep-vault/);
 });
 
@@ -353,7 +353,7 @@ test('[req:MOD-18] init preserves invalid .mcp.json bytes and writes the canonic
     assert.equal(proposed.mcpServers['wendkeep-vault'].command, 'npx');
     assert.deepEqual(
       proposed.mcpServers['wendkeep-vault'].args,
-      ['-y', '@bitbonsai/mcpvault@latest', vaultDir],
+      ['--no-install', 'wendkeep', 'mcp', 'serve', '--vault', vaultDir],
     );
   } finally {
     rmSync(parent, { recursive: true, force: true });

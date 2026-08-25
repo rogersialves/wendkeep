@@ -13,6 +13,7 @@ import {
   setSessionTaskOperatingProfile,
 } from '../hooks/operating-profile-task-store.mjs';
 import { resolveCommandActiveContext } from './active-context-runtime.mjs';
+import { realpathSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { findProjectBinding, resolveProjectVault, updateProjectBinding } from './project-vault.mjs';
 
@@ -77,7 +78,11 @@ function validateArgv(argv) {
 }
 
 function canonicalPath(value) {
-  const path = resolve(value).replaceAll('\\', '/');
+  const absolute = resolve(value);
+  let canonical = absolute;
+  try { canonical = realpathSync.native(absolute); }
+  catch { /* Preserve comparison support for valid paths that do not exist yet. */ }
+  const path = canonical.replaceAll('\\', '/');
   return process.platform === 'win32' ? path.toLowerCase() : path;
 }
 
@@ -114,8 +119,16 @@ function context(argv) {
   catch (error) {
     if (!explicitVault) throw error;
   }
-  const matchingBinding = binding && canonicalPath(binding.base) === canonicalPath(resolved.base) ? binding : null;
-  const projectConfig = resolved.config || matchingBinding?.config || {};
+  let canonicalBinding = null;
+  if (resolved.source === 'worktree-registry' && resolved.projectRoot) {
+    canonicalBinding = findProjectBinding(resolved.projectRoot);
+  }
+  const candidateBinding = canonicalBinding || binding;
+  const matchingBinding = candidateBinding
+    && canonicalPath(candidateBinding.base) === canonicalPath(resolved.base)
+    ? candidateBinding
+    : null;
+  const projectConfig = matchingBinding?.config || resolved.config || {};
   return {
     resolved: {
       ...resolved,

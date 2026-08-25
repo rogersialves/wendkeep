@@ -86,7 +86,9 @@ initialized vault. Existing files are merged or preserved, and the selected vaul
 When MCP is enabled, `init` preserves existing properties and servers in `.mcp.json` and adds
 `wendkeep-vault`. If the existing JSON is invalid, the original file remains byte-for-byte intact
 and the reconciled proposal is written to `.mcp.json.new`. Since version 0.65, this composition is
-owned by the private MCP kernel without changing commands, flags, or the public npm surface.
+owned by the private MCP kernel. The entry runs the installed semantic server through
+`npx --no-install wendkeep mcp serve --vault <vault>`, with no dynamic `@latest` download. See
+[Native MCP](mcp.md) for tools, gates, limits, and client snippets.
 
 Pure rules that project Claude/Codex hooks and interpret envelopes, transcripts, usage, and
 identity belong to the private `@wendkeep/integrations` workspace. Historical facades retain

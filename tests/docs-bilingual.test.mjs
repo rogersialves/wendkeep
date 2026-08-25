@@ -24,6 +24,8 @@ const GUIDES = [
   'context.md',
   'portable.md',
   'sync-protocol.md',
+  'mcp.md',
+  'tdd.md',
 ];
 const GUIDE_DIR = {
   pt: join(ROOT, 'docs', 'pt-BR', 'commands'),
@@ -47,6 +49,7 @@ const README_GROUPS = [
   { pt: 'Contexto ativo', en: 'Active context', guide: 'context.md' },
   { pt: 'Estado portátil', en: 'Portable state', guide: 'portable.md' },
   { pt: 'Sync local-first', en: 'Local-first sync', guide: 'sync-protocol.md' },
+  { pt: 'MCP nativo', en: 'Native MCP', guide: 'mcp.md' },
   { pt: 'Perfis de operação', en: 'Operating profiles', guide: 'operating-profiles.md' },
   { pt: 'Changes e verificação', en: 'Changes and verification', guide: 'changes-and-verification.md' },
   { pt: 'Memória compartilhada', en: 'Shared memory', guide: 'memory.md' },
@@ -56,7 +59,7 @@ const README_GROUPS = [
   { pt: 'Manutenção e diagnóstico', en: 'Maintenance and diagnostics', guide: 'maintenance-and-diagnostics.md' },
   { pt: 'Observer local', en: 'Local Observer', guide: 'observer.md' },
 ];
-const DEEP_GUIDES = ['verify.md', 'memory-migration.md', 'retroactive-import.md'];
+const DEEP_GUIDES = ['verify.md', 'tdd.md', 'memory-migration.md', 'retroactive-import.md'];
 const GUIDE_FOR_FAMILY = new Map([
   ['wendkeep init', 'getting-started.md'], ['wendkeep sync', 'getting-started.md'],
   ['wendkeep worktree create', 'worktrees.md'], ['wendkeep worktree list', 'worktrees.md'],
@@ -69,6 +72,7 @@ const GUIDE_FOR_FAMILY = new Map([
   ['wendkeep change', 'changes-and-verification.md'], ['wendkeep theme sync', 'maintenance-and-diagnostics.md'],
   ['wendkeep session', 'sessions-and-import.md'], ['wendkeep spec', 'changes-and-verification.md'],
   ['wendkeep sensors', 'changes-and-verification.md'], ['wendkeep task', 'changes-and-verification.md'],
+  ['wendkeep tdd', 'tdd.md'],
   ['wendkeep cost', 'costs-and-observability.md'],
   ['wendkeep cost rebuild', 'costs-and-observability.md'], ['wendkeep stats', 'costs-and-observability.md'],
   ['wendkeep import', 'sessions-and-import.md'], ['wendkeep verify', 'changes-and-verification.md'],
@@ -84,6 +88,7 @@ const GUIDE_FOR_FAMILY = new Map([
   ['wendkeep observer', 'observer.md'],
   ['wendkeep portable', 'portable.md'],
   ['wendkeep sync status', 'sync-protocol.md'],
+  ['wendkeep mcp', 'mcp.md'],
 ]);
 const SEMANTIC_CONCEPTS = {
   'getting-started.md': { pt: [/instala/i, /atualiza/i, /vínculo|vincul/i], en: [/install/i, /updat/i, /bind/i] },
@@ -102,6 +107,8 @@ const SEMANTIC_CONCEPTS = {
   'context.md': { pt: [/contexto/i, /branch/i, /rollback|reversão/i], en: [/context/i, /branch/i, /rollback/i] },
   'portable.md': { pt: [/portátil/i, /runtime/i, /revision/i], en: [/portable/i, /runtime/i, /revision/i] },
   'sync-protocol.md': { pt: [/local-first/i, /CAS/i, /conflito/i], en: [/local-first/i, /CAS/i, /conflict/i] },
+  'mcp.md': { pt: [/semântic/i, /capability/i, /stdio/i], en: [/semantic/i, /capability/i, /stdio/i] },
+  'tdd.md': { pt: [/atesta/i, /RED/i, /waiver/i], en: [/attestation/i, /RED/i, /waiver/i] },
 };
 
 const markdownLinks = (text) => [...text.matchAll(/\[[^\]]*\]\(([^)]+)\)/g)].map((m) => m[1]);
@@ -199,7 +206,7 @@ function assertVerifyExitSemantics(text, locale) {
   }
 }
 
-test('DOC-2: PT-BR e EN têm exatamente os treze guias', () => {
+test('DOC-2: PT-BR e EN têm exatamente os guias declarados', () => {
   for (const dir of Object.values(GUIDE_DIR)) assert.ok(existsSync(dir), `diretório ausente: ${dir}`);
   const pt = readdirSync(GUIDE_DIR.pt).filter((f) => f.endsWith('.md')).sort();
   const en = readdirSync(GUIDE_DIR.en).filter((f) => f.endsWith('.md')).sort();
@@ -228,7 +235,7 @@ test('DOC-2: cada par mantém estrutura editorial e alternador de idioma', () =>
   }
 });
 
-test('DOC-1: READMEs preservam primeiro uso e navegam pelos treze guias do próprio idioma', () => {
+test('DOC-1: READMEs preservam primeiro uso e navegam pelos guias do próprio idioma', () => {
   const pt = readFileSync(join(ROOT, 'README.md'), 'utf8');
   const en = readFileSync(join(ROOT, 'README.en.md'), 'utf8');
   assert.match(pt, /^## Instalar & configurar$/m);
