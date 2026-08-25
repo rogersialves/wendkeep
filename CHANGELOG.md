@@ -4,6 +4,31 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.85.0] — 2026-08-25
+
+### Added
+
+- **Matriz versionada de capacidades dos hosts.** Claude Code, Codex, Pi e MCP/CLI genérico
+  declaram as mesmas 17 capacidades de lifecycle/efeitos como `native`, `adapted`, `polled`,
+  `manual` ou `unavailable`; `wendkeep capabilities` inspeciona a cobertura sem exigir Vault e
+  versões/hosts desconhecidos entram em modo degradado explícito.
+- **Pi adapter e efeitos MCP verificáveis.** O workspace Pi deixa de ser placeholder e normaliza
+  envelopes lifecycle sem importar adapters irmãos. Efeitos vêm do catálogo assinado, nunca do
+  nome da tool: reads conhecidos pulam o mutation gate, writes/destructive permanecem gated e
+  desconhecidos falham fechado.
+- **Cobertura causal persistida.** Gaps são injetados no início e acompanham session registry,
+  active context, handoff, Evidence Envelope e Observer; estados manuais continuam apenas
+  `reported`, sem promoção indevida a prova verificada.
+
+### Changed
+
+- **Gates de verify e ASSURE conscientes do host.** Projetos podem declarar
+  `requires_host_capabilities` no `wendkeep.sensors.json`; capacidades manuais/indisponíveis
+  bloqueiam `verify` e handoff ASSURE salvo waiver humano explícito com aprovador e motivo.
+- **Contrato e documentação pública bilíngue.** Novos schemas de manifest/cobertura, campos
+  opcionais de handoff/evidência, README e guias PT-BR/EN documentam fallback, versões, waivers,
+  códigos de saída e recovery.
+
 ## [0.82.0] — 2026-08-25
 
 ### Added

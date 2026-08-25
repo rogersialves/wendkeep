@@ -36,6 +36,7 @@ import { resolveSessionIdentity, sessionWorkSessionPatch } from './session-ident
 import { readCodexRolloutMeta } from './codex-rollout-meta.mjs';
 import { mutateSessionNote } from './session-note-io.mjs';
 import { captureProjectScope, projectScopePatch } from './project-scope.mjs';
+import { buildHostCoverage } from '../src/host-capabilities.mjs';
 
 function sessionIdFromInput(input) {
   return input.session_id || input.sessionId || input.codex_session_id || '';
@@ -162,13 +163,16 @@ function allocateSessionPath(vaultBase, now, summary = 'session') {
   };
 }
 
-function buildAdditionalContext({ relPath, startedAt, vaultBase }) {
+function buildAdditionalContext({ relPath, startedAt, vaultBase, hostCoverage = null }) {
   const controlRel = toVaultRelative(vaultBase, controlPath(vaultBase));
   return [
     '<obsidian_session>',
     `Sessão Obsidian ativa: ${relPath}`,
     `Controle atualizado: ${controlRel}`,
     `Início: ${startedAt}`,
+    '<host_capability_coverage>',
+    `Host: ${hostCoverage?.host_id || 'unknown'}; coverage: ${hostCoverage?.degraded ? 'degraded' : 'complete'}.`,
+    '</host_capability_coverage>',
     '',
     'Use a sessão ativa como log desta conversa.',
     'Antes de registrar informações, leia `.brain/CURRENT_SESSION.md` no vault.',
@@ -273,7 +277,7 @@ function findSessionForInput(vaultBase, input, control) {
   return { sessionId, relPath: '', startedAt: '', fromRegistry: false };
 }
 
-function activateExistingSession({ vaultBase, relPath, startedAt, sessionId, input, now, identity, scopePatch = {} }) {
+function activateExistingSession({ vaultBase, relPath, startedAt, sessionId, input, now, identity, scopePatch = {}, hostCoverage = null }) {
   const sessionPath = join(vaultBase, relPath);
   if (!existsSync(sessionPath)) return false;
 
@@ -296,6 +300,7 @@ function activateExistingSession({ vaultBase, relPath, startedAt, sessionId, inp
     transcript_path: identity.transcriptPath,
     transcript_id: identity.transcriptId,
     provider: identity.provider,
+    host_coverage: hostCoverage,
     ...workSessionPatch(vaultBase, sessionId, input),
     ...scopePatch,
     ...causalTurnPatch(input, now),
@@ -303,7 +308,7 @@ function activateExistingSession({ vaultBase, relPath, startedAt, sessionId, inp
   return true;
 }
 
-function createSession({ vaultBase, sessionId, input, now, identity, scopePatch = {} }) {
+function createSession({ vaultBase, sessionId, input, now, identity, scopePatch = {}, hostCoverage = null }) {
   const summary = sessionSummaryFromInput(input);
   const { absPath, relPath } = allocateSessionPath(vaultBase, now, summary);
   const startedAt = formatLocalIso(now);
@@ -325,6 +330,7 @@ function createSession({ vaultBase, sessionId, input, now, identity, scopePatch 
     transcript_path: identity.transcriptPath,
     transcript_id: identity.transcriptId,
     provider: identity.provider,
+    host_coverage: hostCoverage,
     ...workSessionPatch(vaultBase, sessionId, input),
     ...scopePatch,
     ...causalTurnPatch(input, now),
@@ -332,11 +338,11 @@ function createSession({ vaultBase, sessionId, input, now, identity, scopePatch 
   return { relPath, startedAt };
 }
 
-function outputActiveContext({ relPath, startedAt, vaultBase, message }) {
+function outputActiveContext({ relPath, startedAt, vaultBase, message, hostCoverage = null }) {
   writeHookOutput({
     hookSpecificOutput: {
       hookEventName: 'UserPromptSubmit',
-      additionalContext: buildAdditionalContext({ relPath, startedAt, vaultBase }),
+      additionalContext: buildAdditionalContext({ relPath, startedAt, vaultBase, hostCoverage }),
     },
     systemMessage: message,
   });
@@ -359,6 +365,11 @@ function main() {
     return;
   }
   const sessionId = identity.canonicalConversationId;
+  const hostCoverage = buildHostCoverage({
+    hostId: identity.provider,
+    hostVersion: input.host_version || input.hostVersion || process.env.WENDKEEP_HOST_VERSION || '',
+    observedAt: now.toISOString(),
+  });
 
   // UserPromptSubmit also fires inside Codex subagents. The child belongs to the parent's
   // observability graph, but it is not a new main turn: registering it through causalTurnPatch
@@ -369,6 +380,7 @@ function main() {
       upsertSessionRegistry(vaultBase, sessionId, {
         transcript_paths: [identity.transcriptPath],
         provider: identity.provider,
+        host_coverage: hostCoverage,
         ...workSessionPatch(vaultBase, sessionId, input),
       });
     }
@@ -407,6 +419,7 @@ function main() {
           transcript_path: identity.transcriptPath,
           transcript_id: identity.transcriptId,
           provider: identity.provider,
+          host_coverage: hostCoverage,
           ...workSessionPatch(vaultBase, sessionId, input),
           ...scopePatch,
           ...causalTurnPatch(input, now),
@@ -453,6 +466,7 @@ function main() {
         transcript_path: identity.transcriptPath,
         transcript_id: identity.transcriptId,
         provider: identity.provider,
+        host_coverage: hostCoverage,
         ...workSessionPatch(vaultBase, sessionId || control.session_id, input),
         ...scopePatch,
         ...causalTurnPatch(input, now),
@@ -466,22 +480,24 @@ function main() {
   const resolvedTarget = registered?.session_file
     ? { sessionId, relPath: registered.session_file, startedAt: registered.started_at || '' }
     : { sessionId, relPath: '', startedAt: '' };
-  if (resolvedTarget.relPath && activateExistingSession({ vaultBase, relPath: resolvedTarget.relPath, startedAt: resolvedTarget.startedAt, sessionId, input, now, identity, scopePatch })) {
+  if (resolvedTarget.relPath && activateExistingSession({ vaultBase, relPath: resolvedTarget.relPath, startedAt: resolvedTarget.startedAt, sessionId, input, now, identity, scopePatch, hostCoverage })) {
     outputActiveContext({
       relPath: resolvedTarget.relPath,
       startedAt: resolvedTarget.startedAt || formatLocalIso(now),
       vaultBase,
       message: `Sessão Obsidian reaberta em ${resolvedTarget.relPath}. ${basename(controlPath(vaultBase))} atualizado.`,
+      hostCoverage,
     });
     return;
   }
 
-  const created = createSession({ vaultBase, sessionId, input, now, identity, scopePatch });
+  const created = createSession({ vaultBase, sessionId, input, now, identity, scopePatch, hostCoverage });
   outputActiveContext({
     relPath: created.relPath,
     startedAt: created.startedAt,
     vaultBase,
     message: `Sessão Obsidian criada em ${created.relPath}. ${basename(controlPath(vaultBase))} atualizado.`,
+    hostCoverage,
   });
 }
 

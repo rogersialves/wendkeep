@@ -115,6 +115,7 @@ test('[req:MOD-4] [req:MOD-8] [req:MOD-10] [req:MOD-11] [req:MOD-12] [req:MOD-13
     'packages/mcp/src/config.mjs',
     'packages/mcp/src/index.mjs',
     'packages/integrations/package.json',
+    'packages/integrations/src/capabilities.mjs',
     'packages/integrations/src/hook-envelope.mjs',
     'packages/integrations/src/host-hooks.mjs',
     'packages/integrations/src/index.mjs',
@@ -123,6 +124,7 @@ test('[req:MOD-4] [req:MOD-8] [req:MOD-10] [req:MOD-11] [req:MOD-12] [req:MOD-13
     'packages/integrations/src/transcript-usage.mjs',
     'packages/integrations/src/transcripts.mjs',
     'packages/pi/package.json',
+    'packages/pi/src/index.mjs',
     'packages/vault/package.json',
     'packages/vault/src/index.mjs',
     'packages/vault/src/locale.mjs',
@@ -148,6 +150,16 @@ test('[req:PROV-8] published tarball contains provenance gates, archive lock, so
     'src/receipt-ledger.mjs',
     'schema/wendkeep.provenance-receipt-v2.schema.json',
   ]) assert.ok(published.has(path), `missing provenance file from package: ${path}`);
+});
+
+test('[req:HOST-13] published tarball contains host coverage runtime, CLI and schemas', () => {
+  const published = publishedFiles();
+  for (const path of [
+    'src/capabilities.mjs',
+    'src/host-capabilities.mjs',
+    'schema/host-capability-manifest-v1.schema.json',
+    'schema/host-coverage-v1.schema.json',
+  ]) assert.ok(published.has(path), `missing host capability file from package: ${path}`);
 });
 
 test('[req:MOD-14] [req:MOD-16] CLI workspace declares its private runtime without publishing wendkeep/cli', () => {

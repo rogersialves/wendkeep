@@ -11,6 +11,7 @@ import { parseTasks } from '../hooks/change-core.mjs';
 import { getLocale } from '../hooks/locale.mjs';
 import { buildEffectiveRequirementPackage, contentHashOf, tasksHashOf } from '../hooks/spec-core.mjs';
 import { activeContextKey, resolveActiveContext } from '../hooks/active-context-store.mjs';
+import { evaluateHostCoverage } from '../packages/integrations/src/capabilities.mjs';
 
 const IGNORED_DIRECTORIES = new Set(['.git', '.worktrees', 'node_modules', 'dist']);
 const BINDING_FIELDS = [
@@ -387,7 +388,12 @@ export function deriveHandoffContract(input = {}) {
     head_sha: String(input.headSha || ''),
     tasks_sha256: String(input.tasksSha256 || ''),
     spec_sha256: String(input.specSha256 || ''),
-    authority: 'verified',
+    ...(input.hostCoverage ? {
+      host_coverage: structuredClone(input.hostCoverage),
+      coverage_findings: Array.isArray(input.coverageFindings) ? structuredClone(input.coverageFindings) : [],
+      coverage_waivers: Array.isArray(input.coverageWaivers) ? structuredClone(input.coverageWaivers) : [],
+    } : {}),
+    authority: input.authority === 'reported' ? 'reported' : 'verified',
   };
   for (const field of ['from', 'to', 'active_context_id', 'head_sha', 'tasks_sha256', 'spec_sha256']) {
     if (!contract[field]) {
@@ -424,6 +430,11 @@ export function normalizeHandoffContract(value) {
     head_sha: String(value.head_sha || ''),
     tasks_sha256: String(value.tasks_sha256 || ''),
     spec_sha256: String(value.spec_sha256 || ''),
+    ...(value.host_coverage ? {
+      host_coverage: structuredClone(value.host_coverage),
+      coverage_findings: Array.isArray(value.coverage_findings) ? structuredClone(value.coverage_findings) : [],
+      coverage_waivers: Array.isArray(value.coverage_waivers) ? structuredClone(value.coverage_waivers) : [],
+    } : {}),
     authority: value.authority === 'verified' ? 'verified' : 'reported',
   };
   if (!normalized.handoff_id || !normalized.active_context_id || !normalized.head_sha
@@ -485,6 +496,18 @@ export function buildStructuredTaskHandoff({
     ...uniqueStrings(base.blockers),
     ...(selectedEvaluation?.blocking_findings ?? []).map((finding) => finding.code),
   ]);
+  const hostCoverage = context?.host_coverage || null;
+  const coverageEvaluation = hostCoverage
+    ? evaluateHostCoverage(hostCoverage, ['session.stop', 'task.completed', 'edit.attribution'], {
+        waivers: Array.isArray(base.coverage_waivers) ? base.coverage_waivers : [],
+      })
+    : { ok: true, findings: [], waived: [] };
+  if (String(profile || '').toUpperCase() === 'ASSURE' && !coverageEvaluation.ok) {
+    throw Object.assign(new Error('ASSURE requires host capabilities or explicit human waivers'), {
+      code: 'HANDOFF_CAPABILITY_UNAVAILABLE',
+      findings: coverageEvaluation.findings,
+    });
+  }
   const contract = deriveHandoffContract({
     from: sessionId,
     to: base.to || 'next-session',
@@ -499,6 +522,10 @@ export function buildStructuredTaskHandoff({
     headSha: snapshot.binding?.head_sha,
     tasksSha256: snapshot.binding?.tasks_sha256,
     specSha256: snapshot.binding?.effective_spec_sha256,
+    hostCoverage,
+    coverageFindings: coverageEvaluation.findings,
+    coverageWaivers: coverageEvaluation.waived,
+    authority: coverageEvaluation.ok ? 'verified' : 'reported',
   });
   assertStructuredHandoffForProfile(profile, contract);
   return {

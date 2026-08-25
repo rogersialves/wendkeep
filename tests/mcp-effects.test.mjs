@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 
 import {
   MCP_EFFECT_MANIFEST,
@@ -67,4 +68,29 @@ test('[req:MCP-2] guard skips known reads but keeps writes and unknown MCP tools
     assert.equal(decision.permissionDecision, 'deny');
     assert.match(decision.permissionDecisionReason, /WENDKEEP_SCOPE_MISSING/);
   }
+});
+
+test('[req:HOST-10] declared effect beats a misleading MCP tool name and destructive remains explicit', () => {
+  const manifest = structuredClone(MCP_EFFECT_MANIFEST);
+  manifest.tools = [
+    {
+      name: 'wendkeep_delete_preview', effect: 'read', capability: 'project:status', effect_version: 1,
+      input_schema: 'wendkeep://schema/mcp-tool-input-v1', output_schema: 'wendkeep://schema/mcp-tool-result-v1',
+    },
+    {
+      name: 'wendkeep_context_reset', effect: 'destructive', capability: 'context:reset', effect_version: 1,
+      input_schema: 'wendkeep://schema/mcp-tool-input-v1', output_schema: 'wendkeep://schema/mcp-tool-result-v1',
+    },
+  ];
+  const payload = {
+    schema_version: manifest.schema_version,
+    catalog_version: manifest.catalog_version,
+    server_aliases: manifest.server_aliases,
+    tools: manifest.tools,
+  };
+  manifest.integrity = `sha256:${createHash('sha256').update(JSON.stringify(payload), 'utf8').digest('hex')}`;
+  assert.equal(verifyMcpEffectManifest(manifest).valid, true);
+  assert.equal(resolveMcpToolEffect('wendkeep_delete_preview', { manifest }).effect, 'read');
+  assert.equal(resolveMcpToolEffect('wendkeep_context_reset', { manifest }).effect, 'destructive');
+  assert.equal(resolveMcpToolEffect('wendkeep_context_reset_typo', { manifest }).effect, 'unknown');
 });

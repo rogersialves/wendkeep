@@ -23,6 +23,7 @@ import { addLesson } from '../hooks/lessons-core.mjs';
 import { getLocale } from '../hooks/locale.mjs';
 import { resolveCommandActiveContext } from './active-context-runtime.mjs';
 import { writeVaultFileAtomic } from '../packages/vault/src/vault-path-safety.mjs';
+import { evaluateHostCoverage } from '../packages/integrations/src/capabilities.mjs';
 import { evidenceCheckoutBinding } from '../packages/vault/src/evidence-envelope.mjs';
 import {
   assertStableHead,
@@ -103,6 +104,16 @@ export function runVerify(argv) {
     process.stderr.write(`wendkeep verify: wendkeep.sensors.json não encontrado em ${loaded.path} — rode da raiz do projeto ou use --project <raiz>\n`);
   }
   const sensors = loaded.sensors;
+  const hostGate = evaluateHostCoverage(
+    commandContext?.hostCoverage || null,
+    loaded.requiredHostCapabilities,
+    { waivers: loaded.hostCapabilityWaivers },
+  );
+  if (!hostGate.ok) {
+    const missing = hostGate.findings.map((item) => `${item.capability}:${item.state}`).join(', ');
+    process.stderr.write(`wendkeep verify: HOST_CAPABILITY_UNAVAILABLE: ${missing}\n`);
+    process.exit(1);
+  }
   const reqIds = [...new Set(tasks.flatMap((task) => task.reqs ?? []))];
   const effective = buildEffectiveRequirementPackage(vaultBase, changeDir, reqIds);
   const tasksHash = tasksHashOf(tarefas);
@@ -144,6 +155,7 @@ export function runVerify(argv) {
     sensors: evidence,
     startedAt,
     finishedAt: new Date().toISOString(),
+    hostCoverage: commandContext?.hostCoverage || null,
   });
   writeAuthority('evidencia.json', `${JSON.stringify(envelope, null, 2)}\n`);
   // Freshness seal: bind this evidence to the tarefas.md it was produced against, so the archive

@@ -103,6 +103,7 @@ export function resolveRuntimeActiveContext({
     branch: selected.actual.branch,
     headSha: selected.actual.head,
     sessionId: selected.sessionId,
+    ...(selected.entry.host_coverage ? { hostCoverage: structuredClone(selected.entry.host_coverage) } : {}),
   };
 }
 

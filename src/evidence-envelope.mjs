@@ -264,6 +264,7 @@ export function buildEvidenceEnvelope({
   finishedAt,
   version = PACKAGE_VERSION,
   runtimePlatform = `${process.platform}-${process.arch}`,
+  hostCoverage = null,
 } = {}) {
   const envelope = {
     schema_version: 2,
@@ -283,6 +284,7 @@ export function buildEvidenceEnvelope({
     started_at: startedAt,
     finished_at: finishedAt,
     sensors,
+    ...(hostCoverage ? { host_coverage: structuredClone(hostCoverage) } : {}),
   };
   return { ...envelope, envelope_id: canonicalSha256(envelope) };
 }

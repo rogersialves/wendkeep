@@ -34,6 +34,7 @@ import {
 } from './obsidian-common.mjs';
 import { resolveSessionIdentity, sessionWorkSessionPatch } from './session-identity.mjs';
 import { captureProjectScope, projectScopePatch } from './project-scope.mjs';
+import { buildHostCoverage } from '../src/host-capabilities.mjs';
 
 export function buildSessionContent({ relPath, now, summary = 'session', provider: providerId, sessionId = '' }) {
   const date = formatDate(now);
@@ -133,13 +134,21 @@ export function allocateSessionPath(vaultBase, now, summary = 'session') {
   };
 }
 
-function buildAdditionalContext({ relPath, startedAt, vaultBase }) {
+function buildAdditionalContext({ relPath, startedAt, vaultBase, hostCoverage = null }) {
   const controlRel = toVaultRelative(vaultBase, controlPath(vaultBase));
+  const degradation = (hostCoverage?.degradations || [])
+    .filter((item) => item.capability)
+    .map((item) => `${item.capability}=${item.state}`)
+    .join(', ');
   return [
     '<obsidian_session>',
     `Sessão Obsidian ativa: ${relPath}`,
     `Controle atualizado: ${controlRel}`,
     `Início: ${startedAt}`,
+    '<host_capability_coverage>',
+    `Host: ${hostCoverage?.host_id || 'unknown'}; coverage: ${hostCoverage?.degraded ? 'degraded' : 'complete'}.`,
+    ...(degradation ? [`Lacunas declaradas: ${degradation}. Não fabrique autoridade ausente.`] : []),
+    '</host_capability_coverage>',
     '',
     'Use a sessão ativa como log desta conversa.',
     'Antes de registrar informações, leia `.brain/CURRENT_SESSION.md` no vault.',
@@ -159,6 +168,11 @@ function main() {
   warnIfDefaultVault(input);
   const now = new Date();
   const provider = providerMeta();
+  const hostCoverage = buildHostCoverage({
+    hostId: provider.id,
+    hostVersion: input.host_version || input.hostVersion || process.env.WENDKEEP_HOST_VERSION || '',
+    observedAt: now.toISOString(),
+  });
   const identity = resolveSessionIdentity(vaultBase, input, provider.id);
   if (identity.state !== 'resolved') {
     writeHookOutput({
@@ -194,6 +208,7 @@ function main() {
   const activationStartedAt = formatLocalIso(now);
   const registerActivation = (canonicalSessionId, patch) => upsertSessionRegistry(vaultBase, canonicalSessionId, {
     ...patch,
+    host_coverage: hostCoverage,
     ...workSessionPatchFor(canonicalSessionId),
     ...scopePatchFor(canonicalSessionId),
     activation_id: activationId,
@@ -232,7 +247,7 @@ function main() {
           additionalContext: buildAdditionalContext({
             relPath: control.session_file,
             startedAt: control.started_at,
-            vaultBase,
+            vaultBase, hostCoverage,
           }),
         },
       });
@@ -275,7 +290,7 @@ function main() {
       writeHookOutput({
         hookSpecificOutput: {
           hookEventName: 'SessionStart',
-          additionalContext: buildAdditionalContext({ relPath: known.session_file, startedAt, vaultBase }),
+          additionalContext: buildAdditionalContext({ relPath: known.session_file, startedAt, vaultBase, hostCoverage }),
         },
       });
       return;
@@ -318,7 +333,7 @@ function main() {
       writeHookOutput({
         hookSpecificOutput: {
           hookEventName: 'SessionStart',
-          additionalContext: buildAdditionalContext({ relPath: match.session_file, startedAt, vaultBase }),
+          additionalContext: buildAdditionalContext({ relPath: match.session_file, startedAt, vaultBase, hostCoverage }),
         },
       });
       return;
@@ -349,7 +364,7 @@ function main() {
   writeHookOutput({
     hookSpecificOutput: {
       hookEventName: 'SessionStart',
-      additionalContext: buildAdditionalContext({ relPath, startedAt, vaultBase }),
+      additionalContext: buildAdditionalContext({ relPath, startedAt, vaultBase, hostCoverage }),
     },
     systemMessage: [
       `Sessão ${provider.label} criada em ${relPath}.`,

@@ -9,6 +9,25 @@
     "$schema": { "type": "string" },
     "version": { "const": 1 },
     "source": { "type": "string" },
+    "requires_host_capabilities": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "$ref": "host-capability-manifest-v1.schema.json#/$defs/capabilityName" }
+    },
+    "host_capability_waivers": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["capability", "authority", "approved_by", "reason"],
+        "properties": {
+          "capability": { "$ref": "host-capability-manifest-v1.schema.json#/$defs/capabilityName" },
+          "authority": { "const": "human" },
+          "approved_by": { "type": "string", "minLength": 1 },
+          "reason": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
     "sensors": {
       "type": "array",
       "items": {

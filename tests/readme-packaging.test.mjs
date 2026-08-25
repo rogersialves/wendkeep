@@ -21,6 +21,7 @@ const GUIDE_SLUGS = [
   'retroactive-import.md', 'observer.md', 'worktrees.md',
   'context.md',
   'mcp.md',
+  'capabilities.md',
 ];
 
 function filesUnder(dir, base = dir) {

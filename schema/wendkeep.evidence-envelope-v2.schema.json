@@ -51,7 +51,8 @@
     "sensors": {
       "type": "array",
       "items": { "$ref": "#/$defs/sensor" }
-    }
+    },
+    "host_coverage": { "$ref": "host-coverage-v1.schema.json" }
   },
   "$defs": {
     "gitObject": { "type": "string", "pattern": "^[a-f0-9]{40,64}$" },

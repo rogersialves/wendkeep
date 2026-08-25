@@ -8,6 +8,7 @@ export function makeObserverFixture({
   slug = 'change-a',
   openTasks = ['1.1 Implement observer'],
   doneTasks = [],
+  hostCoverage = null,
 } = {}) {
   const projectRoot = mkdtempSync(join(tmpdir(), 'wk-observer-project-'));
   const vaultBase = join(projectRoot, '.WendKeep-vault');
@@ -41,6 +42,7 @@ export function makeObserverFixture({
         provider: 'codex',
         last_seen: '2026-08-16T11:00:00Z',
         change_slug: slug,
+        ...(hostCoverage ? { host_coverage: hostCoverage } : {}),
       },
     },
   }, null, 2));
