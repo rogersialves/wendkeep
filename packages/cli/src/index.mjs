@@ -49,8 +49,12 @@ Usage:
                            package first (npm i -D wendkeep@latest); a running process
                            cannot replace itself. · --vault P · --profile <name> · --yes
                            · --vscode-worktree-tasks.
+  wendkeep sync status [...]   Optional local-first protocol: status | push | pull | conflicts | resolve.
+                           Uses explicit CAS/conflicts and an offline outbox; --remote path or --url HTTPS.
 
   wendkeep doctor [--vault P]  Health check. --scope core|runtime · --strict for CI/release.
+  wendkeep portable <sub>      Shared authored state: status | export | import | diff.
+                           Default file: .wendkeep/portable/state.json; private runtime stays local.
   wendkeep mcp <serve|config>  Native semantic MCP over stdio, or client config generation.
                            serve: --vault P · --timeout-ms N.
                            config: --client generic|claude|codex|cursor · --vault P.
@@ -70,6 +74,8 @@ Usage:
                            Repair revalidates orphan/removed contexts or expired request leases without deleting history.
   wendkeep task <sub>          Typed task contracts: list | show | evaluate | claim | release.
                            Resolves the change from the causal active context; supports --session/--change/--json.
+  wendkeep tdd <sub>           Causal TDD attestations: red | green | status | waive.
+                           Binds task, requirement, test paths, worktree and work session.
   wendkeep change <sub>        Change lifecycle: new [--simple|--guide] | use | bind <slug> --session <id> | continue | list | show |
                            status | done <id> | undone <id> | diff | archive [--force] | abandon | relink | backlink.
                            --session <id> selects the causal active_context for implicit change operations.
@@ -217,6 +223,9 @@ async function main(argv) {
     } else if (cmd === 'context') {
       const { CONTEXT_HELP } = await import('../../../src/context.mjs');
       process.stdout.write(CONTEXT_HELP);
+    } else if (cmd === 'portable') {
+      const { PORTABLE_HELP } = await import('../../../src/portable.mjs');
+      process.stdout.write(PORTABLE_HELP);
     } else if (cmd === 'mcp') {
       const { MCP_HELP } = await import('../../../src/mcp.mjs');
       process.stdout.write(MCP_HELP);
@@ -251,6 +260,11 @@ async function main(argv) {
     case 'doctor': {
       const { runDoctor } = await import('../../../src/doctor.mjs');
       process.exit(runDoctor(rest));
+      break;
+    }
+    case 'portable': {
+      const { runPortable } = await import('../../../src/portable.mjs');
+      process.exit(runPortable(rest));
       break;
     }
     case 'observer': {
@@ -318,6 +332,11 @@ async function main(argv) {
     case 'task': {
       const { runTask } = await import('../../../src/task.mjs');
       process.exit(runTask(rest));
+      break;
+    }
+    case 'tdd': {
+      const { runTdd } = await import('../../../src/tdd.mjs');
+      process.exit(runTdd(rest));
       break;
     }
     case 'session': {

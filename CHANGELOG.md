@@ -29,6 +29,39 @@ All notable changes to **wendkeep** are documented here. Format based on
   opcionais de handoff/evidência, README e guias PT-BR/EN documentam fallback, versões, waivers,
   códigos de saída e recovery.
 
+## [0.84.0] — 2026-08-25
+
+### Added
+
+- **Protocolo de sync local-first.** `wendkeep sync status/push/pull/conflicts/resolve` transporta
+  estado autoral portátil por revisões, CAS, pais causais, record keys com escopo de
+  projeto/branch/worktree, tombstones e conflitos explícitos, sem last-write-wins ou cloud
+  obrigatória.
+- **Operação offline e coordenação recuperável.** Outbox append-only, acknowledgements
+  idempotentes, replay fora de ordem, leases expirantes com histórico, adaptadores de referência
+  filesystem/HTTP e resolução auditável preservam autoria sob partição, retry e clocks
+  divergentes.
+- **Privacidade, diagnóstico e contrato público.** Envelopes opt-in AES-256-GCM com rotação de
+  chave, schemas v1, status no `doctor` e no Observer sanitizado, chaos tests e guias PT-BR/EN
+  documentam consistência, erros e threat model. O sync desabilitado não cria runtime nem altera
+  Keep Core.
+
+## [0.83.0] — 2026-08-25
+
+### Added
+
+- **Estado autoral portátil e `active-work`.** `wendkeep portable status/export/import/diff`
+  produz um snapshot determinístico e revisável de CORE, ADRs, specs e changes autorais, com uma
+  projeção compacta de retomada por active context sem session/worktree IDs, paths locais, tokens,
+  transcritos, locks, leases ou outboxes.
+- **Import fail-closed e provenance privado.** Schema, project, allowlist, hashes, limites,
+  traversal, symlinks/hardlinks e revision/hash são validados antes da primeira escrita; estado
+  stale ou conflitante nunca sobrescreve silenciosamente o local. Export/import registram somente
+  metadados e hashes em ledger privado, e o `doctor` diagnostica authored state divergente.
+- **Contrato público bilíngue.** Schemas `portable-state-v1`/`portable-active-work-v1`, README,
+  guias PT-BR/EN e política LF em `.gitattributes` documentam redaction, opt-out de Git, revisão em
+  PR e retomada segura em clone limpo.
+
 ## [0.82.0] — 2026-08-25
 
 ### Added
@@ -54,6 +87,35 @@ All notable changes to **wendkeep** are documented here. Format based on
 - **Bootstrap stdio desacoplado do checkout.** `mcp serve` inicia sem exigir um Vault no cwd; quando
   `--vault` não é informado, cada tool resolve e audita somente o binding do `project_root` declarado,
   preservando isolamento multi-projeto e permitindo handshake empacotado em CI/editores.
+
+## [0.81.0] — 2026-08-24
+
+### Added
+
+- **Atestação TDD causal.** `wendkeep tdd red|green|status|waive` registra o ciclo RED → GREEN
+  ligado a projeto, repositório, worktree, work session, change, tarefa, requisito e paths de teste.
+  RED já verde ou causado por import/sintaxe/configuração fica `invalid`; GREEN exige sucessor
+  causal e diff de produção posterior, enquanto waiver exige motivo e autoridade humana explícita.
+- **Prova reviewable e portátil.** O store v1 conserva digests e cauda sanitizada limitada, preserva
+  histórico após refactor/revalidação e expõe IDs no Evidence Envelope, pacote deep, handoff e
+  Observer, sem persistir saída completa nem paths absolutos.
+
+### Changed
+
+- **Gate TDD por perfil.** Task Contracts exigem atestação atual para tarefas `[tdd]` em GOVERN e
+  para comportamento testável em ASSURE; mutante sobrevivente ou mudança pós-GREEN invalida a
+  prova. OFF/FLOW permanecem opcionais e GUIDE recomendado. Skill `wk-tdd`, schemas, README e
+  guias PT-BR/EN documentam o contrato e a recuperação.
+
+## [0.80.2] — 2026-08-24
+
+### Fixed
+
+- **Perfil persistente em worktrees vinculadas.** `profile use` e `profile status` agora leem e
+  escrevem o binding canônico da worktree principal quando o Vault é resolvido pelo registry Git
+  compartilhado, sem alterar o `.wendkeep.json` versionado da worktree vinculada. A identidade de
+  caminho também normaliza aliases Windows 8.3, impedindo que uma seleção humana `OFF` volte
+  imediatamente ao fallback `GOVERN`; README e guia de perfis foram atualizados em PT-BR/EN.
 
 ## [0.80.1] — 2026-08-24
 

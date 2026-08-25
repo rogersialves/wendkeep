@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wendkeep.dev/schema/portable-state-v1.schema.json",
+  "title": "WendKeep portable authored state v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "kind", "project_id", "repository_id", "authored_sha256", "artifacts", "active_work"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "kind": { "const": "wendkeep-portable-state" },
+    "project_id": { "type": "string", "minLength": 1, "maxLength": 160 },
+    "repository_id": { "type": "string", "minLength": 1, "maxLength": 160 },
+    "authored_sha256": { "$ref": "#/$defs/hash" },
+    "artifacts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "category", "content_sha256", "content"],
+        "properties": {
+          "path": { "type": "string", "pattern": "^(?:\\.brain/CORE\\.md|(?:04-Decisões|04-Decisions|07-Specs|08-Mudanças|08-Changes)/[^.][^\\u0000]*)$" },
+          "category": { "enum": ["authored", "derived"] },
+          "content_sha256": { "$ref": "#/$defs/hash" },
+          "content": { "type": "string" }
+        }
+      }
+    },
+    "active_work": {
+      "type": "array",
+      "items": { "$ref": "portable-active-work-v1.schema.json" }
+    }
+  },
+  "$defs": {
+    "hash": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" }
+  }
+}

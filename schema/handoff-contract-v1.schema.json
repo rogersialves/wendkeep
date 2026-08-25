@@ -22,6 +22,7 @@
     "decisions": { "$ref": "#/$defs/stringArray" },
     "next_actions": { "$ref": "#/$defs/stringArray" },
     "blockers": { "$ref": "#/$defs/stringArray" },
+    "tdd_attestation_ids": { "$ref": "#/$defs/stringArray" },
     "head_sha": { "type": "string", "minLength": 1 },
     "tasks_sha256": { "type": "string", "minLength": 1 },
     "spec_sha256": { "type": "string", "minLength": 1 },

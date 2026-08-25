@@ -5,6 +5,7 @@ import { allChangesState } from '../hooks/change-core.mjs';
 import { readControl, readSessionRegistry } from '../hooks/obsidian-common.mjs';
 import { runVaultHealth } from '../hooks/vault-health.mjs';
 import { readProjectForValidation } from '../packages/vault/src/validate-memory.mjs';
+import { inspectSyncOutbox, readLocalSyncState } from './sync-outbox.mjs';
 
 export const OBSERVER_SCHEMA_VERSION = 1;
 export const MAX_SNAPSHOT_BYTES = 32 * 1024;
@@ -92,6 +93,20 @@ function hashEvent(snapshot) {
   return `obs-${createHash('sha256').update(canonical).digest('hex').slice(0, 24)}`;
 }
 
+function syncSummary(vaultBase, projectId) {
+  const outbox = inspectSyncOutbox(vaultBase);
+  let openConflicts = 0;
+  if (!['disabled', 'corrupt'].includes(outbox.status)) {
+    try {
+      const state = readLocalSyncState(vaultBase, projectId);
+      openConflicts = Object.values(state.conflicts || {}).filter((item) => item?.status === 'open').length;
+    } catch {
+      return { status: 'corrupt', pending: outbox.pending, open_conflicts: 0 };
+    }
+  }
+  return { status: outbox.status, pending: outbox.pending, open_conflicts: openConflicts };
+}
+
 function hasForbiddenKey(value) {
   if (!value || typeof value !== 'object') return false;
   for (const [key, child] of Object.entries(value)) {
@@ -154,6 +169,7 @@ export function buildProjectSnapshot({ vaultBase, projectRoot = process.cwd(), n
     session: activeSessionSummary(vaultBase, control, registry),
     changes,
     health: healthSummary(vaultBase),
+    sync: syncSummary(vaultBase, project.projectId),
   };
   snapshot.event_id = hashEvent(snapshot);
   const validation = validateObserverSnapshot(snapshot, { projectId: project.projectId });

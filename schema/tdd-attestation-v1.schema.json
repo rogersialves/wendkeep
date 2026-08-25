@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wendkeep.dev/schema/tdd-attestation-v1.schema.json",
+  "title": "WendKeep TDD Attestation v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "attestation_id", "project_id", "repository_id", "worktree_id",
+    "work_session_id", "change_slug", "task_id", "requirement_id", "profile", "state",
+    "test_paths", "red", "green", "green_history", "waiver", "review_flags", "invalid_reason"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "attestation_id": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "project_id": { "type": "string", "minLength": 1 },
+    "repository_id": { "type": "string", "minLength": 1 },
+    "worktree_id": { "type": "string", "minLength": 1 },
+    "work_session_id": { "type": "string", "minLength": 1 },
+    "change_slug": { "type": "string", "minLength": 1 },
+    "task_id": { "type": "string", "minLength": 1 },
+    "requirement_id": { "type": "string", "minLength": 1 },
+    "profile": { "enum": ["OFF", "FLOW", "GUIDE", "GOVERN", "ASSURE"] },
+    "state": { "enum": ["red-observed", "green-observed", "invalid", "waived"] },
+    "test_paths": { "$ref": "#/$defs/stringArray" },
+    "red": { "type": ["object", "null"] },
+    "green": { "type": ["object", "null"] },
+    "green_history": { "type": "array", "items": { "type": "object" } },
+    "waiver": { "type": ["object", "null"] },
+    "review_flags": { "$ref": "#/$defs/stringArray" },
+    "invalid_reason": { "type": ["string", "null"] }
+  },
+  "$defs": {
+    "stringArray": {
+      "type": "array",
+      "items": { "type": "string" },
+      "uniqueItems": true
+    }
+  }
+}

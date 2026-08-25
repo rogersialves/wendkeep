@@ -28,6 +28,7 @@ const COMMAND_MODULES = new Set([
   'stats.mjs',
   'sync-defs.mjs',
   'sync.mjs',
+  'tdd.mjs',
   'theme.mjs',
   'validate-core.mjs',
   'vault-views.mjs',

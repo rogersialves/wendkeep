@@ -28,6 +28,8 @@
     "owner": { "type": ["string", "null"] },
     "work_session_id": { "type": ["string", "null"] },
     "evidence_envelope_id": { "type": ["string", "null"] },
+    "tdd_required": { "type": "boolean" },
+    "tdd_attestation_id": { "type": ["string", "null"] },
     "checked": { "type": "boolean" },
     "authored_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
     "binding": {

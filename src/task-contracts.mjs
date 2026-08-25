@@ -12,6 +12,8 @@ import { getLocale } from '../hooks/locale.mjs';
 import { buildEffectiveRequirementPackage, contentHashOf, tasksHashOf } from '../hooks/spec-core.mjs';
 import { activeContextKey, resolveActiveContext } from '../hooks/active-context-store.mjs';
 import { evaluateHostCoverage } from '../packages/integrations/src/capabilities.mjs';
+import { evaluateTddAttestation } from './tdd-attestation.mjs';
+import { captureTddSnapshot, readTddAttestationStore } from './tdd-attestation-store.mjs';
 
 const IGNORED_DIRECTORIES = new Set(['.git', '.worktrees', 'node_modules', 'dist']);
 const BINDING_FIELDS = [
@@ -60,6 +62,8 @@ export function deriveTaskContracts(input = {}) {
   }
   const binding = bindingFrom(input);
   const artifactSpecs = new Map((input.artifactSpecs ?? []).map((spec) => [String(spec.name || ''), spec]));
+  const profile = String(input.profile || '').trim().toUpperCase();
+  const attestations = Array.isArray(input.tddAttestations) ? input.tddAttestations : [];
   return (input.tasks ?? []).map((task) => {
     const taskId = String(task.id || '').trim();
     const phase = String(task.phase || 'execute').trim().toLowerCase();
@@ -71,16 +75,26 @@ export function deriveTaskContracts(input = {}) {
       ? lease : null;
     const dependencies = uniqueStrings(task.dependencies);
     const requiredArtifacts = uniqueStrings(task.artifacts);
+    const requirementIds = uniqueStrings(task.reqs);
+    const tddRequired = (profile === 'GOVERN' && task.tdd === true)
+      || (profile === 'ASSURE' && phase === 'execute'
+        && (requirementIds.length > 0 || uniqueStrings(task.sensors).length > 0));
+    const tddAttestation = attestations.find((attestation) => (
+      String(attestation?.task_id || '') === taskId
+      && requirementIds.includes(String(attestation?.requirement_id || ''))
+      && ['green-observed', 'waived'].includes(String(attestation?.state || ''))
+    )) || null;
     const authored = {
       change_slug: changeSlug,
       task_id: taskId,
       title: String(task.text || '').trim(),
       phase,
       checked: task.done === true,
-      requirement_ids: uniqueStrings(task.reqs),
+      requirement_ids: requirementIds,
       required_sensors: uniqueStrings(task.sensors ?? (task.sensor ? [task.sensor] : [])),
       required_artifacts: requiredArtifacts,
       dependencies,
+      tdd_required: tddRequired,
       binding,
       artifact_specs: requiredArtifacts.map((name) => artifactSpecs.get(name) ?? { name }),
     };
@@ -102,6 +116,8 @@ export function deriveTaskContracts(input = {}) {
       owner: activeLease?.owner_session_id ?? null,
       work_session_id: activeLease?.owner_work_session_id ?? null,
       evidence_envelope_id: input.evidenceEnvelopeId ?? null,
+      tdd_required: tddRequired,
+      tdd_attestation_id: tddAttestation ? String(tddAttestation.attestation_id || '') || null : null,
       checked: authored.checked,
       authored_sha256: sha256(canonicalJson(authored)),
       binding,
@@ -141,11 +157,20 @@ export function evaluateTaskContract(contract, options = {}) {
     .filter((name) => artifacts.get(name)?.satisfied !== true);
   const completedTasks = new Set(uniqueStrings(options.completedTaskIds));
   const openDependencies = uniqueStrings(contract.dependencies).filter((id) => !completedTasks.has(id));
+  const tddMissing = contract.tdd_required === true && !String(contract.tdd_attestation_id || '').trim();
 
   for (const id of missingRequirements) blockingFindings.push(taskFinding('TASK_REQUIREMENT_MISSING', 'requirement_ids', id, null));
   for (const id of missingSensors) blockingFindings.push(taskFinding('TASK_SENSOR_MISSING_OR_RED', 'required_sensors', id, sensors.get(id)?.status ?? null));
   for (const name of missingArtifacts) blockingFindings.push(taskFinding('TASK_ARTIFACT_MISSING', 'required_artifacts', name, null));
   for (const id of openDependencies) blockingFindings.push(taskFinding('TASK_DEPENDENCY_OPEN', 'dependencies', id, null));
+  if (tddMissing) {
+    blockingFindings.push(taskFinding(
+      'TASK_TDD_ATTESTATION_MISSING_OR_INVALID',
+      'tdd_attestation_id',
+      'green-observed or waived',
+      null,
+    ));
+  }
 
   const canComplete = blockingFindings.length === 0;
   return {
@@ -291,6 +316,7 @@ export function buildTaskContractSnapshot({
   context = null,
   registeredArtifacts = [],
   artifactLimits,
+  profile = 'GOVERN',
 } = {}) {
   const slug = String(changeSlug || '').trim();
   if (!/^[a-z0-9][a-z0-9._-]*$/i.test(slug)) {
@@ -308,6 +334,10 @@ export function buildTaskContractSnapshot({
   const manifest = artifactManifest(changeDir);
   const evidence = readJson(join(changeDir, 'evidencia.json'), null);
   const causalContext = context || resolveActiveContext(vaultBase, identity);
+  const tddSnapshot = captureTddSnapshot(projectRoot);
+  const mutationSurvivors = (evidence?.sensors ?? []).flatMap((sensor) => sensor.survivors ?? []);
+  const tddAttestations = readTddAttestationStore(vaultBase, slug).attestations
+    .map((attestation) => evaluateTddAttestation(attestation, tddSnapshot, { mutationSurvivors }));
   const binding = {
     projectId: identity.projectId,
     activeContextId: activeContextKey(identity),
@@ -323,6 +353,8 @@ export function buildTaskContractSnapshot({
     artifactSpecs: manifest.specs,
     taskLeases: causalContext?.task_leases ?? {},
     evidenceEnvelopeId: evidence?.envelope_id ?? null,
+    profile,
+    tddAttestations,
   });
   const artifactEvaluation = evaluateArtifactSpecs({
     projectRoot,
@@ -340,6 +372,7 @@ export function buildTaskContractSnapshot({
     sensor_results: evidence?.sensors ?? [],
     evidence_envelope_id: evidence?.envelope_id ?? null,
     artifact_results: artifactEvaluation.results,
+    tdd_attestations: tddAttestations,
   };
 }
 
@@ -385,6 +418,7 @@ export function deriveHandoffContract(input = {}) {
     decisions: uniqueStrings(input.decisions),
     next_actions: uniqueStrings(input.nextActions),
     blockers: uniqueStrings(input.blockers),
+    tdd_attestation_ids: uniqueStrings(input.tddAttestationIds),
     head_sha: String(input.headSha || ''),
     tasks_sha256: String(input.tasksSha256 || ''),
     spec_sha256: String(input.specSha256 || ''),
@@ -427,6 +461,7 @@ export function normalizeHandoffContract(value) {
     decisions: uniqueStrings(value.decisions),
     next_actions: uniqueStrings(value.next_actions),
     blockers: uniqueStrings(value.blockers),
+    tdd_attestation_ids: uniqueStrings(value.tdd_attestation_ids),
     head_sha: String(value.head_sha || ''),
     tasks_sha256: String(value.tasks_sha256 || ''),
     spec_sha256: String(value.spec_sha256 || ''),
@@ -519,6 +554,9 @@ export function buildStructuredTaskHandoff({
     decisions: base.decisions,
     nextActions: base.next_actions,
     blockers,
+    tddAttestationIds: (snapshot.tdd_attestations ?? [])
+      .filter((attestation) => ['green-observed', 'waived'].includes(attestation.state))
+      .map((attestation) => attestation.attestation_id),
     headSha: snapshot.binding?.head_sha,
     tasksSha256: snapshot.binding?.tasks_sha256,
     specSha256: snapshot.binding?.effective_spec_sha256,

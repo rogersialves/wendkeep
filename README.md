@@ -162,6 +162,9 @@ relativos, como `.NutriGymBrain`, partem da raiz do projeto; caminhos absolutos 
 aceitos. Os hooks procuram o vínculo mais próximo subindo a partir do `cwd`. O vault guarda a
 mesma identidade em `.brain/PROJECT.json`, e uma divergência bloqueia a escrita. Sem vínculo,
 os hooks falham de modo seguro e nunca criam o antigo fallback `~/wendkeep-vault`.
+Em worktrees vinculadas, `profile use` e `profile status` resolvem o binding canônico da worktree
+principal pelo registry Git compartilhado; a seleção persistente vale para todo o projeto sem
+reescrever o `.wendkeep.json` versionado da worktree atual.
 
 `OBSIDIAN_VAULT_PATH` permanece somente como compatibilidade legada para comandos manuais.
 Ele não roteia hooks automáticos do Codex ou Claude, e o vínculo local prevalece sobre uma
@@ -241,6 +244,8 @@ O README mostra o mapa; os guias trazem sintaxe, opções, códigos de saída, e
 | **Instalação e atualização** | `init`, `sync`, companions e primeiro vínculo projeto↔cofre | [Instalação e primeiro uso](https://github.com/rogersialves/wendkeep/blob/main/docs/pt-BR/commands/getting-started.md) |
 | **Worktrees gerenciadas** | `worktree create/list/status/open/finish/cleanup/remove/prune`, prova de merge, preflight, cleanup crash-safe/gate comum e receipts | [Worktrees gerenciadas](https://github.com/rogersialves/wendkeep/blob/main/docs/pt-BR/commands/worktrees.md) |
 | **Contexto ativo** | `active_contexts` por `repository_id`/`worktree_id`/`work_session_id`, transição causal, quarentena e recuperação explícita | [Contexto ativo](https://github.com/rogersialves/wendkeep/blob/main/docs/pt-BR/commands/context.md) |
+| **Estado portátil** | `portable status/export/import/diff`, fronteira authored/runtime, redaction e snapshot `active-work` | [Estado portátil](https://github.com/rogersialves/wendkeep/blob/main/docs/pt-BR/commands/portable.md) |
+| **Sync local-first** | `sync status/push/pull/conflicts/resolve`, revision/CAS, outbox, leases e conflitos explícitos | [Protocolo de sync](https://github.com/rogersialves/wendkeep/blob/main/docs/pt-BR/commands/sync-protocol.md) |
 | **MCP nativo** | tools semânticas, effects/capabilities, stdio, schemas, paginação, budgets, auditoria e configuração de clientes | [MCP nativo](https://github.com/rogersialves/wendkeep/blob/main/docs/pt-BR/commands/mcp.md) |
 | **Capacidades dos hosts** | matriz versionada de lifecycle/efeitos, modo degradado, waivers humanos e cobertura em evidência/Observer | [Capacidades dos hosts](https://github.com/rogersialves/wendkeep/blob/main/docs/pt-BR/commands/capabilities.md) |
 | **Perfis de operação** | `profile`, `flow`, Keep Core sempre ativo e governança do Wend Runtime | [Perfis de Operação](https://github.com/rogersialves/wendkeep/blob/main/docs/pt-BR/commands/operating-profiles.md) |
@@ -253,6 +258,7 @@ O README mostra o mapa; os guias trazem sintaxe, opções, códigos de saída, e
 | **Observer local** | `observer serve`, registro, publicação incremental, `reconcile`, outbox e índice multi-projeto | [Observer local](https://github.com/rogersialves/wendkeep/blob/main/docs/pt-BR/commands/observer.md) |
 
 Operações que merecem instrução passo a passo: [verify e seus exits 0/1/2](https://github.com/rogersialves/wendkeep/blob/main/docs/pt-BR/commands/verify.md),
+[atestação TDD causal](https://github.com/rogersialves/wendkeep/blob/main/docs/pt-BR/commands/tdd.md),
 [migração de memória legada](https://github.com/rogersialves/wendkeep/blob/main/docs/pt-BR/commands/memory-migration.md) e
 [importação retroativa segura](https://github.com/rogersialves/wendkeep/blob/main/docs/pt-BR/commands/retroactive-import.md).
 
@@ -400,6 +406,12 @@ permite retry com `--change-slug`. Veja o guia completo de
 semântica. Use `--scope core` para a saúde do Keep Core, `--scope runtime` para governança e
 `--strict` em CI/release; o `wendkeep sync` valida somente o Core para não transformar trabalho em
 andamento em falha de instalação.
+
+Para retomar uma change em outro clone sem versionar transcritos, tokens, paths, leases ou outboxes,
+`wendkeep portable export` gera `.wendkeep/portable/state.json` com CORE/ADRs/specs/deltas autorais
+sanitizados e um `active-work` compacto. `portable import` valida project, hashes, revisions e paths
+antes de escrever; estado stale ou conflitante nunca substitui silenciosamente o local. O recurso é
+opt-in para Git e nunca adiciona arquivos automaticamente.
 
 ## Shared Project Memory v2
 
@@ -551,8 +563,8 @@ explore → propose → apply (TDD) → verify → archive
 ```
 
 - **Propose** — `wendkeep change new <slug>` faz o scaffold de `08-Mudanças/<slug>/` (`proposta.md`, `design.md`, `tarefas.md`; o `--simple` pula o design). `--guide` cria o contrato GUIDE compacto e omite design/spec/ADR automático quando `contract_impact:none`. A change vira a *atual* global; `change use <slug>` troca o foco e `change continue <arquivada> <nova>` cria uma continuação auditável. Várias changes podem ficar abertas: hooks e `change list/status` mostram todas as pendências, enquanto comandos sem `--change` usam somente a atual. Quando a change declara `spec_impact: required`, você mesmo escreve o delta em `specs/<capability>/spec.md` — não há placeholder pra apagar.
-- **Apply** — implemente cada tarefa de `tarefas.md`. Marque a prova de máquina com uma ou mais tags `[sensor:<id>]` na mesma tarefa: todos os IDs distintos entram no gate uma vez, na ordem declarada. Marque também os requisitos satisfeitos com uma ou mais tags `[req:<ID>]`.
-- **Verify** — `wendkeep verify` roda os sensores declarados e grava um **Evidence Envelope v2** em `evidencia.json`, ligado por SHA-256 a projeto/repositório/worktree/sessão, HEAD, árvore do índice, digest normalizado da worktree, tarefas, spec e configuração efetiva. Cada sensor registra comando sanitizado, período, duração, exit code, digest da saída e tail sanitizado de até 2.000 caracteres. Se o HEAD mudar durante a execução, nada novo é publicado. `change status` mostra `bound`, `stale`, `context-mismatch` ou `legacy-unbound`; evidência v1 continua legível, mas não satisfaz autoridade v2. O schema público é [`schema/wendkeep.evidence-envelope-v2.schema.json`](schema/wendkeep.evidence-envelope-v2.schema.json). `verify --deep` liga pacote e verdict ao `envelope_id` atual.
+- **Apply** — implemente cada tarefa de `tarefas.md`. Marque a prova de máquina com uma ou mais tags `[sensor:<id>]` na mesma tarefa: todos os IDs distintos entram no gate uma vez, na ordem declarada. Marque também os requisitos satisfeitos com uma ou mais tags `[req:<ID>]`. Para TDD causal, use `[tdd]` e registre `wendkeep tdd red|green`; o [guia de atestação TDD](docs/pt-BR/commands/tdd.md) detalha perfil, waiver e códigos de saída.
+- **Verify** — `wendkeep verify` roda os sensores declarados e grava um **Evidence Envelope v2** em `evidencia.json`, ligado por SHA-256 a projeto/repositório/worktree/sessão, HEAD, árvore do índice, digest normalizado da worktree, tarefas, spec, atestações TDD e configuração efetiva. Cada sensor registra comando sanitizado, período, duração, exit code, digest da saída e tail sanitizado de até 2.000 caracteres. Se o HEAD mudar durante a execução, nada novo é publicado. `change status` mostra `bound`, `stale`, `context-mismatch` ou `legacy-unbound`; evidência v1 continua legível, mas não satisfaz autoridade v2. O schema público é [`schema/wendkeep.evidence-envelope-v2.schema.json`](schema/wendkeep.evidence-envelope-v2.schema.json). `verify --deep` liga pacote, atestações e verdict ao `envelope_id` atual.
 - **Archive** — `wendkeep change archive <slug>` faz **gate** na evidência (bloqueia a não ser que todo sensor crítico declarado esteja verde), promove cada delta aplicável (`ADDED`/`MODIFIED`/`REMOVED`) pro `07-Specs/<capability>.md` vivo e move a change pro `_arquivo/`. GOVERN/ASSURE cunham ADR em `04-Decisões/`; GUIDE compacta sem impacto de contrato não gera ADR automático.
 
 > O gate bloqueia a não ser que o scaffold esteja preenchido, nenhuma tarefa aberta, evidência fresca e todo requisito declarado coberto. **O `--force` dispensa exatamente uma dessas — a checagem de tarefa aberta — e é decisão do humano, nunca do agente.** Scaffold não preenchido, sensor crítico vermelho, evidência stale, requisito órfão ou verdict ausente bloqueiam de qualquer jeito.
@@ -606,7 +618,7 @@ npx wendkeep change new dark-mode              # proposta/design/tarefas — a c
 Edite o `tarefas.md` — marque a prova e o requisito por tarefa:
 
 ```markdown
-- [ ] 1.1 o toggle persiste entre sessões [req:UI-1] [sensor:tests]
+- [ ] 1.1 o toggle persiste entre sessões [req:UI-1] [sensor:tests] [tdd]
 ```
 
 Declare a capability na `proposta.md` (`specs: [ui]`) e escreva o delta dela só em
@@ -618,6 +630,9 @@ npx wendkeep change list                       # o mesmo backlog, mais as arquiv
 npx wendkeep change status dark-mode           # uma tela pra uma change: specs / tarefas / sensores / veredito
 npx wendkeep spec effective --change dark-mode # contrato vivo + delta desta change
 npx wendkeep change done 1.1                   # marca uma tarefa pela CLI
+npx wendkeep tdd red 1.1 --requirement UI-1 --test tests/ui.test.mjs --command "npm test"
+# implemente; depois observe GREEN no mesmo contexto causal
+npx wendkeep tdd green 1.1 --command "npm test"
 npx wendkeep verify                            # roda os sensores declarados -> evidencia.json
 npx wendkeep verify --deep                     # monta o pacote de verificação
 # a skill wk-verify (passe fresco, read-only) grava o verdict.json

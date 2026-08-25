@@ -38,6 +38,7 @@ test('[req:OBS-1] [req:OBS-2] snapshot sanitizado resume changes sem copiar mem√
     assert.deepEqual(snapshot.session.coverage, {
       host_id: 'codex', degraded: true, unavailable: 4, manual: 1,
     });
+    assert.deepEqual(snapshot.sync, { status: 'disabled', pending: 0, open_conflicts: 0 });
     assert.match(snapshot.event_id, /^obs-/);
     assert.equal(JSON.stringify(snapshot).includes('CORE.md'), false);
     assert.equal(JSON.stringify(snapshot).includes('C:\\GitHub'), false);
