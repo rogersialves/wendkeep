@@ -4,6 +4,25 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.81.0] — 2026-08-24
+
+### Added
+
+- **Atestação TDD causal.** `wendkeep tdd red|green|status|waive` registra o ciclo RED → GREEN
+  ligado a projeto, repositório, worktree, work session, change, tarefa, requisito e paths de teste.
+  RED já verde ou causado por import/sintaxe/configuração fica `invalid`; GREEN exige sucessor
+  causal e diff de produção posterior, enquanto waiver exige motivo e autoridade humana explícita.
+- **Prova reviewable e portátil.** O store v1 conserva digests e cauda sanitizada limitada, preserva
+  histórico após refactor/revalidação e expõe IDs no Evidence Envelope, pacote deep, handoff e
+  Observer, sem persistir saída completa nem paths absolutos.
+
+### Changed
+
+- **Gate TDD por perfil.** Task Contracts exigem atestação atual para tarefas `[tdd]` em GOVERN e
+  para comportamento testável em ASSURE; mutante sobrevivente ou mudança pós-GREEN invalida a
+  prova. OFF/FLOW permanecem opcionais e GUIDE recomendado. Skill `wk-tdd`, schemas, README e
+  guias PT-BR/EN documentam o contrato e a recuperação.
+
 ## [0.80.2] — 2026-08-24
 
 ### Fixed

@@ -17,10 +17,12 @@ import {
 
 export { canonicalSha256, evaluateEvidenceBinding, evidenceSensors };
 
-const PACKAGE_VERSION = JSON.parse(readFileSync(
-  join(dirname(fileURLToPath(import.meta.url)), '..', 'package.json'),
-  'utf8',
-)).version;
+function packageVersion() {
+  return JSON.parse(readFileSync(
+    join(dirname(fileURLToPath(import.meta.url)), '..', 'package.json'),
+    'utf8',
+  )).version;
+}
 
 export function sensorConfigSha256(sensors, ids) {
   const selected = new Set(ids || []);
@@ -260,9 +262,10 @@ export function buildEvidenceEnvelope({
   effectiveSpecSha256,
   sensorConfigSha256: configSha256,
   sensors,
+  tddAttestations = [],
   startedAt,
   finishedAt,
-  version = PACKAGE_VERSION,
+  version = '',
   runtimePlatform = `${process.platform}-${process.arch}`,
 } = {}) {
   const envelope = {
@@ -278,11 +281,12 @@ export function buildEvidenceEnvelope({
     tasks_sha256: tasksSha256,
     effective_spec_sha256: effectiveSpecSha256,
     sensor_config_sha256: configSha256,
-    wendkeep_version: version,
+    wendkeep_version: version || packageVersion(),
     platform: runtimePlatform,
     started_at: startedAt,
     finished_at: finishedAt,
     sensors,
+    tdd_attestations: tddAttestations,
   };
   return { ...envelope, envelope_id: canonicalSha256(envelope) };
 }

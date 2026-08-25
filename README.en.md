@@ -254,6 +254,7 @@ The README is the map; the guides provide syntax, options, exit codes, examples,
 | **Local Observer** | `observer serve`, registration, incremental publication, `reconcile`, outbox, and multi-project index | [Local Observer](https://github.com/rogersialves/wendkeep/blob/main/docs/en/commands/observer.md) |
 
 Operations that deserve step-by-step guidance: [verify and exits 0/1/2](https://github.com/rogersialves/wendkeep/blob/main/docs/en/commands/verify.md),
+[causal TDD attestation](https://github.com/rogersialves/wendkeep/blob/main/docs/en/commands/tdd.md),
 [legacy-memory migration](https://github.com/rogersialves/wendkeep/blob/main/docs/en/commands/memory-migration.md), and
 [safe retroactive import](https://github.com/rogersialves/wendkeep/blob/main/docs/en/commands/retroactive-import.md).
 
@@ -552,8 +553,8 @@ explore → propose → apply (TDD) → verify → archive
 ```
 
 - **Propose** — `wendkeep change new <slug>` scaffolds `08-Mudanças/<slug>/` (`proposta.md`, `design.md`, `tarefas.md`; `--simple` skips the design). `--guide` creates the compact GUIDE contract and omits automatic design/spec/ADR when `contract_impact:none`. It becomes the global *current* change. When the change declares `spec_impact: required`, you author the delta yourself at `specs/<capability>/spec.md` — there is no placeholder to delete. Multiple changes may remain open: `change list`/`status` and the hooks show every pending one, while commands without `--change` act on the current one alone. `change use <slug>` changes focus and `change continue <archived> <new>` creates an auditable continuation.
-- **Apply** — implement each `tarefas.md` task. Mark machine proof with one or more `[sensor:<id>]` tags on the same task: every distinct ID enters the gate once, in declaration order. Also mark satisfied requirements with one or more `[req:<ID>]` tags.
-- **Verify** — `wendkeep verify` runs declared sensors and writes an **Evidence Envelope v2** to `evidencia.json`, SHA-256-bound to project/repository/worktree/session, HEAD, index tree, normalized worktree digest, tasks, effective spec, and sensor configuration. Each sensor records a sanitized command, execution window, duration, exit code, output digest, and a sanitized tail bounded to 2,000 characters. If HEAD changes during the run, no new envelope is published. `change status` reports `bound`, `stale`, `context-mismatch`, or `legacy-unbound`; v1 evidence remains readable but cannot satisfy v2 authority. The public schema is [`schema/wendkeep.evidence-envelope-v2.schema.json`](schema/wendkeep.evidence-envelope-v2.schema.json). `verify --deep` binds both package and verdict to the current `envelope_id`.
+- **Apply** — implement each `tarefas.md` task. Mark machine proof with one or more `[sensor:<id>]` tags on the same task: every distinct ID enters the gate once, in declaration order. Also mark satisfied requirements with one or more `[req:<ID>]` tags. For causal TDD, add `[tdd]` and record `wendkeep tdd red|green`; the [TDD attestation guide](docs/en/commands/tdd.md) covers profiles, waivers, and exit codes.
+- **Verify** — `wendkeep verify` runs declared sensors and writes an **Evidence Envelope v2** to `evidencia.json`, SHA-256-bound to project/repository/worktree/session, HEAD, index tree, normalized worktree digest, tasks, effective spec, TDD attestations, and sensor configuration. Each sensor records a sanitized command, execution window, duration, exit code, output digest, and a sanitized tail bounded to 2,000 characters. If HEAD changes during the run, no new envelope is published. `change status` reports `bound`, `stale`, `context-mismatch`, or `legacy-unbound`; v1 evidence remains readable but cannot satisfy v2 authority. The public schema is [`schema/wendkeep.evidence-envelope-v2.schema.json`](schema/wendkeep.evidence-envelope-v2.schema.json). `verify --deep` binds the package, attestations, and verdict to the current `envelope_id`.
 - **Archive** — `wendkeep change archive <slug>` **gates** on the evidence (blocks unless every declared critical sensor is green), promotes each applicable spec delta (`ADDED`/`MODIFIED`/`REMOVED`) into the living `07-Specs/<capability>.md` and moves the change to `_arquivo/`. GOVERN/ASSURE mint an ADR in `04-Decisões/`; compact GUIDE with no contract impact does not mint one automatically.
 
 > The gate blocks unless the scaffold is filled, no task is open, evidence is fresh, and every declared requirement is covered. **`--force` waives exactly one of those — the open-task check — and is the human's call, never the agent's.** An unfilled scaffold, a red critical sensor, stale evidence, an orphan requirement or a missing verdict block regardless.
@@ -606,7 +607,7 @@ npx wendkeep change new dark-mode              # proposta/design/tarefas — cha
 Edit `tarefas.md` — tag proof and requirement per task:
 
 ```markdown
-- [ ] 1.1 toggle persists across sessions [req:UI-1] [sensor:tests]
+- [ ] 1.1 toggle persists across sessions [req:UI-1] [sensor:tests] [tdd]
 ```
 
 Declare the capability in `proposta.md` (`specs: [ui]`) and author its delta only in
@@ -618,6 +619,9 @@ npx wendkeep change list                       # same backlog, plus the archived
 npx wendkeep change status dark-mode           # one screen for one change: specs / tasks / sensors / verdict
 npx wendkeep spec effective --change dark-mode # living contract + this change's delta
 npx wendkeep change done 1.1                   # tick a task from the CLI
+npx wendkeep tdd red 1.1 --requirement UI-1 --test tests/ui.test.mjs --command "npm test"
+# implement; then observe GREEN in the same causal context
+npx wendkeep tdd green 1.1 --command "npm test"
 npx wendkeep verify                            # run the declared sensors -> evidencia.json
 npx wendkeep verify --deep                     # assemble the verification package
 # the wk-verify skill (fresh, read-only pass) writes verdict.json
