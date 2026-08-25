@@ -6,5 +6,7 @@
   ],
   "tasksHash": "<copie de verificacao.json — selo de frescor / copy from verificacao.json — freshness seal>",
   "effectiveSpecHash": "<copie de verificacao.json / copy from verificacao.json>",
+  "evidenceEnvelopeId": "<copie de verificacao.json / copy from verificacao.json>",
+  "evidenceBinding": "<copie o objeto de verificacao.json / copy the object from verificacao.json>",
   "notes": []
 }

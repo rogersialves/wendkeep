@@ -1,5 +1,10 @@
 {
   "schemaVersion": 1,
   "projectId": "8f116430-1dd7-4af3-a393-5e5786cfa24e",
-  "vault": ".WendKeep-vault"
+  "vault": ".WendKeep-vault",
+  "harness": {
+    "profile": "OFF",
+    "profileSource": "explicit-cli",
+    "profileUpdatedAt": "2026-08-25T01:21:02.332Z"
+  }
 }
