@@ -139,6 +139,10 @@ harness nativo da LLM.
   ausente, ambíguo ou stale falha fechado sem mutação parcial.
 - `.wendkeep.json` continua em `schemaVersion: 1`; o campo aditivo usa, por exemplo,
   `"harness": { "profile": "GOVERN" }`. Binding legado sem o campo também resolve `GOVERN`.
+- Em worktree vinculada, `profile use` e `profile status` usam o binding canônico da worktree
+  principal descoberto pelo registry Git compartilhado. A seleção é persistida uma vez para o
+  projeto e o `.wendkeep.json` versionado da worktree vinculada permanece intacto, inclusive no
+  Windows quando caminhos longos e aliases 8.3 identificam o mesmo Vault.
 - Binding corrompido nunca equivale a `OFF`. Quando o payload ou a integração legada identifica
   um Vault inequívoco, o Keep Core continua ativo sob `GOVERN` e o hook expõe um diagnóstico;
   guards de mutação falham fechados até o binding ser reparado. Configuração local inválida,

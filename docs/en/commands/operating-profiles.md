@@ -138,6 +138,10 @@ ownership to the native LLM harness.
   missing, ambiguous, or stale context fails closed without a partial mutation.
 - `.wendkeep.json` stays on `schemaVersion: 1`; the additive field is, for example,
   `"harness": { "profile": "GOVERN" }`. A legacy binding without it also resolves to `GOVERN`.
+- In a linked worktree, `profile use` and `profile status` use the main worktree's canonical
+  binding discovered through the shared Git registry. The selection is persisted once for the
+  project and the linked worktree's versioned `.wendkeep.json` remains unchanged, including on
+  Windows when long paths and 8.3 aliases identify the same Vault.
 - A corrupt binding never means `OFF`. When the payload or legacy integration identifies one
   unambiguous Vault, Keep Core remains active under `GOVERN` and the hook exposes a diagnostic;
   mutation guards fail closed until the binding is repaired. Invalid local configuration, a
