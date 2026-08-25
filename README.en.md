@@ -161,6 +161,9 @@ paths are also supported. Hooks search upward from the agent's `cwd`, so nested 
 the nearest binding. The vault carries the same identity in `.brain/PROJECT.json`; a mismatch
 is rejected before any session is written. If no binding exists, hooks fail closed and never
 create the historical `~/wendkeep-vault` fallback.
+In linked worktrees, `profile use` and `profile status` resolve the main worktree's canonical
+binding through the shared Git registry; the persistent selection applies project-wide without
+rewriting the current worktree's versioned `.wendkeep.json`.
 
 `OBSIDIAN_VAULT_PATH` remains only as legacy/manual CLI compatibility. It is not used to
 route automatic Codex or Claude hooks and a project-local binding overrides an inherited

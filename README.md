@@ -158,6 +158,9 @@ relativos, como `.NutriGymBrain`, partem da raiz do projeto; caminhos absolutos 
 aceitos. Os hooks procuram o vínculo mais próximo subindo a partir do `cwd`. O vault guarda a
 mesma identidade em `.brain/PROJECT.json`, e uma divergência bloqueia a escrita. Sem vínculo,
 os hooks falham de modo seguro e nunca criam o antigo fallback `~/wendkeep-vault`.
+Em worktrees vinculadas, `profile use` e `profile status` resolvem o binding canônico da worktree
+principal pelo registry Git compartilhado; a seleção persistente vale para todo o projeto sem
+reescrever o `.wendkeep.json` versionado da worktree atual.
 
 `OBSIDIAN_VAULT_PATH` permanece somente como compatibilidade legada para comandos manuais.
 Ele não roteia hooks automáticos do Codex ou Claude, e o vínculo local prevalece sobre uma
