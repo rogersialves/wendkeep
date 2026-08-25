@@ -11,8 +11,8 @@ import {
   evaluateTaskContract,
 } from '../src/task-contracts.mjs';
 
-test('[req:TC-1] [req:TC-2] task metadata derives from tarefas.md without becoming title text', () => {
-  const [task] = parseTasks('- [ ] 2.3 produzir relatório [req:TC-1] [sensor:tests] [depends:2.2] [artifact:report] [phase:verify]\n');
+test('[req:TC-1] [req:TC-2] [req:TDD-1] task metadata derives from tarefas.md without becoming title text', () => {
+  const [task] = parseTasks('- [ ] 2.3 produzir relatório [req:TC-1] [sensor:tests] [depends:2.2] [artifact:report] [phase:verify] [tdd]\n');
 
   assert.deepEqual(task, {
     id: '2.3',
@@ -25,7 +25,50 @@ test('[req:TC-1] [req:TC-2] task metadata derives from tarefas.md without becomi
     dependencies: ['2.2'],
     artifacts: ['report'],
     phase: 'verify',
+    tdd: true,
   });
+});
+
+test('[req:TDD-1] [req:TDD-6] a required TDD task stays blocked until a valid or waived attestation exists', () => {
+  const input = {
+    projectId: 'project-1',
+    changeSlug: 'tdd-attestation',
+    activeContextId: 'context-1',
+    headSha: 'a'.repeat(40),
+    tasksSha256: '1'.repeat(64),
+    effectiveSpecSha256: '2'.repeat(64),
+    artifactManifestSha256: '3'.repeat(64),
+    profile: 'GOVERN',
+    tasks: [{
+      id: '1.1', text: 'implement behavior', done: true, reqs: ['TDD-1'], sensors: ['tests'], tdd: true,
+    }],
+  };
+
+  const [missing] = deriveTaskContracts(input);
+  assert.equal(missing.tdd_required, true);
+  assert.equal(missing.tdd_attestation_id, null);
+  const blocked = evaluateTaskContract(missing, {
+    currentBinding: missing.binding,
+    availableRequirementIds: ['TDD-1'],
+    sensorResults: [{ id: 'tests', status: 'green' }],
+  });
+  assert.equal(blocked.can_complete, false);
+  assert.deepEqual(blocked.blocking_findings.map((finding) => finding.code), [
+    'TASK_TDD_ATTESTATION_MISSING_OR_INVALID',
+  ]);
+
+  const [waived] = deriveTaskContracts({
+    ...input,
+    tddAttestations: [{
+      attestation_id: 'b'.repeat(64), task_id: '1.1', requirement_id: 'TDD-1', state: 'waived',
+    }],
+  });
+  assert.equal(waived.tdd_attestation_id, 'b'.repeat(64));
+  assert.equal(evaluateTaskContract(waived, {
+    currentBinding: waived.binding,
+    availableRequirementIds: ['TDD-1'],
+    sensorResults: [{ id: 'tests', status: 'green' }],
+  }).can_complete, true);
 });
 
 test('[req:TC-1] [req:TC-2] rebuild preserves contract identity and authored changes become stale', () => {

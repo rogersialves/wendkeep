@@ -20,6 +20,61 @@ All notable changes to **wendkeep** are documented here. Format based on
   guias PT-BR/EN e política LF em `.gitattributes` documentam redaction, opt-out de Git, revisão em
   PR e retomada segura em clone limpo.
 
+## [0.82.0] — 2026-08-25
+
+### Added
+
+- **MCP semântico nativo.** `wendkeep mcp serve` oferece tools bounded para projeto, contexto,
+  memória, changes, specs, tarefas, handoff, evidência e Observer por JSON-RPC/stdio, com schemas
+  versionados, paginação, budgets, timeout, cancelamento, redaction e compatibilidade Core com
+  Node 18; Observer SQL permanece capability separada em Node 22.13+.
+- **Effects, capabilities e writes causais.** Um catálogo versionado com integridade SHA-256
+  distingue read/write/destructive; reads conhecidas deixam de ser bloqueadas apenas pelo prefixo
+  MCP, enquanto desconhecidas e manifestos inválidos falham fechado. Writes exigem capability,
+  ator, sessão, active context, lease e motivo, revalidam o binding causal e reutilizam os gates da
+  CLI; delivery, merge, push, tag, publicação e exclusão ficam fora da superfície padrão.
+- **Auditoria e configuração multi-cliente.** O ledger local registra somente metadados de chamada,
+  nunca argumentos/payload; `wendkeep mcp config` gera configuração para Claude, Codex, Cursor e
+  clientes genéricos, e o tarball instalado prova o handshake e a consulta semântica.
+
+### Changed
+
+- **MCP principal reproduzível.** `init` substitui o servidor de Vault executado com `@latest` por
+  `npx --no-install wendkeep mcp serve --vault <vault>`, preservando o merge não destrutivo de
+  `.mcp.json`; README, arquitetura e guias PT-BR/EN documentam tools, gates, limites e recovery.
+- **Bootstrap stdio desacoplado do checkout.** `mcp serve` inicia sem exigir um Vault no cwd; quando
+  `--vault` não é informado, cada tool resolve e audita somente o binding do `project_root` declarado,
+  preservando isolamento multi-projeto e permitindo handshake empacotado em CI/editores.
+
+## [0.81.0] — 2026-08-24
+
+### Added
+
+- **Atestação TDD causal.** `wendkeep tdd red|green|status|waive` registra o ciclo RED → GREEN
+  ligado a projeto, repositório, worktree, work session, change, tarefa, requisito e paths de teste.
+  RED já verde ou causado por import/sintaxe/configuração fica `invalid`; GREEN exige sucessor
+  causal e diff de produção posterior, enquanto waiver exige motivo e autoridade humana explícita.
+- **Prova reviewable e portátil.** O store v1 conserva digests e cauda sanitizada limitada, preserva
+  histórico após refactor/revalidação e expõe IDs no Evidence Envelope, pacote deep, handoff e
+  Observer, sem persistir saída completa nem paths absolutos.
+
+### Changed
+
+- **Gate TDD por perfil.** Task Contracts exigem atestação atual para tarefas `[tdd]` em GOVERN e
+  para comportamento testável em ASSURE; mutante sobrevivente ou mudança pós-GREEN invalida a
+  prova. OFF/FLOW permanecem opcionais e GUIDE recomendado. Skill `wk-tdd`, schemas, README e
+  guias PT-BR/EN documentam o contrato e a recuperação.
+
+## [0.80.2] — 2026-08-24
+
+### Fixed
+
+- **Perfil persistente em worktrees vinculadas.** `profile use` e `profile status` agora leem e
+  escrevem o binding canônico da worktree principal quando o Vault é resolvido pelo registry Git
+  compartilhado, sem alterar o `.wendkeep.json` versionado da worktree vinculada. A identidade de
+  caminho também normaliza aliases Windows 8.3, impedindo que uma seleção humana `OFF` volte
+  imediatamente ao fallback `GOVERN`; README e guia de perfis foram atualizados em PT-BR/EN.
+
 ## [0.80.1] — 2026-08-24
 
 ### Fixed

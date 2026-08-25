@@ -51,11 +51,27 @@
     "sensors": {
       "type": "array",
       "items": { "$ref": "#/$defs/sensor" }
+    },
+    "tdd_attestations": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/tddAttestation" }
     }
   },
   "$defs": {
     "gitObject": { "type": "string", "pattern": "^[a-f0-9]{40,64}$" },
     "sha256": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "tddAttestation": {
+      "type": "object",
+      "required": ["schema_version", "attestation_id", "task_id", "requirement_id", "state", "test_paths"],
+      "properties": {
+        "schema_version": { "const": 1 },
+        "attestation_id": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "task_id": { "type": "string", "minLength": 1 },
+        "requirement_id": { "type": "string", "minLength": 1 },
+        "state": { "enum": ["red-observed", "green-observed", "invalid", "waived"] },
+        "test_paths": { "type": "array", "items": { "type": "string" } }
+      }
+    },
     "sensor": {
       "type": "object",
       "required": [

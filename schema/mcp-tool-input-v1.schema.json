@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "wendkeep://schema/mcp-tool-input-v1",
+  "title": "WendKeep MCP tool input v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["project_root"],
+  "properties": {
+    "project_root": { "type": "string", "minLength": 1 },
+    "worktree_root": { "type": "string", "minLength": 1 },
+    "session_id": { "type": "string", "minLength": 1 },
+    "active_context_id": { "type": "string", "minLength": 1 },
+    "actor": { "type": "string", "minLength": 1 },
+    "reason": { "type": "string", "minLength": 1, "maxLength": 500 },
+    "capabilities": { "type": "array", "uniqueItems": true, "items": { "type": "string" } },
+    "lease": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "expires_at"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "expires_at": { "type": "string", "format": "date-time" }
+      }
+    },
+    "change": { "type": "string" },
+    "task": { "type": "string" },
+    "query": { "type": "string" },
+    "cursor": { "type": "string" },
+    "limit": { "type": "integer", "minimum": 1, "maximum": 100 },
+    "payload": { "type": "object" }
+  }
+}

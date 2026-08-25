@@ -39,12 +39,15 @@ sibling adapters with no dependency between them, and the direction remains
 remain equivalent; the private `@wendkeep/integrations` workspace stays inside the single
 published `wendkeep` package, with no public `wendkeep/integrations` subpath. Pi is the next phase.
 
-In the **0.65 MCP Configuration Kernel** phase, `packages/mcp/src/config.mjs` becomes the
-canonical authority for the MCPVault entry, catalog-described server selection, and `.mcp.json`
-merging. `src/taxonomy.mjs` supplies descriptors while `src/init.mjs` retains only filesystem
-orchestration. Existing keys and servers remain preserved; invalid JSON stays byte-for-byte intact
-and the reconciled proposal is written to `.mcp.json.new`. The workspace remains private, with no
-public `wendkeep/mcp` subpath or separate npm package.
+The **native MCP** workspace now serves semantic project, context, memory, change, spec, task,
+handoff, evidence, and Observer tools through `wendkeep mcp serve`. A versioned, verified catalog
+declares every effect/capability; known reads skip the mutation gate, while writes require a
+capability, session, active context, lease, and reason. Stable schemas, pagination, byte budgets,
+timeouts, cancellation, redaction, and payload-free local audit bound the surface. `init` preserves
+the `.mcp.json` merge while invoking the installed package through
+`npx --no-install wendkeep mcp serve`—with no dynamic `@latest` dependency or arbitrary filesystem
+access. Stdio may start outside a bound project; without `--vault`, each call resolves and audits
+only its declared `project_root`. The workspace remains private inside the single `wendkeep` package.
 
 In the **0.64 CLI Runtime** phase, `packages/cli/src/index.mjs` owns help, version reporting, Vault
 selection, error presentation, and lazy dispatch. `bin/wendkeep.mjs` is reduced to the shebang and
@@ -87,7 +90,7 @@ Decisions, dead ends, the reason you chose X over Y — gone next session. The p
 | **Recall** — injected back | Canonical `CORE` + operational `SHARED_MEMORY` enter on `startup`, `/clear`, and `/compact`; on every prompt, the local chunk index selects a few passages with source, authority, and validity under an explicit budget. |
 | **Cost** — what it all cost | Per‑model, cache‑aware token pricing per session — plus `cost --trend` with a run‑rate projection across the whole vault; research previews without a final rate remain unestimated. |
 | **Multi‑agent** — one vault, both agents | `init` wires the session hooks into `.claude/settings.json` *and* `.codex/hooks.json`, and every note is tagged with the agent that wrote it: Claude Code is detected from its environment, anything else is recorded as Codex. One shared graph, whichever agent you are in. |
-| **Local‑first** — no cloud, no account | Everything is plain Markdown on your disk. An optional MCP server (`@bitbonsai/mcpvault`) lets the agent read/write the vault. |
+| **Local‑first** — no cloud, no account | Everything is plain Markdown on your disk. The native MCP queries local semantic state and gates writes by capability/context/lease. |
 | **Local Observer** — many projects, one view | `wendkeep observer` keeps documents, FTS5 chunks, sessions, agents, tokens, costs, calls, and transcripts in SQLite. Identities and foreign keys are project-scoped; each event is atomic. Hooks publish only what changed; `observer reconcile --url` ignores the incremental cursor to regenerate the complete projection while preserving local/remote revision baselines. |
 
 During historical migration, the Observer preserves differences between frontmatter totals and the
@@ -117,7 +120,7 @@ npx wendkeep init
 2. Write a provider-neutral **`.wendkeep.json`** binding at the project root and a matching `.brain/PROJECT.json` marker in the vault, then merge the session hooks into **`.claude/settings.json`**. The binding is provider-neutral by design: any agent resolves the same vault from its session `cwd`, with no machine-global environment variable. Older registrations already in `.claude/settings.json` are adopted automatically.
 3. Wire the Codex hooks in **`.codex/hooks.json`** — twelve compatible entries: `brain-inject` + `session-start` + `observer-publish` on `SessionStart`, `session-ensure` + `evidence-context` + `change-context` on `UserPromptSubmit`, `session-stop` + `observer-publish` + `change-nag` on `Stop`, `subagent-stop` + `observer-publish` on `SubagentStop`, and `change-guard` on `PreToolUse` for `Bash`, `exec_command`, `apply_patch`, and mutable MCP tools, always in the `npx wendkeep hook <name>` form. For the Observer, `SessionStart` only drains the outbox, `Stop` enqueues the changed session, and `SubagentStop` enqueues only the affected transcript; full scanning is explicit through `observer reconcile`. When the host omits `work_session_id`, `session-start` and `session-ensure` derive it from the canonical `session_id`, preserving an explicit handoff and the already registered value first. The guard accepts object, raw-string, and argv Codex payloads; before a mutation it compares the session with the project, Git root, remote, branch, and worktree, denying missing or divergent targets. A raw `git checkout/switch` branch transition is denied before it can strand the session; use `wendkeep context switch <branch> [--create]`, which moves Git and the causal scope together in the same worktree with an audited revision and rollback. If a divergence is already quarantined, `context status --session <id>` inventories sanitized `reserved`/`observed` candidates; `context recover --session <id> --select <reserved|observed> --revision <n> --reason <text>` requires an explicit choice, CAS, and current-checkout proof, failing closed before clearing the conflict if revalidation changes. `doctor` diagnoses orphaned active contexts, removed worktrees, and expired `request-stop` leases without writing; `context repair --key <key> --revision <n> --reason <text> --session <id>` revalidates under lock, closes only the ownerless/removed context or expires only its lease, while preserving the record and all historical memory. The change lifecycle uses `active_contexts`, identified by `repository_id` + `worktree_id` + `work_session_id`; two matching sessions fail with ambiguity instead of selecting silently, `CURRENT_CHANGE.md` is only a derived projection for one unambiguous context, and migration never invents a worktree or session identity. The other four stay out because Codex offers no equivalent payload, tool, or event: `change-warn` (no reliable `tool_input.file_path`), `plan-capture` (no `ExitPlanMode`), `decision-capture` (`AskUserQuestion` is Claude-only), and `task-log` (`TaskCompleted` is not in Codex's event enum). Codex scope blocks use `permissionDecision: "deny"`; `ask` is never emitted in `PreToolUse`. The merge remains non-destructive, preserves third-party hooks, and migrates legacy `timeout` to `timeoutSec`. **Codex enumerates every hook as untrusted and runs none until you approve the “Hooks need review” prompt at startup — `init` cannot pre-approve them**.
    Once `active_contexts` is initialized, `brain-inject` and `change-context` mark only the causal context's change as current; the backlog remains global, and an empty or ambiguous store never revives `CURRENT_CHANGE.md`.
-4. Add the **`wendkeep-vault`** MCP server to `.mcp.json` so the agent can read/write the vault. Skip with `--no-mcp` — e.g. when the agent already has a vault MCP. (`--no-mcp` skips *only wendkeep's own* MCP; companion MCPs still follow `--companions`.)
+4. Add the native semantic **`wendkeep-vault`** MCP server to `.mcp.json`. It offers bounded reads and capability-gated writes without arbitrary filesystem access or an `@latest` download. Skip with `--no-mcp`. (`--no-mcp` skips *only wendkeep's own* MCP; companion MCPs still follow `--companions`.)
 5. Offer to pin **companion** plugins/MCP (multi-choice; **none** pre-checked — wendkeep is a neutral harness and presumes no third-party plugin). Each is wired the most agent-agnostic way it supports:
    - **`context-mode`** — context optimizer + FTS5 memory, wired as a Claude Code plugin. It ships its own MCP server, so wendkeep deliberately adds no `.mcp.json` entry (registering both cold-started two servers at once). On non-Claude agents, add the MCP by hand: `npx -y context-mode`.
    - **`understand-anything`** — project domain graph, via a `understand-inject` SessionStart hook that injects the graph when generated.
@@ -161,6 +164,9 @@ paths are also supported. Hooks search upward from the agent's `cwd`, so nested 
 the nearest binding. The vault carries the same identity in `.brain/PROJECT.json`; a mismatch
 is rejected before any session is written. If no binding exists, hooks fail closed and never
 create the historical `~/wendkeep-vault` fallback.
+In linked worktrees, `profile use` and `profile status` resolve the main worktree's canonical
+binding through the shared Git registry; the persistent selection applies project-wide without
+rewriting the current worktree's versioned `.wendkeep.json`.
 
 `OBSIDIAN_VAULT_PATH` remains only as legacy/manual CLI compatibility. It is not used to
 route automatic Codex or Claude hooks and a project-local binding overrides an inherited
@@ -242,6 +248,7 @@ The README is the map; the guides provide syntax, options, exit codes, examples,
 | **Managed worktrees** | `worktree create/list/status/open/finish/cleanup/remove/prune`, merge proof, preflight, crash-safe cleanup/common gate, and receipts | [Managed worktrees](https://github.com/rogersialves/wendkeep/blob/main/docs/en/commands/worktrees.md) |
 | **Active context** | `active_contexts` by `repository_id`/`worktree_id`/`work_session_id`, causal transition, quarantine, and explicit recovery | [Active context](https://github.com/rogersialves/wendkeep/blob/main/docs/en/commands/context.md) |
 | **Portable state** | `portable status/export/import/diff`, authored/runtime boundary, redaction, and the `active-work` snapshot | [Portable state](https://github.com/rogersialves/wendkeep/blob/main/docs/en/commands/portable.md) |
+| **Native MCP** | semantic tools, effects/capabilities, stdio, schemas, pagination, budgets, audit, and client configuration | [Native MCP](https://github.com/rogersialves/wendkeep/blob/main/docs/en/commands/mcp.md) |
 | **Operating profiles** | `profile`, `flow`, always-on Keep Core, and Wend Runtime governance | [Operating profiles](https://github.com/rogersialves/wendkeep/blob/main/docs/en/commands/operating-profiles.md) |
 | **Changes and verification** | `change`, specs, sensors, TDD, evidence, Task Contracts, and archive | [Changes and verification](https://github.com/rogersialves/wendkeep/blob/main/docs/en/commands/changes-and-verification.md) |
 | **Shared memory** | CORE, SHARED, status, validation, repair, and curation | [Memory](https://github.com/rogersialves/wendkeep/blob/main/docs/en/commands/memory.md) |
@@ -252,6 +259,7 @@ The README is the map; the guides provide syntax, options, exit codes, examples,
 | **Local Observer** | `observer serve`, registration, incremental publication, `reconcile`, outbox, and multi-project index | [Local Observer](https://github.com/rogersialves/wendkeep/blob/main/docs/en/commands/observer.md) |
 
 Operations that deserve step-by-step guidance: [verify and exits 0/1/2](https://github.com/rogersialves/wendkeep/blob/main/docs/en/commands/verify.md),
+[causal TDD attestation](https://github.com/rogersialves/wendkeep/blob/main/docs/en/commands/tdd.md),
 [legacy-memory migration](https://github.com/rogersialves/wendkeep/blob/main/docs/en/commands/memory-migration.md), and
 [safe retroactive import](https://github.com/rogersialves/wendkeep/blob/main/docs/en/commands/retroactive-import.md).
 
@@ -556,8 +564,8 @@ explore → propose → apply (TDD) → verify → archive
 ```
 
 - **Propose** — `wendkeep change new <slug>` scaffolds `08-Mudanças/<slug>/` (`proposta.md`, `design.md`, `tarefas.md`; `--simple` skips the design). `--guide` creates the compact GUIDE contract and omits automatic design/spec/ADR when `contract_impact:none`. It becomes the global *current* change. When the change declares `spec_impact: required`, you author the delta yourself at `specs/<capability>/spec.md` — there is no placeholder to delete. Multiple changes may remain open: `change list`/`status` and the hooks show every pending one, while commands without `--change` act on the current one alone. `change use <slug>` changes focus and `change continue <archived> <new>` creates an auditable continuation.
-- **Apply** — implement each `tarefas.md` task. Mark machine proof with one or more `[sensor:<id>]` tags on the same task: every distinct ID enters the gate once, in declaration order. Also mark satisfied requirements with one or more `[req:<ID>]` tags.
-- **Verify** — `wendkeep verify` runs declared sensors and writes an **Evidence Envelope v2** to `evidencia.json`, SHA-256-bound to project/repository/worktree/session, HEAD, index tree, normalized worktree digest, tasks, effective spec, and sensor configuration. Each sensor records a sanitized command, execution window, duration, exit code, output digest, and a sanitized tail bounded to 2,000 characters. If HEAD changes during the run, no new envelope is published. `change status` reports `bound`, `stale`, `context-mismatch`, or `legacy-unbound`; v1 evidence remains readable but cannot satisfy v2 authority. The public schema is [`schema/wendkeep.evidence-envelope-v2.schema.json`](schema/wendkeep.evidence-envelope-v2.schema.json). `verify --deep` binds both package and verdict to the current `envelope_id`.
+- **Apply** — implement each `tarefas.md` task. Mark machine proof with one or more `[sensor:<id>]` tags on the same task: every distinct ID enters the gate once, in declaration order. Also mark satisfied requirements with one or more `[req:<ID>]` tags. For causal TDD, add `[tdd]` and record `wendkeep tdd red|green`; the [TDD attestation guide](docs/en/commands/tdd.md) covers profiles, waivers, and exit codes.
+- **Verify** — `wendkeep verify` runs declared sensors and writes an **Evidence Envelope v2** to `evidencia.json`, SHA-256-bound to project/repository/worktree/session, HEAD, index tree, normalized worktree digest, tasks, effective spec, TDD attestations, and sensor configuration. Each sensor records a sanitized command, execution window, duration, exit code, output digest, and a sanitized tail bounded to 2,000 characters. If HEAD changes during the run, no new envelope is published. `change status` reports `bound`, `stale`, `context-mismatch`, or `legacy-unbound`; v1 evidence remains readable but cannot satisfy v2 authority. The public schema is [`schema/wendkeep.evidence-envelope-v2.schema.json`](schema/wendkeep.evidence-envelope-v2.schema.json). `verify --deep` binds the package, attestations, and verdict to the current `envelope_id`.
 - **Archive** — `wendkeep change archive <slug>` **gates** on the evidence (blocks unless every declared critical sensor is green), promotes each applicable spec delta (`ADDED`/`MODIFIED`/`REMOVED`) into the living `07-Specs/<capability>.md` and moves the change to `_arquivo/`. GOVERN/ASSURE mint an ADR in `04-Decisões/`; compact GUIDE with no contract impact does not mint one automatically.
 
 > The gate blocks unless the scaffold is filled, no task is open, evidence is fresh, and every declared requirement is covered. **`--force` waives exactly one of those — the open-task check — and is the human's call, never the agent's.** An unfilled scaffold, a red critical sensor, stale evidence, an orphan requirement or a missing verdict block regardless.
@@ -610,7 +618,7 @@ npx wendkeep change new dark-mode              # proposta/design/tarefas — cha
 Edit `tarefas.md` — tag proof and requirement per task:
 
 ```markdown
-- [ ] 1.1 toggle persists across sessions [req:UI-1] [sensor:tests]
+- [ ] 1.1 toggle persists across sessions [req:UI-1] [sensor:tests] [tdd]
 ```
 
 Declare the capability in `proposta.md` (`specs: [ui]`) and author its delta only in
@@ -622,6 +630,9 @@ npx wendkeep change list                       # same backlog, plus the archived
 npx wendkeep change status dark-mode           # one screen for one change: specs / tasks / sensors / verdict
 npx wendkeep spec effective --change dark-mode # living contract + this change's delta
 npx wendkeep change done 1.1                   # tick a task from the CLI
+npx wendkeep tdd red 1.1 --requirement UI-1 --test tests/ui.test.mjs --command "npm test"
+# implement; then observe GREEN in the same causal context
+npx wendkeep tdd green 1.1 --command "npm test"
 npx wendkeep verify                            # run the declared sensors -> evidencia.json
 npx wendkeep verify --deep                     # assemble the verification package
 # the wk-verify skill (fresh, read-only pass) writes verdict.json

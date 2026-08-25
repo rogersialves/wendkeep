@@ -83,6 +83,39 @@ test('[req:SQL-OBS-SEC] captura padrão omite mensagens, transcript bruto e cami
   }
 });
 
+test('[req:TDD-7] Observer publishes the TDD attestation as change evidence', () => {
+  const fixture = makeObserverFixture();
+  try {
+    const changeDir = join(fixture.vaultBase, '08-Mudanças', 'tdd-attestation');
+    mkdirSync(changeDir, { recursive: true });
+    writeFileSync(join(changeDir, 'tdd-attestations.json'), JSON.stringify({
+      schema_version: 1,
+      attestations: [{
+        schema_version: 1,
+        attestation_id: 'a'.repeat(64),
+        task_id: '1.1',
+        requirement_id: 'TDD-1',
+        state: 'green-observed',
+        test_paths: ['tests/tdd.test.mjs'],
+      }],
+    }));
+    const batch = buildObserverSqlEventBatch({
+      vaultBase: fixture.vaultBase,
+      projectId: fixture.projectId,
+      now: '2026-08-24T20:00:00Z',
+    });
+    const event = batch.events.find((item) => (
+      item.kind === 'document.upsert'
+      && item.payload.logical_path === '08-Mudanças/tdd-attestation/tdd-attestations.json'
+    ));
+    assert.ok(event);
+    assert.equal(event.payload.entity_type, 'change');
+    assert.match(event.payload.content, /green-observed/);
+  } finally {
+    fixture.cleanup();
+  }
+});
+
 test('[req:SQL-INCR-5] forced reconciliation rebuilds operational rows despite a complete local cursor', async () => {
   const fixture = makeObserverFixture();
   const transcriptPath = join(fixture.projectRoot, 'reconcile-transcript.jsonl');

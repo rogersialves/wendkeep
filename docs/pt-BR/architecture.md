@@ -46,25 +46,29 @@ ambiental dentro do kernel. Integrations permanece interno ao tarball raiz: não
 separada de `@wendkeep/integrations` nem subpath público `wendkeep/integrations`. A próxima fase da
 migração modular é Pi.
 
-## 0.65 Kernel de configuração MCP
+## MCP semântico nativo
 
-`packages/mcp/src/config.mjs` é a autoridade canônica para a chave `wendkeep-vault`, a entrada de
-transporte do MCPVault, a seleção de servidores descritos pelo catálogo e o merge imutável de
-configuração MCP. O índice privado `packages/mcp/src/index.mjs` reúne essa superfície interna sem
-executar processos, acessar filesystem ou produzir efeitos durante o import.
+`packages/mcp/src/config.mjs` continua sendo a autoridade pura do merge de configuração. O runtime
+explícito está dividido em catálogo de effects, servidor JSON-RPC, transporte stdio, executor
+semântico, auditor e CLI. O catálogo tem integridade SHA-256, aliases declarados e referências a
+schemas versionados. O guard resolve esse catálogo: read conhecida não é mutação; write,
+destructive, tool desconhecida ou manifest inválido falham fechado.
 
-`src/taxonomy.mjs` continua dono do catálogo de companions e hosts, mas entrega descritores como
-dados ao kernel. `src/init.mjs` continua dono da orquestração do filesystem e delega a composição
-da configuração ao MCP. Isso preserva a direção entre adapters e evita que o kernel dependa do
-catálogo ou do instalador.
+O Core MCP funciona em Node 18. A tool do Observer importa o adapter SQL somente ao ser chamada e
+declara indisponibilidade abaixo de Node 22.13. Reads resolvem binding explícito de projeto e
+worktree e não oferecem leitura arbitrária do filesystem. Writes carregam capability, ator,
+sessão, active context, lease e motivo; o executor revalida o active context e chama os mesmos
+comandos/gates causais da CLI. Delivery, merge, push, tag, publicação e exclusão não fazem parte da
+superfície padrão.
 
-O comportamento do `init` não muda: propriedades de topo e servidores existentes são preservados,
-`wendkeep-vault` continua usando `npx -y @bitbonsai/mcpvault@latest <vault>`, `--no-mcp` continua
-desabilitando essa entrada e JSON inválido permanece byte a byte intacto enquanto a proposta é
-gravada em `.mcp.json.new`. O teste de tarball executa esse fluxo em um consumidor isolado.
+O transporte aplica paginação, budgets de request/response, timeout, cancelamento e erros tipados.
+Paths e secrets são redigidos. A auditoria local append-only registra somente tool, effect,
+capability, resultado, código e duração — nunca o payload. `wendkeep mcp config` gera snippets para
+Claude, Codex, Cursor e clientes genéricos.
 
-O workspace MCP permanece privado nesta fase. Não existe export raiz `wendkeep/mcp`, publicação
-`@wendkeep/mcp` ou servidor MCP nativo; a instalação continua sendo o único pacote `wendkeep`.
+O `init` preserva propriedades e servidores existentes, grava uma proposta `.mcp.json.new` quando
+o JSON atual é inválido e configura `npx --no-install wendkeep mcp serve --vault <vault>`. Não há
+dependência gerenciada `@latest`. O workspace segue privado dentro do pacote único `wendkeep`.
 
 ## 0.64 Runtime canônico da CLI
 

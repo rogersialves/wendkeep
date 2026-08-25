@@ -88,6 +88,11 @@ mesmo diretório e rename atômico. No deep, `verificacao.json` e `verdict.json`
 `evidenceEnvelopeId` e `evidenceBinding` completo; o verificador independente deve preservar ambos
 no verdict.
 
+O envelope carrega `tdd_attestations`, e `verificacao.json`, `tddAttestations`. Em GOVERN, uma tarefa marcada
+`[tdd]` precisa de GREEN atual ou waiver explícito; em ASSURE, isso vale para comportamento
+testável. Refactor/commit posterior ou mutante sobrevivente invalida o GREEN no Task Contract.
+Veja [Atestação TDD causal](tdd.md).
+
 Evidência v1 continua legível como `legacy-unbound`, nunca como autoridade equivalente. Rode
 `wendkeep change status <slug>` para ver `bound`, `stale` ou `context-mismatch`.
 

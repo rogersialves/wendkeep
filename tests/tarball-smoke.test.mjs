@@ -402,8 +402,29 @@ test('[req:MOD-4] [req:MOD-6] [req:MOD-9] [req:MOD-10] [req:MOD-11] [req:MOD-12]
     assert.equal(installedMcp.mcpServers.user.command, 'user');
     assert.deepEqual(
       installedMcp.mcpServers['wendkeep-vault'].args,
-      ['-y', '@bitbonsai/mcpvault@latest', installedVault],
+      ['--no-install', 'wendkeep', 'mcp', 'serve', '--vault', installedVault],
     );
+    const installedMcpServer = spawnSync(process.execPath, [
+      join(consumer, 'node_modules', 'wendkeep', 'bin', 'wendkeep.mjs'),
+      'mcp', 'serve', '--vault', installedVault,
+    ], {
+      cwd: installedProject,
+      encoding: 'utf8',
+      input: `${JSON.stringify({
+        jsonrpc: '2.0', id: 1, method: 'initialize',
+        params: { protocolVersion: '2025-06-18' },
+      })}\n`,
+    });
+    assert.equal(installedMcpServer.status, 0, installedMcpServer.stderr);
+    assert.equal(JSON.parse(installedMcpServer.stdout).result.serverInfo.name, 'wendkeep-native');
+    assert.doesNotMatch(installedMcpServer.stderr, /npm|latest|download/i);
+
+    const installedCodexConfig = spawnSync(process.execPath, [
+      join(consumer, 'node_modules', 'wendkeep', 'bin', 'wendkeep.mjs'),
+      'mcp', 'config', '--client', 'codex', '--vault', installedVault,
+    ], { cwd: installedProject, encoding: 'utf8' });
+    assert.equal(installedCodexConfig.status, 0, installedCodexConfig.stderr);
+    assert.match(installedCodexConfig.stdout, /^\[mcp_servers\.wendkeep-vault\]/m);
 
     const installedHookProjection = spawnSync(process.execPath, ['--input-type=module', '--eval', [
       "import assert from 'node:assert/strict';",
