@@ -53,7 +53,7 @@ test('[req:TDD-1] [req:TDD-2] RED records a bounded sanitized failure instead of
     result: {
       status: 1,
       stdout: `${'x'.repeat(3_000)} ghp_abcdefghijklmnop`,
-      stderr: 'AssertionError: expected true to equal false',
+      stderr: "location: 'C:\\\\Users\\\\RUNNER~1\\\\AppData\\\\Local\\\\Temp\\\\project\\\\tests\\\\auth.test.mjs:4:1'",
     },
   });
 
@@ -62,6 +62,7 @@ test('[req:TDD-1] [req:TDD-2] RED records a bounded sanitized failure instead of
   assert.match(red.red.failure_digest, /^sha256:[a-f0-9]{64}$/);
   assert.ok(red.red.output_tail.length <= 2_000);
   assert.doesNotMatch(red.red.output_tail, /ghp_abcdefghijklmnop/);
+  assert.doesNotMatch(red.red.output_tail, /C:/i);
   assert.equal(red.red.exit_code, 1);
   assert.deepEqual(red.test_paths, ['tests/auth.test.mjs']);
 });

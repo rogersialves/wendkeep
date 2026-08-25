@@ -56,6 +56,8 @@ function sanitizeDiagnostic(value) {
     .replace(/\x1B\[[0-?]*[ -/]*[@-~]/g, '')
     .replace(/file:\/\/\/[A-Za-z]:\/[^\s)]+/gi, '[LOCAL_FILE]')
     .replace(/"[A-Za-z]:\\[^"\r\n]+"/g, '"[LOCAL_EXECUTABLE]"')
+    .replace(/'[A-Za-z]:\\+[^'\r\n]+'/g, "'[LOCAL_FILE]'")
+    .replace(/\b[A-Za-z]:\\+[^\s)"'\r\n]+/g, '[LOCAL_FILE]')
     .replace(/\/[Uu]sers\/[^/\s]+\/[^\s)]+/g, '[LOCAL_FILE]')
     .replace(/\bgh[pousr]_[A-Za-z0-9_]{12,}\b/g, '[REDACTED_SECRET]')
     .replace(/\bxox[baprs]-[A-Za-z0-9-]{12,}\b/g, '[REDACTED_SECRET]')
