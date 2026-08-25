@@ -43,6 +43,8 @@ test('Codex hook discovers the project vault and ignores a wrong global env', ()
       readdirSync(vault).length > 0,
       'hook wrote into the project-configured vault',
     );
+    const registry = JSON.parse(readFileSync(join(vault, '.brain', 'SESSION_REGISTRY.json'), 'utf8'));
+    assert.equal(registry.sessions['runtime-session'].host_coverage.host_id, 'codex');
     assert.equal(existsSync(join(neutralCwd, 'wrong-global-vault')), false);
   } finally {
     rmSync(neutralCwd, { recursive: true, force: true });
@@ -74,6 +76,12 @@ test('[req:ACTX-BOOT-1] Codex session hooks derive a stable work_session_id when
 
     let registry = JSON.parse(readFileSync(join(vault, '.brain', 'SESSION_REGISTRY.json'), 'utf8'));
     assert.equal(registry.sessions[sessionId].work_session_id, sessionId);
+    assert.equal(registry.sessions[sessionId].host_coverage.host_id, 'codex');
+    assert.equal(registry.sessions[sessionId].host_coverage.schema_version, 1);
+    assert.equal(registry.sessions[sessionId].host_coverage.capabilities.find(
+      (item) => item.capability === 'task.completed',
+    ).state, 'unavailable');
+    assert.match(JSON.parse(started.stdout).hookSpecificOutput.additionalContext, /host_capability_coverage/);
 
     const ensured = runHook('session-ensure', {
       env,

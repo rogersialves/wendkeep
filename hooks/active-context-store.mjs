@@ -740,6 +740,7 @@ export function setActiveContextChange(vaultBase, identity, slug, options = {}) 
   }
   return mutateActiveContext(vaultBase, identity, (context) => ({
     ...context,
+    ...(identity?.hostCoverage ? { host_coverage: structuredClone(identity.hostCoverage) } : {}),
     change_slug: normalizedSlug,
     state: 'active',
   }), options);
@@ -760,6 +761,7 @@ export function setActiveContextDelivery(vaultBase, identity, deliveryId, option
   }
   return mutateActiveContext(vaultBase, identity, (context) => ({
     ...context,
+    ...(identity?.hostCoverage ? { host_coverage: structuredClone(identity.hostCoverage) } : {}),
     delivery_id: normalizedId,
     state: 'active',
   }), options);

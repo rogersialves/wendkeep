@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wendkeep.dev/schema/host-capability-manifest-v1.schema.json",
+  "title": "WendKeep host capability manifest v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "manifest_version", "host_id", "label", "supported_major_versions", "envelope_versions", "capabilities"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "manifest_version": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
+    "host_id": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+    "label": { "type": "string", "minLength": 1, "maxLength": 80 },
+    "supported_major_versions": { "type": "array", "minItems": 1, "items": { "type": ["integer", "string"] } },
+    "envelope_versions": { "type": "array", "minItems": 1, "items": { "type": "integer", "minimum": 1 } },
+    "capabilities": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["session.start", "session.resume", "session.stop", "prompt.submit", "tool.pre", "tool.post", "tool.effect.read", "tool.effect.write", "tool.effect.destructive", "edit.attribution", "plan.approved", "decision.capture", "task.completed", "subagent.start", "subagent.stop", "transcript.read", "usage.read"],
+      "properties": {
+        "session.start": { "$ref": "#/$defs/state" },
+        "session.resume": { "$ref": "#/$defs/state" },
+        "session.stop": { "$ref": "#/$defs/state" },
+        "prompt.submit": { "$ref": "#/$defs/state" },
+        "tool.pre": { "$ref": "#/$defs/state" },
+        "tool.post": { "$ref": "#/$defs/state" },
+        "tool.effect.read": { "$ref": "#/$defs/state" },
+        "tool.effect.write": { "$ref": "#/$defs/state" },
+        "tool.effect.destructive": { "$ref": "#/$defs/state" },
+        "edit.attribution": { "$ref": "#/$defs/state" },
+        "plan.approved": { "$ref": "#/$defs/state" },
+        "decision.capture": { "$ref": "#/$defs/state" },
+        "task.completed": { "$ref": "#/$defs/state" },
+        "subagent.start": { "$ref": "#/$defs/state" },
+        "subagent.stop": { "$ref": "#/$defs/state" },
+        "transcript.read": { "$ref": "#/$defs/state" },
+        "usage.read": { "$ref": "#/$defs/state" }
+      }
+    }
+  },
+  "$defs": {
+    "state": { "enum": ["native", "adapted", "polled", "manual", "unavailable"] },
+    "capabilityName": {
+      "enum": ["session.start", "session.resume", "session.stop", "prompt.submit", "tool.pre", "tool.post", "tool.effect.read", "tool.effect.write", "tool.effect.destructive", "edit.attribution", "plan.approved", "decision.capture", "task.completed", "subagent.start", "subagent.stop", "transcript.read", "usage.read"]
+    }
+  }
+}

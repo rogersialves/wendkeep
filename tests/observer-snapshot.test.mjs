@@ -3,12 +3,14 @@ import assert from 'node:assert/strict';
 import { rmSync } from 'node:fs';
 import { buildProjectSnapshot } from '../src/observer-snapshot.mjs';
 import { makeObserverFixture } from './helpers/observer-fixture.mjs';
+import { buildHostCoverage } from '../src/host-capabilities.mjs';
 
 test('[req:OBS-1] [req:OBS-2] snapshot sanitizado resume changes sem copiar mem√≥ria ou caminhos', () => {
   const first = makeObserverFixture({
     projectId: 'project-a',
     projectName: 'Project A',
     openTasks: ['Implement observer'],
+    hostCoverage: buildHostCoverage({ hostId: 'codex', observedAt: '2026-08-25T12:00:00.000Z' }),
   });
   const second = makeObserverFixture({
     projectId: 'project-b',
@@ -33,6 +35,9 @@ test('[req:OBS-1] [req:OBS-2] snapshot sanitizado resume changes sem copiar mem√
     assert.equal(snapshot.changes[0].openTasks, 1);
     assert.equal(other.changes[0].openTasks, 0);
     assert.equal(snapshot.project_id, 'project-a');
+    assert.deepEqual(snapshot.session.coverage, {
+      host_id: 'codex', degraded: true, unavailable: 4, manual: 1,
+    });
     assert.deepEqual(snapshot.sync, { status: 'disabled', pending: 0, open_conflicts: 0 });
     assert.match(snapshot.event_id, /^obs-/);
     assert.equal(JSON.stringify(snapshot).includes('CORE.md'), false);

@@ -15,6 +15,7 @@ import {
   worktreeIdentity,
 } from '../packages/vault/src/worktree-metadata.mjs';
 import { resolveRuntimeActiveContext } from '../src/active-context-runtime.mjs';
+import { buildHostCoverage } from '../src/host-capabilities.mjs';
 
 function git(cwd, args) {
   const result = spawnSync('git', args, { cwd, encoding: 'utf8', windowsHide: true });
@@ -76,6 +77,24 @@ test('[req:ACTX-10] runtime identity uses the worktree registry and explicit cau
       headSha: git(f.project, ['rev-parse', 'HEAD']),
       sessionId: 'session-a',
     });
+  } finally { rmSync(f.parent, { recursive: true, force: true }); }
+});
+
+test('[req:HOST-9] session coverage follows the causal identity into the persisted active context', () => {
+  const f = fixture();
+  try {
+    const hostCoverage = buildHostCoverage({ hostId: 'codex', observedAt: '2026-08-25T12:00:00.000Z' });
+    writeSessionRegistry(f.vault, {
+      version: 2,
+      sessions: { 'session-a': { ...session(f, 'session-a', 'work-a'), host_coverage: hostCoverage } },
+    });
+    const identity = resolveRuntimeActiveContext({
+      vaultBase: f.vault, projectRoot: f.project, sessionId: 'session-a',
+    });
+    assert.equal(identity.hostCoverage.host_id, 'codex');
+    const persisted = setActiveContextChange(f.vault, identity, 'change-a').context;
+    assert.equal(persisted.host_coverage.host_id, 'codex');
+    assert.equal(persisted.host_coverage.degraded, true);
   } finally { rmSync(f.parent, { recursive: true, force: true }); }
 });
 

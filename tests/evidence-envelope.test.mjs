@@ -23,6 +23,7 @@ import {
   resolveEvidenceIdentity,
   sensorConfigSha256,
 } from '../src/evidence-envelope.mjs';
+import { buildHostCoverage } from '../src/host-capabilities.mjs';
 import { runSensors } from '../hooks/sensors-core.mjs';
 import { checkHarness } from '../hooks/harness-doctor.mjs';
 import { writeVaultFileAtomic } from '../packages/vault/src/vault-path-safety.mjs';
@@ -403,7 +404,11 @@ test('[req:EVID-6] [req:EVID-7] v2 distinguishes bound, stale and causal context
     finishedAt: '2026-08-22T20:00:01.000Z',
     version: '0.78.0',
     runtimePlatform: 'test-x64',
+    hostCoverage: buildHostCoverage({ hostId: 'codex', observedAt: '2026-08-25T12:00:00.000Z' }),
   });
+
+  assert.equal(envelope.host_coverage.host_id, 'codex');
+  assert.equal(envelope.host_coverage.degraded, true);
 
   assert.deepEqual(evaluateEvidenceBinding(envelope, expected), { state: 'bound', reasons: [] });
   assert.deepEqual(

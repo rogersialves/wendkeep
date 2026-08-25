@@ -23,6 +23,7 @@ const GUIDE_SLUGS = [
   'portable.md',
   'sync-protocol.md',
   'mcp.md',
+  'capabilities.md',
   'tdd.md',
 ];
 

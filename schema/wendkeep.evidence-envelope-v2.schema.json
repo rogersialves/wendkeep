@@ -52,6 +52,7 @@
       "type": "array",
       "items": { "$ref": "#/$defs/sensor" }
     },
+    "host_coverage": { "$ref": "host-coverage-v1.schema.json" },
     "tdd_attestations": {
       "type": "array",
       "items": { "$ref": "#/$defs/tddAttestation" }

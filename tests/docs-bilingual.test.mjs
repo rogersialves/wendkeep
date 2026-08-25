@@ -25,6 +25,7 @@ const GUIDES = [
   'portable.md',
   'sync-protocol.md',
   'mcp.md',
+  'capabilities.md',
   'tdd.md',
 ];
 const GUIDE_DIR = {
@@ -50,6 +51,7 @@ const README_GROUPS = [
   { pt: 'Estado portátil', en: 'Portable state', guide: 'portable.md' },
   { pt: 'Sync local-first', en: 'Local-first sync', guide: 'sync-protocol.md' },
   { pt: 'MCP nativo', en: 'Native MCP', guide: 'mcp.md' },
+  { pt: 'Capacidades dos hosts', en: 'Host capabilities', guide: 'capabilities.md' },
   { pt: 'Perfis de operação', en: 'Operating profiles', guide: 'operating-profiles.md' },
   { pt: 'Changes e verificação', en: 'Changes and verification', guide: 'changes-and-verification.md' },
   { pt: 'Memória compartilhada', en: 'Shared memory', guide: 'memory.md' },
@@ -89,6 +91,7 @@ const GUIDE_FOR_FAMILY = new Map([
   ['wendkeep portable', 'portable.md'],
   ['wendkeep sync status', 'sync-protocol.md'],
   ['wendkeep mcp', 'mcp.md'],
+  ['wendkeep capabilities', 'capabilities.md'],
 ]);
 const SEMANTIC_CONCEPTS = {
   'getting-started.md': { pt: [/instala/i, /atualiza/i, /vínculo|vincul/i], en: [/install/i, /updat/i, /bind/i] },
@@ -108,6 +111,7 @@ const SEMANTIC_CONCEPTS = {
   'portable.md': { pt: [/portátil/i, /runtime/i, /revision/i], en: [/portable/i, /runtime/i, /revision/i] },
   'sync-protocol.md': { pt: [/local-first/i, /CAS/i, /conflito/i], en: [/local-first/i, /CAS/i, /conflict/i] },
   'mcp.md': { pt: [/semântic/i, /capability/i, /stdio/i], en: [/semantic/i, /capability/i, /stdio/i] },
+  'capabilities.md': { pt: [/lifecycle/i, /degradad/i, /waiver/i], en: [/lifecycle/i, /degraded/i, /waiver/i] },
   'tdd.md': { pt: [/atesta/i, /RED/i, /waiver/i], en: [/attestation/i, /RED/i, /waiver/i] },
 };
 

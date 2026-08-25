@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "requires_host_capabilities": ["task.completed"],
+  "host_capability_waivers": [
+    {
+      "capability": "task.completed",
+      "authority": "human",
+      "approved_by": "maintainer",
+      "reason": "manual confirmation"
+    }
+  ],
+  "sensors": []
+}

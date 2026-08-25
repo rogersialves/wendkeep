@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wendkeep.dev/schema/host-coverage-v1.schema.json",
+  "title": "WendKeep host coverage v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "manifest_version", "host_id", "requested_host_id", "host_version", "version_supported", "observed_at", "degraded", "capabilities", "degradations", "tool_effects"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "manifest_version": { "type": "string" },
+    "host_id": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+    "requested_host_id": { "type": "string", "minLength": 1, "maxLength": 80 },
+    "host_version": { "type": "string", "maxLength": 80 },
+    "version_supported": { "type": "boolean" },
+    "observed_at": { "type": "string", "format": "date-time" },
+    "degraded": { "type": "boolean" },
+    "capabilities": { "type": "array", "minItems": 17, "maxItems": 17, "items": { "$ref": "#/$defs/capability" } },
+    "degradations": { "type": "array", "items": { "$ref": "#/$defs/degradation" } },
+    "tool_effects": { "$ref": "#/$defs/toolEffects" }
+  },
+  "$defs": {
+    "state": { "enum": ["native", "adapted", "polled", "manual", "unavailable"] },
+    "capability": {
+      "type": "object", "additionalProperties": false,
+      "required": ["capability", "state", "authority"],
+      "properties": {
+        "capability": { "type": "string" },
+        "state": { "$ref": "#/$defs/state" },
+        "authority": { "enum": ["verified", "reported", "unavailable"] }
+      }
+    },
+    "degradation": {
+      "type": "object", "additionalProperties": false,
+      "required": ["capability", "state", "code", "blocking"],
+      "properties": {
+        "capability": { "type": "string" },
+        "state": { "$ref": "#/$defs/state" },
+        "code": { "type": "string", "pattern": "^HOST_[A-Z0-9_]+$" },
+        "blocking": { "type": "boolean" }
+      }
+    },
+    "toolEffects": {
+      "type": "object", "additionalProperties": false,
+      "required": ["manifest_valid", "catalog_version", "read", "write", "destructive", "unknown"],
+      "properties": {
+        "manifest_valid": { "type": "boolean" },
+        "catalog_version": { "type": "string" },
+        "read": { "type": "boolean" },
+        "write": { "type": "boolean" },
+        "destructive": { "type": "boolean" },
+        "unknown": { "const": "fail-closed" }
+      }
+    }
+  }
+}

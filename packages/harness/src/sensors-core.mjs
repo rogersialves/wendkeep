@@ -73,12 +73,25 @@ export function loadSensors(projectRoot, file = 'wendkeep.sensors.json') {
 // both into [] made every sensor report "sensor não definido" — a misleading diagnosis.
 export function loadSensorsDetailed(projectRoot, file = 'wendkeep.sensors.json') {
   const path = join(projectRoot, file);
-  if (!existsSync(path)) return { sensors: [], missing: true, error: null, path };
+  if (!existsSync(path)) return {
+    sensors: [], requiredHostCapabilities: [], hostCapabilityWaivers: [], missing: true, error: null, path,
+  };
   try {
     const data = JSON.parse(readFileSync(path, 'utf8'));
-    return { sensors: Array.isArray(data.sensors) ? data.sensors : [], missing: false, error: null, path };
+    return {
+      sensors: Array.isArray(data.sensors) ? data.sensors : [],
+      requiredHostCapabilities: Array.isArray(data.requires_host_capabilities)
+        ? data.requires_host_capabilities : [],
+      hostCapabilityWaivers: Array.isArray(data.host_capability_waivers)
+        ? data.host_capability_waivers : [],
+      missing: false,
+      error: null,
+      path,
+    };
   } catch (e) {
-    return { sensors: [], missing: false, error: e.message, path };
+    return {
+      sensors: [], requiredHostCapabilities: [], hostCapabilityWaivers: [], missing: false, error: e.message, path,
+    };
   }
 }
 

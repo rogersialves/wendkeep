@@ -47,12 +47,21 @@ function activeSessionSummary(vaultBase, control, registry) {
     .sort((a, b) => String(b.entry?.last_seen || b.entry?.updated_at || '').localeCompare(String(a.entry?.last_seen || a.entry?.updated_at || '')));
   const selected = entries.find(({ sessionId }) => sessionId === control?.session_id) || entries[0];
   const entry = selected?.entry || {};
+  const coverage = entry.host_coverage;
   return {
     status: safeText(control?.status || entry.status || 'inactive', 32),
     session_id: safeText(control?.session_id || selected?.sessionId || '', 100),
     provider: safeText(entry.provider || '', 32),
     change_slug: safeText(entry.change_slug || '', 100),
     last_seen: safeText(entry.last_seen || entry.updated_at || '', 40),
+    ...(coverage ? {
+      coverage: {
+        host_id: safeText(coverage.host_id || 'unknown', 32),
+        degraded: coverage.degraded === true,
+        unavailable: (coverage.capabilities || []).filter((item) => item?.state === 'unavailable').length,
+        manual: (coverage.capabilities || []).filter((item) => item?.state === 'manual').length,
+      },
+    } : {}),
   };
 }
 

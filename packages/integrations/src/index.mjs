@@ -1,4 +1,5 @@
 export * from './host-hooks.mjs';
+export * from './capabilities.mjs';
 export * from './hook-envelope.mjs';
 export * from './prompt-content.mjs';
 export * from './transcript-usage.mjs';

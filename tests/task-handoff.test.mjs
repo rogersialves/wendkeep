@@ -10,6 +10,7 @@ import {
 } from '../src/task-contracts.mjs';
 import { buildSessionMemoryEvents } from '../hooks/memory-handoff.mjs';
 import { makeSyntheticHandoff, SYNTHETIC_MEMORY } from './fixtures/synthetic-memory-lifecycle.mjs';
+import { buildHostCoverage } from '../src/host-capabilities.mjs';
 
 test('[req:TC-8] Handoff Contract v1 is deterministic and stale-aware', () => {
   const input = {
@@ -121,4 +122,36 @@ test('[req:TC-8] SessionStop adapter selects the causal claimed task and ASSURE 
     () => buildStructuredTaskHandoff({ profile: 'ASSURE', sessionId: 'session-a' }),
     (error) => error?.code === 'HANDOFF_STRUCTURED_REQUIRED',
   );
+});
+
+test('[req:HOST-8] handoff declares missing lifecycle proof and ASSURE requires a human waiver', () => {
+  const snapshot = {
+    binding: {
+      active_context_id: 'context-a', head_sha: 'a'.repeat(40),
+      tasks_sha256: '1'.repeat(64), effective_spec_sha256: '2'.repeat(64),
+    },
+    evidence_envelope_id: 'envelope-1', artifact_results: [],
+    contracts: [{ task_id: '1.1', contract_id: 'b'.repeat(64) }],
+  };
+  const hostCoverage = buildHostCoverage({ hostId: 'codex', observedAt: '2026-08-25T12:00:00.000Z' });
+  const shared = buildStructuredTaskHandoff({
+    profile: 'GOVERN', sessionId: 'session-a', snapshot,
+    evaluations: [{ task_id: '1.1', can_complete: true, blocking_findings: [] }],
+    context: { host_coverage: hostCoverage },
+  });
+  assert.equal(shared.handoff_contract.authority, 'reported');
+  assert.ok(shared.handoff_contract.coverage_findings.some((item) => item.capability === 'task.completed'));
+  assert.throws(() => buildStructuredTaskHandoff({
+    profile: 'ASSURE', sessionId: 'session-a', snapshot,
+    evaluations: [{ task_id: '1.1', can_complete: true, blocking_findings: [] }],
+    context: { host_coverage: hostCoverage },
+  }), (error) => error?.code === 'HANDOFF_CAPABILITY_UNAVAILABLE');
+  const waived = buildStructuredTaskHandoff({
+    profile: 'ASSURE', sessionId: 'session-a', snapshot,
+    evaluations: [{ task_id: '1.1', can_complete: true, blocking_findings: [] }],
+    context: { host_coverage: hostCoverage },
+    shared: { coverage_waivers: [{ capability: 'task.completed', authority: 'human', approved_by: 'maintainer', reason: 'confirmed manually' }] },
+  });
+  assert.equal(waived.handoff_contract.authority, 'verified');
+  assert.equal(waived.handoff_contract.coverage_waivers.length, 1);
 });

@@ -26,6 +26,9 @@
     "head_sha": { "type": "string", "minLength": 1 },
     "tasks_sha256": { "type": "string", "minLength": 1 },
     "spec_sha256": { "type": "string", "minLength": 1 },
+    "host_coverage": { "$ref": "host-coverage-v1.schema.json" },
+    "coverage_findings": { "type": "array", "items": { "type": "object" } },
+    "coverage_waivers": { "type": "array", "items": { "type": "object" } },
     "authority": { "enum": ["verified", "reported"] }
   },
   "$defs": {
