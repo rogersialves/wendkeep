@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wendkeep.dev/schema/portable-active-work-v1.schema.json",
+  "title": "WendKeep portable active-work v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "active_work_id", "project_id", "repository_id", "change_slug",
+    "task_id", "branch", "base_sha", "head_sha", "spec_sha256", "tasks_sha256",
+    "status", "completed", "current_action", "next_actions", "blockers", "evidence_refs",
+    "updated_at", "revision"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "active_work_id": { "type": "string", "pattern": "^[a-f0-9]{24}$" },
+    "project_id": { "type": "string", "minLength": 1, "maxLength": 160 },
+    "repository_id": { "type": "string", "minLength": 1, "maxLength": 160 },
+    "change_slug": { "type": "string", "maxLength": 160 },
+    "task_id": { "type": "string", "maxLength": 160 },
+    "branch": { "type": "string", "maxLength": 240 },
+    "base_sha": { "type": "string", "pattern": "^(|[a-f0-9]{40,64})$" },
+    "head_sha": { "type": "string", "pattern": "^(|[a-f0-9]{40,64})$" },
+    "spec_sha256": { "$ref": "#/$defs/hash" },
+    "tasks_sha256": { "$ref": "#/$defs/hash" },
+    "status": { "enum": ["in_progress", "completed", "blocked"] },
+    "completed": { "$ref": "#/$defs/strings" },
+    "current_action": { "type": "object" },
+    "next_actions": { "$ref": "#/$defs/strings" },
+    "blockers": { "$ref": "#/$defs/strings" },
+    "evidence_refs": { "$ref": "#/$defs/strings" },
+    "updated_at": { "type": "string", "format": "date-time" },
+    "revision": { "type": "integer", "minimum": 0 }
+  },
+  "$defs": {
+    "hash": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "strings": { "type": "array", "items": { "type": "string" }, "uniqueItems": true }
+  }
+}

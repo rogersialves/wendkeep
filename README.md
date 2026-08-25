@@ -237,6 +237,7 @@ O README mostra o mapa; os guias trazem sintaxe, opções, códigos de saída, e
 | **Instalação e atualização** | `init`, `sync`, companions e primeiro vínculo projeto↔cofre | [Instalação e primeiro uso](https://github.com/rogersialves/wendkeep/blob/main/docs/pt-BR/commands/getting-started.md) |
 | **Worktrees gerenciadas** | `worktree create/list/status/open/finish/cleanup/remove/prune`, prova de merge, preflight, cleanup crash-safe/gate comum e receipts | [Worktrees gerenciadas](https://github.com/rogersialves/wendkeep/blob/main/docs/pt-BR/commands/worktrees.md) |
 | **Contexto ativo** | `active_contexts` por `repository_id`/`worktree_id`/`work_session_id`, transição causal, quarentena e recuperação explícita | [Contexto ativo](https://github.com/rogersialves/wendkeep/blob/main/docs/pt-BR/commands/context.md) |
+| **Estado portátil** | `portable status/export/import/diff`, fronteira authored/runtime, redaction e snapshot `active-work` | [Estado portátil](https://github.com/rogersialves/wendkeep/blob/main/docs/pt-BR/commands/portable.md) |
 | **Perfis de operação** | `profile`, `flow`, Keep Core sempre ativo e governança do Wend Runtime | [Perfis de Operação](https://github.com/rogersialves/wendkeep/blob/main/docs/pt-BR/commands/operating-profiles.md) |
 | **Changes e verificação** | `change`, specs, sensores, TDD, evidência, Task Contracts e archive | [Changes e verificação](https://github.com/rogersialves/wendkeep/blob/main/docs/pt-BR/commands/changes-and-verification.md) |
 | **Memória compartilhada** | CORE, SHARED, status, validação, repair e curadoria | [Memória](https://github.com/rogersialves/wendkeep/blob/main/docs/pt-BR/commands/memory.md) |
@@ -394,6 +395,12 @@ permite retry com `--change-slug`. Veja o guia completo de
 semântica. Use `--scope core` para a saúde do Keep Core, `--scope runtime` para governança e
 `--strict` em CI/release; o `wendkeep sync` valida somente o Core para não transformar trabalho em
 andamento em falha de instalação.
+
+Para retomar uma change em outro clone sem versionar transcritos, tokens, paths, leases ou outboxes,
+`wendkeep portable export` gera `.wendkeep/portable/state.json` com CORE/ADRs/specs/deltas autorais
+sanitizados e um `active-work` compacto. `portable import` valida project, hashes, revisions e paths
+antes de escrever; estado stale ou conflitante nunca substitui silenciosamente o local. O recurso é
+opt-in para Git e nunca adiciona arquivos automaticamente.
 
 ## Shared Project Memory v2
 
