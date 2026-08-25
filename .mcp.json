@@ -4,8 +4,11 @@
       "type": "stdio",
       "command": "npx",
       "args": [
-        "-y",
-        "@bitbonsai/mcpvault@latest",
+        "--no-install",
+        "wendkeep",
+        "mcp",
+        "serve",
+        "--vault",
         "C:\\GitHub\\WendKeep\\.WendKeep-vault"
       ]
     }

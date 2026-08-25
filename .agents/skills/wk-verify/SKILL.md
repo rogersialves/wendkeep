@@ -26,7 +26,8 @@ nunca tivesse visto a implementação. Contexto fresco, read-only.
   (isolamento real). Nos outros, entre num contexto limpo e re-derive do spec, não da memória.
 - `ok: false` se algum requisito não tem cobertura que discrimina. Gap não é "quase lá" — é vermelho.
 - Não conserte aqui. Gap vira tarefa de correção na change; re-verifica depois.
-- O gate do `archive` **exige** `verdict.json` com `ok` cobrindo todo `[req:]`. Sem isso, não arquiva.
+- O gate do `archive` **exige** `verdict.json` com `ok` cobrindo todo `[req:]` e copiando
+  `evidenceEnvelopeId` + `evidenceBinding` de `verificacao.json`. Sem isso, não arquiva.
 
 ## Templates (nesta pasta)
 - `spec-reviewer-prompt.md` — cole ao spawnar o subagente verificador (read-only, autor≠verificador).

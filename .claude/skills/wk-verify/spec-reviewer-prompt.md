@@ -19,5 +19,6 @@ Para cada `[req:ID]` da mudança:
 
 Grave `08-Mudanças/<slug>/verdict.json` no formato de `verdict-template.json`. `ok: false` se
 qualquer `[req:]` não tem cobertura que discrimina. Não conserte aqui — gap vira tarefa de
-correção. `tasksHash` e `effectiveSpecHash` vêm do pacote; alterações posteriores deixam o verdict stale.
+correção. `tasksHash`, `effectiveSpecHash`, `evidenceEnvelopeId` e `evidenceBinding` vêm do
+pacote; alterações posteriores deixam o verdict stale e o binding nunca deve ser reconstruído à mão.
 ---
