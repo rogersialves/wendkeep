@@ -23,6 +23,7 @@ const GUIDES = [
   'worktrees.md',
   'context.md',
   'portable.md',
+  'sync-protocol.md',
 ];
 const GUIDE_DIR = {
   pt: join(ROOT, 'docs', 'pt-BR', 'commands'),
@@ -45,6 +46,7 @@ const README_GROUPS = [
   { pt: 'Worktrees gerenciadas', en: 'Managed worktrees', guide: 'worktrees.md' },
   { pt: 'Contexto ativo', en: 'Active context', guide: 'context.md' },
   { pt: 'Estado portátil', en: 'Portable state', guide: 'portable.md' },
+  { pt: 'Sync local-first', en: 'Local-first sync', guide: 'sync-protocol.md' },
   { pt: 'Perfis de operação', en: 'Operating profiles', guide: 'operating-profiles.md' },
   { pt: 'Changes e verificação', en: 'Changes and verification', guide: 'changes-and-verification.md' },
   { pt: 'Memória compartilhada', en: 'Shared memory', guide: 'memory.md' },
@@ -81,6 +83,7 @@ const GUIDE_FOR_FAMILY = new Map([
   ['wendkeep --help', 'maintenance-and-diagnostics.md'],
   ['wendkeep observer', 'observer.md'],
   ['wendkeep portable', 'portable.md'],
+  ['wendkeep sync status', 'sync-protocol.md'],
 ]);
 const SEMANTIC_CONCEPTS = {
   'getting-started.md': { pt: [/instala/i, /atualiza/i, /vínculo|vincul/i], en: [/install/i, /updat/i, /bind/i] },
@@ -98,6 +101,7 @@ const SEMANTIC_CONCEPTS = {
   'worktrees.md': { pt: [/worktree/i, /Vault/i, /registry/i], en: [/worktree/i, /Vault/i, /registry/i] },
   'context.md': { pt: [/contexto/i, /branch/i, /rollback|reversão/i], en: [/context/i, /branch/i, /rollback/i] },
   'portable.md': { pt: [/portátil/i, /runtime/i, /revision/i], en: [/portable/i, /runtime/i, /revision/i] },
+  'sync-protocol.md': { pt: [/local-first/i, /CAS/i, /conflito/i], en: [/local-first/i, /CAS/i, /conflict/i] },
 };
 
 const markdownLinks = (text) => [...text.matchAll(/\[[^\]]*\]\(([^)]+)\)/g)].map((m) => m[1]);

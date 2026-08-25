@@ -19,7 +19,7 @@ const GUIDE_SLUGS = [
   'sessions-and-import.md', 'notes-and-knowledge.md', 'costs-and-observability.md',
   'maintenance-and-diagnostics.md', 'verify.md', 'memory-migration.md',
   'retroactive-import.md', 'observer.md', 'worktrees.md',
-  'context.md', 'portable.md',
+  'context.md', 'portable.md', 'sync-protocol.md',
 ];
 
 function filesUnder(dir, base = dir) {
@@ -165,6 +165,11 @@ test('[req:OP-9] npm pack leva módulos de profile/FLOW/delivery, docs bilíngue
       'src/delivery.mjs',
       'src/context.mjs',
       'src/portable.mjs',
+      'src/sync-protocol.mjs',
+      'src/sync-outbox.mjs',
+      'src/sync-adapters.mjs',
+      'src/sync-protocol-cli.mjs',
+      'packages/mcp/src/sync.mjs',
       'hooks/flow-core.mjs',
       'hooks/operating-profile-task-store.mjs',
       'hooks/vault-path-safety.mjs',

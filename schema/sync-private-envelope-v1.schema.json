@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wendkeep.dev/schema/sync-private-envelope-v1.schema.json",
+  "title": "WendKeep private sync envelope v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "algorithm", "key_id", "iv", "ciphertext", "auth_tag"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "algorithm": { "const": "AES-256-GCM" },
+    "key_id": { "type": "string", "minLength": 1, "maxLength": 160 },
+    "iv": { "type": "string", "contentEncoding": "base64" },
+    "ciphertext": { "type": "string", "contentEncoding": "base64" },
+    "auth_tag": { "type": "string", "contentEncoding": "base64" }
+  }
+}

@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wendkeep.dev/schema/sync-event-v1.schema.json",
+  "title": "WendKeep sync event v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "event_id", "project_id", "record_key", "revision", "base_revision", "content_hash", "causal_parent_ids", "actor_id", "device_id", "lease_id", "observed_at", "operation", "privacy", "payload"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "event_id": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "project_id": { "type": "string", "minLength": 1, "maxLength": 160 },
+    "record_key": { "type": "string", "minLength": 1, "maxLength": 2048 },
+    "revision": { "type": "integer", "minimum": 1 },
+    "base_revision": { "type": "integer", "minimum": 0 },
+    "content_hash": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "causal_parent_ids": { "type": "array", "uniqueItems": true, "items": { "type": "string", "maxLength": 128 } },
+    "actor_id": { "type": "string", "minLength": 1, "maxLength": 160 },
+    "device_id": { "type": "string", "minLength": 1, "maxLength": 160 },
+    "lease_id": { "type": "string", "maxLength": 160 },
+    "observed_at": { "type": "string", "format": "date-time" },
+    "operation": { "enum": ["put", "tombstone", "resolve"] },
+    "privacy": { "enum": ["shared", "private"] },
+    "payload": {}
+  }
+}

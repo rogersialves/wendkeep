@@ -49,6 +49,8 @@ Usage:
                            package first (npm i -D wendkeep@latest); a running process
                            cannot replace itself. · --vault P · --profile <name> · --yes
                            · --vscode-worktree-tasks.
+  wendkeep sync status [...]   Optional local-first protocol: status | push | pull | conflicts | resolve.
+                           Uses explicit CAS/conflicts and an offline outbox; --remote path or --url HTTPS.
 
   wendkeep doctor [--vault P]  Health check. --scope core|runtime · --strict for CI/release.
   wendkeep portable <sub>      Shared authored state: status | export | import | diff.

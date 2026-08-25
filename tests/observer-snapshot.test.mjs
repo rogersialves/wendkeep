@@ -33,6 +33,7 @@ test('[req:OBS-1] [req:OBS-2] snapshot sanitizado resume changes sem copiar mem√
     assert.equal(snapshot.changes[0].openTasks, 1);
     assert.equal(other.changes[0].openTasks, 0);
     assert.equal(snapshot.project_id, 'project-a');
+    assert.deepEqual(snapshot.sync, { status: 'disabled', pending: 0, open_conflicts: 0 });
     assert.match(snapshot.event_id, /^obs-/);
     assert.equal(JSON.stringify(snapshot).includes('CORE.md'), false);
     assert.equal(JSON.stringify(snapshot).includes('C:\\GitHub'), false);

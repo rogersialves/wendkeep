@@ -4,6 +4,23 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.84.0] — 2026-08-25
+
+### Added
+
+- **Protocolo de sync local-first.** `wendkeep sync status/push/pull/conflicts/resolve` transporta
+  estado autoral portátil por revisões, CAS, pais causais, record keys com escopo de
+  projeto/branch/worktree, tombstones e conflitos explícitos, sem last-write-wins ou cloud
+  obrigatória.
+- **Operação offline e coordenação recuperável.** Outbox append-only, acknowledgements
+  idempotentes, replay fora de ordem, leases expirantes com histórico, adaptadores de referência
+  filesystem/HTTP e resolução auditável preservam autoria sob partição, retry e clocks
+  divergentes.
+- **Privacidade, diagnóstico e contrato público.** Envelopes opt-in AES-256-GCM com rotação de
+  chave, schemas v1, status no `doctor` e no Observer sanitizado, chaos tests e guias PT-BR/EN
+  documentam consistência, erros e threat model. O sync desabilitado não cria runtime nem altera
+  Keep Core.
+
 ## [0.83.0] — 2026-08-25
 
 ### Added

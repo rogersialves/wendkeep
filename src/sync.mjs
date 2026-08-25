@@ -20,6 +20,14 @@ function opt(argv, name) {
 const step = (n, label) => process.stdout.write(`\n[${n}/3] ${label}\n`);
 
 export async function runSync(argv) {
+  const { isSyncProtocolCommand, runSyncProtocol, SYNC_PROTOCOL_HELP } = await import('./sync-protocol-cli.mjs');
+  if (argv.includes('--help') || argv.includes('-h')) {
+    process.stdout.write(`wendkeep sync [--project <dir>] [--vault <dir>] [--yes]\n\n`);
+    process.stdout.write('Without a protocol subcommand, runs init -> sync-defs -> doctor.\n\n');
+    process.stdout.write(SYNC_PROTOCOL_HELP);
+    return 0;
+  }
+  if (isSyncProtocolCommand(argv)) return runSyncProtocol(argv);
   const projectRaw = opt(argv, '--project');
   const vaultRaw = opt(argv, '--vault');
   const hasProfile = argv.includes('--profile') || argv.some((a) => a.startsWith('--profile='));
