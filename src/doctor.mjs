@@ -11,6 +11,7 @@ import {
   inspectActiveContextHealth,
   renderActiveContextHealthLines,
 } from './active-context-health.mjs';
+import { inspectPortableState } from './portable.mjs';
 
 const healthStatusLabel = (status) => ({
   healthy: 'saudável', warning: 'atenção', degraded: 'degradada', blocked: 'bloqueada', legacy: 'legado',
@@ -147,6 +148,11 @@ export function runDoctor(argv) {
   const activeContexts = inspectActiveContextHealth({ vaultBase, projectRoot });
   process.stdout.write(`\n${renderActiveContextHealthLines(activeContexts).join('\n')}\n`);
 
+  const portable = inspectPortableState({ vaultBase, projectRoot });
+  process.stdout.write(`\n[portable] ${portable.status}${portable.issues.length ? ` — ${portable.issues.length} divergência(s)` : ''}\n`);
+  if (portable.status === 'diverged') process.stdout.write('  → wendkeep portable diff; revise e rode `wendkeep portable export`\n');
+  if (portable.status === 'invalid') process.stdout.write(`  ✗ ${portable.issues.join(', ')}\n`);
+
   // 3. Link/graph health — órfãos que o grafo do Obsidian mostraria, com o comando de reparo.
   const links = checkVaultLinks(vaultBase);
   const graphLabel = links.graphColors === true ? 'com cores' : links.graphColors === false ? 'sem cores' : 'sem graph.json';
@@ -197,6 +203,7 @@ export function runDoctor(argv) {
     || warnings.length
     || worktrees.issues.length
     || activeContexts.issues.length
+    || ['diverged', 'invalid'].includes(portable.status)
     || links.derivedOrphans
     || links.artifactOrphans
     || links.graphColors === false

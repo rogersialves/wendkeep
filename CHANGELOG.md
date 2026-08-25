@@ -4,6 +4,22 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.83.0] — 2026-08-25
+
+### Added
+
+- **Estado autoral portátil e `active-work`.** `wendkeep portable status/export/import/diff`
+  produz um snapshot determinístico e revisável de CORE, ADRs, specs e changes autorais, com uma
+  projeção compacta de retomada por active context sem session/worktree IDs, paths locais, tokens,
+  transcritos, locks, leases ou outboxes.
+- **Import fail-closed e provenance privado.** Schema, project, allowlist, hashes, limites,
+  traversal, symlinks/hardlinks e revision/hash são validados antes da primeira escrita; estado
+  stale ou conflitante nunca sobrescreve silenciosamente o local. Export/import registram somente
+  metadados e hashes em ledger privado, e o `doctor` diagnostica authored state divergente.
+- **Contrato público bilíngue.** Schemas `portable-state-v1`/`portable-active-work-v1`, README,
+  guias PT-BR/EN e política LF em `.gitattributes` documentam redaction, opt-out de Git, revisão em
+  PR e retomada segura em clone limpo.
+
 ## [0.82.0] — 2026-08-25
 
 ### Added

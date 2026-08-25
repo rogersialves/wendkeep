@@ -22,6 +22,7 @@ const GUIDES = [
   'observer.md',
   'worktrees.md',
   'context.md',
+  'portable.md',
   'mcp.md',
   'tdd.md',
 ];
@@ -45,6 +46,7 @@ const README_GROUPS = [
   { pt: 'Instalação e atualização', en: 'Installation and updates', guide: 'getting-started.md' },
   { pt: 'Worktrees gerenciadas', en: 'Managed worktrees', guide: 'worktrees.md' },
   { pt: 'Contexto ativo', en: 'Active context', guide: 'context.md' },
+  { pt: 'Estado portátil', en: 'Portable state', guide: 'portable.md' },
   { pt: 'MCP nativo', en: 'Native MCP', guide: 'mcp.md' },
   { pt: 'Perfis de operação', en: 'Operating profiles', guide: 'operating-profiles.md' },
   { pt: 'Changes e verificação', en: 'Changes and verification', guide: 'changes-and-verification.md' },
@@ -82,6 +84,7 @@ const GUIDE_FOR_FAMILY = new Map([
   ['wendkeep sync-defs', 'maintenance-and-diagnostics.md'], ['wendkeep --version', 'maintenance-and-diagnostics.md'],
   ['wendkeep --help', 'maintenance-and-diagnostics.md'],
   ['wendkeep observer', 'observer.md'],
+  ['wendkeep portable', 'portable.md'],
   ['wendkeep mcp', 'mcp.md'],
 ]);
 const SEMANTIC_CONCEPTS = {
@@ -99,6 +102,7 @@ const SEMANTIC_CONCEPTS = {
   'observer.md': { pt: [/Observer/i, /snapshot/i, /outbox/i], en: [/Observer/i, /snapshot/i, /outbox/i] },
   'worktrees.md': { pt: [/worktree/i, /Vault/i, /registry/i], en: [/worktree/i, /Vault/i, /registry/i] },
   'context.md': { pt: [/contexto/i, /branch/i, /rollback|reversão/i], en: [/context/i, /branch/i, /rollback/i] },
+  'portable.md': { pt: [/portátil/i, /runtime/i, /revision/i], en: [/portable/i, /runtime/i, /revision/i] },
   'mcp.md': { pt: [/semântic/i, /capability/i, /stdio/i], en: [/semantic/i, /capability/i, /stdio/i] },
   'tdd.md': { pt: [/atesta/i, /RED/i, /waiver/i], en: [/attestation/i, /RED/i, /waiver/i] },
 };

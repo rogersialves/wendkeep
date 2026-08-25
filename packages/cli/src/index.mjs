@@ -51,6 +51,8 @@ Usage:
                            · --vscode-worktree-tasks.
 
   wendkeep doctor [--vault P]  Health check. --scope core|runtime · --strict for CI/release.
+  wendkeep portable <sub>      Shared authored state: status | export | import | diff.
+                           Default file: .wendkeep/portable/state.json; private runtime stays local.
   wendkeep mcp <serve|config>  Native semantic MCP over stdio, or client config generation.
                            serve: --vault P · --timeout-ms N.
                            config: --client generic|claude|codex|cursor · --vault P.
@@ -218,6 +220,9 @@ async function main(argv) {
     } else if (cmd === 'context') {
       const { CONTEXT_HELP } = await import('../../../src/context.mjs');
       process.stdout.write(CONTEXT_HELP);
+    } else if (cmd === 'portable') {
+      const { PORTABLE_HELP } = await import('../../../src/portable.mjs');
+      process.stdout.write(PORTABLE_HELP);
     } else if (cmd === 'mcp') {
       const { MCP_HELP } = await import('../../../src/mcp.mjs');
       process.stdout.write(MCP_HELP);
@@ -249,6 +254,11 @@ async function main(argv) {
     case 'doctor': {
       const { runDoctor } = await import('../../../src/doctor.mjs');
       process.exit(runDoctor(rest));
+      break;
+    }
+    case 'portable': {
+      const { runPortable } = await import('../../../src/portable.mjs');
+      process.exit(runPortable(rest));
       break;
     }
     case 'observer': {

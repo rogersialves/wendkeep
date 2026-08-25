@@ -247,6 +247,7 @@ The README is the map; the guides provide syntax, options, exit codes, examples,
 | **Installation and updates** | `init`, `sync`, companions, and the first project↔vault binding | [Installation and first use](https://github.com/rogersialves/wendkeep/blob/main/docs/en/commands/getting-started.md) |
 | **Managed worktrees** | `worktree create/list/status/open/finish/cleanup/remove/prune`, merge proof, preflight, crash-safe cleanup/common gate, and receipts | [Managed worktrees](https://github.com/rogersialves/wendkeep/blob/main/docs/en/commands/worktrees.md) |
 | **Active context** | `active_contexts` by `repository_id`/`worktree_id`/`work_session_id`, causal transition, quarantine, and explicit recovery | [Active context](https://github.com/rogersialves/wendkeep/blob/main/docs/en/commands/context.md) |
+| **Portable state** | `portable status/export/import/diff`, authored/runtime boundary, redaction, and the `active-work` snapshot | [Portable state](https://github.com/rogersialves/wendkeep/blob/main/docs/en/commands/portable.md) |
 | **Native MCP** | semantic tools, effects/capabilities, stdio, schemas, pagination, budgets, audit, and client configuration | [Native MCP](https://github.com/rogersialves/wendkeep/blob/main/docs/en/commands/mcp.md) |
 | **Operating profiles** | `profile`, `flow`, always-on Keep Core, and Wend Runtime governance | [Operating profiles](https://github.com/rogersialves/wendkeep/blob/main/docs/en/commands/operating-profiles.md) |
 | **Changes and verification** | `change`, specs, sensors, TDD, evidence, Task Contracts, and archive | [Changes and verification](https://github.com/rogersialves/wendkeep/blob/main/docs/en/commands/changes-and-verification.md) |
@@ -405,6 +406,12 @@ retry through `--change-slug`. Read the complete
 ambiguity. Use `--scope core` for Keep Core health, `--scope runtime` for governance, and
 `--strict` in CI/release; `wendkeep sync` validates Core only so work in progress does not become
 an installation failure.
+
+To resume a change in another clone without tracking transcripts, tokens, paths, leases, or outboxes,
+`wendkeep portable export` creates `.wendkeep/portable/state.json` with sanitized authored
+CORE/ADRs/specs/deltas and a compact `active-work` projection. `portable import` validates project,
+hashes, revisions, and paths before writing; stale or conflicting state never silently replaces local
+state. Git tracking is opt-in and the command never adds files automatically.
 
 ## Shared Project Memory v2
 
