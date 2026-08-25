@@ -4,6 +4,16 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.80.2] — 2026-08-24
+
+### Fixed
+
+- **Perfil persistente em worktrees vinculadas.** `profile use` e `profile status` agora leem e
+  escrevem o binding canônico da worktree principal quando o Vault é resolvido pelo registry Git
+  compartilhado, sem alterar o `.wendkeep.json` versionado da worktree vinculada. A identidade de
+  caminho também normaliza aliases Windows 8.3, impedindo que uma seleção humana `OFF` volte
+  imediatamente ao fallback `GOVERN`; README e guia de perfis foram atualizados em PT-BR/EN.
+
 ## [0.80.1] — 2026-08-24
 
 ### Fixed
