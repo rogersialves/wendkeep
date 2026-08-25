@@ -12,6 +12,8 @@ import {
   renderActiveContextHealthLines,
 } from './active-context-health.mjs';
 import { inspectPortableState } from './portable.mjs';
+import { inspectSyncOutbox, readLocalSyncState } from './sync-outbox.mjs';
+import { readProjectForValidation } from '../packages/vault/src/validate-memory.mjs';
 
 const healthStatusLabel = (status) => ({
   healthy: 'saudável', warning: 'atenção', degraded: 'degradada', blocked: 'bloqueada', legacy: 'legado',
@@ -153,6 +155,23 @@ export function runDoctor(argv) {
   if (portable.status === 'diverged') process.stdout.write('  → wendkeep portable diff; revise e rode `wendkeep portable export`\n');
   if (portable.status === 'invalid') process.stdout.write(`  ✗ ${portable.issues.join(', ')}\n`);
 
+  const sync = inspectSyncOutbox(vaultBase);
+  let syncConflicts = 0;
+  if (sync.status !== 'disabled' && sync.status !== 'corrupt') {
+    try {
+      const projectIdentity = readProjectForValidation(vaultBase);
+      const syncState = readLocalSyncState(vaultBase, resolution.projectId || projectIdentity.projectId || 'unknown');
+      syncConflicts = Object.values(syncState.conflicts || {}).filter((item) => item?.status === 'open').length;
+    } catch {
+      sync.status = 'corrupt';
+      sync.code = 'WENDKEEP_SYNC_STATE_CORRUPT';
+    }
+  }
+  process.stdout.write(`\n[sync] ${sync.status} · ${sync.pending} pendente(s) · ${syncConflicts} conflito(s) aberto(s)\n`);
+  if (sync.status === 'pending') process.stdout.write('  → wendkeep sync push --remote <diretório> (ou --url <endpoint>)\n');
+  if (sync.status === 'corrupt') process.stdout.write(`  ✗ ${sync.code || 'WENDKEEP_SYNC_OUTBOX_CORRUPT'}\n`);
+  if (syncConflicts) process.stdout.write('  → wendkeep sync conflicts; resolva cada conflito explicitamente\n');
+
   // 3. Link/graph health — órfãos que o grafo do Obsidian mostraria, com o comando de reparo.
   const links = checkVaultLinks(vaultBase);
   const graphLabel = links.graphColors === true ? 'com cores' : links.graphColors === false ? 'sem cores' : 'sem graph.json';
@@ -204,6 +223,8 @@ export function runDoctor(argv) {
     || worktrees.issues.length
     || activeContexts.issues.length
     || ['diverged', 'invalid'].includes(portable.status)
+    || sync.status === 'corrupt'
+    || syncConflicts
     || links.derivedOrphans
     || links.artifactOrphans
     || links.graphColors === false

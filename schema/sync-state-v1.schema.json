@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wendkeep.dev/schema/sync-state-v1.schema.json",
+  "title": "WendKeep sync state v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "project_id", "records", "conflicts", "pending", "leases", "decisions", "applied_event_ids"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "project_id": { "type": "string", "minLength": 1, "maxLength": 160 },
+    "records": { "type": "object", "additionalProperties": { "type": "object" } },
+    "conflicts": { "type": "object", "additionalProperties": { "type": "object" } },
+    "pending": { "type": "object", "additionalProperties": { "type": "array", "items": { "$ref": "sync-event-v1.schema.json" } } },
+    "leases": { "type": "object", "additionalProperties": { "type": "object" } },
+    "decisions": { "type": "array", "items": { "type": "object" } },
+    "applied_event_ids": { "type": "array", "uniqueItems": true, "items": { "type": "string", "pattern": "^[a-f0-9]{64}$" } }
+  }
+}
