@@ -6,8 +6,12 @@ import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { bindProjectVault } from '../src/project-vault.mjs';
+import { bindProjectVault, resolveProjectVault } from '../src/project-vault.mjs';
 import { setSessionOperatingProfile } from '../src/profile.mjs';
+import {
+  discoverWorktreeRepository,
+  ensureWorktreeMetadata,
+} from '../packages/vault/src/worktree-metadata.mjs';
 
 const BIN = join(dirname(fileURLToPath(import.meta.url)), '..', 'bin', 'wendkeep.mjs');
 
@@ -58,6 +62,37 @@ function run(project, ...args) {
   });
 }
 
+function git(cwd, ...args) {
+  const result = spawnSync('git', args, { cwd, encoding: 'utf8' });
+  assert.equal(result.status, 0, `git ${args.join(' ')}\n${result.stderr}`);
+  return result;
+}
+
+function linkedWorktreeFixture() {
+  const root = mkdtempSync(join(tmpdir(), 'wk-profile-worktree-'));
+  const main = join(root, 'main');
+  const linked = join(root, 'linked');
+  const vault = join(main, '.WendKeep-vault');
+  mkdirSync(main, { recursive: true });
+  git(main, 'init', '-b', 'main');
+  git(main, 'config', 'user.email', 'tests@wendkeep.invalid');
+  git(main, 'config', 'user.name', 'WendKeep Tests');
+  writeFileSync(join(main, 'tracked.txt'), 'fixture\n');
+  git(main, 'add', 'tracked.txt');
+  git(main, 'commit', '-m', 'initial');
+  bindProjectVault({ projectRoot: main, vaultPath: vault });
+  git(main, 'add', '.wendkeep.json');
+  git(main, 'commit', '-m', 'bind project');
+  git(main, 'worktree', 'add', linked, '-b', 'wk/linked');
+  const repository = discoverWorktreeRepository({ startDir: main });
+  ensureWorktreeMetadata({
+    repository,
+    projectId: JSON.parse(readFileSync(join(main, '.wendkeep.json'), 'utf8')).projectId,
+    vaultPath: vault,
+  });
+  return { root, main, linked };
+}
+
 test('profile status defaults legacy bindings to GOVERN without rewriting them', () => {
   const f = fixture();
   try {
@@ -89,6 +124,26 @@ test('profile use persists explicit OFF at project scope and status reads it bac
     assert.equal(status.status, 0, status.stderr);
     assert.equal(JSON.parse(status.stdout).profile, 'OFF');
     assert.equal(JSON.parse(status.stdout).source, 'project-binding');
+  } finally { rmSync(f.root, { recursive: true, force: true }); }
+});
+
+test('profile use from a linked worktree persists and reads the canonical project profile', () => {
+  const f = linkedWorktreeFixture();
+  try {
+    const linkedBindingBefore = readFileSync(join(f.linked, '.wendkeep.json'), 'utf8');
+    assert.equal(resolveProjectVault({ startDir: f.linked }).source, 'worktree-registry');
+    const changed = run(f.linked, 'use', 'OFF', '--json');
+    assert.equal(changed.status, 0, changed.stderr);
+    assert.equal(
+      JSON.parse(readFileSync(join(f.main, '.wendkeep.json'), 'utf8')).harness.profile,
+      'OFF',
+    );
+
+    const status = run(f.linked, 'status', '--json');
+    assert.equal(status.status, 0, status.stderr);
+    assert.equal(JSON.parse(status.stdout).profile, 'OFF', status.stderr);
+    assert.equal(JSON.parse(status.stdout).source, 'project-binding');
+    assert.equal(readFileSync(join(f.linked, '.wendkeep.json'), 'utf8'), linkedBindingBefore);
   } finally { rmSync(f.root, { recursive: true, force: true }); }
 });
 

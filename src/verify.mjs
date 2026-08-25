@@ -22,6 +22,9 @@ import {
 import { addLesson } from '../hooks/lessons-core.mjs';
 import { getLocale } from '../hooks/locale.mjs';
 import { resolveCommandActiveContext } from './active-context-runtime.mjs';
+import { resolveHookOperatingProfile } from '../hooks/operating-profile-runtime.mjs';
+import { evaluateTddAttestation } from './tdd-attestation.mjs';
+import { readTddAttestationStore } from './tdd-attestation-store.mjs';
 import { writeVaultFileAtomic } from '../packages/vault/src/vault-path-safety.mjs';
 import { evidenceCheckoutBinding } from '../packages/vault/src/evidence-envelope.mjs';
 import {
@@ -126,6 +129,9 @@ export function runVerify(argv) {
     cwd: projectRoot,
     env: sensorProcessEnv(vaultBase),
   });
+  const mutationSurvivors = evidence.flatMap((sensor) => sensor.survivors ?? []);
+  const tddAttestations = readTddAttestationStore(vaultBase, slug).attestations
+    .map((attestation) => evaluateTddAttestation(attestation, startSnapshot, { mutationSurvivors }));
   let finishSnapshot;
   try {
     finishSnapshot = captureGitSnapshot(projectRoot);
@@ -142,6 +148,7 @@ export function runVerify(argv) {
     effectiveSpecSha256: `sha256:${effective.hash}`,
     sensorConfigSha256: sensorConfigSha256(sensors, ids),
     sensors: evidence,
+    tddAttestations,
     startedAt,
     finishedAt: new Date().toISOString(),
   });
@@ -195,11 +202,15 @@ export function runVerify(argv) {
   // verify can announce success or assemble the deep package. Legacy projects without an active
   // context preserve their pre-contract behavior until they migrate.
   if (commandContext) {
+    const profileRuntime = resolveHookOperatingProfile({
+      input: { cwd: projectRoot, session_id: commandContext.sessionId || requestedSession },
+    });
     const taskSnapshot = buildTaskContractSnapshot({
       vaultBase,
       projectRoot,
       changeSlug: slug,
       identity: commandContext,
+      profile: profileRuntime.profile,
     });
     const taskEvaluations = evaluateTaskContracts(taskSnapshot);
     const executeEvaluations = taskEvaluations.filter((task) => task.phase !== 'verify');
@@ -251,6 +262,7 @@ export function runVerify(argv) {
       }),
       tasks: tasks.map((t) => ({ id: t.id, text: t.text, req: t.req || null, reqs: t.reqs || [], done: t.done })),
       sensors: evidence,
+      tddAttestations,
     };
     writeAuthority('verificacao.json', `${JSON.stringify(pkg, null, 2)}\n`);
     if (reqIds.length === 0) {
