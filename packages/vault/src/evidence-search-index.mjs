@@ -34,6 +34,7 @@ const SHA256 = /^[a-f0-9]{64}$/;
 const ARTIFACT_PATH = /^evidence-search\/[A-Za-z0-9._-]+$/;
 const require = createRequire(import.meta.url);
 const lexicalCache = new Map();
+let sqliteCapability = null;
 
 function brainDir(vaultBase) {
   return join(vaultBase, '.brain');
@@ -331,8 +332,39 @@ function sqliteDatabaseSync() {
   }
 }
 
+function detectSqliteCapability() {
+  if (sqliteCapability) return sqliteCapability;
+  const DatabaseSync = sqliteDatabaseSync();
+  if (!DatabaseSync) {
+    sqliteCapability = {
+      available: false,
+      DatabaseSync: null,
+      reason: 'node-sqlite-unavailable',
+      error_code: 'EVIDENCE_SEARCH_SQLITE_UNAVAILABLE',
+    };
+    return sqliteCapability;
+  }
+
+  let db = null;
+  try {
+    db = new DatabaseSync(':memory:', { open: true });
+    db.exec('CREATE VIRTUAL TABLE evidence_fts_probe USING fts5(content)');
+    sqliteCapability = { available: true, DatabaseSync, reason: '', error_code: '' };
+  } catch {
+    sqliteCapability = {
+      available: false,
+      DatabaseSync,
+      reason: 'fts5-unavailable',
+      error_code: 'EVIDENCE_SEARCH_FTS5_UNAVAILABLE',
+    };
+  } finally {
+    try { db?.close(); } catch { /* capability probe is best effort */ }
+  }
+  return sqliteCapability;
+}
+
 export function evidenceSearchSqliteAvailable() {
-  return Boolean(sqliteDatabaseSync());
+  return detectSqliteCapability().available;
 }
 
 function cleanupSqliteCandidate(vaultBase, path) {
@@ -343,15 +375,18 @@ function cleanupSqliteCandidate(vaultBase, path) {
 }
 
 function buildSqliteArtifact(vaultBase, rows, indexHash, { required = false } = {}) {
-  const DatabaseSync = sqliteDatabaseSync();
-  if (!DatabaseSync) {
+  const capability = detectSqliteCapability();
+  if (!capability.available) {
     if (required) {
-      const error = new Error('node:sqlite is unavailable; evidence FTS requires Node.js 22.13+');
-      error.code = 'EVIDENCE_SEARCH_SQLITE_UNAVAILABLE';
+      const error = new Error(capability.reason === 'node-sqlite-unavailable'
+        ? 'node:sqlite is unavailable; evidence FTS requires a compatible Node.js runtime'
+        : 'the current node:sqlite build does not include FTS5; evidence search will use the lexical backend');
+      error.code = capability.error_code;
       throw error;
     }
-    return { artifact: null, written: false, reason: 'node-sqlite-unavailable' };
+    return { artifact: null, written: false, reason: capability.reason };
   }
+  const { DatabaseSync } = capability;
 
   const candidate = join(searchDir(vaultBase), `.fts-${indexHash.slice(0, 20)}-${randomUUID()}.tmp.sqlite`);
   assertVaultPathSafe(vaultBase, candidate, {

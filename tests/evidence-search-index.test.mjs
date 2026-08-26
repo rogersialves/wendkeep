@@ -105,6 +105,48 @@ test('[req:RECALL-8] lexical sidecar is persistent, bounded, and reaches old evi
   }
 });
 
+test('[req:RECALL-8] SQLite availability represents FTS5 and auto mode degrades safely', () => {
+  const vault = createVault();
+  try {
+    writeDocument(vault, '04-Decisões/ADR-capacidade-fts.md', {
+      title: 'Capacidade FTS',
+      body: 'A evidência contém marcador-capacidade-fts.',
+    });
+
+    const first = build(vault, { sqlite: 'auto' });
+    assert.equal(first.search.sqlite_available, evidenceSearchSqliteAvailable());
+
+    if (evidenceSearchSqliteAvailable()) {
+      assert.equal(first.search.sqlite_reason, '');
+      assert.ok(first.search.state.sqlite);
+      return;
+    }
+
+    assert.equal(first.search.state.sqlite, null);
+    assert.ok([
+      'node-sqlite-unavailable',
+      'fts5-unavailable',
+    ].includes(first.search.sqlite_reason));
+    assert.equal(searchEvidenceCandidates(vault, 'marcador-capacidade-fts', {
+      backend: 'auto',
+      candidateLimit: 3,
+    }).rows[0].logical_path, '04-Decisões/ADR-capacidade-fts.md');
+
+    assert.throws(
+      () => refreshEvidenceSearchIndex(vault, loadEvidenceIndex(vault), {
+        force: true,
+        sqlite: 'required',
+      }),
+      (error) => [
+        'EVIDENCE_SEARCH_SQLITE_UNAVAILABLE',
+        'EVIDENCE_SEARCH_FTS5_UNAVAILABLE',
+      ].includes(error?.code),
+    );
+  } finally {
+    rmSync(vault, { recursive: true, force: true });
+  }
+});
+
 test('[req:RECALL-8] filters are equivalent across lexical and SQLite FTS backends', {
   skip: !evidenceSearchSqliteAvailable(),
 }, () => {
