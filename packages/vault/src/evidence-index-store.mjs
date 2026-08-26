@@ -19,6 +19,7 @@ export const EVIDENCE_INDEX_STATE_VERSION = 1;
 const EXCLUDED_DIRECTORIES = new Set([
   '.brain', '.git', '.obsidian', '.worktrees', 'node_modules',
 ]);
+const SHA256 = /^[a-f0-9]{64}$/;
 
 function brainDir(vaultBase) {
   return join(vaultBase, '.brain');
@@ -85,6 +86,22 @@ function walkMarkdown(root, dir = root, found = []) {
   return found;
 }
 
+function checkedMarkdownSource(vaultBase, path, logicalPath) {
+  let checked = checkedFile(
+    vaultBase,
+    path,
+    `documento Markdown ${logicalPath} do índice de evidências`,
+    { allowMissing: false },
+  );
+  checked = checkedFile(
+    vaultBase,
+    checked.target,
+    `documento Markdown ${logicalPath} do índice de evidências`,
+    { allowMissing: false },
+  );
+  return checked.target;
+}
+
 function nsText(value, fallbackMs = 0) {
   if (typeof value === 'bigint') return value.toString();
   const milliseconds = Number(fallbackMs || 0);
@@ -113,6 +130,10 @@ function validChunk(row, projectId) {
     && row.index_version === EVIDENCE_INDEX_VERSION
     && typeof row.logical_path === 'string'
     && typeof row.chunk_id === 'string'
+    && typeof row.content === 'string'
+    && SHA256.test(String(row.content_hash || ''))
+    && Number.isInteger(row.ordinal)
+    && row.ordinal >= 0
     && String(row.project_id || '') === projectId;
 }
 
@@ -133,7 +154,8 @@ function validDocumentState(value) {
     && typeof value.size === 'string'
     && typeof value.mtime_ns === 'string'
     && typeof value.ctime_ns === 'string'
-    && typeof value.content_hash === 'string'
+    && SHA256.test(String(value.content_hash || ''))
+    && SHA256.test(String(value.chunks_hash || ''))
     && Number.isInteger(value.chunk_count)
     && value.chunk_count >= 0;
 }
@@ -174,6 +196,23 @@ function groupByLogicalPath(rows) {
   return grouped;
 }
 
+function chunksHash(rows) {
+  return hash(rows.map((row) => JSON.stringify(row)).join('\n'));
+}
+
+function stateMatchesIndex(state, rows) {
+  const grouped = groupByLogicalPath(rows);
+  for (const logicalPath of grouped.keys()) {
+    if (!Object.hasOwn(state.documents, logicalPath)) return false;
+  }
+  for (const [logicalPath, document] of Object.entries(state.documents)) {
+    const documentRows = grouped.get(logicalPath) || [];
+    if (documentRows.length !== document.chunk_count
+        || chunksHash(documentRows) !== document.chunks_hash) return false;
+  }
+  return true;
+}
+
 function sortedRecord(value) {
   return Object.fromEntries(Object.entries(value).sort(([left], [right]) => left.localeCompare(right)));
 }
@@ -206,7 +245,10 @@ export function refreshEvidenceIndex(vaultBase, { force = false } = {}) {
     'estado incremental do índice de evidências',
   );
   const priorState = parseState(priorStateRaw, projectId);
-  const fullRebuild = Boolean(force || priorIndex.status !== 'ok' || !priorState);
+  const cacheMatches = priorIndex.status === 'ok'
+    && priorState
+    && stateMatchesIndex(priorState, priorIndex.rows);
+  const fullRebuild = Boolean(force || !cacheMatches);
   const priorRows = fullRebuild ? [] : priorIndex.rows;
   const priorByPath = groupByLogicalPath(priorRows);
   const priorDocuments = fullRebuild ? {} : priorState.documents;
@@ -226,15 +268,22 @@ export function refreshEvidenceIndex(vaultBase, { force = false } = {}) {
     .sort((left, right) => left.logicalPath.localeCompare(right.logicalPath));
 
   for (const item of files) {
+    let sourcePath;
     let fingerprint;
-    try { fingerprint = documentFingerprint(item.path); } catch { continue; }
+    try {
+      sourcePath = checkedMarkdownSource(vaultBase, item.path, item.logicalPath);
+      fingerprint = documentFingerprint(sourcePath);
+    } catch {
+      continue;
+    }
     if (!fingerprint) continue;
     seen.add(item.logicalPath);
 
     const previous = priorDocuments[item.logicalPath];
     const previousChunks = priorByPath.get(item.logicalPath) || [];
     const reusableChunkSet = Boolean(previous)
-      && previousChunks.length === previous.chunk_count;
+      && previousChunks.length === previous.chunk_count
+      && chunksHash(previousChunks) === previous.chunks_hash;
 
     if (!fullRebuild && reusableChunkSet && sameFingerprint(previous, fingerprint)) {
       chunks.push(...previousChunks);
@@ -244,7 +293,7 @@ export function refreshEvidenceIndex(vaultBase, { force = false } = {}) {
     }
 
     let content;
-    try { content = readFileSync(item.path, 'utf8'); } catch { continue; }
+    try { content = readFileSync(sourcePath, 'utf8'); } catch { continue; }
     readDocuments += 1;
     const contentHash = hash(content);
 
@@ -253,6 +302,7 @@ export function refreshEvidenceIndex(vaultBase, { force = false } = {}) {
       documents[item.logicalPath] = {
         ...fingerprint,
         content_hash: contentHash,
+        chunks_hash: chunksHash(previousChunks),
         chunk_count: previousChunks.length,
       };
       reusedDocuments += 1;
@@ -268,6 +318,7 @@ export function refreshEvidenceIndex(vaultBase, { force = false } = {}) {
     documents[item.logicalPath] = {
       ...fingerprint,
       content_hash: contentHash,
+      chunks_hash: chunksHash(nextChunks),
       chunk_count: nextChunks.length,
     };
     reindexedDocuments += 1;
