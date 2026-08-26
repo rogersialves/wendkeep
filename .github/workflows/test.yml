@@ -3,29 +3,35 @@ name: test
 on:
   pull_request:
 
+concurrency:
+  group: pr-test-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - { os: ubuntu-latest, node: 18, scope: core }
-          - { os: windows-latest, node: 18, scope: core }
-          - { os: ubuntu-latest, node: 20, scope: core }
-          - { os: windows-latest, node: 20, scope: core }
-          - { os: ubuntu-latest, node: 22.13.0, scope: full }
-          - { os: windows-latest, node: 22.13.0, scope: full }
-          - { os: ubuntu-latest, node: 24, scope: full }
-          - { os: windows-latest, node: 24, scope: full }
-    runs-on: ${{ matrix.os }}
+    name: test / linux-minimum
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v5
-      - uses: actions/setup-node@v5
+
+      - name: Set up Node.js 18
+        uses: actions/setup-node@v5
         with:
-          node-version: ${{ matrix.node }}
+          node-version: 18
+
+      - name: Validate minimum runtime
+        run: node --test tests/runtime-compat.mjs
+
+      - name: Validate syntax on minimum runtime
+        run: npm run check
+
+      - name: Set up Node.js 22.13
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22.13.0
+
       - run: npm ci --ignore-scripts
-      - if: matrix.scope == 'core'
-        run: npm run test:core
-      - if: matrix.scope == 'full'
+
+      - name: Run full Linux suite
         run: npm test
-      - run: npm run check

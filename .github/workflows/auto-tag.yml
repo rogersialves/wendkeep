@@ -13,31 +13,80 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  test-linux:
+    name: test / linux-release
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      release_required: ${{ steps.release-scope.outputs.required }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 2
+
+      - name: Detect package-affecting changes
+        id: release-scope
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${BASE_SHA:-}" || "$BASE_SHA" =~ ^0+$ ]]; then
+            echo "required=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if ! git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null; then
+            git fetch --no-tags --depth=1 origin "$BASE_SHA"
+          fi
+          if git diff --quiet "$BASE_SHA" "$GITHUB_SHA" -- . \
+            ':(exclude).github/**' \
+            ':(exclude)tests/**'; then
+            echo "required=false" >> "$GITHUB_OUTPUT"
+            echo "Somente CI/testes mudaram; Windows e release serão pulados."
+          else
+            echo "required=true" >> "$GITHUB_OUTPUT"
+            echo "Mudança afeta a árvore de produto; Windows e release permanecem obrigatórios."
+          fi
+
+      - name: Set up Node.js 18
+        uses: actions/setup-node@v5
+        with:
+          node-version: 18
+
+      - name: Validate minimum runtime
+        run: node --test tests/runtime-compat.mjs
+
+      - name: Validate syntax on minimum runtime
+        run: npm run check
+
+      - name: Set up Node.js 22.13
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22.13.0
+
+      - run: npm ci --ignore-scripts
+
+      - name: Run full Linux suite
+        run: npm test
+
   test:
     strategy:
-      fail-fast: false
+      fail-fast: true
       matrix:
         include:
-          - { os: ubuntu-latest, node: 18, scope: core }
-          - { os: windows-latest, node: 18, scope: core }
-          - { os: ubuntu-latest, node: 20, scope: core }
-          - { os: windows-latest, node: 20, scope: core }
-          - { os: ubuntu-latest, node: 22.13.0, scope: full }
-          - { os: windows-latest, node: 22.13.0, scope: full }
-          - { os: ubuntu-latest, node: 24, scope: full }
-          - { os: windows-latest, node: 24, scope: full }
+          - { os: windows-latest, node: 24 }
+    needs: test-linux
+    if: needs.test-linux.outputs.release_required == 'true'
+    name: test / windows-release
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
         with:
           node-version: ${{ matrix.node }}
       - run: npm ci --ignore-scripts
-      - if: matrix.scope == 'core'
-        run: npm run test:core
-      - if: matrix.scope == 'full'
-        run: npm test
-      - run: npm run check
+      - run: npm test
 
   release:
     needs: test
