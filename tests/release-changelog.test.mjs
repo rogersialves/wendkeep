@@ -82,11 +82,11 @@ test('extractReleaseNotes: throws when the version is absent', () => {
 });
 
 test('[sensor:release-tests] current release notes are extractable and match the package', () => {
-  assert.equal(PACKAGE.version, '0.85.0');
+  assert.equal(PACKAGE.version, '0.85.1');
   const release = extractReleaseNotes(CHANGELOG, PACKAGE.version);
   assert.equal(release.date, '2026-08-25');
-  assert.match(release.notes, /Matriz versionada de capacidades dos hosts/i);
-  assert.match(release.notes, /requires_host_capabilities/i);
+  assert.match(release.notes, /Proveniência da árvore publicada após o sync do próprio projeto/i);
+  assert.match(release.notes, /perfil persistente continua explicitamente `OFF`/i);
   assert.doesNotMatch(release.notes, /019f[0-9a-f-]+/i);
 });
 

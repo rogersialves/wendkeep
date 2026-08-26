@@ -4,6 +4,20 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.85.1] — 2026-08-25
+
+### Fixed
+
+- **Proveniência da árvore publicada após o sync do próprio projeto.** O checkout de
+  desenvolvimento permanece sem depender do pacote `wendkeep` publicado, enquanto o bump patch
+  alinha `package.json`, lockfile, tag e automação de Release à árvore integrada pelo PR #109.
+
+### Changed
+
+- **Harness do repositório sincronizado com 0.85.0.** `AGENTS.md` e as skills gerenciadas passam
+  a refletir o contrato atual, incluindo o binding completo do Evidence Envelope no verdict; o
+  MCP do projeto usa o servidor nativo e o perfil persistente continua explicitamente `OFF`.
+
 ## [0.85.0] — 2026-08-25
 
 ### Added
