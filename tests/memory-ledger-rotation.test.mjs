@@ -75,6 +75,9 @@ function generationPath(vault) { return join(vault, '.brain', 'MEMORY_LEDGER_GEN
 function receiptsPath(vault) { return join(vault, '.brain', 'MEMORY_ROTATION_RECEIPTS.jsonl'); }
 function checkpointPath(vault) { return join(vault, '.brain', 'MEMORY_ROTATION_RECEIPTS.checkpoint.json'); }
 function journalPath(vault) { return join(vault, '.brain', MEMORY_ROTATION_JOURNAL_FILE); }
+function candidatePath(vault, operationId) {
+  return join(vault, '.brain', `MEMORY_ROTATION_CANDIDATE.${operationId}.jsonl`);
+}
 function backups(vault) {
   const dir = join(vault, '.brain', 'memory-ledger-generations');
   return existsSync(dir) ? readdirSync(dir).filter((name) => name.endsWith('.jsonl')).sort() : [];
@@ -127,18 +130,20 @@ test('[req:MEM-ROT-2] apply keeps a full immutable backup and compacts the activ
   try {
     seed(vault, 1, 5);
     const source = readMemoryLedger(vault);
-    const sourceBytes = readFileSync(activeLedgerPath(vault)).length;
+    const physicalBytesBefore = readFileSync(activeLedgerPath(vault)).length;
     const rotated = rotateMemoryLedger(vault, applyOptions());
 
     assert.equal(rotated.status, 'rotated');
     assert.equal(rotated.apply, true);
     assert.equal(rotated.generation, 1);
     assert.equal(rotated.sourceEvents, 5);
+    assert.equal(rotated.activeBytesBefore, physicalBytesBefore);
+    assert.equal(rotated.reclaimedActiveBytes, physicalBytesBefore - rotated.activeBytesAfter);
     assert.equal(rotated.backupRetained, true);
     assert.equal(rotated.policy, 'retain-source-backup');
     assert.equal(existsSync(journalPath(vault)), false);
     assert.equal(backups(vault).length, 1);
-    assert.ok(readFileSync(activeLedgerPath(vault)).length < sourceBytes);
+    assert.ok(readFileSync(activeLedgerPath(vault)).length < physicalBytesBefore);
     assert.equal(readFileSync(activeLedgerPath(vault), 'utf8').trimEnd().split('\n').length, 1);
 
     const logical = readMemoryLedger(vault);
@@ -147,10 +152,15 @@ test('[req:MEM-ROT-2] apply keeps a full immutable backup and compacts the activ
     assert.equal(logical.activeTailEvents.length, 0);
 
     const generation = readMemoryLedgerGeneration(vault);
+    const snapshot = readMemoryProjectionSnapshot(vault);
     assert.equal(generation.status, 'ok');
     assert.equal(generation.state.generation, 1);
     assert.equal(generation.state.source_event_count, 5);
-    assert.equal(readMemoryProjectionSnapshot(vault).status, 'ok');
+    assert.equal(snapshot.status, 'ok');
+    assert.equal(generation.state.snapshot_hash, snapshot.snapshot.snapshot_hash);
+    assert.equal(snapshot.snapshot.ledger_generation_operation_id, generation.state.operation_id);
+    assert.equal(snapshot.snapshot.ledger_generation_source_hash, generation.state.source_ledger_hash);
+    assert.equal(Object.hasOwn(snapshot.snapshot, 'ledger_generation_state_hash'), false);
 
     const receipts = readMemoryRotationReceipts(vault);
     assert.equal(receipts.status, 'ok');
@@ -226,6 +236,39 @@ for (const stage of ['after-prepared', 'after-switch', 'after-state', 'after-sna
     }
   });
 }
+
+test('[req:MEM-ROT-4] crash after journal removal leaves only a safe candidate cleanup', () => {
+  const vault = scratch();
+  try {
+    seed(vault, 1, 4);
+    assert.throws(
+      () => rotateMemoryLedger(vault, applyOptions({ faultAt: 'after-journal-removal' })),
+      /Injected memory-rotation fault/,
+    );
+
+    const generation = readMemoryLedgerGeneration(vault);
+    assert.equal(generation.status, 'ok');
+    assert.equal(readMemoryRotationJournal(vault).status, 'missing');
+    assert.equal(readMemoryLedger(vault).status, 'ok');
+    assert.equal(readMemoryRotationReceipts(vault).receipts.length, 1);
+    assert.equal(existsSync(candidatePath(vault, generation.state.operation_id)), true);
+
+    const preview = recoverMemoryLedgerRotation(vault);
+    assert.equal(preview.status, 'preview');
+    assert.equal(preview.stage, 'candidate-cleanup');
+    assert.equal(preview.operationId, generation.state.operation_id);
+
+    const finalized = recoverMemoryLedgerRotation(vault, { apply: true });
+    assert.equal(finalized.status, 'finalized');
+    assert.equal(finalized.recoveryRequired, false);
+    assert.equal(existsSync(candidatePath(vault, generation.state.operation_id)), false);
+    assert.equal(readMemoryLedger(vault).status, 'ok');
+    assert.equal(readMemoryRotationReceipts(vault).receipts.length, 1);
+    assert.equal(backups(vault).length, 1);
+  } finally {
+    rmSync(vault, { recursive: true, force: true });
+  }
+});
 
 test('[req:MEM-ROT-5] apply requires explicit authority and a live memory lock serializes rotations', () => {
   const vault = scratch();
