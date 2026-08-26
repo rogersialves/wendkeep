@@ -5,7 +5,7 @@ export * from './locale.mjs';
 export * from './memory-schema.mjs';
 export * from './memory-mode.mjs';
 export * from './memory-handoff.mjs';
-export * from './memory-runtime.mjs';
+export * from './memory-store.mjs';
 export * from './memory-scope.mjs';
 export * from './evidence-recall.mjs';
 export * from './evidence-envelope.mjs';
