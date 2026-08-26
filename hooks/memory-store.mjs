@@ -1,1 +1,1 @@
-export * from '../packages/vault/src/memory-store.mjs';
+export * from '../packages/vault/src/memory-runtime.mjs';
