@@ -1,7 +1,5 @@
-import { createHash } from 'node:crypto';
 import {
-  closeSync, fstatSync, fsyncSync, openSync, readFileSync, readdirSync, statSync,
-  writeFileSync,
+  closeSync, fstatSync, fsyncSync, openSync, readdirSync, statSync, writeFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
 
@@ -39,7 +37,6 @@ import {
 } from './memory-ledger-view.mjs';
 import {
   readMemorySegmentManifest,
-  sealMemorySegments,
   verifyMemorySegments,
 } from './memory-segment-store.mjs';
 import { readMemoryProjectionSnapshot } from './memory-snapshot-store.mjs';
@@ -72,7 +69,6 @@ export class MemoryLedgerRotationBlocked extends Error {
 function brainDir(vaultBase) { return join(vaultBase, '.brain'); }
 function outboxDir(vaultBase) { return join(brainDir(vaultBase), 'memory-outbox'); }
 function snapshotPath(vaultBase) { return join(brainDir(vaultBase), 'MEMORY_SNAPSHOT.json'); }
-function manifestPath(vaultBase) { return join(brainDir(vaultBase), 'MEMORY_SEGMENTS.json'); }
 function candidateRelative(operationId) { return `${MEMORY_ROTATION_CANDIDATE_PREFIX}.${operationId}.jsonl`; }
 function candidatePath(vaultBase, operationId) { return join(brainDir(vaultBase), candidateRelative(operationId)); }
 function backupRelative(generation, hash) {
@@ -172,7 +168,14 @@ function readSnapshotRaw(vaultBase) {
   );
 }
 
-function transformSnapshot(snapshot, generation, stateHash, anchorLine, anchorEventId) {
+function transformSnapshot(
+  snapshot,
+  generation,
+  operationId,
+  sourceLedgerHash,
+  anchorLine,
+  anchorEventId,
+) {
   const transformed = structuredClone(snapshot);
   const lineBytes = Buffer.byteLength(anchorLine);
   transformed.ledger_bytes = lineBytes + 1;
@@ -181,7 +184,9 @@ function transformSnapshot(snapshot, generation, stateHash, anchorLine, anchorEv
   transformed.through_line_hash = memorySha256(anchorLine);
   transformed.through_event_id = anchorEventId;
   transformed.ledger_generation = generation;
-  transformed.ledger_generation_state_hash = stateHash;
+  transformed.ledger_generation_operation_id = operationId;
+  transformed.ledger_generation_source_hash = sourceLedgerHash;
+  delete transformed.ledger_generation_state_hash;
   transformed.snapshot_hash = snapshotHash(transformed);
   return transformed;
 }
@@ -216,6 +221,13 @@ function operationIdFor(subject) {
   return `memrot-${memorySha256(canonicalMemoryControlJson(subject)).slice(0, 16)}`;
 }
 
+function generationCandidate(vaultBase, generationState) {
+  if (!generationState?.operation_id) return { exists: false, path: null };
+  const path = candidatePath(vaultBase, generationState.operation_id);
+  const checked = checkedFile(vaultBase, path, 'candidate residual da rotação', { allowMissing: true });
+  return { exists: checked.exists, path: checked.target };
+}
+
 function buildPlan(vaultBase, options = {}, { allowJournal = false } = {}) {
   const blockers = [];
   const projectId = projectIdForMemoryLedger(vaultBase);
@@ -233,6 +245,9 @@ function buildPlan(vaultBase, options = {}, { allowJournal = false } = {}) {
 
   const generation = readMemoryLedgerGeneration(vaultBase);
   if (generation.status === 'invalid') blockers.push(`generation state invalid: ${generation.errors.join('; ')}`);
+  if (generation.status === 'ok' && generationCandidate(vaultBase, generation.state).exists) {
+    blockers.push(`completed rotation candidate cleanup required for ${generation.state.operation_id}`);
+  }
   const previousGeneration = generation.status === 'ok' ? generation.state.generation : 0;
   const previousStateHash = generation.status === 'ok' ? generation.state.state_hash : CHAIN_GENESIS;
 
@@ -285,6 +300,16 @@ function buildPlan(vaultBase, options = {}, { allowJournal = false } = {}) {
     segment_manifest_hash: segmentManifestHash,
     snapshot_hash: sourceSnapshotHash,
   });
+  const nextSnapshot = snapshot.status === 'ok' && anchor
+    ? transformSnapshot(
+      snapshot.snapshot,
+      generationNumber,
+      operationId,
+      sourceLedgerHash,
+      anchorLine,
+      anchor.event_id,
+    )
+    : null;
   const generationState = {
     schema_version: MEMORY_LEDGER_GENERATION_SCHEMA_VERSION,
     project_id: projectId,
@@ -302,34 +327,11 @@ function buildPlan(vaultBase, options = {}, { allowJournal = false } = {}) {
     segment_manifest_hash: segmentManifestHash,
     segment_chain_tip: segmentChainTip,
     source_snapshot_hash: sourceSnapshotHash,
-    snapshot_hash: CHAIN_GENESIS,
+    snapshot_hash: nextSnapshot?.snapshot_hash || CHAIN_GENESIS,
     previous_state_hash: previousStateHash,
     rotated_at: completedAt,
   };
   generationState.state_hash = hashMemoryControl(generationState, 'state_hash');
-  const nextSnapshot = snapshot.status === 'ok' && anchor
-    ? transformSnapshot(snapshot.snapshot, generationNumber, generationState.state_hash, anchorLine, anchor.event_id)
-    : null;
-  if (nextSnapshot) {
-    generationState.snapshot_hash = nextSnapshot.snapshot_hash;
-    generationState.state_hash = hashMemoryControl(generationState, 'state_hash');
-    nextSnapshot.ledger_generation_state_hash = generationState.state_hash;
-    nextSnapshot.snapshot_hash = snapshotHash(nextSnapshot);
-    generationState.snapshot_hash = nextSnapshot.snapshot_hash;
-    generationState.state_hash = hashMemoryControl(generationState, 'state_hash');
-    nextSnapshot.ledger_generation_state_hash = generationState.state_hash;
-    nextSnapshot.snapshot_hash = snapshotHash(nextSnapshot);
-    generationState.snapshot_hash = nextSnapshot.snapshot_hash;
-    generationState.state_hash = hashMemoryControl(generationState, 'state_hash');
-  }
-  // The state and snapshot bind each other through stable hashes. Three deterministic passes are
-  // sufficient because only the two hash fields change and each pass is pure; record the final pair.
-  if (nextSnapshot) {
-    nextSnapshot.ledger_generation_state_hash = generationState.state_hash;
-    nextSnapshot.snapshot_hash = snapshotHash(nextSnapshot);
-    generationState.snapshot_hash = nextSnapshot.snapshot_hash;
-    generationState.state_hash = hashMemoryControl(generationState, 'state_hash');
-  }
 
   const sourceActiveHash = active.status === 'ok' ? memorySha256(active.raw) : CHAIN_GENESIS;
   const plan = {
@@ -431,6 +433,7 @@ function writeJournalShape(plan, stage, updatedAt) {
       source_ledger_hash: plan.sourceLedgerHash,
       source_event_count: plan.sourceEventCount,
       source_active_hash: plan.sourceActiveHash,
+      source_active_bytes: plan.sourceActiveBytes,
       source_snapshot_hash: plan.sourceSnapshotHash,
       segment_manifest_hash: plan.segmentManifestHash,
       segment_chain_tip: plan.segmentChainTip,
@@ -552,7 +555,9 @@ function receiptRecord(plan, sequence, previousHash) {
 
 function receiptEquivalent(receipt, plan) {
   const facts = receiptFacts(plan);
-  return Object.entries(facts).every(([key, value]) => canonicalMemoryControlJson(receipt[key]) === canonicalMemoryControlJson(value));
+  return Object.entries(facts).every(([key, value]) => (
+    canonicalMemoryControlJson(receipt[key]) === canonicalMemoryControlJson(value)
+  ));
 }
 
 function appendReceiptLine(vaultBase, line) {
@@ -632,6 +637,7 @@ function planFromJournal(vaultBase, journal) {
     sourceLedgerHash: value.source_ledger_hash,
     sourceEventCount: value.source_event_count,
     sourceActiveHash: value.source_active_hash,
+    sourceActiveBytes: value.source_active_bytes,
     sourceSnapshotHash: value.source_snapshot_hash,
     segmentManifestHash: value.segment_manifest_hash,
     segmentChainTip: value.segment_chain_tip,
@@ -654,10 +660,29 @@ function planFromJournal(vaultBase, journal) {
   if (!CANDIDATE_FILE.test(String(plan.candidateFile || '')) || !plan.candidateFile.includes(plan.operationId)) {
     errors.push('journal candidate file invalid');
   }
+  if (!Number.isInteger(plan.sourceActiveBytes) || plan.sourceActiveBytes < 0) {
+    errors.push('journal source_active_bytes invalid');
+  }
   if (!generationState || generationState.state_hash !== hashMemoryControl(generationState, 'state_hash')) {
     errors.push('journal generation state invalid');
   }
-  if (!nextSnapshot || nextSnapshot.snapshot_hash !== snapshotHash(nextSnapshot)) errors.push('journal snapshot invalid');
+  if (!nextSnapshot || nextSnapshot.snapshot_hash !== snapshotHash(nextSnapshot)) {
+    errors.push('journal snapshot invalid');
+  } else {
+    if (nextSnapshot.ledger_generation !== plan.generation) errors.push('journal snapshot generation mismatch');
+    if (nextSnapshot.ledger_generation_operation_id !== plan.operationId) {
+      errors.push('journal snapshot operation mismatch');
+    }
+    if (nextSnapshot.ledger_generation_source_hash !== plan.sourceLedgerHash) {
+      errors.push('journal snapshot source mismatch');
+    }
+    if (Object.hasOwn(nextSnapshot, 'ledger_generation_state_hash')) {
+      errors.push('journal snapshot contains circular generation state binding');
+    }
+  }
+  if (generationState?.snapshot_hash !== nextSnapshot?.snapshot_hash) {
+    errors.push('journal state/snapshot hash mismatch');
+  }
   for (const [key, item] of Object.entries({
     sourceLedgerHash: plan.sourceLedgerHash,
     sourceActiveHash: plan.sourceActiveHash,
@@ -711,14 +736,15 @@ function planFromJournal(vaultBase, journal) {
   return plan;
 }
 
-function cleanupOperation(vaultBase, plan) {
-  unlinkVaultFile(vaultBase, join(brainDir(vaultBase), plan.candidateFile), {
-    missingOk: true,
-    label: 'candidate finalizado da rotação',
-  });
+function cleanupOperation(vaultBase, plan, options = {}) {
   unlinkVaultFile(vaultBase, memoryRotationJournalPath(vaultBase), {
     missingOk: true,
     label: 'journal finalizado da rotação',
+  });
+  injectFault(options.faultAt, 'after-journal-removal');
+  unlinkVaultFile(vaultBase, join(brainDir(vaultBase), plan.candidateFile), {
+    missingOk: true,
+    label: 'candidate finalizado da rotação',
   });
 }
 
@@ -749,7 +775,7 @@ function resumeLocked(vaultBase, journal, options = {}) {
   }
   injectFault(options.faultAt, 'after-receipt');
 
-  cleanupOperation(vaultBase, plan);
+  cleanupOperation(vaultBase, plan, options);
   return {
     status: 'rotated',
     apply: true,
@@ -757,9 +783,9 @@ function resumeLocked(vaultBase, journal, options = {}) {
     generation: plan.generation,
     sourceEvents: plan.sourceEventCount,
     sourceBytes: Buffer.byteLength(plan.sourceContent),
-    activeBytesBefore: Buffer.byteLength(plan.sourceContent),
+    activeBytesBefore: plan.sourceActiveBytes,
     activeBytesAfter: Buffer.byteLength(plan.candidateContent),
-    reclaimedActiveBytes: Math.max(0, Buffer.byteLength(plan.sourceContent) - Buffer.byteLength(plan.candidateContent)),
+    reclaimedActiveBytes: Math.max(0, plan.sourceActiveBytes - Buffer.byteLength(plan.candidateContent)),
     backupFile: plan.backupFile,
     backupRetained: true,
     policy: MEMORY_ROTATION_POLICY,
@@ -822,10 +848,91 @@ export function rotateMemoryLedger(vaultBase, options = {}) {
   return result;
 }
 
+function inspectOrphanCandidate(vaultBase) {
+  const generation = readMemoryLedgerGeneration(vaultBase);
+  if (generation.status === 'missing') {
+    return { status: 'none', apply: false, recoveryRequired: false };
+  }
+  if (generation.status !== 'ok') {
+    return {
+      status: 'blocked',
+      apply: false,
+      recoveryRequired: true,
+      errors: generation.errors,
+    };
+  }
+  const candidate = generationCandidate(vaultBase, generation.state);
+  if (!candidate.exists) return { status: 'none', apply: false, recoveryRequired: false };
+
+  const errors = [];
+  const ledger = readMemoryLedger(vaultBase);
+  if (ledger.status !== 'ok') errors.push(...ledger.errors.map((error) => error.message));
+  const receipts = readMemoryRotationReceipts(vaultBase);
+  if (receipts.status !== 'ok') errors.push(...receipts.errors);
+  if (receipts.checkpointStatus !== 'ok') errors.push(...receipts.checkpointErrors);
+  const raw = readMemoryControlFile(
+    vaultBase,
+    candidate.path,
+    'candidate residual da rotação concluída',
+    { allowMissing: false },
+  );
+  if (memorySha256(raw) !== generation.state.active_ledger_hash) {
+    errors.push('orphan candidate hash diverges from current generation');
+  }
+  const parsed = parseMemoryLedgerContent(raw, generation.projectId, candidate.path);
+  if (parsed.status !== 'ok' || parsed.events.length !== 1
+      || parsed.events[0].event_id !== generation.state.anchor_event_id) {
+    errors.push('orphan candidate anchor is invalid');
+  }
+  if (errors.length) {
+    return {
+      status: 'blocked',
+      apply: false,
+      recoveryRequired: true,
+      operationId: generation.state.operation_id,
+      generation: generation.state.generation,
+      errors,
+    };
+  }
+  return {
+    status: 'preview',
+    apply: false,
+    recoveryRequired: true,
+    operationId: generation.state.operation_id,
+    generation: generation.state.generation,
+    stage: 'candidate-cleanup',
+    candidatePath: candidate.path,
+  };
+}
+
+function finalizeOrphanCandidateLocked(vaultBase) {
+  const inspection = inspectOrphanCandidate(vaultBase);
+  if (inspection.status !== 'preview') return inspection;
+  unlinkVaultFile(vaultBase, inspection.candidatePath, {
+    missingOk: false,
+    label: 'candidate residual da rotação concluída',
+  });
+  return {
+    status: 'finalized',
+    apply: true,
+    recoveryRequired: false,
+    operationId: inspection.operationId,
+    generation: inspection.generation,
+    stage: inspection.stage,
+  };
+}
+
 export function recoverMemoryLedgerRotation(vaultBase, options = {}) {
   const pending = readMemoryRotationJournal(vaultBase);
   if (pending.status === 'missing') {
-    return { status: 'none', apply: Boolean(options.apply), recoveryRequired: false };
+    if (!options.apply) return inspectOrphanCandidate(vaultBase);
+    const result = withMemoryLock(
+      vaultBase,
+      () => finalizeOrphanCandidateLocked(vaultBase),
+      options.lock || {},
+    );
+    if (result === MEMORY_LOCK_BUSY) return { status: 'busy', apply: true, recoveryRequired: true };
+    return result;
   }
   if (pending.status !== 'ok') {
     return { status: 'blocked', apply: false, recoveryRequired: true, errors: pending.errors };
@@ -853,6 +960,7 @@ export function memoryLedgerRotationStatus(vaultBase) {
   return {
     ...memoryLedgerGenerationStatus(vaultBase),
     journalDetails: readMemoryRotationJournal(vaultBase),
+    orphanCandidate: inspectOrphanCandidate(vaultBase),
   };
 }
 
