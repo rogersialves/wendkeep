@@ -7,3 +7,16 @@ export {
   readMemoryProjectionSnapshot,
   reprojectMemoryLedger,
 } from './memory-snapshot-store.mjs';
+export {
+  MEMORY_SEGMENT_DEFAULT_MAX_BYTES,
+  MEMORY_SEGMENT_DEFAULT_MAX_EVENTS,
+  MEMORY_SEGMENT_DIRECTORY,
+  MEMORY_SEGMENT_MANIFEST_FILE,
+  MEMORY_SEGMENT_MANIFEST_SCHEMA_VERSION,
+  MEMORY_SEGMENT_SCHEMA_VERSION,
+  MemorySegmentCorruption,
+  readMemorySegmentManifest,
+  repairMemorySegmentManifest,
+  sealMemorySegments,
+  verifyMemorySegments,
+} from './memory-segment-store.mjs';
