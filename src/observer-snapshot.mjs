@@ -5,6 +5,7 @@ import { allChangesState } from '../hooks/change-core.mjs';
 import { readControl, readSessionRegistry } from '../hooks/obsidian-common.mjs';
 import { runVaultHealth } from '../hooks/vault-health.mjs';
 import { readProjectForValidation } from '../packages/vault/src/validate-memory.mjs';
+import { augmentVaultHealthWithMemoryScale } from './memory-scale-health.mjs';
 import { inspectSyncOutbox, readLocalSyncState } from './sync-outbox.mjs';
 
 export const OBSERVER_SCHEMA_VERSION = 1;
@@ -25,6 +26,11 @@ function safeText(value, max = MAX_TEXT) {
     .replace(/\s+/g, ' ')
     .trim()
     .slice(0, max);
+}
+
+function safeCount(value) {
+  const number = Number(value || 0);
+  return Number.isSafeInteger(number) && number >= 0 ? number : 0;
 }
 
 function isoNow(value) {
@@ -65,9 +71,51 @@ function activeSessionSummary(vaultBase, control, registry) {
   };
 }
 
+function memoryScaleSummary(memory = {}) {
+  if (memory.scaleSchemaVersion !== 1) return null;
+  return {
+    schema_version: 1,
+    status: safeText(memory.scaleStatus || 'unknown', 32),
+    ...(memory.scaleErrorCode ? { error_code: safeText(memory.scaleErrorCode, 120) } : {}),
+    snapshot: {
+      status: safeText(memory.snapshotStatus || 'unknown', 32),
+      ...(memory.snapshotReason ? { reason: safeText(memory.snapshotReason, 120) } : {}),
+      event_count: safeCount(memory.snapshotEvents),
+      ledger_bytes: safeCount(memory.snapshotLedgerBytes),
+      tail_events: safeCount(memory.snapshotTailEvents),
+      tail_bytes: safeCount(memory.snapshotTailBytes),
+    },
+    segments: {
+      status: safeText(memory.segmentStatus || 'unknown', 32),
+      count: safeCount(memory.segmentCount),
+      covered_events: safeCount(memory.segmentCoveredEvents),
+      covered_bytes: safeCount(memory.segmentCoveredBytes),
+      pending_events: safeCount(memory.segmentPendingEvents),
+    },
+    generation: {
+      status: safeText(memory.generationStatus || 'unknown', 32),
+      number: safeCount(memory.generation),
+      source_events: safeCount(memory.generationSourceEvents),
+      active_tail_events: safeCount(memory.generationActiveTailEvents),
+      rotated_at: safeText(memory.generationRotatedAt || '', 40),
+    },
+    rotation: {
+      journal: safeText(memory.rotationJournal || 'unknown', 32),
+      recovery_required: memory.rotationRecoveryRequired === true,
+      receipts_status: safeText(memory.rotationReceiptsStatus || 'unknown', 32),
+      receipts: safeCount(memory.rotationReceipts),
+      receipt_checkpoint: safeText(memory.rotationReceiptCheckpoint || 'unknown', 32),
+    },
+  };
+}
+
 function healthSummary(vaultBase) {
   try {
-    const health = runVaultHealth({ vaultBase });
+    const health = augmentVaultHealthWithMemoryScale(
+      runVaultHealth({ vaultBase }),
+      vaultBase,
+    );
+    const memoryScale = memoryScaleSummary(health.metrics?.memory);
     return {
       ok: health.ok === true,
       status: safeText(health.memoryStatus || (health.ok ? 'healthy' : 'degraded'), 40),
@@ -75,6 +123,7 @@ function healthSummary(vaultBase) {
       warning_count: Array.isArray(health.warnings) ? health.warnings.length : 0,
       registry_sessions: Number(health.metrics?.registrySessions || 0),
       derived_notes: Number(health.metrics?.derivedNotes || 0),
+      ...(memoryScale ? { memory_scale: memoryScale } : {}),
     };
   } catch {
     return {
