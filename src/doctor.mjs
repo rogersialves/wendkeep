@@ -134,7 +134,7 @@ export function runDoctor(argv) {
     const strictDebt = strict && (
       (health.warnings || []).length > 0
       || !['healthy'].includes(health.memoryStatus)
-      || recall.status !== 'healthy'
+      || !['healthy', 'missing'].includes(recall.status)
     );
     process.stdout.write(`\n[core] ${healthStatus || recallStatus ? 'erro estrutural' : health.memoryStatus === 'degraded' ? 'saudável com memória degradada' : 'saudável'}\n`);
     return healthStatus || recallStatus || strictDebt ? 1 : 0;
@@ -229,7 +229,7 @@ export function runDoctor(argv) {
   const strictDebt = strict && (
     (scope !== 'runtime' && (health.warnings || []).length)
     || (scope !== 'runtime' && health.memoryStatus !== 'healthy')
-    || (scope !== 'runtime' && recall.status !== 'healthy')
+    || (scope !== 'runtime' && !['healthy', 'missing'].includes(recall.status))
     || attention.length
     || repairable.length
     || warnings.length
