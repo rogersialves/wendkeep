@@ -3,6 +3,9 @@ import { MCP_EFFECT_MANIFEST, resolveMcpToolEffect } from './effects.mjs';
 const DEFAULT_PAGE_SIZE = 50;
 const MAX_PAGE_SIZE = 100;
 const DEFAULT_TIMEOUT_MS = 10_000;
+const MAX_EVIDENCE_BYTES = 512 * 1024;
+const MAX_EVIDENCE_CANDIDATES = 4096;
+const MAX_EVIDENCE_POSTINGS = 1_048_576;
 
 function boundedInteger(value, fallback, maximum = MAX_PAGE_SIZE) {
   const parsed = Number.parseInt(value, 10);
@@ -42,6 +45,7 @@ function availability(tool, nodeVersion) {
 
 const TOOL_REQUIRED_ARGUMENTS = Object.freeze({
   wendkeep_context_status: ['session_id'],
+  wendkeep_evidence_recall: ['query'],
   wendkeep_change_show: ['change'],
   wendkeep_change_status: ['change'],
   wendkeep_task_show: ['session_id', 'task'],
@@ -54,6 +58,13 @@ const TOOL_REQUIRED_ARGUMENTS = Object.freeze({
   wendkeep_task_complete: ['task'],
   wendkeep_handoff_publish: ['payload'],
 });
+
+const stringOrStringList = {
+  oneOf: [
+    { type: 'string' },
+    { type: 'array', items: { type: 'string' }, uniqueItems: true },
+  ],
+};
 
 function inputSchema(tool) {
   const required = ['project_root'];
@@ -87,6 +98,25 @@ function inputSchema(tool) {
       query: { type: 'string' },
       cursor: { type: 'string' },
       limit: { type: 'integer', minimum: 1, maximum: MAX_PAGE_SIZE },
+      max_bytes: { type: 'integer', minimum: 2, maximum: MAX_EVIDENCE_BYTES },
+      candidate_limit: { type: 'integer', minimum: 1, maximum: MAX_EVIDENCE_CANDIDATES },
+      posting_budget: { type: 'integer', minimum: 1, maximum: MAX_EVIDENCE_POSTINGS },
+      backend: { type: 'string', enum: ['auto', 'sqlite', 'lexical'] },
+      filters: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          authority: stringOrStringList,
+          validity: stringOrStringList,
+          entity_type: stringOrStringList,
+          project_id: stringOrStringList,
+          change_slug: stringOrStringList,
+          session_id: stringOrStringList,
+          work_session_id: stringOrStringList,
+          logical_path: stringOrStringList,
+          logical_path_prefix: stringOrStringList,
+        },
+      },
       payload: { type: 'object' },
     },
   };
