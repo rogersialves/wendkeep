@@ -6,6 +6,7 @@ const TOOLS = [
   ['wendkeep_project_status', 'read', 'project:status'],
   ['wendkeep_context_status', 'read', 'context:status'],
   ['wendkeep_memory_recall', 'read', 'memory:recall'],
+  ['wendkeep_evidence_recall', 'read', 'evidence:recall'],
   ['wendkeep_memory_conflicts', 'read', 'memory:conflicts'],
   ['wendkeep_change_list', 'read', 'change:list'],
   ['wendkeep_change_show', 'read', 'change:show'],
@@ -55,10 +56,10 @@ function deepFreeze(value) {
 
 export const MCP_EFFECT_MANIFEST = deepFreeze({
   schema_version: 1,
-  catalog_version: '2026-08-24',
+  catalog_version: '2026-08-27',
   server_aliases: ['wendkeep', 'wendkeep-native'],
   tools: TOOLS,
-  integrity: 'sha256:de96c2f3f5ae3d814440b541db778f87be4550ebd2ce9dd5ae2377f354770046',
+  integrity: 'sha256:1bb4d5dc62008ed23afa0d850a89bbbb77ea9cc31da79cde557aa2f02034fdde',
 });
 
 export function verifyMcpEffectManifest(manifest) {
