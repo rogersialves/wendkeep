@@ -23,6 +23,7 @@ import {
 } from '../../vault/src/memory-store.mjs';
 import { scopeForMemoryKey } from '../../vault/src/memory-scope.mjs';
 import { sanitizeMemoryText } from '../../vault/src/memory-schema.mjs';
+import { recallEvidenceForMcp } from './evidence-recall.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const BIN = join(ROOT, 'bin', 'wendkeep.mjs');
@@ -304,6 +305,9 @@ export async function executeNativeMcpTool(tool, args, { signal } = {}) {
     return sanitize(recallEvidence(loadEvidenceIndex(ctx.vaultBase), String(args.query || ''), {
       topK: Math.min(Number(args.limit || 10), 100),
     }));
+  }
+  if (tool.name === 'wendkeep_evidence_recall') {
+    return sanitize(recallEvidenceForMcp(ctx.vaultBase, args));
   }
   if (tool.name === 'wendkeep_memory_conflicts') {
     return sanitize(listMemoryCandidates(ctx.vaultBase, { activeOnly: true }).candidates);
