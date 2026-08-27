@@ -32,6 +32,14 @@ function backend(value) {
   return normalized;
 }
 
+function filters(value) {
+  if (value === undefined || value === null) return {};
+  if (typeof value !== 'object' || Array.isArray(value)) {
+    throw new TypeError('filters must be an object');
+  }
+  return value;
+}
+
 function logicalReference(result) {
   const { logical_path: logicalPath, ...rest } = result || {};
   return {
@@ -88,19 +96,17 @@ export function recallEvidenceForMcp(vaultBase, args = {}) {
       EVIDENCE_SEARCH_DEFAULT_POSTING_BUDGET,
       { max: EVIDENCE_SEARCH_MAX_POSTING_BUDGET },
     );
-    const filters = args.filters && typeof args.filters === 'object' && !Array.isArray(args.filters)
-      ? args.filters
-      : {};
+    const normalizedFilters = filters(args.filters);
     const candidates = searchEvidenceCandidates(vaultBase, query, {
       candidateLimit,
       postingBudget,
-      filters,
+      filters: normalizedFilters,
       backend: backend(args.backend),
       sqlite: 'auto',
     });
     const page = recallEvidencePage(candidates.rows, query, {
       cursor: args.cursor || null,
-      filters,
+      filters: normalizedFilters,
       limit,
       maxBytes,
     });
