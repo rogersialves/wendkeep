@@ -5,6 +5,7 @@ import { allChangesState } from '../hooks/change-core.mjs';
 import { readControl, readSessionRegistry } from '../hooks/obsidian-common.mjs';
 import { runVaultHealth } from '../hooks/vault-health.mjs';
 import { readProjectForValidation } from '../packages/vault/src/validate-memory.mjs';
+import { inspectEvidenceSearchHealth } from './evidence-search-health.mjs';
 import { inspectSyncOutbox, readLocalSyncState } from './sync-outbox.mjs';
 
 export const OBSERVER_SCHEMA_VERSION = 1;
@@ -25,6 +26,11 @@ function safeText(value, max = MAX_TEXT) {
     .replace(/\s+/g, ' ')
     .trim()
     .slice(0, max);
+}
+
+function safeCount(value) {
+  const number = Number(value || 0);
+  return Number.isSafeInteger(number) && number >= 0 ? number : 0;
 }
 
 function isoNow(value) {
@@ -65,9 +71,44 @@ function activeSessionSummary(vaultBase, control, registry) {
   };
 }
 
+function recallSearchSummary(metrics) {
+  return {
+    schema_version: 1,
+    status: safeText(metrics?.status || 'unknown', 32),
+    ...(metrics?.errorCode ? { error_code: safeText(metrics.errorCode, 120) } : {}),
+    authority: {
+      status: safeText(metrics?.authorityStatus || 'unknown', 32),
+      bytes: safeCount(metrics?.authorityBytes),
+    },
+    incremental: {
+      status: safeText(metrics?.incrementalStateStatus || 'unknown', 32),
+      bytes: safeCount(metrics?.incrementalStateBytes),
+      documents: safeCount(metrics?.documentCount),
+    },
+    search: {
+      status: safeText(metrics?.searchStateStatus || 'unknown', 32),
+      bytes: safeCount(metrics?.searchStateBytes),
+      chunks: safeCount(metrics?.rowCount),
+      source_index_current: metrics?.sourceIndexCurrent === true,
+      source_state_current: metrics?.sourceStateCurrent === true,
+    },
+    lexical: {
+      status: safeText(metrics?.lexicalStatus || 'unknown', 32),
+      bytes: safeCount(metrics?.lexicalBytes),
+    },
+    sqlite: {
+      status: safeText(metrics?.sqliteStatus || 'unknown', 32),
+      bytes: safeCount(metrics?.sqliteBytes),
+      capability: metrics?.sqliteCapability === true,
+    },
+    backend: safeText(metrics?.backend || 'unavailable', 40),
+  };
+}
+
 function healthSummary(vaultBase) {
   try {
     const health = runVaultHealth({ vaultBase });
+    const recall = recallSearchSummary(inspectEvidenceSearchHealth(vaultBase));
     return {
       ok: health.ok === true,
       status: safeText(health.memoryStatus || (health.ok ? 'healthy' : 'degraded'), 40),
@@ -75,6 +116,7 @@ function healthSummary(vaultBase) {
       warning_count: Array.isArray(health.warnings) ? health.warnings.length : 0,
       registry_sessions: Number(health.metrics?.registrySessions || 0),
       derived_notes: Number(health.metrics?.derivedNotes || 0),
+      recall_search: recall,
     };
   } catch {
     return {
