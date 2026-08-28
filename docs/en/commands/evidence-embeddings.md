@@ -10,7 +10,10 @@ vector database, HTTP client, or provider dependency to WendKeep Core.
 This surface is **not a CLI command**. It is exported by `wendkeep/vault` for local plugins that are
 explicitly supplied by the application's composition root.
 
-## Default state
+## When to use
+
+Use this API when a trusted composition root needs to rerank a small candidate set already filtered
+by lexical/FTS recall while keeping the model and adapter outside Core.
 
 Embeddings are disabled by default.
 
@@ -30,7 +33,13 @@ Core does not:
 
 A plugin receives data only when the caller supplies the plugin object and sets `enabled: true`.
 
-## Authority contract
+## When not to use
+
+Do not use the plugin as an authoritative index, a scope-expansion mechanism, a code autoloader, or
+a replacement for lexical filters/recall. Do not use a remote provider either: the contract requires
+local in-process execution with no network and no retention.
+
+### Authority contract
 
 Authority remains ordered as follows:
 
@@ -46,7 +55,14 @@ The plugin operates only on a bounded prefix of already-filtered candidates. It 
 - remove unprocessed candidates—they remain at the end in their original order;
 - mutate the source objects returned by Core.
 
-## Versioned manifest
+## Prerequisites
+
+- a reviewed local plugin explicitly loaded by the application;
+- a model/configuration pinned by SHA-256 fingerprint;
+- explicit batch and byte budgets;
+- candidates already filtered by lexical/FTS recall.
+
+### Versioned manifest
 
 Use `buildEvidenceEmbeddingManifest()` to create the manifest and
 `createEvidenceEmbeddingPlugin()` to bind it to the `embed` function.
@@ -75,7 +91,16 @@ The manifest is declarative. Core cannot sandbox arbitrary JavaScript, so instal
 plugins and review their code. WendKeep prevents automatic loading and validates the contract before
 handing over any evidence, but it does not turn third-party code into trusted code.
 
-## Minimal example
+## Syntax
+
+```text
+buildEvidenceEmbeddingManifest(options)
+createEvidenceEmbeddingPlugin({ manifest, embed })
+verifyEvidenceEmbeddingPlugin(plugin)
+rerankEvidenceCandidatesWithEmbedding(rows, query, options)
+```
+
+## Examples
 
 ```js
 import {
@@ -136,7 +161,7 @@ The request contains only:
 `logical_path` is not sent to the plugin. Full provenance remains on the source objects and returns
 with the reranked order.
 
-## Plugin response
+## Expected result
 
 The response is fail-closed and may contain only:
 
@@ -162,7 +187,7 @@ Core rejects:
 
 The canonical adapter uses cosine similarity. Ties preserve the original order.
 
-## Budgets and fallback
+## Options and exit codes
 
 The effective limit is always the lower value between caller and plugin manifest.
 
@@ -194,7 +219,7 @@ Main codes:
 5. Record metrics only—IDs, counts, bytes, and timings—never query, text, or vectors.
 6. Treat a fingerprint change as a new generation of any plugin-owned cache.
 
-## Repair
+## Common errors and diagnosis
 
 When `metrics.status` is `fallback`:
 
@@ -207,8 +232,12 @@ When `metrics.status` is `fallback`:
 6. re-enable with `required: false` and promote to `required: true` only in an environment that
    genuinely requires the provider.
 
-## Deliberate limit
+## Next steps
 
 This contract does not install a model or automatically add embeddings to MCP, doctor, or Observer.
 It defines the safe, testable boundary for a future sibling adapter. Core remains complete and
 functional without any plugin.
+
+Use the [Native MCP](mcp.md) guide for the existing paged/lexical surface and the
+[maintenance and diagnostics](maintenance-and-diagnostics.md) guide to inspect derived-artifact
+health without rebuilding it.

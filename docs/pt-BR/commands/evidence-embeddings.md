@@ -10,7 +10,10 @@ runtime de ML, vector database, cliente HTTP ou dependência de provider ao Core
 Esta superfície **não é um comando CLI**. Ela é exportada por `wendkeep/vault` para plugins locais
 carregados explicitamente pelo composition root da aplicação.
 
-## Estado padrão
+## Quando usar
+
+Use esta API quando um composition root confiável precisar reranquear um conjunto pequeno de
+candidatos que o recall lexical/FTS já filtrou, mantendo o modelo e o adapter fora do Core.
 
 Embeddings ficam desligados por padrão.
 
@@ -30,7 +33,13 @@ O Core:
 
 Um plugin só recebe dados quando o chamador fornece o objeto do plugin e define `enabled: true`.
 
-## Contrato de autoridade
+## Quando não usar
+
+Não use o plugin como índice autoritativo, mecanismo de ampliação de escopo, autoload de código ou
+substituto para filtros/recall lexical. Também não use provider remoto: o contrato exige execução
+local, in-process, sem rede e sem retenção.
+
+### Contrato de autoridade
 
 A ordem de autoridade permanece:
 
@@ -46,7 +55,14 @@ O plugin atua somente sobre um prefixo bounded de candidatos já filtrados. Ele 
 - remover candidatos não processados — eles permanecem no final, na ordem original;
 - alterar os objetos-fonte retornados pelo Core.
 
-## Manifest versionado
+## Pré-requisitos
+
+- plugin local revisado e carregado explicitamente pela aplicação;
+- modelo/configuração fixados por fingerprint SHA-256;
+- budgets de batch e bytes definidos;
+- candidatos já filtrados pelo recall lexical/FTS.
+
+### Manifest versionado
 
 Use `buildEvidenceEmbeddingManifest()` para criar o manifest e
 `createEvidenceEmbeddingPlugin()` para vinculá-lo à função `embed`.
@@ -76,7 +92,16 @@ somente plugins locais confiáveis e revise seu código. O WendKeep impede carre
 valida o contrato antes de entregar qualquer evidência, mas não transforma código de terceiros em
 código confiável.
 
-## Exemplo mínimo
+## Sintaxe
+
+```text
+buildEvidenceEmbeddingManifest(options)
+createEvidenceEmbeddingPlugin({ manifest, embed })
+verifyEvidenceEmbeddingPlugin(plugin)
+rerankEvidenceCandidatesWithEmbedding(rows, query, options)
+```
+
+## Exemplos
 
 ```js
 import {
@@ -137,7 +162,7 @@ O request contém somente:
 `logical_path` não é enviado ao plugin. A proveniência completa permanece nos objetos-fonte e volta
 com a ordem reranqueada.
 
-## Resposta do plugin
+## Resultado esperado
 
 A resposta é fail-closed e deve conter apenas:
 
@@ -163,7 +188,7 @@ O Core rejeita:
 
 A similaridade usada pelo adapter canônico é cosseno. Empates preservam a ordem original.
 
-## Budgets e fallback
+## Opções e códigos de saída
 
 O limite efetivo é sempre o menor entre o chamador e o manifest do plugin.
 
@@ -194,7 +219,7 @@ Códigos principais:
 5. Registre apenas métricas — IDs, contagens, bytes e tempos — nunca query, texto ou vetores.
 6. Trate mudança de fingerprint como uma geração nova de qualquer cache pertencente ao plugin.
 
-## Repair
+## Erros comuns e diagnóstico
 
 Quando `metrics.status` for `fallback`:
 
@@ -208,8 +233,12 @@ Quando `metrics.status` for `fallback`:
 6. reative com `required: false` e promova para `required: true` apenas em um ambiente que realmente
    exige o provider.
 
-## Limite deliberado
+## Próximos passos
 
 Este contrato não instala um modelo nem integra embeddings automaticamente ao MCP, doctor ou
 Observer. Ele define a fronteira segura e testável para um adapter irmão futuro. O Core continua
 completo e funcional sem qualquer plugin.
+
+Use o guia de [MCP nativo](mcp.md) para a superfície paginada/lexical já exposta e o guia de
+[manutenção e diagnóstico](maintenance-and-diagnostics.md) para inspecionar a saúde dos artefatos
+derivados sem reconstruí-los.

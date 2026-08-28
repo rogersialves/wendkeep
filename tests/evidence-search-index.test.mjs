@@ -152,9 +152,14 @@ test('[req:RECALL-8] filters are equivalent across lexical and SQLite FTS backen
 }, () => {
   const vault = createVault();
   try {
-    writeDocument(vault, '04-Decisões/ADR-verificada.md', {
+    writeDocument(vault, '04-Decisões/100%_real/ADR-verificada.md', {
       title: 'Contrato FTS verificado',
       body: 'O contrato motor-foguete foi validado por teste.',
+      authority: 'verified',
+    });
+    writeDocument(vault, '04-Decisões/100ABreal/ADR-decoy.md', {
+      title: 'Contrato FTS fora do prefixo literal',
+      body: 'O contrato motor-foguete não pertence ao prefixo com percent e underscore literais.',
       authority: 'verified',
     });
     writeDocument(vault, '02-Sessões/relato.md', {
@@ -174,7 +179,7 @@ test('[req:RECALL-8] filters are equivalent across lexical and SQLite FTS backen
       filters: {
         authority: 'verified',
         validity: 'active',
-        logical_path_prefix: '04-Decisões/',
+        logical_path_prefix: '04-Decisões/100%_real/',
       },
       candidateLimit: 10,
       postingBudget: 100,
@@ -195,7 +200,7 @@ test('[req:RECALL-8] filters are equivalent across lexical and SQLite FTS backen
     );
     assert.ok(sqlite.rows.every((row) => row.authority === 'verified'
       && row.validity === 'active'
-      && row.logical_path.startsWith('04-Decisões/')));
+      && row.logical_path.startsWith('04-Decisões/100%_real/')));
   } finally {
     rmSync(vault, { recursive: true, force: true });
   }

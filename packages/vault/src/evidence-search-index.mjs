@@ -713,7 +713,7 @@ function sqlFilterClause(filters) {
     parameters.push(...values);
   }
   if (filters.logical_path_prefix?.length) {
-    clauses.push(`(${filters.logical_path_prefix.map(() => "r.logical_path LIKE ? ESCAPE '\\\\'").join(' OR ')})`);
+    clauses.push(`(${filters.logical_path_prefix.map(() => "r.logical_path LIKE ? ESCAPE '\\'").join(' OR ')})`);
     parameters.push(...filters.logical_path_prefix.map((prefix) => `${escapeLike(prefix)}%`));
   }
   return {

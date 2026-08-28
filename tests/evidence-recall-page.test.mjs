@@ -43,7 +43,7 @@ function canonicalRows(rows) {
     || left.ordinal - right.ordinal || left.chunk_id.localeCompare(right.chunk_id));
 }
 
-test('recallEvidencePage paginates the deterministic ranking without hiding late evidence', () => {
+test('[req:RECALL-12] recallEvidencePage paginates the deterministic ranking without hiding late evidence', () => {
   const rows = Array.from({ length: 7 }, (_, index) => evidenceRow(index));
   const expected = recallEvidence(canonicalRows(rows), 'ledger', {
     topK: rows.length,
@@ -70,7 +70,7 @@ test('recallEvidencePage paginates the deterministic ranking without hiding late
   assert.equal(found.at(-1), expected.at(-1));
 });
 
-test('recallEvidencePage binds cursors to normalized query, filters, and index state', () => {
+test('[req:RECALL-12] recallEvidencePage binds cursors to normalized query, filters, and index state', () => {
   const rows = [
     evidenceRow(1, { authority: 'verified', logicalPath: 'docs/verified.md' }),
     evidenceRow(2, { authority: 'reported', logicalPath: 'docs/reported.md' }),
@@ -109,7 +109,7 @@ test('recallEvidencePage binds cursors to normalized query, filters, and index s
   }), EvidenceRecallCursorError);
 });
 
-test('recallEvidencePage rejects corrupted and unsupported cursors fail closed', () => {
+test('[req:RECALL-12] recallEvidencePage rejects corrupted and unsupported cursors fail closed', () => {
   const rows = [evidenceRow(1), evidenceRow(2)];
   const first = recallEvidencePage(rows, 'ledger', { limit: 1, now: NOW });
   const last = first.next_cursor.at(-1);
@@ -124,7 +124,7 @@ test('recallEvidencePage rejects corrupted and unsupported cursors fail closed',
     EvidenceRecallCursorError);
 });
 
-test('recallEvidencePage pins recency ranking to the first page as_of timestamp', () => {
+test('[req:RECALL-12] recallEvidencePage pins recency ranking to the first page as_of timestamp', () => {
   const rows = [
     evidenceRow(1, { observedAt: '2026-08-25T12:00:00.000Z' }),
     evidenceRow(2, { observedAt: '2025-08-26T12:00:00.000Z' }),
@@ -148,7 +148,7 @@ test('recallEvidencePage pins recency ranking to the first page as_of timestamp'
   ], expected);
 });
 
-test('recallEvidencePage truncates excerpts to the exact serialized byte budget', () => {
+test('[req:RECALL-12] recallEvidencePage truncates excerpts to the exact serialized byte budget', () => {
   const content = `ledger ${'á漢🙂'.repeat(900)}`;
   const row = evidenceRow(8, { content });
   const full = recallEvidencePage([row], 'ledger', { maxBytes: 128 * 1024, now: NOW });
@@ -168,7 +168,7 @@ test('recallEvidencePage truncates excerpts to the exact serialized byte budget'
   assert.ok(!Object.hasOwn(bounded.results[0], 'content'));
 });
 
-test('recallEvidencePage reports a typed error when metadata cannot fit the budget', () => {
+test('[req:RECALL-12] recallEvidencePage reports a typed error when metadata cannot fit the budget', () => {
   const row = evidenceRow(1);
   assert.throws(() => recallEvidencePage([row], 'ledger', { maxBytes: 2, now: NOW }), (error) => {
     assert.ok(error instanceof EvidenceRecallBudgetError);
@@ -178,7 +178,7 @@ test('recallEvidencePage reports a typed error when metadata cannot fit the budg
   });
 });
 
-test('legacy recallEvidence keeps returning raw content while paged recall stays compact', () => {
+test('[req:RECALL-12] legacy recallEvidence keeps returning raw content while paged recall stays compact', () => {
   const row = evidenceRow(1);
   const [legacy] = recallEvidence([row], 'ledger', { topK: 1, now: NOW });
   const page = recallEvidencePage([row], 'ledger', { limit: 1, now: NOW });

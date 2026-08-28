@@ -70,7 +70,7 @@ function request(id, method, params = {}) {
   return { jsonrpc: '2.0', id, method, params };
 }
 
-test('[req:MCP-10] evidence recall pages indexed candidates with opaque cursors and byte budgets', () => {
+test('[req:RECALL-12] [req:MCP-10] evidence recall pages indexed candidates with opaque cursors and byte budgets', () => {
   const item = fixture();
   try {
     writeDecision(item.vault, 'ADR-motor-a', 'O contrato motor-foguete alfa foi validado.');
@@ -142,7 +142,7 @@ test('[req:MCP-10] evidence recall pages indexed candidates with opaque cursors 
   }
 });
 
-test('[req:MCP-10] native executor preserves relative provenance without local paths', async () => {
+test('[req:RECALL-12] [req:MCP-10] native executor preserves relative provenance without local paths', async () => {
   const item = fixture();
   try {
     writeDecision(item.vault, 'ADR-nebulosa', 'A âncora nebulosa-executor preserva a evidência.');
@@ -171,7 +171,7 @@ test('[req:MCP-10] native executor preserves relative provenance without local p
   }
 });
 
-test('[req:MCP-10] server advertises typed recall inputs and rejects a missing query pre-execution', async () => {
+test('[req:RECALL-12] [req:MCP-10] server advertises typed recall inputs and rejects a missing query pre-execution', async () => {
   let executions = 0;
   const server = createNativeMcpServer({
     defaultPageSize: 100,
