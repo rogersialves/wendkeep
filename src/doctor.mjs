@@ -8,6 +8,7 @@ import {
   inspectEvidenceSearchHealth,
   renderEvidenceSearchHealthLines,
 } from './evidence-search-health.mjs';
+import { augmentVaultHealthWithMemoryScale } from './memory-scale-health.mjs';
 import { checkSyncDefs } from './sync-defs.mjs';
 import { resolveProjectVault } from './project-vault.mjs';
 import { inspectObserverSqlOutbox } from './observer-sql-publish.mjs';
@@ -21,6 +22,12 @@ import { readProjectForValidation } from '../packages/vault/src/validate-memory.
 
 const healthStatusLabel = (status) => ({
   healthy: 'saudável', warning: 'atenção', degraded: 'degradada', blocked: 'bloqueada', legacy: 'legado',
+}[status] || status || 'desconhecido');
+
+const artifactStatusLabel = (status) => ({
+  ok: 'saudável', healthy: 'saudável', warning: 'atenção', degraded: 'degradado',
+  missing: 'ausente', empty: 'vazio', invalid: 'inválido', corrupt: 'corrompido',
+  blocked: 'bloqueado', unknown: 'desconhecido',
 }[status] || status || 'desconhecido');
 
 const metricValue = (value) => value === null || value === undefined || value === '' ? 'n/a' : value;
@@ -53,6 +60,19 @@ export function renderVaultHealthLines(result) {
   );
   const repairableHandoffs = Number(memory.repairableHandoffs || 0);
   lines.push(`  ledger: ${metricValue(memory.ledgerEvents)} evento(s) · outbox: ${metricValue(memory.pendingOutbox)} · candidates: ${metricValue(memory.candidates)} · conflitos: ${metricValue(memory.activeConflicts)}${repairableHandoffs ? ` · handoffs reparáveis: ${repairableHandoffs}` : ''}`);
+  if (memory.scaleSchemaVersion === 1) {
+    lines.push(
+      `  replay: snapshot ${artifactStatusLabel(memory.snapshotStatus)} · cobertos: ${metricValue(memory.snapshotEvents)} evento(s) · tail: ${metricValue(memory.snapshotTailEvents)} evento(s)/${metricValue(memory.snapshotTailBytes)} bytes · ledger no snapshot: ${metricValue(memory.snapshotLedgerBytes)} bytes`,
+    );
+    if (memory.snapshotReason) lines.push(`    ↳ snapshot: ${memory.snapshotReason}`);
+    lines.push(
+      `  segmentos: ${artifactStatusLabel(memory.segmentStatus)} · ${metricValue(memory.segmentCount)} segmento(s) · cobertos: ${metricValue(memory.segmentCoveredEvents)} evento(s)/${metricValue(memory.segmentCoveredBytes)} bytes · pendentes: ${metricValue(memory.segmentPendingEvents)}`,
+    );
+    lines.push(
+      `  rotação: geração ${artifactStatusLabel(memory.generationStatus)} #${metricValue(memory.generation)} · origem: ${metricValue(memory.generationSourceEvents)} · tail ativo: ${metricValue(memory.generationActiveTailEvents)} · journal: ${artifactStatusLabel(memory.rotationJournal)} · receipts: ${metricValue(memory.rotationReceipts)} (${artifactStatusLabel(memory.rotationReceiptCheckpoint)})`,
+    );
+    if (memory.scaleErrorCode) lines.push(`    ↳ escala: ${memory.scaleErrorCode}`);
+  }
   const semanticKeys = memory.semanticActiveKeys || [];
   const semanticProjected = memory.semanticProjectedKeys || [];
   const semanticMissing = memory.semanticMissingKeys || [];
@@ -109,7 +129,10 @@ export function runDoctor(argv) {
   // 1. Session/vault integrity. The standalone hook remains JSON; doctor renders it for humans.
   let health;
   try {
-    health = runVaultHealth({ vaultBase, session });
+    health = augmentVaultHealthWithMemoryScale(
+      runVaultHealth({ vaultBase, session }),
+      vaultBase,
+    );
   } catch (error) {
     health = {
       ok: false,
