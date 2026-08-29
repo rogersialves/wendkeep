@@ -2,9 +2,9 @@
 
 ## Visão geral
 
-**Branch:** `wk/observer-security`  
-**Prioridade:** alta; superfície sensível  
-**Estado:** pendente
+- **Branch:** `wk/observer-security`
+- **Prioridade:** alta; superfície sensível
+- **Estado:** pendente
 
 Adicionar policy, AuthZ, retenção, purge, auditoria e criptografia sem quebrar isolamento por projeto.
 

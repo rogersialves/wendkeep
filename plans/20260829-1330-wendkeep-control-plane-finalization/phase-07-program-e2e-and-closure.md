@@ -2,9 +2,9 @@
 
 ## Visão geral
 
-**Branch:** `wk/control-plane-program-e2e`  
-**Dependências:** fases 01–06 entregues  
-**Estado:** bloqueada
+- **Branch:** `wk/control-plane-program-e2e`
+- **Dependências:** fases 01–06 entregues
+- **Estado:** bloqueada
 
 Revalidar o programa completo em clone limpo, atualizar checklists por prova e fechar #84/#69.
 

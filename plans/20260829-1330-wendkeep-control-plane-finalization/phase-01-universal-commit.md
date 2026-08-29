@@ -2,9 +2,9 @@
 
 ## Visão geral
 
-**Branch:** `wk/universal-commit`  
-**Prioridade:** alta; desbloqueia receipt final da #84  
-**Estado:** pendente
+- **Branch:** `wk/universal-commit`
+- **Prioridade:** alta; desbloqueia receipt final da #84
+- **Estado:** pendente
 
 Criar uma mensagem de commit reproduzível em hosts diferentes, baseada somente em prova permitida.
 

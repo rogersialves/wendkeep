@@ -2,9 +2,9 @@
 
 ## Visão geral
 
-**Branch:** `wk/architecture-packages-0x`  
-**Dependências:** fases 01–03 integradas  
-**Estado:** bloqueada
+- **Branch:** `wk/architecture-packages-0x`
+- **Dependências:** fases 01–03 integradas
+- **Estado:** bloqueada
 
 Extrair domínios sem quebrar exports legados nem criar ciclos.
 

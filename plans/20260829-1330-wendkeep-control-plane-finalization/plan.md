@@ -1,9 +1,9 @@
 # Plano — finalização incremental do WendKeep Control Plane
 
-**Status:** pronto para revisão  
-**Design:** [design aprovado](../../docs/superpowers/specs/2026-08-29-wendkeep-control-plane-finalization-design.md)  
-**Perfil:** `OFF`; Keep Core ativo  
-**Base auditada:** `main`/`origin/main` em `77fc0b8307ca8ee4c6d57f1c6158d2f0c87f9fae`
+- **Status:** pronto para execução
+- **Design:** [design aprovado](../../docs/superpowers/specs/2026-08-29-wendkeep-control-plane-finalization-design.md)
+- **Perfil:** `OFF`; Keep Core ativo
+- **Base auditada:** `main`/`origin/main` em `77fc0b8307ca8ee4c6d57f1c6158d2f0c87f9fae`
 
 ## Objetivo
 

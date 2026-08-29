@@ -2,9 +2,9 @@
 
 ## Visão geral
 
-**Branch:** `wk/ecosystem-bridges`  
-**Prioridade:** alta  
-**Estado:** pendente
+- **Branch:** `wk/ecosystem-bridges`
+- **Prioridade:** alta
+- **Estado:** pendente
 
 Adicionar adapters opcionais sem criar uma segunda autoridade de plano, tarefa ou evidência.
 

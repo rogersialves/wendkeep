@@ -2,9 +2,9 @@
 
 ## Visão geral
 
-**Branch:** `wk/migration-harness-0x`  
-**Dependência:** packages da fase 04  
-**Estado:** bloqueada
+- **Branch:** `wk/migration-harness-0x`
+- **Dependência:** packages da fase 04
+- **Estado:** bloqueada
 
 Unificar migrations de Vault, ledger, contexts, Observer e portable state com recuperação explícita.
 

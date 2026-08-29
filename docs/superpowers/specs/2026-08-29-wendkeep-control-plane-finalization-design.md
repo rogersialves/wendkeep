@@ -1,8 +1,8 @@
 # Design — finalização incremental do WendKeep Control Plane
 
-**Status:** aprovado em conversa em 2026-08-29  
-**Perfil operacional:** `OFF`; governança pelo harness nativo, Keep Core ativo  
-**Escopo:** issues #40, #69, #81, #83 e #84 no repositório WendKeep
+- **Status:** aprovado em conversa em 2026-08-29
+- **Perfil operacional:** `OFF`; governança pelo harness nativo, Keep Core ativo
+- **Escopo:** issues #40, #69, #81, #83 e #84 no repositório WendKeep
 
 ## Contexto
 
