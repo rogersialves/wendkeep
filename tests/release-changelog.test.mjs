@@ -11,6 +11,7 @@ import {
   executeRelease, npmExecutorSpec, npmHasVersion, npmVersionQueryArgs, releaseCommands,
   releaseSteps, resolveReleasePlan,
 } from '../scripts/release-plan.mjs';
+import { assessUnpublishedPackageVersion } from '../scripts/check-unpublished-version.mjs';
 
 const TEST_WORKFLOW = readFileSync(new URL('../.github/workflows/test.yml', import.meta.url), 'utf8');
 const RELEASE_WORKFLOW = readFileSync(new URL('../.github/workflows/auto-tag.yml', import.meta.url), 'utf8');
@@ -88,6 +89,26 @@ test('[sensor:release-tests] [req:RECALL-13] current release notes are extractab
   assert.match(release.notes, /Recall incremental, paginado e indexado/i);
   assert.match(release.notes, /Contrato opcional de embeddings locais/i);
   assert.doesNotMatch(release.notes, /019f[0-9a-f-]+/i);
+});
+
+test('[req:RECALL-13] release preflight distinguishes unpublished, published, and stale versions', () => {
+  assert.deepEqual(
+    assessUnpublishedPackageVersion({ packageVersion: '0.86.0', publishedVersion: '0.85.1' }),
+    {
+      ok: true,
+      package_version: '0.86.0',
+      published_version: '0.85.1',
+      status: 'unpublished',
+    },
+  );
+  assert.equal(
+    assessUnpublishedPackageVersion({ packageVersion: '0.86.0', publishedVersion: '0.86.0' }).status,
+    'already-published',
+  );
+  assert.equal(
+    assessUnpublishedPackageVersion({ packageVersion: '0.85.1', publishedVersion: '0.86.0' }).status,
+    'package-behind',
+  );
 });
 
 test('[sensor:release-tests] 0.76.9 active-context injection notes remain extractable', () => {
