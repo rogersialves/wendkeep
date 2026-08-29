@@ -213,6 +213,7 @@ test('[req:MOD-20] [req:MOD-22] Integrations workspace is packaged privately wit
   assert.equal(Object.hasOwn(root.exports, './integrations'), false);
   assert.equal(Object.hasOwn(root.exports, './*'), false);
   const publicPackageTargets = new Set([
+    './packages/commit/src/index.mjs',
     './packages/harness/src/index.mjs',
     './packages/vault/src/index.mjs',
   ]);

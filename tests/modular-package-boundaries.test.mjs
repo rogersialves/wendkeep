@@ -7,7 +7,7 @@ import { parse } from 'acorn';
 import { importSpecifiers } from './helpers/import-specifiers.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const SURFACES = ['cli', 'harness', 'vault', 'mcp', 'integrations', 'pi'];
+const SURFACES = ['cli', 'commit', 'harness', 'vault', 'mcp', 'integrations', 'pi'];
 const ADAPTERS = new Set(['cli', 'mcp', 'integrations', 'pi']);
 const INITIAL_MEMORY_KERNEL = [
   { module: 'memory-schema.mjs', legacy: '../hooks/memory-schema.mjs' },
@@ -108,7 +108,7 @@ function assertAdapterSiblings(graph) {
   }
 }
 
-test('[req:MOD-1] root declares all six internal workspaces exactly once', () => {
+test('[req:MOD-1] root declares all seven internal workspaces exactly once', () => {
   const root = json(join(ROOT, 'package.json'));
   const packageDirs = readdirSync(join(ROOT, 'packages'), { withFileTypes: true })
     .filter((entry) => entry.isDirectory()
@@ -257,6 +257,7 @@ test('[req:MOD-20] [req:MOD-21] Integrations is a private, inert adapter sibling
   assert.equal(Object.hasOwn(root.exports, './integrations'), false);
   assert.equal(Object.hasOwn(root.exports, './*'), false);
   const publicPackageTargets = new Set([
+    './packages/commit/src/index.mjs',
     './packages/harness/src/index.mjs',
     './packages/vault/src/index.mjs',
   ]);
