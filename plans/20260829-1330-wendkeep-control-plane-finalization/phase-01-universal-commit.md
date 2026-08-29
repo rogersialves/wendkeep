@@ -70,6 +70,12 @@ O kernel recebe dados já limitados e sanitizados. Ele não resolve autoridade p
 7. Documentar instalação, diagnóstico e recuperação em PT-BR/EN.
 8. Preparar candidato final, revisão e gates de integração.
 
+## Contratos canônicos concluídos
+
+- [x] COMMIT-1 Implementar kernel tipado e render determinístico.
+- [x] COMMIT-2 Integrar hooks, CLI, instalação e gate remoto.
+- [x] COMMIT-3 Validar focused tests, privacidade, schema e range real [phase:verify] [sensor:universal-commit]
+
 ## Testes focados
 
 - `node --test tests/commit-message.test.mjs`

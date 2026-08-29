@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wendkeep.dev/schema/commit-message-v1.schema.json",
+  "title": "WendKeep evidence-based commit input",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "subject", "capability", "authority", "evidence"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "subject": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "summary"],
+      "properties": {
+        "type": { "enum": ["feat", "fix", "refactor", "perf"] },
+        "scope": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._/-]*$" },
+        "summary": { "type": "string", "minLength": 1, "maxLength": 120 }
+      }
+    },
+    "capability": { "type": "string", "minLength": 1, "maxLength": 500 },
+    "authority": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "adr", "ref"],
+          "properties": {
+            "kind": { "const": "adr" },
+            "adr": { "type": "string", "pattern": "^ADR-[0-9]{4,}$" },
+            "ref": { "type": "string", "minLength": 1 },
+            "issue": { "type": "string", "pattern": "^#[0-9]+$" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "issue", "design"],
+          "properties": {
+            "kind": { "const": "native" },
+            "issue": { "type": "string", "pattern": "^#[0-9]+$" },
+            "design": { "type": "string", "pattern": "^(docs/superpowers/specs|plans)/(?!\\.{1,2}(?:/|$))(?!.*//)(?!.*\\/\\.{1,2}(?:\\/|$))[a-zA-Z0-9._/-]+\\.md$" }
+          }
+        }
+      ]
+    },
+    "staged_diff": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sha256", "files"],
+      "properties": {
+        "sha256": { "type": "string", "pattern": "^[a-fA-F0-9]{64}$" },
+        "files": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string", "minLength": 1 } }
+      }
+    },
+    "evidence": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "ref"],
+        "properties": {
+          "kind": { "enum": ["adr", "design", "evidence", "receipt", "spec", "task", "verdict"] },
+          "ref": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "limits": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+    "identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": { "agent": { "type": "string" } }
+    }
+  }
+}

@@ -151,6 +151,7 @@ npx wendkeep init --no-companions --no-mcp --yes              # zero companions,
 | `--no-mcp` | Skip **wendkeep's own** vault MCP (`wendkeep-vault`). Companion MCPs still follow `--companions`. |
 | `--no-colors` | Skip the Obsidian color system (`.obsidian` snippet + graph groups). |
 | `--vscode-worktree-tasks` | Create a local, Git-excluded `.vscode/tasks.json` for creating/listing/opening/finishing worktrees; never overwrites an existing file. Also accepted by `sync`. |
+| `--git-commit-hooks` | Opt in to copying commit hooks into `.githooks/` and setting local `core.hooksPath`; custom hooks are preserved without `--force`. |
 | `--yes`, `-y` | Non-interactive; accept defaults (skips the language / vault / companion prompts). |
 | `--force` | Overwrite existing wendkeep config blocks. |
 
@@ -259,6 +260,7 @@ The README is the map; the guides provide syntax, options, exit codes, examples,
 | **Notes and knowledge** | BUG/APR/ADR, repairs, renumbering, lessons, and dashboard | [Notes and knowledge](https://github.com/rogersialves/wendkeep/blob/main/docs/en/commands/notes-and-knowledge.md) |
 | **Costs and observability** | safe dry-run, tri-state, aggregation, trends, and historical rebuild | [Costs and observability](https://github.com/rogersialves/wendkeep/blob/main/docs/en/commands/costs-and-observability.md) |
 | **Maintenance and diagnostics** | doctor, frontier/manifest freshness, drift, version, and help | [Maintenance and diagnostics](https://github.com/rogersialves/wendkeep/blob/main/docs/en/commands/maintenance-and-diagnostics.md) |
+| **Evidence-based commits** | `wendkeep commit`, tasks derived from contracts, tests only from canonical execution bound to the exact SHA, opt-in Git hooks, privacy, and remote range gate | [Commits](https://github.com/rogersialves/wendkeep/blob/main/docs/en/commands/commit.md) |
 | **Local Observer** | `observer serve`, registration, incremental publication, `reconcile`, outbox, and multi-project index | [Local Observer](https://github.com/rogersialves/wendkeep/blob/main/docs/en/commands/observer.md) |
 
 Operations that deserve step-by-step guidance: [verify and exits 0/1/2](https://github.com/rogersialves/wendkeep/blob/main/docs/en/commands/verify.md),

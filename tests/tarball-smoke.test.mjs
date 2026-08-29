@@ -141,6 +141,24 @@ test('[req:MOD-4] [req:MOD-8] [req:MOD-10] [req:MOD-11] [req:MOD-12] [req:MOD-13
   }
 });
 
+test('[req:COMMIT-20] published tarball contains the commit kernel, hooks, schema, gate and bilingual docs', () => {
+  const published = publishedFiles();
+  for (const path of [
+    '.githooks/prepare-commit-msg',
+    '.githooks/commit-msg',
+    'packages/commit/package.json',
+    'packages/commit/src/index.mjs',
+    'packages/commit/src/commit-input.mjs',
+    'packages/commit/src/commit-message.mjs',
+    'packages/commit/src/commit-policy.mjs',
+    'packages/commit/src/git-runtime.mjs',
+    'schema/commit-message-v1.schema.json',
+    'scripts/validate-commit-range.mjs',
+    'docs/pt-BR/commands/commit.md',
+    'docs/en/commands/commit.md',
+  ]) assert.ok(published.has(path), `missing commit policy file from package: ${path}`);
+});
+
 test('[req:PROV-8] published tarball contains provenance gates, archive lock, sources, ledger, and receipt schema', () => {
   const published = publishedFiles();
   for (const path of [

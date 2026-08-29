@@ -11,6 +11,14 @@
       "command": "node --test --test-concurrency=1"
     },
     {
+      "id": "universal-commit",
+      "name": "Universal commit focused contract",
+      "description": "Validates evidence-derived commit input, Git hooks, semantic proof binding and the remote range gate",
+      "severity": "critical",
+      "type": "command",
+      "command": "node --test tests/commit-message.test.mjs tests/commit-proof-validation.test.mjs tests/git-commit-hooks.test.mjs tests/commit-range-policy.test.mjs"
+    },
+    {
       "id": "evidence-envelope",
       "name": "Evidence Envelope v2",
       "description": "Validates Git/worktree bindings, sensor provenance, atomic authority writes, legacy classification and consumers",

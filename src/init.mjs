@@ -41,6 +41,7 @@ import { adoptSpecsState, ensureSpecsReadme, SPECS_STATE_FILE } from '../hooks/s
 import { bindProjectVault, readProjectBinding } from './project-vault.mjs';
 import { seedMemoryV2 } from './memory.mjs';
 import { installVscodeWorktreeTasks } from './worktree.mjs';
+import { installGitCommitHooks } from './git-commit-hooks.mjs';
 import {
   DEFAULT_OPERATING_PROFILE,
   normalizeOperatingProfile,
@@ -69,6 +70,7 @@ function parseArgs(argv) {
     else if (a === '--no-companions') args.noCompanions = true;
     else if (a === '--no-colors') args.noColors = true;
     else if (a === '--vscode-worktree-tasks') args.vscodeWorktreeTasks = true;
+    else if (a === '--git-commit-hooks') args.gitCommitHooks = true;
     else if (a === '--dotcontext-mcp') args.dotcontextMcp = argv[++i];
     else if (a.startsWith('--dotcontext-mcp=')) args.dotcontextMcp = a.slice(17);
     else if (a === '--dotcontext-hooks') args.dotcontextHooks = argv[++i];
@@ -638,6 +640,17 @@ export async function runInit(argv) {
     log(M.codexHooks(hadFile ? M.merged : M.created, hadFile ? M.bakSaved : ''));
   }
   log(M.codexTrust);
+
+  // Git commit policy is opt-in because this is the only init surface that writes
+  // repository-local Git configuration. Existing custom hooks are never overwritten silently.
+  if (args.gitCommitHooks) {
+    const hooks = installGitCommitHooks({ projectRoot: projectPath, force: args.force });
+    if (hooks.status === 'conflict') {
+      log(`  [!] Git commit hooks preserved (${hooks.conflicts.join(', ')}); review and rerun ${hooks.repair}`);
+    } else {
+      log(`  Git commit hooks: ${hooks.status} (${hooks.path})`);
+    }
+  }
 
   // 3. .mcp.json --------------------------------------------------------------
   // Written when the native WendKeep MCP is wanted OR a selected companion ships an MCP server.

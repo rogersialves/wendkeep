@@ -7,13 +7,26 @@ import { WK_SKILLS, seedWkSkills, wkSkills } from '../src/skills-seed.mjs';
 
 test('WK_SKILLS: the process skills, each valid SKILL.md with matching name', () => {
   const names = WK_SKILLS.map((s) => s.name);
-  for (const n of ['wk-workflow', 'wk-tdd', 'wk-debugging', 'wk-brainstorming', 'wk-planning', 'wk-verify']) {
+  for (const n of ['wk-workflow', 'wk-tdd', 'wk-debugging', 'wk-brainstorming', 'wk-planning', 'wk-verify', 'wk-commit']) {
     assert.ok(names.includes(n), `has ${n}`);
   }
   for (const s of WK_SKILLS) {
     assert.match(s.body, new RegExp(`name:\\s*${s.name}\\b`), `${s.name} frontmatter name`);
     assert.match(s.body, /description:/, `${s.name} has description`);
     assert.ok(s.body.length > 200, `${s.name} body non-trivial`);
+  }
+});
+
+test('[req:COMMIT-18] wk-commit ensina prova rederivada, coautoria omitida e hooks opt-in', () => {
+  for (const locale of ['pt-BR', 'en']) {
+    const skill = wkSkills(locale).find((item) => item.name === 'wk-commit');
+    assert.ok(skill, `${locale}: wk-commit exists`);
+    assert.match(skill.body, /wendkeep commit context/);
+    assert.match(skill.body, /rederiv|re-deriv/i);
+    assert.match(skill.body, /Co-Authored-By/);
+    assert.match(skill.body, /omit|omiti/i);
+    assert.match(skill.body, /Vault/);
+    assert.match(skill.body, /--git-commit-hooks/);
   }
 });
 
@@ -144,6 +157,17 @@ test('skills carry bundled templates that their SKILL.md references', () => {
   const verdict = JSON.parse((by['wk-verify'].files.find((f) => f.name === 'verdict-template.json')).content);
   for (const k of ['slug', 'ok', 'coverage', 'tasksHash', 'effectiveSpecHash', 'evidenceEnvelopeId', 'evidenceBinding']) {
     assert.ok(k in verdict, `verdict has ${k}`);
+  }
+});
+
+test('[req:COMMIT-25] wk-commit preserva ADR causal e limita fallback nativo a issue + design', () => {
+  for (const localeId of ['pt-BR', 'en']) {
+    const body = wkSkills(localeId).find((skill) => skill.name === 'wk-commit').body;
+    assert.match(body, /authority\.kind.*adr/i);
+    assert.match(body, /authority\.kind.*native/i);
+    assert.match(body, /observed profile[\s\S]*OFF|perfil observado[\s\S]*OFF/i);
+    assert.match(body, /context|contexto/i);
+    assert.match(body, /docs\/superpowers\/specs|plans\//);
   }
 });
 

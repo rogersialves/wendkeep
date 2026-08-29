@@ -1,0 +1,16 @@
+#!/bin/sh
+set -eu
+
+CLI=${WENDKEEP_COMMIT_CLI:-}
+if [ -z "$CLI" ]; then
+  if [ -f "./node_modules/wendkeep/bin/wendkeep.mjs" ]; then
+    CLI=./node_modules/wendkeep/bin/wendkeep.mjs
+  elif [ -f "./bin/wendkeep.mjs" ]; then
+    CLI=./bin/wendkeep.mjs
+  else
+    echo "WENDKEEP_COMMIT_CLI_MISSING: install wendkeep or run wendkeep doctor" >&2
+    exit 2
+  fi
+fi
+
+exec node "$CLI" commit validate --message-file "$1" --consume-context

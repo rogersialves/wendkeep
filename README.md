@@ -150,6 +150,7 @@ npx wendkeep init --no-companions --no-mcp --yes              # zero companions,
 | `--no-mcp` | Pula o MCP de cofre **do próprio wendkeep** (`wendkeep-vault`). Os MCPs de companion seguem `--companions`. |
 | `--no-colors` | Pula o sistema de cores do Obsidian (snippet `.obsidian` + grupos do grafo). |
 | `--vscode-worktree-tasks` | Cria `.vscode/tasks.json` local e ignorado pelo Git para criar/listar/abrir/finalizar worktrees; não sobrescreve arquivo existente. Também é aceito por `sync`. |
+| `--git-commit-hooks` | Opt-in: copia os hooks de commit para `.githooks/` e configura `core.hooksPath` local; preserva hooks personalizados sem `--force`. |
 | `--yes`, `-y` | Não-interativo; aceita os padrões (pula os prompts de idioma / cofre / companion). |
 | `--force` | Sobrescreve os blocos de config do wendkeep existentes. |
 
@@ -256,6 +257,7 @@ O README mostra o mapa; os guias trazem sintaxe, opções, códigos de saída, e
 | **Notas e conhecimento** | BUG/APR/ADR, reparos, renumeração, lessons e dashboard | [Notas e conhecimento](https://github.com/rogersialves/wendkeep/blob/main/docs/pt-BR/commands/notes-and-knowledge.md) |
 | **Custos e observabilidade** | dry-run seguro, tri-state, agregação, tendências e rebuild histórico | [Custos e observabilidade](https://github.com/rogersialves/wendkeep/blob/main/docs/pt-BR/commands/costs-and-observability.md) |
 | **Manutenção e diagnóstico** | doctor, frescor do frontier/manifest, drift, versão e ajuda | [Manutenção e diagnóstico](https://github.com/rogersialves/wendkeep/blob/main/docs/pt-BR/commands/maintenance-and-diagnostics.md) |
+| **Commits baseados em evidências** | `wendkeep commit`, tasks derivadas de contratos, tests somente da reexecução canônica vinculada ao SHA, hooks Git opt-in, privacidade e gate remoto | [Commits](https://github.com/rogersialves/wendkeep/blob/main/docs/pt-BR/commands/commit.md) |
 | **Observer local** | `observer serve`, registro, publicação incremental, `reconcile`, outbox e índice multi-projeto | [Observer local](https://github.com/rogersialves/wendkeep/blob/main/docs/pt-BR/commands/observer.md) |
 
 Operações que merecem instrução passo a passo: [verify e seus exits 0/1/2](https://github.com/rogersialves/wendkeep/blob/main/docs/pt-BR/commands/verify.md),

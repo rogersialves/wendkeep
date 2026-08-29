@@ -34,6 +34,7 @@ Usage:
     --no-companions        Skip companion plugins/MCP entirely.
     --no-colors            Skip the Obsidian color system (.obsidian snippet + graph groups).
     --vscode-worktree-tasks Create local, Git-excluded VS Code tasks for managed worktrees.
+    --git-commit-hooks      Opt in to .githooks + local core.hooksPath for evidence commits.
     --dotcontext-mcp <v>   dotcontext MCP placement: auto (default; skip project entry
                            if already global), project, or none.
     --dotcontext-hooks <v> dotcontext hooks: full (default), light (no PostToolUse), none.
@@ -53,6 +54,7 @@ Usage:
                            Uses explicit CAS/conflicts and an offline outbox; --remote path or --url HTTPS.
 
   wendkeep doctor [--vault P]  Health check. --scope core|runtime · --strict for CI/release.
+  wendkeep commit <sub>        Evidence-based Git commits: context | render | prepare | validate.
   wendkeep portable <sub>      Shared authored state: status | export | import | diff.
                            Default file: .wendkeep/portable/state.json; private runtime stays local.
   wendkeep mcp <serve|config>  Native semantic MCP over stdio, or client config generation.
@@ -232,6 +234,9 @@ async function main(argv) {
     } else if (cmd === 'capabilities') {
       const { CAPABILITIES_HELP } = await import('../../../src/capabilities.mjs');
       process.stdout.write(CAPABILITIES_HELP);
+    } else if (cmd === 'commit') {
+      const { COMMIT_HELP } = await import('../../commit/src/cli.mjs');
+      process.stdout.write(COMMIT_HELP);
     } else {
       process.stdout.write(HELP);
     }
@@ -245,7 +250,7 @@ async function main(argv) {
     // `sync` starts with `init` and resolves the freshly bound Vault itself. Pre-resolving
     // here would prevent that repair step from reporting a corrupt binding as its own
     // first-stage failure (and could never make it as far as the guarded init).
-    && !['init', 'sync', 'worktree', 'hook', 'observer', 'mcp', 'capabilities', '--version', '-v', '--help', '-h', 'help'].includes(cmd)) {
+    && !['init', 'sync', 'worktree', 'hook', 'observer', 'mcp', 'capabilities', 'commit', '--version', '-v', '--help', '-h', 'help'].includes(cmd)) {
     await preferProjectVault(rest);
   }
   switch (cmd) {
@@ -260,6 +265,11 @@ async function main(argv) {
     case 'doctor': {
       const { runDoctor } = await import('../../../src/doctor.mjs');
       process.exit(runDoctor(rest));
+      break;
+    }
+    case 'commit': {
+      const { runCommit } = await import('../../commit/src/cli.mjs');
+      process.exit(runCommit(rest));
       break;
     }
     case 'portable': {

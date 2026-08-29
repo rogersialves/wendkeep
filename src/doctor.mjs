@@ -19,6 +19,7 @@ import {
 import { inspectPortableState } from './portable.mjs';
 import { inspectSyncOutbox, readLocalSyncState } from './sync-outbox.mjs';
 import { readProjectForValidation } from '../packages/vault/src/validate-memory.mjs';
+import { inspectGitCommitHooks } from './git-commit-hooks.mjs';
 
 const healthStatusLabel = (status) => ({
   healthy: 'saudável', warning: 'atenção', degraded: 'degradada', blocked: 'bloqueada', legacy: 'legado',
@@ -182,6 +183,11 @@ export function runDoctor(argv) {
     process.stdout.write(`  → ${issue.slug}: ${issue.errorCode} — ${issue.repair}\n`);
   }
 
+  const commitHooks = inspectGitCommitHooks({ projectRoot });
+  process.stdout.write(`\n[commit-hooks] ${commitHooks.status}\n`);
+  for (const issue of commitHooks.issues) process.stdout.write(`  ! ${issue}\n`);
+  if (commitHooks.repair) process.stdout.write(`  → ${commitHooks.repair}\n`);
+
   const activeContexts = inspectActiveContextHealth({ vaultBase, projectRoot });
   process.stdout.write(`\n${renderActiveContextHealthLines(activeContexts).join('\n')}\n`);
 
@@ -257,6 +263,7 @@ export function runDoctor(argv) {
     || repairable.length
     || warnings.length
     || worktrees.issues.length
+    || (commitHooks.configured && commitHooks.status !== 'healthy')
     || activeContexts.issues.length
     || ['diverged', 'invalid'].includes(portable.status)
     || sync.status === 'corrupt'
