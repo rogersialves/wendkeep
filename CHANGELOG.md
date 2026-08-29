@@ -4,6 +4,32 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.86.0] — 2026-08-28
+
+### Added
+
+- **Memory ledger bounded para Vaults longos.** Snapshots determinísticos, replay apenas do tail,
+  segmentos imutáveis com manifest encadeado e rotação/compactação transacional preservam a
+  autoridade append-only, com dry-run, journal, receipt, recovery e benchmarks sintéticos de
+  100 mil eventos.
+- **Recall incremental, paginado e indexado.** Estado por documento/chunk, cursor vinculado ao
+  índice/consulta/filtros/`as_of`, budgets UTF-8 exatos, sidecar lexical bounded e SQLite FTS5
+  opcional evitam scans integrais sem transformar artefatos derivados em autoridade; o MCP expõe
+  a mesma leitura paginada e bounded.
+- **Contrato opcional de embeddings locais.** `wendkeep/vault` exporta manifest versionado,
+  integrity-bound e in-process para reranquear somente um prefixo de candidatos; fica desligado
+  por padrão, proíbe rede/retenção, limita batch/bytes, preserva proveniência e degrada para a
+  ordem lexical sem incluir modelo, provider ou vector database no Core.
+
+### Changed
+
+- **Saúde de escala no `doctor` e Observer.** Snapshots operacionais publicam somente contagens,
+  bytes, atualidade, backend e estados sanitizados de memória/recall, sem rebuild, leitura do
+  corpus ou vazamento de termos e paths.
+- **Fechamento coordenado da issue #82.** A PR agregadora #124 reconcilia os slices #111–#123,
+  mantém documentação PT-BR/EN e tarball em paridade e alinha package/lock/CHANGELOG para a
+  entrega minor única.
+
 ## [0.85.1] — 2026-08-25
 
 ### Fixed

@@ -11,6 +11,7 @@ import {
   executeRelease, npmExecutorSpec, npmHasVersion, npmVersionQueryArgs, releaseCommands,
   releaseSteps, resolveReleasePlan,
 } from '../scripts/release-plan.mjs';
+import { assessUnpublishedPackageVersion } from '../scripts/check-unpublished-version.mjs';
 
 const TEST_WORKFLOW = readFileSync(new URL('../.github/workflows/test.yml', import.meta.url), 'utf8');
 const RELEASE_WORKFLOW = readFileSync(new URL('../.github/workflows/auto-tag.yml', import.meta.url), 'utf8');
@@ -81,13 +82,33 @@ test('extractReleaseNotes: throws when the version is absent', () => {
   assert.throws(() => extractReleaseNotes(FIXTURE, '9.9.9'), /9\.9\.9/);
 });
 
-test('[sensor:release-tests] current release notes are extractable and match the package', () => {
-  assert.equal(PACKAGE.version, '0.85.1');
+test('[sensor:release-tests] [req:RECALL-13] current release notes are extractable and match the package', () => {
+  assert.equal(PACKAGE.version, '0.86.0');
   const release = extractReleaseNotes(CHANGELOG, PACKAGE.version);
-  assert.equal(release.date, '2026-08-25');
-  assert.match(release.notes, /Proveniência da árvore publicada após o sync do próprio projeto/i);
-  assert.match(release.notes, /perfil persistente continua explicitamente `OFF`/i);
+  assert.equal(release.date, '2026-08-28');
+  assert.match(release.notes, /Recall incremental, paginado e indexado/i);
+  assert.match(release.notes, /Contrato opcional de embeddings locais/i);
   assert.doesNotMatch(release.notes, /019f[0-9a-f-]+/i);
+});
+
+test('[req:RECALL-13] release preflight distinguishes unpublished, published, and stale versions', () => {
+  assert.deepEqual(
+    assessUnpublishedPackageVersion({ packageVersion: '0.86.0', publishedVersion: '0.85.1' }),
+    {
+      ok: true,
+      package_version: '0.86.0',
+      published_version: '0.85.1',
+      status: 'unpublished',
+    },
+  );
+  assert.equal(
+    assessUnpublishedPackageVersion({ packageVersion: '0.86.0', publishedVersion: '0.86.0' }).status,
+    'already-published',
+  );
+  assert.equal(
+    assessUnpublishedPackageVersion({ packageVersion: '0.85.1', publishedVersion: '0.86.0' }).status,
+    'package-behind',
+  );
 });
 
 test('[sensor:release-tests] 0.76.9 active-context injection notes remain extractable', () => {

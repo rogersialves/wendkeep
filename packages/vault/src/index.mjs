@@ -8,6 +8,9 @@ export * from './memory-handoff.mjs';
 export * from './memory-store.mjs';
 export * from './memory-scope.mjs';
 export * from './evidence-recall.mjs';
+export * from './evidence-recall-page.mjs';
+export * from './evidence-search-index.mjs';
+export * from './evidence-embedding-plugin.mjs';
 export {
   EVIDENCE_INDEX_STATE_FILE,
   EVIDENCE_INDEX_STATE_VERSION,

@@ -23,6 +23,7 @@ const GUIDE_SLUGS = [
   'portable.md',
   'sync-protocol.md',
   'mcp.md',
+  'evidence-embeddings.md',
   'capabilities.md',
   'tdd.md',
 ];
@@ -119,7 +120,7 @@ test('a atualização por pnpm resolve e reinstala a versão publicada', () => {
 });
 
 // O que realmente importa: o conteúdo do tarball, e o repo intacto depois.
-test('[req:OP-9] npm pack leva módulos de profile/FLOW/delivery, docs bilíngues e restaura o README', () => {
+test('[req:OP-9] [req:RECALL-13] npm pack leva módulos de profile/FLOW/delivery, docs bilíngues e restaura o README', () => {
   const outDir = mkdtempSync(join(tmpdir(), 'wk-pack-'));
   const packRoot = join(outDir, 'workspace');
   try {

@@ -25,6 +25,7 @@ const GUIDES = [
   'portable.md',
   'sync-protocol.md',
   'mcp.md',
+  'evidence-embeddings.md',
   'capabilities.md',
   'tdd.md',
 ];
@@ -51,6 +52,7 @@ const README_GROUPS = [
   { pt: 'Estado portátil', en: 'Portable state', guide: 'portable.md' },
   { pt: 'Sync local-first', en: 'Local-first sync', guide: 'sync-protocol.md' },
   { pt: 'MCP nativo', en: 'Native MCP', guide: 'mcp.md' },
+  { pt: 'Recall e embeddings', en: 'Evidence recall and embeddings', guide: 'evidence-embeddings.md' },
   { pt: 'Capacidades dos hosts', en: 'Host capabilities', guide: 'capabilities.md' },
   { pt: 'Perfis de operação', en: 'Operating profiles', guide: 'operating-profiles.md' },
   { pt: 'Changes e verificação', en: 'Changes and verification', guide: 'changes-and-verification.md' },
@@ -111,6 +113,7 @@ const SEMANTIC_CONCEPTS = {
   'portable.md': { pt: [/portátil/i, /runtime/i, /revision/i], en: [/portable/i, /runtime/i, /revision/i] },
   'sync-protocol.md': { pt: [/local-first/i, /CAS/i, /conflito/i], en: [/local-first/i, /CAS/i, /conflict/i] },
   'mcp.md': { pt: [/semântic/i, /capability/i, /stdio/i], en: [/semantic/i, /capability/i, /stdio/i] },
+  'evidence-embeddings.md': { pt: [/embeddings/i, /local/i, /budget/i], en: [/embeddings/i, /local/i, /budget/i] },
   'capabilities.md': { pt: [/lifecycle/i, /degradad/i, /waiver/i], en: [/lifecycle/i, /degraded/i, /waiver/i] },
   'tdd.md': { pt: [/atesta/i, /RED/i, /waiver/i], en: [/attestation/i, /RED/i, /waiver/i] },
 };
@@ -210,7 +213,7 @@ function assertVerifyExitSemantics(text, locale) {
   }
 }
 
-test('DOC-2: PT-BR e EN têm exatamente os guias declarados', () => {
+test('[req:RECALL-13] DOC-2: PT-BR e EN têm exatamente os guias declarados', () => {
   for (const dir of Object.values(GUIDE_DIR)) assert.ok(existsSync(dir), `diretório ausente: ${dir}`);
   const pt = readdirSync(GUIDE_DIR.pt).filter((f) => f.endsWith('.md')).sort();
   const en = readdirSync(GUIDE_DIR.en).filter((f) => f.endsWith('.md')).sort();
@@ -219,7 +222,7 @@ test('DOC-2: PT-BR e EN têm exatamente os guias declarados', () => {
   assert.deepEqual(pt, en, 'os diretórios de idiomas não estão espelhados');
 });
 
-test('DOC-2: cada par mantém estrutura editorial e alternador de idioma', () => {
+test('[req:RECALL-13] DOC-2: cada par mantém estrutura editorial e alternador de idioma', () => {
   for (const guide of GUIDES) {
     const ptPath = join(GUIDE_DIR.pt, guide);
     const enPath = join(GUIDE_DIR.en, guide);
@@ -239,7 +242,7 @@ test('DOC-2: cada par mantém estrutura editorial e alternador de idioma', () =>
   }
 });
 
-test('DOC-1: READMEs preservam primeiro uso e navegam pelos guias do próprio idioma', () => {
+test('[req:RECALL-13] DOC-1: READMEs preservam primeiro uso e navegam pelos guias do próprio idioma', () => {
   const pt = readFileSync(join(ROOT, 'README.md'), 'utf8');
   const en = readFileSync(join(ROOT, 'README.en.md'), 'utf8');
   assert.match(pt, /^## Instalar & configurar$/m);

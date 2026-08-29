@@ -6,9 +6,9 @@
     {
       "id": "tests",
       "name": "Tests",
-      "description": "node --test (the full suite)",
+      "description": "node --test (the full suite, serialized for stable local evidence)",
       "severity": "critical",
-      "command": "npm test"
+      "command": "node --test --test-concurrency=1"
     },
     {
       "id": "evidence-envelope",
@@ -696,6 +696,14 @@
       "severity": "critical",
       "type": "command",
       "command": "node --test tests/task-handoff.test.mjs tests/memory-handoff.test.mjs tests/active-context-handoff-evidence.test.mjs tests/observer-memory-publish.test.mjs"
+    },
+    {
+      "id": "npm-unpublished",
+      "name": "npm-unpublished",
+      "description": "node scripts/check-unpublished-version.mjs",
+      "severity": "critical",
+      "type": "command",
+      "command": "node scripts/check-unpublished-version.mjs"
     }
   ]
 }

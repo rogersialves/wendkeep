@@ -5,6 +5,7 @@ import { allChangesState } from '../hooks/change-core.mjs';
 import { readControl, readSessionRegistry } from '../hooks/obsidian-common.mjs';
 import { runVaultHealth } from '../hooks/vault-health.mjs';
 import { readProjectForValidation } from '../packages/vault/src/validate-memory.mjs';
+import { inspectEvidenceSearchHealth } from './evidence-search-health.mjs';
 import { augmentVaultHealthWithMemoryScale } from './memory-scale-health.mjs';
 import { inspectSyncOutbox, readLocalSyncState } from './sync-outbox.mjs';
 
@@ -71,6 +72,40 @@ function activeSessionSummary(vaultBase, control, registry) {
   };
 }
 
+function recallSearchSummary(metrics) {
+  return {
+    schema_version: 1,
+    status: safeText(metrics?.status || 'unknown', 32),
+    ...(metrics?.errorCode ? { error_code: safeText(metrics.errorCode, 120) } : {}),
+    authority: {
+      status: safeText(metrics?.authorityStatus || 'unknown', 32),
+      bytes: safeCount(metrics?.authorityBytes),
+    },
+    incremental: {
+      status: safeText(metrics?.incrementalStateStatus || 'unknown', 32),
+      bytes: safeCount(metrics?.incrementalStateBytes),
+      documents: safeCount(metrics?.documentCount),
+    },
+    search: {
+      status: safeText(metrics?.searchStateStatus || 'unknown', 32),
+      bytes: safeCount(metrics?.searchStateBytes),
+      chunks: safeCount(metrics?.rowCount),
+      source_index_current: metrics?.sourceIndexCurrent === true,
+      source_state_current: metrics?.sourceStateCurrent === true,
+    },
+    lexical: {
+      status: safeText(metrics?.lexicalStatus || 'unknown', 32),
+      bytes: safeCount(metrics?.lexicalBytes),
+    },
+    sqlite: {
+      status: safeText(metrics?.sqliteStatus || 'unknown', 32),
+      bytes: safeCount(metrics?.sqliteBytes),
+      capability: metrics?.sqliteCapability === true,
+    },
+    backend: safeText(metrics?.backend || 'unavailable', 40),
+  };
+}
+
 function memoryScaleSummary(memory = {}) {
   if (memory.scaleSchemaVersion !== 1) return null;
   return {
@@ -115,6 +150,7 @@ function healthSummary(vaultBase) {
       runVaultHealth({ vaultBase }),
       vaultBase,
     );
+    const recall = recallSearchSummary(inspectEvidenceSearchHealth(vaultBase));
     const memoryScale = memoryScaleSummary(health.metrics?.memory);
     return {
       ok: health.ok === true,
@@ -123,6 +159,7 @@ function healthSummary(vaultBase) {
       warning_count: Array.isArray(health.warnings) ? health.warnings.length : 0,
       registry_sessions: Number(health.metrics?.registrySessions || 0),
       derived_notes: Number(health.metrics?.derivedNotes || 0),
+      recall_search: recall,
       ...(memoryScale ? { memory_scale: memoryScale } : {}),
     };
   } catch {

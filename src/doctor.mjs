@@ -4,6 +4,10 @@ import { resolve } from 'node:path';
 import { checkHarness, checkVaultLinks, checkSessionActivity, checkStackedFrontmatter, renderStackedFrontmatterLines, checkUnpricedModels, renderUnpricedModelLines, checkStaleDerivedSections, renderStaleDerivedSectionLines, checkSessionObservability, renderSessionObservabilityLines } from '../hooks/harness-doctor.mjs';
 import { diagnoseManagedWorktrees } from './worktree.mjs';
 import { runVaultHealth } from '../hooks/vault-health.mjs';
+import {
+  inspectEvidenceSearchHealth,
+  renderEvidenceSearchHealthLines,
+} from './evidence-search-health.mjs';
 import { augmentVaultHealthWithMemoryScale } from './memory-scale-health.mjs';
 import { checkSyncDefs } from './sync-defs.mjs';
 import { resolveProjectVault } from './project-vault.mjs';
@@ -139,16 +143,24 @@ export function runDoctor(argv) {
       memoryStatus: 'blocked',
     };
   }
-  if (scope !== 'runtime') process.stdout.write(`${renderVaultHealthLines(health).join('\n')}\n`);
+  const recall = scope === 'runtime'
+    ? { status: 'skipped' }
+    : inspectEvidenceSearchHealth(vaultBase);
+  if (scope !== 'runtime') {
+    process.stdout.write(`${renderVaultHealthLines(health).join('\n')}\n`);
+    process.stdout.write(`${renderEvidenceSearchHealthLines(recall).join('\n')}\n`);
+  }
   const healthStatus = health.ok ? 0 : 1;
+  const recallStatus = recall.status === 'blocked' ? 1 : 0;
 
   if (scope === 'core') {
     const strictDebt = strict && (
       (health.warnings || []).length > 0
       || !['healthy'].includes(health.memoryStatus)
+      || !['healthy', 'missing'].includes(recall.status)
     );
-    process.stdout.write(`\n[core] ${healthStatus ? 'erro estrutural' : health.memoryStatus === 'degraded' ? 'saudável com memória degradada' : 'saudável'}\n`);
-    return healthStatus || strictDebt ? 1 : 0;
+    process.stdout.write(`\n[core] ${healthStatus || recallStatus ? 'erro estrutural' : health.memoryStatus === 'degraded' ? 'saudável com memória degradada' : 'saudável'}\n`);
+    return healthStatus || recallStatus || strictDebt ? 1 : 0;
   }
 
   // 2. Harness integrity (Wave B).
@@ -240,6 +252,7 @@ export function runDoctor(argv) {
   const strictDebt = strict && (
     (scope !== 'runtime' && (health.warnings || []).length)
     || (scope !== 'runtime' && health.memoryStatus !== 'healthy')
+    || (scope !== 'runtime' && !['healthy', 'missing'].includes(recall.status))
     || attention.length
     || repairable.length
     || warnings.length
@@ -256,5 +269,5 @@ export function runDoctor(argv) {
     || (staleDerived.notes || staleDerived.items || []).length
     || !observability.ok
   );
-  return (scope !== 'runtime' && healthStatus !== 0) || errors.length || strictDebt ? 1 : 0;
+  return (scope !== 'runtime' && (healthStatus !== 0 || recallStatus !== 0)) || errors.length || strictDebt ? 1 : 0;
 }

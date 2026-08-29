@@ -1,4 +1,6 @@
 export * from '../packages/vault/src/evidence-recall.mjs';
+export * from '../packages/vault/src/evidence-recall-page.mjs';
+export * from '../packages/vault/src/evidence-search-index.mjs';
 export {
   EVIDENCE_INDEX_STATE_FILE,
   EVIDENCE_INDEX_STATE_VERSION,
