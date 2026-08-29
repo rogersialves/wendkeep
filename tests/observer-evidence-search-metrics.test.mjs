@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import {
+import fs, {
   linkSync,
   mkdirSync,
   mkdtempSync,
@@ -7,8 +7,9 @@ import {
   rmSync,
   writeFileSync,
 } from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import test from 'node:test';
 
 import {
@@ -76,18 +77,35 @@ function buildSearch(vaultBase) {
   return { index, search };
 }
 
-test('[req:OBS-RECALL-1] Observer persists sanitized recall index health in project snapshots', () => {
+test('[req:RECALL-10] [req:OBS-RECALL-1] Observer persists sanitized recall index health in project snapshots', () => {
   const fixture = prepareFixture();
   const dataDir = makeDataDir();
   let db;
   try {
     writeDecision(fixture.vaultBase, `A evidência contém ${MARKER}.`);
     const built = buildSearch(fixture.vaultBase);
-    const snapshot = buildProjectSnapshot({
-      vaultBase: fixture.vaultBase,
-      projectRoot: fixture.projectRoot,
-      now: '2026-08-27T01:00:00.000Z',
-    });
+    const authorityPath = resolve(fixture.vaultBase, '.brain', 'EVIDENCE_INDEX.jsonl');
+    const originalReadFileSync = fs.readFileSync;
+    fs.readFileSync = function guardedReadFileSync(path, ...args) {
+      if (resolve(String(path)) === authorityPath) {
+        throw Object.assign(new Error('Observer read the full evidence authority'), {
+          code: 'EVIDENCE_AUTHORITY_READ_FORBIDDEN',
+        });
+      }
+      return originalReadFileSync.call(this, path, ...args);
+    };
+    syncBuiltinESMExports();
+    let snapshot;
+    try {
+      snapshot = buildProjectSnapshot({
+        vaultBase: fixture.vaultBase,
+        projectRoot: fixture.projectRoot,
+        now: '2026-08-27T01:00:00.000Z',
+      });
+    } finally {
+      fs.readFileSync = originalReadFileSync;
+      syncBuiltinESMExports();
+    }
     const recall = snapshot.health.recall_search;
 
     assert.equal(recall.schema_version, 1);
@@ -132,7 +150,7 @@ test('[req:OBS-RECALL-1] Observer persists sanitized recall index health in proj
   }
 });
 
-test('[req:OBS-RECALL-2] stale authority is published as bounded metadata without rebuilding', () => {
+test('[req:RECALL-10] [req:OBS-RECALL-2] stale authority is published as bounded metadata without rebuilding', () => {
   const fixture = prepareFixture();
   try {
     writeDecision(fixture.vaultBase, 'A evidência contém sinal-antigo-observer.');
@@ -160,7 +178,7 @@ test('[req:OBS-RECALL-2] stale authority is published as bounded metadata withou
   }
 });
 
-test('[req:OBS-RECALL-3] unsafe recall artifact publishes only blocked sanitized metadata', (t) => {
+test('[req:RECALL-10] [req:OBS-RECALL-3] unsafe recall artifact publishes only blocked sanitized metadata', (t) => {
   const fixture = prepareFixture();
   const outside = mkdtempSync(join(tmpdir(), 'wk-observer-recall-outside-'));
   try {

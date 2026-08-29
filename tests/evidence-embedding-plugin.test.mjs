@@ -1,5 +1,9 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import test from 'node:test';
+import { fileURLToPath } from 'node:url';
+import { parse } from 'acorn';
 
 import {
   EVIDENCE_EMBEDDING_PROTOCOL_VERSION,
@@ -14,6 +18,7 @@ import {
 } from '../packages/vault/src/evidence-embedding-plugin.mjs';
 
 const MODEL_FINGERPRINT = `sha256:${'a'.repeat(64)}`;
+const TEST_DIR = dirname(fileURLToPath(import.meta.url));
 
 function manifest(overrides = {}) {
   return buildEvidenceEmbeddingManifest({
@@ -106,6 +111,26 @@ test('[req:RECALL-11] embedding manifest is local-only, integrity-bound, and dep
     (error) => error instanceof EvidenceEmbeddingPluginError
       && error.errors.includes('locality'),
   );
+});
+
+test('[req:RECALL-11] Core embedding contract has no provider, network, vector DB, or autoload dependency', () => {
+  const modulePath = join(
+    TEST_DIR,
+    '..',
+    'packages',
+    'vault',
+    'src',
+    'evidence-embedding-plugin.mjs',
+  );
+  const source = readFileSync(modulePath, 'utf8');
+  const ast = parse(source, { ecmaVersion: 'latest', sourceType: 'module' });
+  const imports = ast.body
+    .filter((node) => node.type === 'ImportDeclaration')
+    .map((node) => node.source.value);
+  assert.deepEqual(imports, ['node:crypto']);
+  assert.doesNotMatch(source, /\bimport\s*\(/);
+  assert.doesNotMatch(source, /\b(?:require|fetch|WebSocket|XMLHttpRequest)\s*\(/);
+
 });
 
 test('[req:RECALL-11] embedding reranker is disabled by default and never calls the plugin', async () => {

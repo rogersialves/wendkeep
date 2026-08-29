@@ -696,6 +696,14 @@
       "severity": "critical",
       "type": "command",
       "command": "node --test tests/task-handoff.test.mjs tests/memory-handoff.test.mjs tests/active-context-handoff-evidence.test.mjs tests/observer-memory-publish.test.mjs"
+    },
+    {
+      "id": "npm-unpublished",
+      "name": "npm-unpublished",
+      "description": "node scripts/check-unpublished-version.mjs",
+      "severity": "critical",
+      "type": "command",
+      "command": "node scripts/check-unpublished-version.mjs"
     }
   ]
 }

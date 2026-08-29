@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import {
+import fs, {
   linkSync,
   mkdirSync,
   mkdtempSync,
@@ -9,8 +9,9 @@ import {
   statSync,
   writeFileSync,
 } from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import test from 'node:test';
 
 import {
@@ -84,7 +85,24 @@ test('[req:RECALL-10] doctor reports current authority and bounded search artifa
     assert.equal(built.search.sqlite_available, false);
     const before = byteSnapshot(vault);
 
-    const health = inspectEvidenceSearchHealth(vault);
+    const authorityPath = resolve(vault, '.brain', 'EVIDENCE_INDEX.jsonl');
+    const originalReadFileSync = fs.readFileSync;
+    fs.readFileSync = function guardedReadFileSync(path, ...args) {
+      if (resolve(String(path)) === authorityPath) {
+        throw Object.assign(new Error('health inspection read the full evidence authority'), {
+          code: 'EVIDENCE_AUTHORITY_READ_FORBIDDEN',
+        });
+      }
+      return originalReadFileSync.call(this, path, ...args);
+    };
+    syncBuiltinESMExports();
+    let health;
+    try {
+      health = inspectEvidenceSearchHealth(vault);
+    } finally {
+      fs.readFileSync = originalReadFileSync;
+      syncBuiltinESMExports();
+    }
     assert.deepEqual(byteSnapshot(vault), before, 'recall health inspection must be read-only');
     assert.equal(health.schemaVersion, 1);
     assert.equal(health.status, 'healthy');

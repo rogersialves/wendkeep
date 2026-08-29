@@ -53,4 +53,22 @@ test('[req:RECALL-9] large lexical search remains bounded and warm state is reus
   });
   assert.ok(result.bytes.evidence_authority > 0);
   assert.ok(result.bytes.lexical_artifact > result.bytes.evidence_authority);
+  assert.deepEqual(Object.keys(result.timings_ms), [
+    'generation',
+    'build',
+    'reuse',
+    'rare_query',
+    'common_query',
+  ]);
+  for (const duration of Object.values(result.timings_ms)) {
+    assert.equal(Number.isFinite(duration), true);
+    assert.ok(duration >= 0);
+  }
+  assert.equal(Number.isSafeInteger(result.memory.rss_before), true);
+  assert.equal(Number.isSafeInteger(result.memory.rss_after), true);
+  assert.equal(Number.isSafeInteger(result.memory.rss_delta), true);
+  assert.equal(
+    result.memory.rss_delta,
+    result.memory.rss_after - result.memory.rss_before,
+  );
 });
