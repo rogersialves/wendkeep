@@ -19,16 +19,16 @@ When projecting sessions, trailing internal metadata is removed only from assist
 user reports remain intact. XML-like tags are written as escaped text so Obsidian Reading view
 does not interpret them as HTML.
 
-The runtime is being separated into six physical boundaries — `cli`, `harness`, `vault`, `mcp`,
-`integrations`, and `pi` — without fragmenting installation. The private `cli`, `harness`,
-`vault`, `mcp`, and `integrations` workspaces now canonically own the executable runtime,
-Operating Profiles/the sensor engine, safe binding/the Shared Project Memory v2 kernel, the MCP
-configuration kernel, and pure Claude/Codex integration rules, respectively. The root package
-exposes Harness and Vault through `wendkeep/harness` and `wendkeep/vault`; CLI, MCP, and
-Integrations remain private surfaces, reached only through the binaries, the configuration effects
-of `init`, and historical facades. Historical imports keep working through compatibility facades
-and no session data needs migration;
-see the [modular architecture](docs/en/architecture.md).
+The runtime is separated into thirteen physical boundaries — `cli`, `commit`, `contracts`,
+`evidence`, `harness`, `integrations`, `mcp`, `migrations`, `observer`, `pi`, `sync`, `vault`, and `worktrees` — without
+fragmenting installation. The root package publishes exactly `wendkeep/commit`,
+`wendkeep/contracts`, `wendkeep/evidence`, `wendkeep/harness`, `wendkeep/mcp`,
+`wendkeep/migrations`, `wendkeep/observer`, `wendkeep/sync`, `wendkeep/vault`, and
+`wendkeep/worktrees`. CLI, Pi, and Integrations remain private, and no `@wendkeep/*` workspace is
+an independent package. Historical facades preserve identity throughout 0.x. See the
+[modular architecture](docs/en/architecture.md),
+[compatibility](docs/en/compatibility.md), [migrations](docs/en/migrations.md), and
+[support policy](docs/en/support-policy.md).
 
 In the **0.66 Integrations Kernel** phase, `packages/integrations/src/` becomes the canonical
 authority for the hook catalog and projection, the envelope/provider, transcript content and usage
@@ -37,7 +37,8 @@ filesystem, Vault, and registry effects remain in the historical facades. MCP an
 sibling adapters with no dependency between them, and the direction remains
 `cli/mcp/integrations/pi → Harness → Vault`. Hooks, sessions, paths, configuration, and schemas
 remain equivalent; the private `@wendkeep/integrations` workspace stays inside the single
-published `wendkeep` package, with no public `wendkeep/integrations` subpath. Pi is the next phase.
+published `wendkeep` package without a public subpath. Consumers use the supported historical
+facades, while deep `packages/` imports remain blocked.
 
 The **native MCP** workspace now serves semantic project, context, memory, change, spec, task,
 handoff, evidence, and Observer tools through `wendkeep mcp serve`. A versioned, verified catalog
@@ -261,7 +262,7 @@ The README is the map; the guides provide syntax, options, exit codes, examples,
 | **Notes and knowledge** | BUG/APR/ADR, repairs, renumbering, lessons, and dashboard | [Notes and knowledge](https://github.com/rogersialves/wendkeep/blob/main/docs/en/commands/notes-and-knowledge.md) |
 | **Costs and observability** | safe dry-run, tri-state, aggregation, trends, and historical rebuild | [Costs and observability](https://github.com/rogersialves/wendkeep/blob/main/docs/en/commands/costs-and-observability.md) |
 | **Maintenance and diagnostics** | doctor, frontier/manifest freshness, drift, version, and help | [Maintenance and diagnostics](https://github.com/rogersialves/wendkeep/blob/main/docs/en/commands/maintenance-and-diagnostics.md) |
-| **Evidence-based commits** | `wendkeep commit`, tasks derived from contracts, tests only from canonical execution bound to the exact SHA, opt-in Git hooks, privacy, and remote range gate | [Commits](https://github.com/rogersialves/wendkeep/blob/main/docs/en/commands/commit.md) |
+| **Evidence-based commits** | `wendkeep commit`, canonically ordered derived tasks, tests only from execution bound to the exact SHA, opt-in Git hooks, privacy, and remote range gate | [Commits](https://github.com/rogersialves/wendkeep/blob/main/docs/en/commands/commit.md) |
 | **Local Observer** | `observer serve`, scoped/expiring hash-only bootstrap, incremental publishing with canonical timestamps, `reconcile`, policy, stable structural identities, content-bound hashes, deletion-safe capture, required encryption, retention, purge, and multi-project index | [Local Observer](https://github.com/rogersialves/wendkeep/blob/main/docs/en/commands/observer.md) · [Security](https://github.com/rogersialves/wendkeep/blob/main/docs/en/commands/observer-security.md) |
 
 Operations that deserve step-by-step guidance: [verify and exits 0/1/2](https://github.com/rogersialves/wendkeep/blob/main/docs/en/commands/verify.md),

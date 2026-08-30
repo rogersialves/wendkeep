@@ -7,6 +7,7 @@ import test from 'node:test';
 import {
   acquireSyncLease,
   applySyncEvent,
+  canonicalSyncJson,
   canonicalRecordKey,
   createSyncEvent,
   createSyncState,
@@ -14,6 +15,7 @@ import {
   encryptPrivatePayload,
   resolveSyncConflict,
   rotatePrivatePayloadKey,
+  validateSyncEvent,
 } from '../src/sync-protocol.mjs';
 import {
   ackSyncEvent,
@@ -54,6 +56,31 @@ function event(overrides = {}) {
   });
 }
 
+test('[req:SYNC-1] schema boundary rejects malformed keys, events, privacy and lease clocks', () => {
+  assert.equal(canonicalSyncJson([{ z: 1, a: 2 }]), '[{"a":2,"z":1}]');
+  assert.throws(() => createSyncState('bad\nproject'), { code: 'WENDKEEP_SYNC_SCHEMA_INVALID' });
+  assert.throws(() => canonicalRecordKey({
+    projectId: PROJECT, repositoryId: REPOSITORY, namespace: 'n', key: 'k', scope: 'global',
+  }), { code: 'WENDKEEP_SYNC_SCOPE_INVALID' });
+  for (const overrides of [
+    { revision: 3, baseRevision: 0 },
+    { operation: 'overwrite' },
+    { privacy: 'secret' },
+    { privacy: 'private', payload: { content: 'plaintext' } },
+    { observedAt: 'not-a-date' },
+  ]) assert.throws(() => event(overrides));
+  const valid = event();
+  assert.throws(() => validateSyncEvent({ ...valid, content_hash: `sha256:${'0'.repeat(64)}` }),
+    { code: 'WENDKEEP_SYNC_EVENT_INVALID' });
+  assert.throws(() => validateSyncEvent(valid, { projectId: 'foreign' }),
+    { code: 'WENDKEEP_SYNC_PROJECT_MISMATCH' });
+  assert.throws(() => acquireSyncLease(createSyncState(PROJECT), {
+    recordKey: valid.record_key, leaseId: 'lease', actorId: 'actor', deviceId: 'device',
+    acquiredAt: '2026-08-30T10:00:00.000Z', expiresAt: '2026-08-30T09:00:00.000Z',
+    now: '2026-08-30T10:00:00.000Z',
+  }), { code: 'WENDKEEP_SYNC_LEASE_INVALID' });
+});
+
 test('[req:SYNC-1] CAS applies the expected revision and duplicate delivery is idempotent', () => {
   const state = createSyncState(PROJECT);
   const first = event();
@@ -61,6 +88,38 @@ test('[req:SYNC-1] CAS applies the expected revision and duplicate delivery is i
   assert.equal(applySyncEvent(state, first).status, 'duplicate');
   assert.equal(state.records[first.record_key].revision, 1);
   assert.equal(state.applied_event_ids.length, 1);
+});
+
+test('[req:SYNC-4] multiple pending and conflict candidates exercise deterministic ordering', () => {
+  const state = createSyncState(PROJECT);
+  const first = event();
+  const second = event({
+    revision: 2, baseRevision: 1, causalParentIds: [first.event_id], payload: { content: '# B\n' },
+  });
+  const third = event({
+    revision: 3, baseRevision: 2, causalParentIds: [second.event_id], payload: { content: '# C\n' },
+  });
+  assert.equal(applySyncEvent(state, third).status, 'pending');
+  assert.equal(applySyncEvent(state, second).status, 'pending');
+  assert.equal(applySyncEvent(state, second).status, 'pending');
+  assert.equal(state.pending[first.record_key].length, 2);
+  assert.equal(applySyncEvent(state, first).status, 'applied');
+  assert.equal(state.records[first.record_key].revision, 3);
+
+  const conflictState = createSyncState(PROJECT);
+  applySyncEvent(conflictState, first);
+  const rival = event({ payload: { content: '# Rival\n' }, actorId: 'actor-b' });
+  const rivalTwo = event({ payload: { content: '# Rival 2\n' }, actorId: 'actor-c' });
+  assert.equal(applySyncEvent(conflictState, rival).status, 'conflict');
+  assert.equal(applySyncEvent(conflictState, rivalTwo).status, 'conflict');
+  assert.equal(conflictState.conflicts[first.record_key].candidates.length, 3);
+
+  const causalState = createSyncState(PROJECT);
+  applySyncEvent(causalState, first);
+  const wrongParent = event({
+    revision: 2, baseRevision: 1, causalParentIds: ['0'.repeat(64)], payload: { content: '# Wrong parent\n' },
+  });
+  assert.equal(applySyncEvent(causalState, wrongParent).status, 'conflict');
 });
 
 test('[req:OBS-SEC-SYNC] sync carries only a canonical policy reference and never duplicates Observer authority', () => {

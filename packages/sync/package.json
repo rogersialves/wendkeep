@@ -1,0 +1,6 @@
+{
+  "name": "@wendkeep/sync",
+  "private": true,
+  "type": "module",
+  "exports": "./src/index.mjs"
+}

@@ -4,7 +4,7 @@
 
 - **Branch:** `wk/architecture-packages-0x`
 - **Dependências:** fases 01–03 integradas
-- **Estado:** bloqueada
+- **Estado:** implementada na issue #84; fechamento registrado em `issue-84-execution.md`
 
 Extrair domínios sem quebrar exports legados nem criar ciclos.
 

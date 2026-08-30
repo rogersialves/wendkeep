@@ -3,16 +3,13 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join, relative } from 'node:path';
+import { evaluateVerdict, tasksHashOf } from '../packages/contracts/src/verdict.mjs';
+export { evaluateVerdict, tasksHashOf } from '../packages/contracts/src/verdict.mjs';
 import { getLocale } from './locale.mjs';
 import {
   assertVaultPathSafe, assertVaultPathsSafe, mkdirVaultPath,
   writeVaultFileAtomic, writeVaultFileSync,
 } from './vault-path-safety.mjs';
-
-// Canonical SHA-256 fingerprint of tarefas.md — freshness binding between package/verdict and gate.
-export function tasksHashOf(md) {
-  return `sha256:${createHash('sha256').update(String(md).replace(/\r\n?/g, '\n')).digest('hex')}`;
-}
 
 export function contentHashOf(value) {
   return createHash('sha256').update(String(value)).digest('hex');
@@ -540,35 +537,4 @@ export function buildSpecPromotionPlan(vaultBase, changeDir, specs, {
   plan.changes = changes;
   promoted.push(...materialized.map((item) => item.capability));
   return { promoted, warnings, changes, plan };
-}
-
-export function evaluateVerdict(verdict, reqIds, {
-  tasksHash,
-  effectiveSpecHash,
-  evidenceEnvelopeId,
-  evidenceBinding,
-} = {}) {
-  const ids = reqIds || [];
-  if (ids.length === 0 && !evidenceEnvelopeId) return { ok: true, missing: [] };
-  if (!verdict || verdict.ok !== true) return { ok: false, missing: [] };
-  if (evidenceEnvelopeId && verdict.evidenceEnvelopeId !== evidenceEnvelopeId) {
-    return { ok: false, missing: [], stale: true };
-  }
-  if (evidenceBinding && (!verdict.evidenceBinding || Object.entries(evidenceBinding).some(
-    ([key, value]) => verdict.evidenceBinding[key] !== value,
-  ))) {
-    return { ok: false, missing: [], stale: true };
-  }
-  if (ids.length === 0) return { ok: true, missing: [] };
-  // Freshness (G3/#6): a verdict minted against a different tarefas.md is stale. Verdicts
-  // without a hash (pre-0.6.1) are accepted for backward compat.
-  if (tasksHash && verdict.tasksHash && verdict.tasksHash !== tasksHash) {
-    return { ok: false, missing: [], stale: true };
-  }
-  if (effectiveSpecHash && verdict.effectiveSpecHash && verdict.effectiveSpecHash !== effectiveSpecHash) {
-    return { ok: false, missing: [], stale: true };
-  }
-  const covered = new Set((verdict.coverage || []).filter((c) => c.covered).map((c) => c.req));
-  const missing = ids.filter((r) => !covered.has(r));
-  return { ok: missing.length === 0, missing };
 }

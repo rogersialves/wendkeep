@@ -11,6 +11,14 @@
       "command": "node --test --test-concurrency=1"
     },
     {
+      "id": "release-hardening",
+      "name": "Release hardening 0.90 focused gate",
+      "description": "Validates package graph, migrations, CI and supply-chain policy, bilingual docs, release metadata and provenance without the global suite",
+      "severity": "critical",
+      "type": "command",
+      "command": "npm run test:release-hardening:remote"
+    },
+    {
       "id": "universal-commit",
       "name": "Universal commit focused contract",
       "description": "Validates evidence-derived commit input, Git hooks, semantic proof binding and the remote range gate",

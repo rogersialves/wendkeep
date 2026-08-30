@@ -5,16 +5,26 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const SURFACES = ['cli', 'commit', 'harness', 'integrations', 'mcp', 'observer', 'pi', 'vault'];
+const SURFACES = [
+  'cli', 'commit', 'contracts', 'evidence', 'harness', 'integrations', 'mcp', 'migrations',
+  'observer', 'pi', 'sync', 'vault', 'worktrees',
+];
 const PUBLIC_PACKAGE_EXPORTS = new Map([
   ['./commit', './packages/commit/src/index.mjs'],
+  ['./contracts', './packages/contracts/src/index.mjs'],
+  ['./evidence', './packages/evidence/src/index.mjs'],
   ['./harness', './packages/harness/src/index.mjs'],
   ['./vault', './packages/vault/src/index.mjs'],
+  ['./mcp', './packages/mcp/src/index.mjs'],
+  ['./migrations', './packages/migrations/src/index.mjs'],
+  ['./observer', './packages/observer/src/index.mjs'],
+  ['./sync', './packages/sync/src/index.mjs'],
+  ['./worktrees', './packages/worktrees/src/index.mjs'],
 ]);
 
 const json = (path) => JSON.parse(readFileSync(path, 'utf8'));
 
-test('[req:MOD-1] root inventory keeps eight exact private workspaces and only approved public surfaces', () => {
+test('[req:MOD-1] root inventory keeps every exact private workspace and approved public surface', () => {
   const root = json(join(ROOT, 'package.json'));
   const packageDirs = readdirSync(join(ROOT, 'packages'), { withFileTypes: true })
     .filter((entry) => entry.isDirectory()
@@ -34,5 +44,5 @@ test('[req:MOD-1] root inventory keeps eight exact private workspaces and only a
   const packageExports = Object.entries(root.exports)
     .filter(([, target]) => String(target).startsWith('./packages/'));
   assert.deepEqual(new Map(packageExports), PUBLIC_PACKAGE_EXPORTS);
-  assert.equal(Object.hasOwn(root.exports, './observer'), false);
+  assert.equal(root.exports['./observer'], './packages/observer/src/index.mjs');
 });

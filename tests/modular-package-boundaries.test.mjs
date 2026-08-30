@@ -7,7 +7,10 @@ import { parse } from 'acorn';
 import { importSpecifiers } from './helpers/import-specifiers.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const SURFACES = ['cli', 'commit', 'harness', 'integrations', 'mcp', 'observer', 'pi', 'vault'];
+const SURFACES = [
+  'cli', 'commit', 'contracts', 'evidence', 'harness', 'integrations', 'mcp', 'migrations',
+  'observer', 'pi', 'sync', 'vault', 'worktrees',
+];
 const ADAPTERS = new Set(['cli', 'mcp', 'integrations', 'pi']);
 const INITIAL_MEMORY_KERNEL = [
   { module: 'memory-schema.mjs', legacy: '../hooks/memory-schema.mjs' },
@@ -30,6 +33,44 @@ const INTEGRATIONS_KERNEL = [
   'session-identity.mjs',
 ];
 const EFFECTFUL_BUILTINS = /^(?:node:)?(?:child_process|cluster|dgram|dns|fs|fs\/promises|http|https|net|readline|tls|worker_threads)$/;
+const DOMAIN_FACADES = [
+  ['src/sync-protocol.mjs', '../packages/sync/src/sync-protocol.mjs'],
+  ['src/sync-outbox.mjs', '../packages/sync/src/sync-outbox.mjs'],
+  ['src/sync-adapters.mjs', '../packages/sync/src/sync-adapters.mjs'],
+  ['src/tdd-attestation.mjs', '../packages/contracts/src/tdd-attestation.mjs'],
+  ['src/tdd-attestation-store.mjs', '../packages/contracts/src/tdd-attestation-store.mjs'],
+  ['src/evidence-envelope.mjs', '../packages/evidence/src/evidence-envelope.mjs'],
+  ['src/provenance-gate.mjs', '../packages/evidence/src/provenance-gate.mjs'],
+  ['src/provenance-sources.mjs', '../packages/evidence/src/provenance-sources.mjs'],
+  ['src/receipt-ledger.mjs', '../packages/evidence/src/receipt-ledger.mjs'],
+];
+const PACKAGE_COMPOSITION_IMPORTS = new Map([
+  ['packages/cli/src/index.mjs', new Set([
+    '../../../src/taxonomy.mjs', '../../../src/project-vault.mjs', '../../../src/flow.mjs',
+    '../../../src/delivery.mjs', '../../../src/profile.mjs', '../../../src/context.mjs',
+    '../../../src/portable.mjs', '../../../src/mcp.mjs', '../../../src/capabilities.mjs',
+    '../../../src/ecosystem-bridges.mjs', '../../../src/init.mjs', '../../../src/doctor.mjs',
+    '../../../src/observer.mjs', '../../../src/worktree.mjs', '../../../src/sync.mjs',
+    '../../../src/memory.mjs', '../../../src/validate-core.mjs', '../../../src/memory-curate.mjs',
+    '../../../src/sync-defs.mjs', '../../../src/change.mjs', '../../../src/task.mjs',
+    '../../../src/tdd.mjs', '../../../src/session.mjs', '../../../src/theme.mjs',
+    '../../../src/verify.mjs', '../../../src/lessons.mjs', '../../../src/spec.mjs',
+    '../../../src/sensors.mjs', '../../../src/cost.mjs', '../../../src/stats.mjs',
+    '../../../src/import.mjs', '../../../src/vault-views.mjs', '../../../src/renumber.mjs',
+    '../../../src/note.mjs',
+  ])],
+  ['packages/commit/src/git-runtime.mjs', new Set([
+    '../../../src/active-context-runtime.mjs', '../../../hooks/active-context-store.mjs',
+    '../../../hooks/spec-core.mjs',
+  ])],
+  ['packages/mcp/src/executor.mjs', new Set([
+    '../../../src/project-vault.mjs', '../../../src/operating-profile.mjs',
+    '../../../src/context.mjs', '../../../src/memory.mjs',
+    '../../../src/active-context-runtime.mjs', '../../../hooks/change-core.mjs',
+    '../../../hooks/active-context-store.mjs', '../../../hooks/obsidian-common.mjs',
+    '../../../src/observer-sql-store.mjs',
+  ])],
+]);
 
 function json(path) {
   return JSON.parse(readFileSync(path, 'utf8'));
@@ -108,7 +149,7 @@ function assertAdapterSiblings(graph) {
   }
 }
 
-test('[req:MOD-1] root declares all eight internal workspaces exactly once', () => {
+test('[req:MOD-22] root declares every control-plane workspace and public domain export exactly once', () => {
   const root = json(join(ROOT, 'package.json'));
   const packageDirs = readdirSync(join(ROOT, 'packages'), { withFileTypes: true })
     .filter((entry) => entry.isDirectory()
@@ -126,6 +167,23 @@ test('[req:MOD-1] root declares all eight internal workspaces exactly once', () 
   assert.ok(SURFACES.every((surface) => json(
     join(ROOT, 'packages', surface, 'package.json'),
   ).private === true));
+  for (const surface of [
+    'contracts', 'evidence', 'mcp', 'migrations', 'observer', 'sync', 'worktrees',
+  ]) {
+    assert.equal(root.exports[`./${surface}`], `./packages/${surface}/src/index.mjs`, `missing public ${surface} export`);
+  }
+});
+
+test('[req:MOD-23] legacy domain modules are pure facades over package-owned implementations', async () => {
+  for (const [legacyPath, canonicalSpecifier] of DOMAIN_FACADES) {
+    const legacy = join(ROOT, legacyPath);
+    assertPureFacade(legacy, canonicalSpecifier);
+    const [canonical, facade] = await Promise.all([
+      import(canonicalSpecifier),
+      import(`../${legacyPath}`),
+    ]);
+    assertSameBindings(canonical, canonical, facade, legacyPath);
+  }
 });
 
 test('[req:MOD-2] wendkeep/vault and legacy paths expose identical bindings', async () => {
@@ -258,8 +316,15 @@ test('[req:MOD-20] [req:MOD-21] Integrations is a private, inert adapter sibling
   assert.equal(Object.hasOwn(root.exports, './*'), false);
   const publicPackageTargets = new Set([
     './packages/commit/src/index.mjs',
+    './packages/contracts/src/index.mjs',
+    './packages/evidence/src/index.mjs',
     './packages/harness/src/index.mjs',
+    './packages/mcp/src/index.mjs',
+    './packages/migrations/src/index.mjs',
+    './packages/observer/src/index.mjs',
+    './packages/sync/src/index.mjs',
     './packages/vault/src/index.mjs',
+    './packages/worktrees/src/index.mjs',
   ]);
   assert.equal(
     Object.entries(root.exports).some(([key, target]) => (
@@ -354,4 +419,35 @@ test('[req:MOD-21] package dependency direction is acyclic', () => {
     ])),
     /adapter dependency forbidden: pi -> mcp/,
   );
+});
+
+test('[req:MOD-21] packages cannot import legacy src/hooks outside explicit composition roots', () => {
+  const packagesRoot = join(ROOT, 'packages');
+  const violations = [];
+  const observedCompositionImports = new Map(
+    [...PACKAGE_COMPOSITION_IMPORTS].map(([file]) => [file, new Set()]),
+  );
+  for (const file of moduleFilesUnder(packagesRoot)) {
+    const relativeFile = normalizedRelative(ROOT, file);
+    for (const specifier of importSpecifiers(file)) {
+      if (!specifier.startsWith('.')) continue;
+      let target;
+      try { target = resolve(dirname(file), decodeURIComponent(specifier)); }
+      catch { continue; }
+      const escaped = normalizedRelative(packagesRoot, target);
+      if (escaped !== '..' && !escaped.startsWith('../')) continue;
+      const allowed = PACKAGE_COMPOSITION_IMPORTS.get(relativeFile);
+      if (allowed?.has(specifier)) observedCompositionImports.get(relativeFile).add(specifier);
+      else violations.push(`${relativeFile} -> ${specifier}`);
+    }
+  }
+  assert.deepEqual(violations, []);
+  assert.deepEqual(observedCompositionImports, PACKAGE_COMPOSITION_IMPORTS);
+
+  const detectorTarget = resolve(
+    dirname(join(ROOT, 'packages', 'worktrees', 'src', 'probe.mjs')),
+    '../../../hooks/active-context-store.mjs',
+  );
+  const escaped = normalizedRelative(packagesRoot, detectorTarget);
+  assert.equal(escaped.startsWith('../'), true, 'mutant reverse import must be detected');
 });

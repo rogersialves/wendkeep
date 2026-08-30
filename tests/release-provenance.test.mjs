@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url';
 import {
   collectArtifactAtCommit,
   evaluateReleaseProvenance,
+  extractVerifiedNpmAttestation,
   packIntegrityInIsolatedCopy,
   parsePackIntegrity,
   packageHasSelfDependency,
@@ -17,14 +18,61 @@ import {
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
+const integrity = 'sha512-ZYzzo6cFr9OUG8nSEb7Gq0/pPdk8uHzP/MICWyTqn9DXGygcIgcpVjGIQrnqd1y206eoD39M55b9btGepIvGhw==';
+const digest = Buffer.from(integrity.slice('sha512-'.length), 'base64').toString('hex');
+const commit = 'a'.repeat(40);
+
+function verifiedAudit(overrides = {}) {
+  const statement = {
+    _type: 'https://in-toto.io/Statement/v1',
+    subject: [{ name: 'pkg:npm/wendkeep@0.72.1', digest: { sha512: digest } }],
+    predicateType: 'https://slsa.dev/provenance/v1',
+    predicate: {
+      buildDefinition: {
+        externalParameters: { workflow: {
+          ref: 'refs/heads/main',
+          repository: 'https://github.com/rogersialves/wendkeep',
+          path: '.github/workflows/auto-tag.yml',
+        } },
+        resolvedDependencies: [{
+          uri: 'git+https://github.com/rogersialves/wendkeep@refs/heads/main',
+          digest: { gitCommit: commit },
+        }],
+      },
+    },
+    ...overrides,
+  };
+  return {
+    verified: [{
+      name: 'wendkeep', version: '0.72.1',
+      attestations: [{ bundle: { dsseEnvelope: {
+        payloadType: 'application/vnd.in-toto+json',
+        payload: Buffer.from(JSON.stringify(statement)).toString('base64'),
+      } } }],
+    }],
+  };
+}
+
+function publishedAttestation(overrides = {}) {
+  return {
+    verified: true,
+    subjectSha512: digest,
+    repository: 'rogersialves/wendkeep',
+    commit,
+    workflow: '.github/workflows/auto-tag.yml',
+    ...overrides,
+  };
+}
+
 function provenance(overrides = {}) {
   return {
     name: 'wendkeep',
     version: '0.72.1',
-    headCommit: 'a'.repeat(40),
-    tagCommit: 'a'.repeat(40),
-    publishedIntegrity: 'sha512-published',
-    localIntegrity: 'sha512-published',
+    headCommit: commit,
+    tagCommit: commit,
+    publishedIntegrity: integrity,
+    localIntegrity: integrity,
+    publishedAttestation: publishedAttestation(),
     requirePublished: true,
     ...overrides,
   };
@@ -72,16 +120,53 @@ test('[req:REL-PROV-5] tarball publicado divergente do SHA testado é rejeitado'
   assert.equal(result.code, 'tarball_integrity_mismatch');
 });
 
-test('[req:REL-PROV-5] tag, commit e integridade iguais produzem receipt verificável', () => {
+test('[req:REL-PROV-5] tag, commit, integridade e attestation iguais produzem receipt verificável', () => {
   assert.deepEqual(evaluateReleaseProvenance(provenance()), {
     ok: true,
     code: 'verified',
     name: 'wendkeep',
     version: '0.72.1',
     tag: 'v0.72.1',
-    commit: 'a'.repeat(40),
-    integrity: 'sha512-published',
+    commit,
+    integrity,
+    attestation: publishedAttestation(),
   });
+});
+
+test('[req:REL-PROV-5] bytes publicados iguais nunca atribuem um commit sem attestation verificada', () => {
+  const result = evaluateReleaseProvenance(provenance({ publishedAttestation: null }));
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'published_attestation_missing');
+});
+
+test('[req:REL-PROV-5] attestation de outro subject, commit ou repositório falha fechada', () => {
+  for (const forgedAttestation of [
+    { ...publishedAttestation(), subjectSha512: '0'.repeat(128) },
+    { ...publishedAttestation(), commit: 'b'.repeat(40) },
+    { ...publishedAttestation(), repository: 'attacker/fork' },
+    { ...publishedAttestation(), workflow: '.github/workflows/other.yml' },
+  ]) {
+    const result = evaluateReleaseProvenance(provenance({ publishedAttestation: forgedAttestation }));
+    assert.equal(result.ok, false);
+    assert.equal(result.code, 'published_attestation_mismatch');
+  }
+});
+
+test('[req:REL-PROV-5] parser aceita apenas bundle SLSA dentro de verified e ligado ao subject/SHA', () => {
+  const context = {
+    name: 'wendkeep', version: '0.72.1', integrity,
+    repository: 'rogersialves/wendkeep', commit,
+    workflow: '.github/workflows/auto-tag.yml',
+  };
+  assert.deepEqual(extractVerifiedNpmAttestation(verifiedAudit(), context), publishedAttestation());
+  assert.equal(extractVerifiedNpmAttestation({ attestations: verifiedAudit().verified }, context), null,
+    'bundles fora do array verified não são prova criptográfica');
+  assert.equal(extractVerifiedNpmAttestation(verifiedAudit({
+    subject: [{ name: 'pkg:npm/wendkeep@0.72.1', digest: { sha512: '0'.repeat(128) } }],
+  }), context), null);
+  assert.equal(extractVerifiedNpmAttestation(verifiedAudit({
+    predicate: { buildDefinition: { resolvedDependencies: [] } },
+  }), context), null);
 });
 
 test('[req:REL-PROV-5] verificação pós-publicação falha se o registry ainda não comprova o pacote', () => {

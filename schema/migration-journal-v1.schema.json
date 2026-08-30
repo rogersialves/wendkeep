@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wendkeep.dev/schema/migration-journal-v1.schema.json",
+  "title": "WendKeep migration journal v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "resource", "status", "from_version", "to_version",
+    "before_sha256", "backup_sha256", "steps"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "resource": { "enum": ["vault", "ledger", "active-contexts", "observer", "portable"] },
+    "status": { "const": "running" },
+    "from_version": { "type": "integer", "minimum": 0 },
+    "to_version": { "type": "integer", "minimum": 0 },
+    "before_sha256": { "$ref": "#/$defs/sha256" },
+    "backup_sha256": { "$ref": "#/$defs/sha256" },
+    "steps": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "from_version", "to_version", "status"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "from_version": { "type": "integer", "minimum": 0 },
+          "to_version": { "type": "integer", "minimum": 1 },
+          "status": { "enum": ["pending", "writing", "completed"] },
+          "before_sha256": { "$ref": "#/$defs/sha256" },
+          "expected_after_sha256": { "$ref": "#/$defs/sha256" },
+          "after_sha256": { "$ref": "#/$defs/sha256" },
+          "recovered_after_write": { "const": true }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" }
+  }
+}

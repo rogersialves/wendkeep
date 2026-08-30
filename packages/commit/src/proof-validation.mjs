@@ -1,14 +1,21 @@
 import { createHash } from 'node:crypto';
 import { basename, isAbsolute } from 'node:path';
 
-import { parseTasks } from '../../../hooks/change-core.mjs';
-import { evaluateVerdict, tasksHashOf } from '../../../hooks/spec-core.mjs';
-import { deriveTaskContracts, evaluateTaskContracts } from '../../../src/task-contracts.mjs';
-import { evaluateTddAttestation } from '../../../src/tdd-attestation.mjs';
-import { sensorConfigSha256 } from '../../../src/evidence-envelope.mjs';
-import { classifyReceipt } from '../../../src/provenance-gate.mjs';
-import { verifyReceiptChain } from '../../../src/receipt-ledger.mjs';
+import {
+  deriveTaskContracts,
+  evaluateTaskContracts,
+  evaluateTddAttestation,
+  evaluateVerdict,
+  parseTasks,
+  tasksHashOf,
+} from '../../contracts/src/index.mjs';
+import {
+  classifyReceipt,
+  sensorConfigSha256,
+  verifyReceiptChain,
+} from '../../evidence/src/index.mjs';
 import { requiredSensors, runSensors } from '../../harness/src/sensors-core.mjs';
+import { canonicalCommitStringOrder } from './commit-input.mjs';
 import {
   canonicalSha256,
   evaluateEvidenceBinding,
@@ -437,7 +444,7 @@ export function validateCommitProofSet({ entries, authority, stagedHash, context
       ref: signedEvidenceRef(entry.path, entry.content),
       status: 'verified',
     })),
-    tasks: task.renderedTasks,
+    tasks: canonicalCommitStringOrder(task.renderedTasks),
     tests: [...new Set(tests)].sort((left, right) => left.localeCompare(right, 'en')),
   };
 }

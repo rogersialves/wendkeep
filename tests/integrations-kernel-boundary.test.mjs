@@ -156,8 +156,15 @@ test('[req:MOD-20] Integrations workspace declares and owns its private host ker
   assert.equal(Object.hasOwn(root.exports || {}, './*'), false, 'root wildcard would expose private workspaces');
   const publicPackageTargets = new Set([
     './packages/commit/src/index.mjs',
+    './packages/contracts/src/index.mjs',
+    './packages/evidence/src/index.mjs',
     './packages/harness/src/index.mjs',
+    './packages/mcp/src/index.mjs',
+    './packages/migrations/src/index.mjs',
+    './packages/observer/src/index.mjs',
+    './packages/sync/src/index.mjs',
     './packages/vault/src/index.mjs',
+    './packages/worktrees/src/index.mjs',
   ]);
   assert.equal(
     Object.entries(root.exports || {}).some(([key, target]) => (

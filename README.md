@@ -19,16 +19,15 @@ Na projeção das sessões, metadados internos terminais são removidos somente 
 assistente; relatos do usuário permanecem. Tags XML-like são gravadas como texto escapado para não
 serem interpretadas como HTML no modo de leitura do Obsidian.
 
-O runtime está sendo separado em seis fronteiras físicas — `cli`, `harness`, `vault`, `mcp`,
-`integrations` e `pi` — sem fragmentar a instalação. Os workspaces privados `cli`, `harness`,
-`vault`, `mcp` e `integrations` agora são donos canônicos do runtime do executável, dos Perfis de
-Operação/engine de sensores, do binding seguro/kernel da Shared Project Memory v2, do kernel de
-configuração MCP e das regras puras de integração com Claude/Codex, respectivamente. O pacote raiz
-expõe Harness e Vault em `wendkeep/harness` e `wendkeep/vault`; CLI, MCP e Integrations permanecem
-superfícies privadas, acessíveis somente pelos binários, pelos efeitos de configuração do `init` e
-pelas fachadas históricas. Os imports históricos continuam funcionando por
-fachadas de compatibilidade e nenhum dado de sessão precisa ser migrado;
-veja a [arquitetura modular](docs/pt-BR/architecture.md).
+O runtime está separado em treze fronteiras físicas — `cli`, `commit`, `contracts`, `evidence`,
+`harness`, `integrations`, `mcp`, `migrations`, `observer`, `pi`, `sync`, `vault` e `worktrees` — sem fragmentar a instalação.
+O pacote raiz publica exatamente `wendkeep/commit`, `wendkeep/contracts`, `wendkeep/evidence`,
+`wendkeep/harness`, `wendkeep/mcp`, `wendkeep/migrations`, `wendkeep/observer`, `wendkeep/sync`,
+`wendkeep/vault` e `wendkeep/worktrees`. CLI, Pi e Integrations seguem privados; todos os workspaces
+`@wendkeep/*` não são pacotes independentes. Facades históricas preservam identidade na linha 0.x.
+Veja a [arquitetura modular](docs/pt-BR/architecture.md), a
+[compatibilidade](docs/pt-BR/compatibility.md), as [migrations](docs/pt-BR/migrations.md) e a
+[política de suporte](docs/pt-BR/support-policy.md).
 
 Na fase **0.66 Integrations Kernel**, `packages/integrations/src/` passa a ser a autoridade
 canônica para o catálogo e a projeção de hooks, o envelope/provider, os filtros e parsers de
@@ -36,8 +35,8 @@ conteúdo e uso de transcripts e a identidade de sessão. Essas regras são pura
 ambiente, filesystem, Vault e registry continuam nas fachadas históricas. MCP e Integrations são
 adapters irmãos sem dependência entre si, e a direção continua `cli/mcp/integrations/pi → Harness
 → Vault`. Hooks, sessões, paths, configs e schemas permanecem equivalentes; o workspace privado
-`@wendkeep/integrations` segue dentro do único pacote publicado `wendkeep`, sem subpath público
-`wendkeep/integrations`. A próxima fase é Pi.
+`@wendkeep/integrations` segue dentro do único pacote publicado `wendkeep`, sem subpath público;
+consumidores usam as fachadas históricas suportadas e deep imports de `packages/` permanecem bloqueados.
 
 O workspace **MCP nativo** agora serve tools semânticas de projeto, contexto, memória, changes,
 specs, tarefas, handoff, evidência e Observer por `wendkeep mcp serve`. Um catálogo versionado e
@@ -258,7 +257,7 @@ O README mostra o mapa; os guias trazem sintaxe, opções, códigos de saída, e
 | **Notas e conhecimento** | BUG/APR/ADR, reparos, renumeração, lessons e dashboard | [Notas e conhecimento](https://github.com/rogersialves/wendkeep/blob/main/docs/pt-BR/commands/notes-and-knowledge.md) |
 | **Custos e observabilidade** | dry-run seguro, tri-state, agregação, tendências e rebuild histórico | [Custos e observabilidade](https://github.com/rogersialves/wendkeep/blob/main/docs/pt-BR/commands/costs-and-observability.md) |
 | **Manutenção e diagnóstico** | doctor, frescor do frontier/manifest, drift, versão e ajuda | [Manutenção e diagnóstico](https://github.com/rogersialves/wendkeep/blob/main/docs/pt-BR/commands/maintenance-and-diagnostics.md) |
-| **Commits baseados em evidências** | `wendkeep commit`, tasks derivadas de contratos, tests somente da reexecução canônica vinculada ao SHA, hooks Git opt-in, privacidade e gate remoto | [Commits](https://github.com/rogersialves/wendkeep/blob/main/docs/pt-BR/commands/commit.md) |
+| **Commits baseados em evidências** | `wendkeep commit`, tasks derivadas e ordenadas canonicamente, tests somente da reexecução vinculada ao SHA, hooks Git opt-in, privacidade e gate remoto | [Commits](https://github.com/rogersialves/wendkeep/blob/main/docs/pt-BR/commands/commit.md) |
 | **Observer local** | `observer serve`, bootstrap hash-only escopado/expirável, publicação incremental com timestamps canônicos, `reconcile`, policy, identidades estruturais estáveis, hashes vinculados ao conteúdo, captura segura de exclusões, criptografia obrigatória, retenção, purge e índice multi-projeto | [Observer local](https://github.com/rogersialves/wendkeep/blob/main/docs/pt-BR/commands/observer.md) · [Segurança](https://github.com/rogersialves/wendkeep/blob/main/docs/pt-BR/commands/observer-security.md) |
 
 Operações que merecem instrução passo a passo: [verify e seus exits 0/1/2](https://github.com/rogersialves/wendkeep/blob/main/docs/pt-BR/commands/verify.md),

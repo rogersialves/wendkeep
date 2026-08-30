@@ -9,6 +9,7 @@ import { protectObserverEvent, readObserverPolicy } from '../packages/observer/s
 import {
   chunkMarkdownDocument, recallEvidence, recallTerms,
 } from '../packages/vault/src/evidence-recall.mjs';
+import { planNativeControlPlaneMigration } from '../packages/migrations/src/index.mjs';
 
 export const OBSERVER_SQL_FILE = 'observer.sqlite';
 export const OBSERVER_SQL_SCHEMA_VERSION = 6;
@@ -184,6 +185,17 @@ export function migrateObserverDatabase(db, { backupEncryption = null, requireEn
   if (!migrationColumns.includes('checksum')) db.exec("ALTER TABLE schema_migrations ADD COLUMN checksum TEXT NOT NULL DEFAULT ''");
   const appliedRows = db.prepare('SELECT version, name, checksum FROM schema_migrations ORDER BY version').all();
   const applied = new Map(appliedRows.map((row) => [Number(row.version), row]));
+  const sourceVersion = appliedRows.length ? Number(appliedRows.at(-1).version) : 0;
+  for (let version = 1; version <= sourceVersion; version += 1) {
+    if (!applied.has(version)) {
+      throw Object.assign(
+        new Error(`Observer migration history has a gap before version ${version}.`),
+        { code: 'WENDKEEP_MIGRATION_STATE_DIVERGED' },
+      );
+    }
+  }
+  const migrationPlan = planNativeControlPlaneMigration('observer', sourceVersion);
+  const plannedVersions = new Set(migrationPlan.steps.map((version) => version + 1));
   const backups = [];
   for (const file of migrationFiles()) {
     const version = Number(file.split('-')[0]);
@@ -200,6 +212,12 @@ export function migrateObserverDatabase(db, { backupEncryption = null, requireEn
         db.prepare('UPDATE schema_migrations SET checksum = ? WHERE version = ?').run(checksum, version);
       }
       continue;
+    }
+    if (!plannedVersions.has(version)) {
+      throw Object.assign(
+        new Error(`Observer migration ${version} is outside the canonical migration plan.`),
+        { code: 'WENDKEEP_MIGRATION_STATE_DIVERGED' },
+      );
     }
     if (/^\s*--\s*wendkeep:structural\b/m.test(sql) && applied.size > 0) {
       const databasePath = DATABASE_PATHS.get(db);
@@ -228,6 +246,7 @@ export function migrateObserverDatabase(db, { backupEncryption = null, requireEn
     version: Number(db.prepare('SELECT COALESCE(MAX(version), 0) AS version FROM schema_migrations').get().version || 0),
     applied: db.prepare('SELECT version, name, applied_at, checksum FROM schema_migrations ORDER BY version').all(),
     backups,
+    migration_plan: migrationPlan,
   };
 }
 

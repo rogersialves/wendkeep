@@ -1328,6 +1328,7 @@ test('[req:MOD-17] legacy wrappers must own their exported binding without later
 test('[req:MOD-18] MCP kernel preserves the canonical transport and selects descriptors deterministically', async () => {
   const {
     mcpServerEntry,
+    renderMcpClientConfig,
     selectMcpServers,
   } = await import(pathToFileURL(MCP_INDEX).href);
 
@@ -1341,18 +1342,29 @@ test('[req:MOD-18] MCP kernel preserves the canonical transport and selects desc
   const last = { type: 'stdio', command: 'last', args: ['--safe'] };
   assert.deepEqual(
     selectMcpServers([
+      null,
       { id: 'ignored' },
+      { id: 'invalid-key', key: '', entry: first },
+      { id: 'invalid-entry', key: 'invalid', entry: null },
       { id: 'first', key: 'shared', entry: first },
       { id: 'skipped', key: 'skip-me', entry: first },
       { id: 'last', key: 'shared', entry: last },
     ], ['skipped']),
     { shared: last },
   );
+  assert.deepEqual(selectMcpServers(), {});
+  assert.match(renderMcpClientConfig('codex', 'C:\\Vault'), /^\[mcp_servers\.wendkeep-vault\]/);
+  for (const client of ['generic', 'claude', 'cursor']) {
+    const rendered = JSON.parse(renderMcpClientConfig(client, '/vault'));
+    assert.equal(rendered.mcpServers['wendkeep-vault'].args.at(-1), '/vault');
+  }
+  assert.throws(() => renderMcpClientConfig('unknown', '/vault'), { code: 'MCP_CLIENT_INVALID' });
 });
 
 test('[req:MOD-18] MCP merge is immutable, idempotent, and preserves existing configuration', async () => {
   const {
     MCP_SERVER_KEY,
+    mcpServerEntry,
     mergeMcpConfig,
   } = await import(pathToFileURL(MCP_INDEX).href);
 
@@ -1392,6 +1404,8 @@ test('[req:MOD-18] MCP merge is immutable, idempotent, and preserves existing co
     baseline.mcpServers[MCP_SERVER_KEY],
     'withVault false preserves a consumer entry instead of deleting it',
   );
+  assert.deepEqual(mergeMcpConfig(null, { vaultPath: '/vault' }).mcpServers[MCP_SERVER_KEY],
+    mcpServerEntry('/vault'));
 });
 
 test('[req:MOD-18] MCP merge preserves baseline precedence: existing, Vault, then companions', async () => {

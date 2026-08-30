@@ -34,6 +34,9 @@ test('[req:OBS-SEC-MIGRATE] v5 database upgrades to security schema with backup,
 
     const result = migrateObserverDatabase(db);
     assert.equal(result.version, 6);
+    assert.deepEqual(result.migration_plan, {
+      resource: 'observer', from_version: 5, to_version: 6, steps: [5],
+    });
     assert.equal(result.backups.some((path) => /pre-006-\d+\.bak$/.test(path)), true);
     assert.equal(db.prepare("SELECT content FROM documents WHERE project_id = 'project-a'").get().content, '# Preserved');
     for (const table of ['observer_tokens', 'observer_access_audit', 'observer_purge_receipts', 'observer_retention_policies']) {
@@ -43,6 +46,7 @@ test('[req:OBS-SEC-MIGRATE] v5 database upgrades to security schema with backup,
     assert.deepEqual(db.prepare('PRAGMA foreign_key_check').all(), []);
     const replay = migrateObserverDatabase(db);
     assert.equal(replay.version, 6);
+    assert.deepEqual(replay.migration_plan.steps, []);
     assert.equal(replay.backups.length, 0);
   } finally {
     db.close();

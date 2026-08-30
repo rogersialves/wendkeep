@@ -8,6 +8,7 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 
 import { readSessionRegistry } from '../hooks/obsidian-common.mjs';
 import { discoverWorktreeRepository, readWorktreeRegistry } from '../packages/vault/src/worktree-metadata.mjs';
+import { migratePortableState } from '../packages/migrations/src/index.mjs';
 import { resolveProjectVault } from './project-vault.mjs';
 
 const SCHEMA_VERSION = 1;
@@ -158,6 +159,12 @@ function parseTasks(content = '') {
 
 function digestArtifacts(artifacts, predicate) {
   return sha256(canonicalJson(artifacts.filter(predicate).map(({ path, content_sha256 }) => ({ path, content_sha256 }))));
+}
+
+export function upgradePortableState(state) {
+  return migratePortableState(state, {
+    digestArtifacts: (artifacts) => digestArtifacts(artifacts, () => true),
+  });
 }
 
 function activeWorkOf({ activeContexts, artifacts, repositoryId, baseSha = '', headSha = '', now }) {
@@ -428,7 +435,9 @@ function readStateFile(path) {
 }
 
 export function importPortableState({ vaultBase, projectRoot = process.cwd(), state, input, now } = {}) {
-  const raw = state || readStateFile(input || join(projectRoot, ...pathParts(DEFAULT_RELATIVE_PATH)));
+  const raw = upgradePortableState(
+    state || readStateFile(input || join(projectRoot, ...pathParts(DEFAULT_RELATIVE_PATH))),
+  );
   const validated = validateState(raw, vaultBase);
   const registryContexts = Object.values(readSessionRegistry(vaultBase).active_contexts || {});
   const current = buildPortableState({
@@ -470,7 +479,9 @@ function inferredBuildOptions({ vaultBase, projectRoot, state }) {
 }
 
 export function diffPortableState({ vaultBase, projectRoot = process.cwd(), input, state } = {}) {
-  const expected = validateState(state || readStateFile(input || join(projectRoot, ...pathParts(DEFAULT_RELATIVE_PATH))), vaultBase);
+  const expected = validateState(upgradePortableState(
+    state || readStateFile(input || join(projectRoot, ...pathParts(DEFAULT_RELATIVE_PATH))),
+  ), vaultBase);
   const actual = buildPortableState(inferredBuildOptions({ vaultBase, projectRoot, state: expected }));
   const left = artifactMap(expected);
   const right = artifactMap(actual);

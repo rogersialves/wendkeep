@@ -57,7 +57,7 @@ test('[req:OBS-SEC-MCP] sensitive MCP reads require project-scoped capability an
     ] });
     registerObserverToken(db, {
       tokenId: 'mcp-auditor', token: 'mcp-auditor-secret', role: 'auditor', projectIds: [fixture.projectId],
-      scopes: ['usage:calls:read'], createdAt: '2026-08-29T12:00:00.000Z', expiresAt: '2026-08-30T12:00:00.000Z',
+      scopes: ['usage:calls:read'], createdAt: '2026-08-29T12:00:00.000Z', expiresAt: '2099-01-01T00:00:00.000Z',
     });
   } finally { db.close(); }
   const previous = {

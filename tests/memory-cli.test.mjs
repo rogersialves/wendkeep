@@ -348,6 +348,9 @@ test('memory migrate é dry-run por padrão e não toca nenhum byte', async () =
     const { migrateMemory } = await import('../src/memory.mjs');
     const result = migrateMemory(vault);
     assert.equal(result.status, 'dry-run');
+    assert.deepEqual(result.migration_plan, {
+      resource: 'vault', from_version: 0, to_version: 2, steps: [0, 1],
+    });
     assert.equal(readFileSync(join(vault, '.brain', 'SHARED_MEMORY.md'), 'utf8'), before);
     assert.equal(existsSync(join(vault, '.brain', 'MEMORY_EVENTS.jsonl')), false);
     assert.equal(existsSync(result.backupPath), false);

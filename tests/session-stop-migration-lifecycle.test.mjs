@@ -235,6 +235,16 @@ test('[req:MEM-STOP-1] [req:MEM-STOP-7] removing lifecycle staging makes the ful
       { recursive: true },
     );
     cpSync(
+      join(ROOT, 'packages', 'contracts'),
+      join(mutantRoot, 'packages', 'contracts'),
+      { recursive: true },
+    );
+    cpSync(
+      join(ROOT, 'packages', 'evidence'),
+      join(mutantRoot, 'packages', 'evidence'),
+      { recursive: true },
+    );
+    cpSync(
       join(ROOT, 'packages', 'integrations'),
       join(mutantRoot, 'packages', 'integrations'),
       { recursive: true },
@@ -242,6 +252,11 @@ test('[req:MEM-STOP-1] [req:MEM-STOP-7] removing lifecycle staging makes the ful
     cpSync(
       join(ROOT, 'packages', 'mcp'),
       join(mutantRoot, 'packages', 'mcp'),
+      { recursive: true },
+    );
+    cpSync(
+      join(ROOT, 'packages', 'migrations'),
+      join(mutantRoot, 'packages', 'migrations'),
       { recursive: true },
     );
 
