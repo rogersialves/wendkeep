@@ -193,7 +193,7 @@ jobs:
           if npm view "$PKG@$VERSION" version --prefer-online >/dev/null 2>&1; then
             echo "$PKG@$VERSION já está no registry — publish idempotente"
           else
-            npm publish artifacts/release-candidate.tgz --provenance
+            npm publish ./artifacts/release-candidate.tgz --provenance
           fi
       - name: Create verified tag
         env:
