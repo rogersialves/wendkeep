@@ -26,6 +26,7 @@ const GUIDE_SLUGS = [
   'evidence-embeddings.md',
   'capabilities.md',
   'tdd.md',
+  'commit.md',
 ];
 
 function filesUnder(dir, base = dir) {

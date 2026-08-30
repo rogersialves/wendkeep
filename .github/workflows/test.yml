@@ -14,6 +14,8 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
 
       - name: Set up Node.js 18
         uses: actions/setup-node@v5
@@ -32,6 +34,12 @@ jobs:
           node-version: 22.13.0
 
       - run: npm ci --ignore-scripts
+
+      - name: Validate evidence-based commit messages
+        run: >-
+          node scripts/validate-commit-range.mjs
+          --base "${{ github.event.pull_request.base.sha }}"
+          --head "${{ github.event.pull_request.head.sha }}"
 
       - name: Run full Linux suite
         run: npm test

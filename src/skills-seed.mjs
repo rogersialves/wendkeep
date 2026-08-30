@@ -524,6 +524,83 @@ the author — even if you wrote the code, enter as if you'd never seen it. Fres
 - \`verdict-template.json\` — the exact shape of the \`verdict.json\` to write.
 `;
 
+const WK_COMMIT = `# Commit universal baseado em evidências
+
+Use para preparar commits de implementação que precisem do contrato WendKeep. O gerador recebe
+somente referências sanitizadas e o diff staged resumido; nunca leia, copie ou publique o Vault,
+\`.brain\`, registros de sessão, tokens ou segredos na mensagem.
+
+## Fluxo
+
+1. Confirme que autoridade e referências de evidência estão atuais. O draft **não aceita** texto
+   caller-controlled em \`tasks\` ou \`tests\`: o runtime deriva tasks de Task Contracts concluídos;
+   Tests vêm somente de \`[sensor:<id>]\` executado pelo coletor.
+   Sensors do Envelope devem corresponder exatamente à reexecução; só a reexecução gera Tests.
+   \`[phase:verify]\` sozinho nunca prova execução, e o range reexecuta o sensor no SHA exato,
+   rederiva authority/artefatos/task/spec/Scope/config no SHA. Envelope/Verdict/receipt/TDD ficam
+   somente na validação local e são omitidos da Evidence remota; nunca publique seus IDs locais.
+   Tasks com \`[req:]\` exigem \`spec\` versionada e sanitizada. Use
+   \`authority.kind: adr\` sempre que existe uma change ou ADR causal. Somente sob perfil observado
+   \`OFF\`, sem context/change/lease ou ADR causal real, use \`authority.kind: native\`, com
+   \`Issue #NNN\` e design versionado sob \`docs/superpowers/specs/\` ou \`plans/\`.
+2. Crie um JSON conforme \`schema/commit-message-v1.schema.json\`. Não declare \`fresh\`,
+   \`verified\`, \`tasks\` ou \`tests\`: o runtime rederiva prova, digest SHA-256 do artefato,
+   binding completo de identidade/snapshot/tasks/spec/config e Scope do diff staged. Expected
+   ausente, envelope vazio, task pendente,
+   verdict sem selos/cobertura/independência ou
+   receipt sem chain/observation válidos falham fechados. \`Co-Authored-By\` é omitido
+   enquanto não houver identidade registrada confiável.
+3. Com os arquivos já staged, rode
+   \`wendkeep commit context --input <arquivo.json>\`. O CLI calcula o hash do index e grava o
+   contexto sanitizado dentro de \`.git\`, fora do working tree.
+4. Rode \`git commit\` normalmente. Os hooks opt-in revalidam contexto, hash, privacidade e
+   trivialidade antes de consumir o contexto. Instale-os
+   explicitamente com \`wendkeep init --git-commit-hooks --yes\`.
+5. Para diagnóstico, rode \`wendkeep doctor\`; para limpar contexto abandonado, use
+   \`wendkeep commit context --clear\`.
+
+Não use \`--no-verify\` para implementação. Amend, merge e squash preservam a mensagem existente e
+não recebem conteúdo inventado. A validação remota do PR continua sendo a defesa contra bypass.
+`;
+
+const WK_COMMIT_EN = `# Evidence-based universal commit
+
+Use this skill to prepare implementation commits governed by the WendKeep message contract. The
+generator receives sanitized references and a staged-diff summary only; never read, copy, or publish
+the Vault, \`.brain\`, session registries, tokens, or secrets into a commit message.
+
+## Flow
+
+1. Confirm that authority and evidence references are current. The draft **does not accept**
+   caller-controlled \`tasks\` or \`tests\`; runtime derives tasks from completed Task Contracts.
+   Tests come only from a collector-executed \`[sensor:<id>]\`.
+   Envelope sensors must exactly match reexecution; only reexecution emits Tests.
+   \`[phase:verify]\` alone never proves execution, and range re-executes the sensor at the exact
+   SHA and re-derives authority/artifacts/task/spec/Scope/config there. Envelope/Verdict/receipt/TDD
+   stay local-only and are omitted from remote Evidence; never publish their local IDs. Tasks with
+   \`[req:]\` require a versioned sanitized \`spec\`. Use \`authority.kind: adr\`
+   whenever a causal change or ADR exists. Only under observed profile \`OFF\`, with no real causal
+   context/change/lease or ADR, use \`authority.kind: native\` with \`Issue #NNN\` and a versioned
+   design under \`docs/superpowers/specs/\` or \`plans/\`.
+2. Create JSON matching \`schema/commit-message-v1.schema.json\`. Do not claim \`fresh\`,
+   \`verified\`, \`tasks\`, or \`tests\`: runtime re-derives proof, artifact SHA-256, canonical
+   full identity/snapshot/tasks/spec/config binding, and staged-diff Scope. Missing expected fields,
+   empty envelopes, pending tasks, verdicts without
+   seals/coverage/independence, and receipts
+   without a valid chain/observation fail closed. \`Co-Authored-By\` is omitted
+   until a trusted identity registry can resolve it.
+3. After staging the files, run \`wendkeep commit context --input <file.json>\`. The CLI hashes the
+   Git index and stores the sanitized context inside \`.git\`, outside the working tree.
+4. Run \`git commit\` normally. The opt-in hooks revalidate context, hash, privacy, and triviality
+   before consuming context. Install them
+   explicitly with \`wendkeep init --git-commit-hooks --yes\`.
+5. Run \`wendkeep doctor\` for diagnostics; abandon a context with
+   \`wendkeep commit context --clear\`.
+
+Do not use \`--no-verify\` for implementation work. Amend, merge, and squash preserve the existing
+message and never receive invented content. The PR range check remains the remote bypass defense.
+`;
+
 // --- bundled templates (shipped alongside the relevant SKILL.md) -------------
 
 // Shared, language-neutral verdict skeleton for the independent verify pass.
@@ -709,6 +786,7 @@ const WK_SKILLS_PT = [
   skill('wk-brainstorming', 'Use quando a ideia ainda é vaga ou o usuário quer discutir/planejar uma feature (inclusive em plan mode) — vira design aprovado, com closure gate e tabela out-of-scope, antes de código.', BRAINSTORMING, [{ name: 'design-template.md', content: DESIGN_TEMPLATE_PT }]),
   skill('wk-planning', 'Use após um design aprovado ou um plano aceito (inclusive plan mode) — decompõe em plano de tarefas TDD bite-sized e registra na change ativa.', PLANNING, [{ name: 'plan-template.md', content: PLAN_TEMPLATE_PT }]),
   skill('wk-verify', 'Use no verify deep — passe independente read-only (autor≠verificador) que re-deriva a cobertura do spec e grava verdict.json.', VERIFY, [{ name: 'spec-reviewer-prompt.md', content: REVIEWER_PROMPT_PT }, { name: 'verdict-template.json', content: VERDICT_TEMPLATE }]),
+  skill('wk-commit', 'Use ao preparar commits de implementação baseados em autoridade causal, tarefas, testes e evidências verificadas, com hooks Git opt-in e privacidade local.', WK_COMMIT),
 ];
 
 const WK_SKILLS_EN = [
@@ -718,6 +796,7 @@ const WK_SKILLS_EN = [
   skill('wk-brainstorming', 'Use when the idea is still vague or the user wants to discuss/plan a feature (plan mode included) — turns it into an approved design, with a closure gate and out-of-scope table, before code.', BRAINSTORMING_EN, [{ name: 'design-template.md', content: DESIGN_TEMPLATE_EN }]),
   skill('wk-planning', 'Use after an approved design or an accepted plan (plan mode included) — decomposes it into a bite-sized TDD task plan recorded in the active change.', PLANNING_EN, [{ name: 'plan-template.md', content: PLAN_TEMPLATE_EN }]),
   skill('wk-verify', 'Use in verify deep — an independent read-only pass (author≠verifier) that re-derives spec coverage and writes verdict.json.', VERIFY_EN, [{ name: 'spec-reviewer-prompt.md', content: REVIEWER_PROMPT_EN }, { name: 'verdict-template.json', content: VERDICT_TEMPLATE }]),
+  skill('wk-commit', 'Use when preparing implementation commits from causal authority, tasks, tests, and verified evidence, with opt-in Git hooks and local privacy.', WK_COMMIT_EN),
 ];
 
 // Skill set for a locale. WK_SKILLS stays the pt-BR set for back-compat.

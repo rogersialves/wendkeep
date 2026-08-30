@@ -28,6 +28,7 @@ const GUIDES = [
   'evidence-embeddings.md',
   'capabilities.md',
   'tdd.md',
+  'commit.md',
 ];
 const GUIDE_DIR = {
   pt: join(ROOT, 'docs', 'pt-BR', 'commands'),
@@ -61,6 +62,7 @@ const README_GROUPS = [
   { pt: 'Notas e conhecimento', en: 'Notes and knowledge', guide: 'notes-and-knowledge.md' },
   { pt: 'Custos e observabilidade', en: 'Costs and observability', guide: 'costs-and-observability.md' },
   { pt: 'Manutenção e diagnóstico', en: 'Maintenance and diagnostics', guide: 'maintenance-and-diagnostics.md' },
+  { pt: 'Commits baseados em evidências', en: 'Evidence-based commits', guide: 'commit.md' },
   { pt: 'Observer local', en: 'Local Observer', guide: 'observer.md' },
 ];
 const DEEP_GUIDES = ['verify.md', 'tdd.md', 'memory-migration.md', 'retroactive-import.md'];
@@ -73,6 +75,7 @@ const GUIDE_FOR_FAMILY = new Map([
   ['wendkeep profile', 'operating-profiles.md'], ['wendkeep flow', 'operating-profiles.md'],
   ['wendkeep delivery', 'operating-profiles.md'],
   ['wendkeep hook', 'sessions-and-import.md'], ['wendkeep doctor', 'maintenance-and-diagnostics.md'],
+  ['wendkeep commit', 'commit.md'],
   ['wendkeep change', 'changes-and-verification.md'], ['wendkeep theme sync', 'maintenance-and-diagnostics.md'],
   ['wendkeep session', 'sessions-and-import.md'], ['wendkeep spec', 'changes-and-verification.md'],
   ['wendkeep sensors', 'changes-and-verification.md'], ['wendkeep task', 'changes-and-verification.md'],
@@ -116,6 +119,7 @@ const SEMANTIC_CONCEPTS = {
   'evidence-embeddings.md': { pt: [/embeddings/i, /local/i, /budget/i], en: [/embeddings/i, /local/i, /budget/i] },
   'capabilities.md': { pt: [/lifecycle/i, /degradad/i, /waiver/i], en: [/lifecycle/i, /degraded/i, /waiver/i] },
   'tdd.md': { pt: [/atesta/i, /RED/i, /waiver/i], en: [/attestation/i, /RED/i, /waiver/i] },
+  'commit.md': { pt: [/evidência/i, /staged/i, /privad/i], en: [/evidence/i, /staged/i, /private/i] },
 };
 
 const markdownLinks = (text) => [...text.matchAll(/\[[^\]]*\]\(([^)]+)\)/g)].map((m) => m[1]);

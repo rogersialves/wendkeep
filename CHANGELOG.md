@@ -4,6 +4,20 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.87.0] — 2026-08-29
+
+### Added
+
+- **Política universal de commits baseada em evidências.** O novo pacote `wendkeep/commit`, a CLI,
+  os hooks Git e o gate de intervalo produzem e validam mensagens determinísticas a partir de
+  autoridade, tarefas, spec, escopo e sensores rederiváveis no checkout exato do commit.
+
+### Security
+
+- **Prova remota limitada ao que o CI consegue rederivar.** Evidências causais locais permanecem
+  não publicadas; alegações remotas indisponíveis, provas circulares, sensores divergentes,
+  adulterações de escopo e caminhos privados falham de modo fechado antes da persistência.
+
 ## [0.86.0] — 2026-08-28
 
 ### Added
