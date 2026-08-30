@@ -17,6 +17,8 @@ import { parseSessionCost, } from './cost.mjs';
 import { buildSessionIdentityMap, listMigrationDocuments, parseFrontmatter, sessionEvents } from './observer-sql-migrate.mjs';
 import { observerAuthHeaders } from './observer-auth.mjs';
 import { sanitizeObserverContent, sanitizeObserverMetadata } from './observer-privacy.mjs';
+import { decryptObserverValue, encryptObserverValue } from '../packages/observer/src/encryption.mjs';
+import { createObserverPolicy, protectObserverEvent } from '../packages/observer/src/policy.mjs';
 
 export const SQL_OUTBOX_REL = '.brain/observer-sql-outbox';
 export const SQL_STATE_REL = '.brain/observer-sql-state.json';
@@ -54,6 +56,18 @@ function hash(value) { return createHash('sha256').update(typeof value === 'stri
 function eventId(kind, projectId, seed) { return `sql-${kind}-${hash(`${projectId}:${seed}`).slice(0, 24)}`; }
 function isoNow(value) {
   const date = value instanceof Date ? value : new Date(value || Date.now());
+  if (Number.isNaN(date.getTime())) throw new Error('occurred_at inválido.');
+  return date.toISOString();
+}
+function transcriptOccurredAt(value, fallback) {
+  const candidate = value === null || value === undefined
+    || (typeof value === 'string' && !value.trim())
+    ? fallback
+    : value;
+  if (!(candidate instanceof Date) && typeof candidate !== 'string' && typeof candidate !== 'number') {
+    throw new Error('occurred_at inválido.');
+  }
+  const date = candidate instanceof Date ? candidate : new Date(candidate);
   if (Number.isNaN(date.getTime())) throw new Error('occurred_at inválido.');
   return date.toISOString();
 }
@@ -167,12 +181,13 @@ function transcriptCalls({ projectId, sessionId, agentId, role, provider, modelF
       ? 'complete'
       : hash({ prompt, response, tokens, status: turn.status }).slice(0, 16);
     const callId = eventId('call', projectId, `${transcriptId}:${agentId}:${stableTurn}:${turnRevision}`);
+    const callOccurredAt = transcriptOccurredAt(turn.timestamp, occurredAt);
     return [{
       schema_version: 1,
       event_id: eventId('call-event', projectId, callId),
       kind: 'llm_call',
       project_id: projectId,
-      occurred_at: text(turn.timestamp, occurredAt),
+      occurred_at: callOccurredAt,
       payload: {
         call_id: callId,
         session_id: sessionId,
@@ -183,7 +198,7 @@ function transcriptCalls({ projectId, sessionId, agentId, role, provider, modelF
         model,
         effort: '',
         sequence: index + 1,
-        occurred_at: text(turn.timestamp, occurredAt),
+        occurred_at: callOccurredAt,
         tokens,
         cost_usd: 0,
         cost_status: 'unknown',
@@ -223,7 +238,7 @@ function completeTranscriptEvents({ projectId, sessionId, mainAgentId, provider,
     ? agentEvent({ projectId, sessionId, agentId, parentAgentId: mainAgentId, role: 'subagent', provider, model, input: source.agentInput, occurredAt: now })
     : null;
   const fingerprint = hash(content);
-  const transcript = captureLevel === 'full-transcript' ? {
+  const transcript = {
     schema_version: 1,
     event_id: eventId('transcript', projectId, `${source.transcriptId}:${fingerprint}`),
     kind: 'transcript.upsert',
@@ -238,7 +253,7 @@ function completeTranscriptEvents({ projectId, sessionId, mainAgentId, provider,
       source: 'hook-transcript',
       metadata: { source_label: basename(source.path), source_hash: hash(normalizePath(source.path)) },
     },
-  } : null;
+  };
   const calls = transcriptCalls({
     projectId,
     sessionId,
@@ -249,7 +264,7 @@ function completeTranscriptEvents({ projectId, sessionId, mainAgentId, provider,
     transcriptId: source.transcriptId,
     content,
     occurredAt: now,
-    includeMessages: captureLevel !== 'metadata',
+    includeMessages: true,
   });
   return { events: [agent, transcript, ...calls].filter(Boolean), fingerprint, transcriptId: source.transcriptId };
 }
@@ -263,10 +278,31 @@ function dedupeEvents(events) {
   });
 }
 
-export function buildObserverSqlEventBatch({ vaultBase, projectId, input = {}, now = new Date(), state = readState(vaultBase), remoteDocuments = {}, captureLevel = process.env.WENDKEEP_OBSERVER_CAPTURE_LEVEL || 'metadata', forceFull = false } = {}) {
+function applyObserverPolicy(events, policy) {
+  return events.map((event) => protectObserverEvent(event, { policy })).filter(Boolean);
+}
+
+function publisherPolicy(policy, captureLevel) {
+  if (policy) return createObserverPolicy(policy);
+  const legacy = normalizeObserverCaptureLevel(captureLevel);
+  return createObserverPolicy({
+    document_capture: 'full',
+    transcript_capture: legacy === 'full-transcript' ? 'full' : legacy,
+    prompt_capture: legacy === 'metadata' ? 'none' : 'full',
+    response_capture: legacy === 'metadata' ? 'none' : 'full',
+    usage_capture: 'calls',
+  });
+}
+
+function publisherCoverage(policy) {
+  return `policy:${policy.transcript_capture}`;
+}
+
+export function buildObserverSqlEventBatch({ vaultBase, projectId, input = {}, now = new Date(), state = readState(vaultBase), remoteDocuments = {}, captureLevel = process.env.WENDKEEP_OBSERVER_CAPTURE_LEVEL || 'metadata', forceFull = false, policy = null } = {}) {
   if (!vaultBase || !projectId) throw new Error('vaultBase e projectId são obrigatórios.');
   const occurredAt = isoNow(now);
-  const resolvedCaptureLevel = normalizeObserverCaptureLevel(captureLevel);
+  const effectivePolicy = publisherPolicy(policy, captureLevel);
+  const resolvedCaptureLevel = publisherCoverage(effectivePolicy);
   const nextState = { schema_version: SQL_SCHEMA_VERSION, files: { ...(state.files || {}) }, transcripts: { ...(state.transcripts || {}) } };
   const events = [];
   const sessionContexts = [];
@@ -326,7 +362,7 @@ export function buildObserverSqlEventBatch({ vaultBase, projectId, input = {}, n
       nextState.transcripts[context.fm.observability_transcript_id] ||= { content_hash: '', coverage: 'summary_only' };
     }
   }
-  return { events: dedupeEvents(events), nextState, scanned: Object.keys(nextState.files).length, changed };
+  return { events: applyObserverPolicy(dedupeEvents(events), effectivePolicy), nextState, scanned: Object.keys(nextState.files).length, changed };
 }
 
 function hookEventName(input = {}) {
@@ -366,6 +402,7 @@ export function buildObserverSqlIncrementalBatch({
   now = new Date(),
   state = readState(vaultBase),
   captureLevel = process.env.WENDKEEP_OBSERVER_CAPTURE_LEVEL || 'metadata',
+  policy = null,
 } = {}) {
   if (!vaultBase || !projectId) throw new Error('vaultBase e projectId são obrigatórios.');
   const eventName = hookEventName(input);
@@ -381,7 +418,8 @@ export function buildObserverSqlIncrementalBatch({
   if (!context) return { events: [], nextState, scanned: 0, changed: 0, scope: 'drain-only' };
 
   const occurredAt = isoNow(now);
-  const resolvedCaptureLevel = normalizeObserverCaptureLevel(captureLevel);
+  const effectivePolicy = publisherPolicy(policy, captureLevel);
+  const resolvedCaptureLevel = publisherCoverage(effectivePolicy);
   const events = [];
   let changed = 0;
   const safeContent = sanitizeObserverContent(context.content);
@@ -451,7 +489,7 @@ export function buildObserverSqlIncrementalBatch({
     changed += 1;
   }
   return {
-    events: dedupeEvents(events),
+    events: applyObserverPolicy(dedupeEvents(events), effectivePolicy),
     nextState,
     scanned: 1,
     changed,
@@ -459,10 +497,30 @@ export function buildObserverSqlIncrementalBatch({
   };
 }
 
-function queueOutbox(vaultBase, batch) {
+function outboxAad(path) { return `observer-outbox:${basename(path)}`; }
+
+function writeOutbox(path, batch, encryption = null) {
+  if (!encryption) return atomicJson(path, batch);
+  return atomicJson(path, {
+    schema_version: 1,
+    protected: true,
+    envelope: encryptObserverValue(encryption, JSON.stringify(batch), { aad: outboxAad(path) }),
+  });
+}
+
+function readOutbox(path, fallback = null, encryption = null) {
+  const stored = readJson(path, fallback);
+  if (!stored?.protected) return stored;
+  if (!encryption) {
+    throw Object.assign(new Error('Chave da outbox protegida indisponível.'), { code: 'observer_encryption_key_unavailable' });
+  }
+  return JSON.parse(decryptObserverValue(encryption, stored.envelope, { aad: outboxAad(path) }));
+}
+
+function queueOutbox(vaultBase, batch, encryption = null) {
   mkdirSync(outboxDir(vaultBase), { recursive: true });
   const path = outboxPath(vaultBase, batch);
-  if (!existsSync(path)) atomicJson(path, batch);
+  if (!existsSync(path)) writeOutbox(path, batch, encryption);
   return path;
 }
 
@@ -521,29 +579,32 @@ function releaseBatchFileLease(lease) {
 }
 
 /** Queue a precise writer batch and replace older pending state for the same logical scope. */
-export function enqueueObserverSqlBatch(vaultBase, batch, { scope = 'incremental', now = new Date() } = {}) {
+export function enqueueObserverSqlBatch(vaultBase, batch, { scope = 'incremental', now = new Date(), encryption = null, policy = null } = {}) {
   if (!batch?.project_id || !Array.isArray(batch.events)) throw new Error('Batch incremental do Observer inválido.');
+  if (policy?.encryption_required && !encryption) {
+    throw Object.assign(new Error('A policy exige criptografia antes de enfileirar eventos do Observer.'), { code: 'observer_encryption_required' });
+  }
   if (!batch.events.length) return { queued: false, events: 0, path: '' };
   mkdirSync(outboxDir(vaultBase), { recursive: true });
   const path = join(outboxDir(vaultBase), `sql-live-${hash(`${batch.project_id}:${scope}`).slice(0, 24)}.json`);
   const lease = acquireBatchFileLease(path, 200);
   if (!lease) {
-    const fallback = queueOutbox(vaultBase, { ...batch, enqueued_at: isoNow(now), scope });
+    const fallback = queueOutbox(vaultBase, { ...batch, enqueued_at: isoNow(now), scope }, encryption);
     return { queued: true, events: batch.events.length, path: fallback, coalesced: false };
   }
   try {
-    const existing = readJson(path, { events: [] });
+    const existing = existsSync(path) ? readOutbox(path, { events: [] }, encryption) : { events: [] };
     const merged = new Map();
     for (const event of [...(existing.events || []), ...batch.events]) merged.set(eventCoalesceKey(event), event);
     const timestamp = isoNow(now);
-    atomicJson(path, {
+    writeOutbox(path, {
       schema_version: SQL_SCHEMA_VERSION,
       project_id: batch.project_id,
       scope,
       enqueued_at: existing.enqueued_at || timestamp,
       updated_at: timestamp,
       events: [...merged.values()],
-    });
+    }, encryption);
     return { queued: true, events: merged.size, path, coalesced: true };
   } finally {
     releaseBatchFileLease(lease);
@@ -557,6 +618,7 @@ export function enqueueObserverDocumentChange({
   logicalPath,
   deleted = false,
   now = new Date(),
+  outboxEncryption = null,
 } = {}) {
   const normalized = normalizePath(logicalPath);
   if (!vaultBase || !projectId || !normalized || normalized.startsWith('/') || normalized.includes('..')) {
@@ -599,21 +661,26 @@ export function enqueueObserverDocumentChange({
     schema_version: SQL_SCHEMA_VERSION,
     project_id: projectId,
     events: [event],
-  }, { scope: `document:${normalized}`, now });
+  }, { scope: `document:${normalized}`, now, encryption: outboxEncryption });
   atomicJson(statePath(vaultBase), nextState);
   return { ...queued, event_id: event.event_id, deleted };
 }
 
-export function listSqlOutbox(vaultBase) {
+export function listSqlOutbox(vaultBase, { encryption = null } = {}) {
   const dir = outboxDir(vaultBase);
   if (!existsSync(dir)) return [];
   return readdirSync(dir).filter((name) => /^sql-(?:live-)?[a-f0-9]{24}\.json$/.test(name)).sort().flatMap((name) => {
-    try { return [{ path: join(dir, name), ...JSON.parse(readFileSync(join(dir, name), 'utf8')) }]; } catch { return []; }
+    const path = join(dir, name);
+    try { return [{ path, ...readOutbox(path, null, encryption) }]; }
+    catch (error) {
+      if (error?.code === 'observer_encryption_key_unavailable' || error?.code === 'observer_decryption_failed') throw error;
+      return [];
+    }
   });
 }
 
-export function inspectObserverSqlOutbox(vaultBase, currentTime = Date.now()) {
-  const batches = listSqlOutbox(vaultBase);
+export function inspectObserverSqlOutbox(vaultBase, currentTime = Date.now(), { encryption = null } = {}) {
+  const batches = listSqlOutbox(vaultBase, { encryption });
   let bytes = 0;
   let oldestAt = '';
   let events = 0;
@@ -720,8 +787,8 @@ async function postSqlBatch({ url, projectId, events, fetchImpl = globalThis.fet
   return aggregate;
 }
 
-export async function retryObserverSqlOutbox({ vaultBase, projectId, url, fetchImpl = globalThis.fetch, token = process.env.WENDKEEP_OBSERVER_TOKEN || '' } = {}) {
-  const pending = listSqlOutbox(vaultBase);
+export async function retryObserverSqlOutbox({ vaultBase, projectId, url, fetchImpl = globalThis.fetch, token = process.env.WENDKEEP_OBSERVER_TOKEN || '', outboxEncryption = null } = {}) {
+  const pending = listSqlOutbox(vaultBase, { encryption: outboxEncryption });
   if (!url) return { attempted: 0, confirmed: 0, pending: pending.length };
   const lease = acquirePublisherLease(vaultBase);
   if (!lease) return { attempted: 0, confirmed: 0, pending: pending.length, busy: true };
@@ -734,7 +801,7 @@ export async function retryObserverSqlOutbox({ vaultBase, projectId, url, fetchI
       if (!batchLease) continue;
       attempted += 1;
       try {
-        const current = readJson(batch.path, null);
+        const current = readOutbox(batch.path, null, outboxEncryption);
         if (!current?.events?.length) continue;
         await postSqlBatch({ url, projectId, events: current.events, fetchImpl, token });
         if (existsSync(batch.path)) unlinkSync(batch.path);
@@ -742,7 +809,7 @@ export async function retryObserverSqlOutbox({ vaultBase, projectId, url, fetchI
       } catch { break; }
       finally { releaseBatchFileLease(batchLease); }
     }
-    return { attempted, confirmed, pending: listSqlOutbox(vaultBase).length, busy: false };
+    return { attempted, confirmed, pending: listSqlOutbox(vaultBase, { encryption: outboxEncryption }).length, busy: false };
   } finally {
     releasePublisherLease(lease);
   }
@@ -758,20 +825,25 @@ export async function publishObserverSqlIncremental({
   fetchImpl = globalThis.fetch,
   token = process.env.WENDKEEP_OBSERVER_TOKEN || '',
   captureLevel = process.env.WENDKEEP_OBSERVER_CAPTURE_LEVEL || 'metadata',
+  outboxEncryption = null,
+  policy = null,
 } = {}) {
+  if (policy?.encryption_required && !outboxEncryption) {
+    throw Object.assign(new Error('A policy exige criptografia da outbox do Observer.'), { code: 'observer_encryption_required' });
+  }
   if (!vaultBase || !projectId) throw new Error('vaultBase e projectId são obrigatórios.');
   const state = readState(vaultBase);
   const batch = buildObserverSqlIncrementalBatch({
-    vaultBase, projectId, input, now, state, captureLevel,
+    vaultBase, projectId, input, now, state, captureLevel, policy,
   });
   const queued = enqueueObserverSqlBatch(vaultBase, {
     schema_version: SQL_SCHEMA_VERSION,
     project_id: projectId,
     events: batch.events,
-  }, { scope: batch.scope, now });
+  }, { scope: batch.scope, now, encryption: outboxEncryption, policy });
   if (batch.events.length) atomicJson(statePath(vaultBase), batch.nextState);
-  const replay = await retryObserverSqlOutbox({ vaultBase, projectId, url, fetchImpl, token });
-  const pending = listSqlOutbox(vaultBase).length;
+  const replay = await retryObserverSqlOutbox({ vaultBase, projectId, url, fetchImpl, token, outboxEncryption });
+  const pending = listSqlOutbox(vaultBase, { encryption: outboxEncryption }).length;
   return {
     ok: pending === 0,
     queued: pending > 0,
@@ -784,30 +856,33 @@ export async function publishObserverSqlIncremental({
   };
 }
 
-export async function publishObserverSql({ vaultBase, projectId, url = process.env.WENDKEEP_OBSERVER_URL || '', input = {}, now = new Date(), fetchImpl = globalThis.fetch, token = process.env.WENDKEEP_OBSERVER_TOKEN || '', captureLevel = process.env.WENDKEEP_OBSERVER_CAPTURE_LEVEL || 'metadata', forceFull = false } = {}) {
+export async function publishObserverSql({ vaultBase, projectId, url = process.env.WENDKEEP_OBSERVER_URL || '', input = {}, now = new Date(), fetchImpl = globalThis.fetch, token = process.env.WENDKEEP_OBSERVER_TOKEN || '', captureLevel = process.env.WENDKEEP_OBSERVER_CAPTURE_LEVEL || 'metadata', forceFull = false, outboxEncryption = null, policy = null } = {}) {
+  if (policy?.encryption_required && !outboxEncryption) {
+    throw Object.assign(new Error('A policy exige criptografia da outbox do Observer.'), { code: 'observer_encryption_required' });
+  }
   if (!vaultBase || !projectId) throw new Error('vaultBase e projectId são obrigatórios.');
-  const replay = await retryObserverSqlOutbox({ vaultBase, projectId, url, fetchImpl, token });
+  const replay = await retryObserverSqlOutbox({ vaultBase, projectId, url, fetchImpl, token, outboxEncryption });
   const state = readState(vaultBase);
   const remoteDocuments = forceFull || Object.keys(state.files || {}).length === 0
     ? await readRemoteDocuments({ url, projectId, fetchImpl, token })
     : {};
-  const batch = buildObserverSqlEventBatch({ vaultBase, projectId, input, now, state, remoteDocuments, captureLevel, forceFull });
+  const batch = buildObserverSqlEventBatch({ vaultBase, projectId, input, now, state, remoteDocuments, captureLevel, forceFull, policy });
   if (!batch.events.length) {
     atomicJson(statePath(vaultBase), batch.nextState);
-    return { ok: true, queued: false, scanned: batch.scanned, changed: batch.changed, pending: listSqlOutbox(vaultBase).length, replay };
+    return { ok: true, queued: false, scanned: batch.scanned, changed: batch.changed, pending: listSqlOutbox(vaultBase, { encryption: outboxEncryption }).length, replay };
   }
   if (!url) {
-    queueOutbox(vaultBase, { schema_version: SQL_SCHEMA_VERSION, project_id: projectId, events: batch.events });
+    queueOutbox(vaultBase, { schema_version: SQL_SCHEMA_VERSION, project_id: projectId, events: batch.events }, outboxEncryption);
     atomicJson(statePath(vaultBase), batch.nextState);
-    return { ok: false, queued: true, scanned: batch.scanned, changed: batch.changed, pending: listSqlOutbox(vaultBase).length, replay, hookExitCode: 0 };
+    return { ok: false, queued: true, scanned: batch.scanned, changed: batch.changed, pending: listSqlOutbox(vaultBase, { encryption: outboxEncryption }).length, replay, hookExitCode: 0 };
   }
   try {
     const response = await postSqlBatch({ url, projectId, events: batch.events, fetchImpl, token });
     atomicJson(statePath(vaultBase), batch.nextState);
-    return { ok: true, queued: false, scanned: batch.scanned, changed: batch.changed, pending: listSqlOutbox(vaultBase).length, replay, response };
+    return { ok: true, queued: false, scanned: batch.scanned, changed: batch.changed, pending: listSqlOutbox(vaultBase, { encryption: outboxEncryption }).length, replay, response };
   } catch (error) {
-    queueOutbox(vaultBase, { schema_version: SQL_SCHEMA_VERSION, project_id: projectId, events: batch.events });
+    queueOutbox(vaultBase, { schema_version: SQL_SCHEMA_VERSION, project_id: projectId, events: batch.events }, outboxEncryption);
     atomicJson(statePath(vaultBase), batch.nextState);
-    return { ok: false, queued: true, scanned: batch.scanned, changed: batch.changed, pending: listSqlOutbox(vaultBase).length, replay, hookExitCode: 0, error: error.message };
+    return { ok: false, queued: true, scanned: batch.scanned, changed: batch.changed, pending: listSqlOutbox(vaultBase, { encryption: outboxEncryption }).length, replay, hookExitCode: 0, error: error.message };
   }
 }

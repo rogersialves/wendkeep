@@ -44,7 +44,8 @@ test('[req:OBS-LOCAL-1] dashboard serve HTML diretamente e assets allowlisted', 
     assert.match(page.body, /WendKeep Observer/);
     assert.match(page.body, /\/styles\.css/);
     assert.match(page.body, /\/app\.mjs/);
-    assert.doesNotMatch(page.body, /auth-form|token-input|PRIVATE LOCAL FEED/i);
+    assert.match(page.body, /observer-auth-form/);
+    assert.match(page.body, /observer-token-input/);
     assert.match(page.body, /id="dashboard-panel"/);
     assert.doesNotMatch(page.body, /id="dashboard-panel"[^>]+hidden/i);
     assert.equal(styles.status, 200);
@@ -60,7 +61,7 @@ test('[req:OBS-LOCAL-1] dashboard serve HTML diretamente e assets allowlisted', 
   }
 });
 
-test('[req:OBS-LOCAL-1] dashboard carrega projetos sem token ou Authorization', async () => {
+test('[req:OBS-SEC-UI] dashboard keeps the bearer token in request headers without persisting it in markup', async () => {
   const calls = [];
   const fetchImpl = async (url, options) => {
     calls.push({ url, options });
@@ -78,13 +79,14 @@ test('[req:OBS-LOCAL-1] dashboard carrega projetos sem token ou Authorization', 
       },
     });
   };
-  const data = await loadDashboardData(fetchImpl);
+  const data = await loadDashboardData(fetchImpl, 'dashboard-secret');
   assert.equal(data.length, 1);
   assert.equal(calls.length, 2);
   assert.deepEqual(calls.map((call) => call.options.headers), [
-    { Accept: 'application/json' }, { Accept: 'application/json' },
+    { Accept: 'application/json', Authorization: 'Bearer dashboard-secret' },
+    { Accept: 'application/json', Authorization: 'Bearer dashboard-secret' },
   ]);
-  assert.equal(calls.some((call) => Object.hasOwn(call.options.headers, 'Authorization')), false);
+  assert.equal(calls.every((call) => call.options.headers.Authorization === 'Bearer dashboard-secret'), true);
 });
 
 test('[req:OBS-LOCAL-1] view model mantém isolamento e resume cada projeto', () => {

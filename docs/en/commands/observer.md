@@ -26,7 +26,9 @@ WendKeep hooks.
 
 Use Node.js 22.13 or newer for the SQL Observer. Keep Core and the remaining commands continue to
 support Node.js 18 or newer. Explicitly register each project and set `WENDKEEP_OBSERVER_TOKEN`;
-loopback reads remain open, while every mutation requires a Bearer token.
+every mutation and every sensitive-content read requires a Bearer token, including on loopback.
+Metadata and aggregates may remain locally open when `--require-loopback-auth` is omitted. See
+[Observer security](observer-security.md).
 
 ## Syntax
 
@@ -36,7 +38,7 @@ npx wendkeep observer register --project <project> --vault <vault> --data-dir <d
 npx wendkeep observer publish --project <project> --vault <vault> --data-dir <directory>
 npx wendkeep observer reconcile --project <project> --vault <vault> --data-dir <directory> [--url http://127.0.0.1:8787]
 npx wendkeep observer memory import --project <project> --vault <vault> --url http://127.0.0.1:8787 --token <token> --json
-npx wendkeep observer serve --host 127.0.0.1 --port 8787 --data-dir <directory> --token <token>
+npx wendkeep observer serve --host 127.0.0.1 --port 8787 --data-dir <directory> --token <token> --bootstrap-projects <p1,p2> --bootstrap-expires-at <ISO> [--require-loopback-auth] [--require-encryption]
 ```
 
 ## Options and exit codes
@@ -46,7 +48,13 @@ npx wendkeep observer serve --host 127.0.0.1 --port 8787 --data-dir <directory> 
 - `--project` and `--vault` identify a project for `register`, `publish`, `reconcile`, and `memory import`.
 - `--host` accepts only `127.0.0.1`, `localhost`, or `::1`; other hosts are rejected before
   listening.
-- `--token` or `WENDKEEP_OBSERVER_TOKEN` authenticates mutations; `--allow-non-loopback` fails without one.
+- `--token` or `WENDKEEP_OBSERVER_TOKEN` supplies hash-only bootstrap material; explicit projects
+  and finite expiry are required, and all mutations/sensitive reads go through the registry;
+  `--allow-non-loopback` fails without one.
+- `--require-loopback-auth` also requires Bearer for local metadata and aggregates and enables the
+  project's secure ingestion policy.
+- `--require-encryption` requires a 32-byte hex/base64 `WENDKEEP_OBSERVER_ENCRYPTION_KEY`; use
+  `WENDKEEP_OBSERVER_ENCRYPTION_KEY_ID` to identify the external key.
 - `WENDKEEP_OBSERVER_CAPTURE_LEVEL` accepts `metadata` (default, no messages), `messages`, or
   `full-transcript`. Absolute local paths are never published.
 - Exit `0` means success; exit `1` means configuration or operation failure; the publisher hook
@@ -57,7 +65,10 @@ npx wendkeep observer serve --host 127.0.0.1 --port 8787 --data-dir <directory> 
 ```powershell
 npx wendkeep observer register --project C:\GitHub\WendKeep --vault C:\GitHub\WendKeep\.WendKeep-vault --data-dir C:\WendKeepObserver
 $env:WENDKEEP_OBSERVER_TOKEN = '<strong-local-token>'
-npx wendkeep observer serve --host 127.0.0.1 --port 8787 --data-dir C:\WendKeepObserver --token $env:WENDKEEP_OBSERVER_TOKEN
+$env:WENDKEEP_OBSERVER_BOOTSTRAP_PROJECTS = 'project-a'
+$env:WENDKEEP_OBSERVER_BOOTSTRAP_EXPIRES_AT = '2026-09-29T12:00:00Z'
+$env:WENDKEEP_OBSERVER_ENCRYPTION_KEY = '<32-bytes-in-hex-or-base64>'
+npx wendkeep observer serve --host 127.0.0.1 --port 8787 --data-dir C:\WendKeepObserver --token $env:WENDKEEP_OBSERVER_TOKEN --require-loopback-auth
 $env:WENDKEEP_OBSERVER_URL = 'http://127.0.0.1:8787'
 ```
 
@@ -67,15 +78,19 @@ For local Docker:
 docker compose -f docker/wendkeep-observer/compose.yaml up -d --build
 ```
 
+Compose requires token, bootstrap allowlist/expiry, and key material; it starts with full
+authentication and required encryption. An `encryption_required` policy refuses plaintext ingest/outbox.
+
 ## Local web dashboard
 
 With the server running, open [http://127.0.0.1:8787/](http://127.0.0.1:8787/) in a browser. The
-dashboard is served by the same process and opens directly for reads, without a form or token. Keep the port
-bound to the computer loopback; do not expose this address on a network interface.
+dashboard is served by the same process. Enter the token in the local form: it remains only in page
+memory, is sent as Bearer for queries, and is discarded on reload. Keep the port bound to the
+computer loopback; do not expose this address on a network interface.
 
 The dashboard shows the multi-project list, version, health, latest session, active change, change
 count, and last capture time. Opening a project exposes Overview, Consumption, Sessions, Memory,
-Changes, and Sync screens. Consumption shows total cost, token categories, primary agents,
+Changes, Sync, and Security screens. Consumption shows total cost, token categories, primary agents,
 subagents, providers, models, daily trend, historical coverage, and calls with prompt, response,
 and transcript content according to the selected capture level. Loading, empty, unavailable-server, conflict, no-pricing, and stale-data
 states are visible, with manual refresh and an automatic 15-second refresh.
@@ -160,18 +175,21 @@ complete, archive, repair, or promote state.
 - `POST /v1/projects/:project_id/ingest` — idempotent batches of documents, sessions, agents,
   rollups, calls, and transcripts.
 - `GET /v1/projects/:project_id/memory/tree` — document tree and metadata.
-- `GET /v1/projects/:project_id/memory/document?path=...` — complete Markdown content.
+- `GET /v1/projects/:project_id/memory/document?path=...` — complete Markdown content; requires Bearer.
 - `GET /v1/projects/:project_id/memory/search?q=...` — ranked chunk search with matching passage
-  and provenance; uses a lexical fallback when FTS5 is unavailable.
+  and provenance; uses a lexical fallback when FTS5 is unavailable and requires Bearer.
 - `GET /v1/projects/:project_id/sync` — mode, counts, conflicts, and latest event.
 - `PUT /v1/projects/:project_id/sync` — compatibility configuration; SQL remains authoritative.
-- `GET /v1/projects/:project_id/memory/export` — read-only export with complete content.
+- `GET /v1/projects/:project_id/memory/export` — read-only export sanitized by default; requires Bearer.
 - `POST /v1/projects/:project_id/memory/events` — idempotent batch ingestion.
 - `GET /v1/projects/:project_id/usage/summary` — filterable totals by period, change, session,
   agent, provider, model, and role.
 - `GET /v1/projects/:project_id/usage/breakdown` — agent, subagent, and model hierarchy.
-- `GET /v1/projects/:project_id/usage/calls` — individual calls with prompt and response.
-- `GET /v1/projects/:project_id/transcripts/:transcript_id` — compressed transcript validated by hash.
+- `GET /v1/projects/:project_id/usage/calls` — individual calls with prompt and response; requires Bearer.
+- `GET /v1/projects/:project_id/transcripts/:transcript_id` — compressed transcript validated by hash; requires Bearer.
+- `GET /v1/projects/:project_id/security` — policy, token counts, and sanitized audit; requires admin.
+- `PUT /v1/projects/:project_id/security/policy` — updates the effective policy without restart; requires admin.
+- `POST /v1/projects/:project_id/security/purge` — transactional dry-run/purge with receipt; requires admin.
 
 The `/v1` routes reject transported or expanded bodies above their limits and validate project,
 path, revision, hash, idempotency, and isolation before writing to SQLite. Use `memory/export` for

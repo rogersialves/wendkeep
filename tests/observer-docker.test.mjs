@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
-test('[req:OBS-LOCAL-3] Docker Observer publica somente loopback e não exige token', () => {
+test('[req:OBS-SEC-DOCKER] Docker Observer binds internally but requires injected auth and encryption material', () => {
   const composePath = join(ROOT, 'docker', 'wendkeep-observer', 'compose.yaml');
   const dockerfilePath = join(ROOT, 'docker', 'wendkeep-observer', 'Dockerfile');
   assert.equal(existsSync(composePath), true);
@@ -16,9 +16,15 @@ test('[req:OBS-LOCAL-3] Docker Observer publica somente loopback e não exige to
   assert.match(compose, /127\.0\.0\.1:8787:8787/);
   assert.match(compose, /observer-data/);
   assert.doesNotMatch(compose, /C:\\\\GitHub|\.WendKeep-vault/);
-  assert.doesNotMatch(compose, /WENDKEEP_OBSERVER_TOKEN|--token/);
+  assert.match(compose, /WENDKEEP_OBSERVER_TOKEN/);
+  assert.match(compose, /WENDKEEP_OBSERVER_TOKEN:\s*["']?\$\{WENDKEEP_OBSERVER_TOKEN:\?/);
+  assert.match(compose, /WENDKEEP_OBSERVER_BOOTSTRAP_PROJECTS:\s*["']?\$\{WENDKEEP_OBSERVER_BOOTSTRAP_PROJECTS:\?/);
+  assert.match(compose, /WENDKEEP_OBSERVER_BOOTSTRAP_EXPIRES_AT:\s*["']?\$\{WENDKEEP_OBSERVER_BOOTSTRAP_EXPIRES_AT:\?/);
+  assert.match(compose, /WENDKEEP_OBSERVER_ENCRYPTION_KEY:\s*["']?\$\{WENDKEEP_OBSERVER_ENCRYPTION_KEY:\?/);
   const dockerfile = readFileSync(dockerfilePath, 'utf8');
   assert.match(dockerfile, /healthz/);
   assert.match(dockerfile, /0\.0\.0\.0/);
   assert.match(dockerfile, /allow-non-loopback/);
+  assert.match(dockerfile, /require-loopback-auth/);
+  assert.match(dockerfile, /require-encryption/);
 });

@@ -26,7 +26,9 @@ pelos hooks e pelo WendKeep local.
 
 Tenha Node.js 22.13 ou mais recente para executar o Observer SQL. O Keep Core e os demais comandos
 continuam compatíveis com Node.js 18 ou mais recente. Registre explicitamente cada projeto e defina
-`WENDKEEP_OBSERVER_TOKEN`; leituras no loopback permanecem abertas, mas toda mutação exige Bearer.
+`WENDKEEP_OBSERVER_TOKEN`. Toda mutação e toda leitura de conteúdo sensível exigem Bearer, inclusive
+no loopback; metadados e agregados podem permanecer abertos localmente quando
+`--require-loopback-auth` não é usado. Veja [Segurança do Observer](observer-security.md).
 
 ## Sintaxe
 
@@ -36,7 +38,7 @@ npx wendkeep observer register --project <projeto> --vault <vault> --data-dir <d
 npx wendkeep observer publish --project <projeto> --vault <vault> --data-dir <diretório>
 npx wendkeep observer reconcile --project <projeto> --vault <vault> --data-dir <diretório> [--url http://127.0.0.1:8787]
 npx wendkeep observer memory import --project <projeto> --vault <vault> --url http://127.0.0.1:8787 --token <token> --json
-npx wendkeep observer serve --host 127.0.0.1 --port 8787 --data-dir <diretório> --token <token>
+npx wendkeep observer serve --host 127.0.0.1 --port 8787 --data-dir <diretório> --token <token> --bootstrap-projects <p1,p2> --bootstrap-expires-at <ISO> [--require-loopback-auth] [--require-encryption]
 ```
 
 ## Opções e códigos de saída
@@ -46,7 +48,13 @@ npx wendkeep observer serve --host 127.0.0.1 --port 8787 --data-dir <diretório>
 - `--project` e `--vault` identificam o projeto nos comandos `register`, `publish`, `reconcile` e `memory import`.
 - `--host` aceita somente `127.0.0.1`, `localhost` ou `::1`; outros hosts são recusados antes do
   listen.
-- `--token` ou `WENDKEEP_OBSERVER_TOKEN` autentica mutações; `--allow-non-loopback` falha sem token.
+- `--token` ou `WENDKEEP_OBSERVER_TOKEN` fornece o segredo de bootstrap hash-only; projetos
+  explícitos e expiração finita são obrigatórios, e toda mutação/leitura sensível passa pelo registry;
+  `--allow-non-loopback` falha sem token.
+- `--require-loopback-auth` exige Bearer também para metadados e agregados locais e ativa a policy
+  segura do projeto na ingestão.
+- `--require-encryption` exige `WENDKEEP_OBSERVER_ENCRYPTION_KEY` com 32 bytes em hex/base64; use
+  `WENDKEEP_OBSERVER_ENCRYPTION_KEY_ID` para identificar a chave externa.
 - `WENDKEEP_OBSERVER_CAPTURE_LEVEL` aceita `metadata` (padrão, sem mensagens), `messages` ou
   `full-transcript`. Caminhos locais absolutos nunca são publicados.
 - Exit `0` indica sucesso; exit `1` indica falha de configuração ou operação; o hook publisher
@@ -57,7 +65,10 @@ npx wendkeep observer serve --host 127.0.0.1 --port 8787 --data-dir <diretório>
 ```powershell
 npx wendkeep observer register --project C:\GitHub\WendKeep --vault C:\GitHub\WendKeep\.WendKeep-vault --data-dir C:\WendKeepObserver
 $env:WENDKEEP_OBSERVER_TOKEN = '<token-local-forte>'
-npx wendkeep observer serve --host 127.0.0.1 --port 8787 --data-dir C:\WendKeepObserver --token $env:WENDKEEP_OBSERVER_TOKEN
+$env:WENDKEEP_OBSERVER_BOOTSTRAP_PROJECTS = 'project-a'
+$env:WENDKEEP_OBSERVER_BOOTSTRAP_EXPIRES_AT = '2026-09-29T12:00:00Z'
+$env:WENDKEEP_OBSERVER_ENCRYPTION_KEY = '<32-bytes-em-hex-ou-base64>'
+npx wendkeep observer serve --host 127.0.0.1 --port 8787 --data-dir C:\WendKeepObserver --token $env:WENDKEEP_OBSERVER_TOKEN --require-loopback-auth
 $env:WENDKEEP_OBSERVER_URL = 'http://127.0.0.1:8787'
 ```
 
@@ -67,15 +78,19 @@ Para Docker local:
 docker compose -f docker/wendkeep-observer/compose.yaml up -d --build
 ```
 
+O Compose exige token, allowlist/expiração do bootstrap e chave; inicia com autenticação integral
+e criptografia obrigatória. A policy `encryption_required` recusa ingestão e outbox plaintext.
+
 ## Painel web local
 
 Com o servidor em execução, abra [http://127.0.0.1:8787/](http://127.0.0.1:8787/) no navegador.
-O painel é servido pelo mesmo processo e abre diretamente para consultas, sem formulário ou token. A porta fica
-presa ao loopback do computador; não coloque o endereço em uma interface de rede.
+O painel é servido pelo mesmo processo. Informe o token no formulário local: ele fica somente na
+memória da página, segue como Bearer nas consultas e é descartado ao recarregar. A porta fica presa
+ao loopback do computador; não coloque o endereço em uma interface de rede.
 
 O painel mostra a lista multi-projeto, versão, saúde, sessão mais recente, change ativa, contagem
 de changes e data da última captura. Ao abrir um projeto, o workspace oferece Overview, Consumo,
-Sessões, Memória, Changes e Sincronização. A aba Consumo mostra custo total, tokens por categoria,
+Sessões, Memória, Changes, Sincronização e Segurança. A aba Consumo mostra custo total, tokens por categoria,
 agentes principais, subagentes, provedores, modelos, tendência diária, cobertura histórica e
 chamadas conforme o nível de captura escolhido. Os estados de carregamento, vazio, servidor
 indisponível, conflito, modelo sem tarifa e dados desatualizados ficam visíveis, e a atualização
@@ -160,18 +175,21 @@ corte. As telas do Observer não concluem, arquivam, reparam ou promovem estado.
 - `POST /v1/projects/:project_id/ingest` — lote idempotente de documentos, sessões, agentes, rollups,
   chamadas e transcripts.
 - `GET /v1/projects/:project_id/memory/tree` — árvore e metadados dos documentos.
-- `GET /v1/projects/:project_id/memory/document?path=...` — conteúdo Markdown integral.
+- `GET /v1/projects/:project_id/memory/document?path=...` — conteúdo Markdown integral; exige Bearer.
 - `GET /v1/projects/:project_id/memory/search?q=...` — busca ranqueada por chunks, com trecho do
-  match e proveniência; usa fallback lexical quando FTS5 não está disponível.
+  match e proveniência; usa fallback lexical quando FTS5 não está disponível e exige Bearer.
 - `GET /v1/projects/:project_id/sync` — modo, contagem, conflitos e último evento.
 - `PUT /v1/projects/:project_id/sync` — compatibilidade de configuração; a autoridade continua SQL.
-- `GET /v1/projects/:project_id/memory/export` — exportação read-only com conteúdo completo.
+- `GET /v1/projects/:project_id/memory/export` — exportação read-only sanitizada por padrão; exige Bearer.
 - `POST /v1/projects/:project_id/memory/events` — ingestão idempotente em lote.
 - `GET /v1/projects/:project_id/usage/summary` — totais filtráveis por período, change, sessão,
   agente, provedor, modelo e papel.
 - `GET /v1/projects/:project_id/usage/breakdown` — hierarquia de agentes, subagentes e modelos.
-- `GET /v1/projects/:project_id/usage/calls` — chamadas individuais com prompt e resposta.
-- `GET /v1/projects/:project_id/transcripts/:transcript_id` — transcript comprimido, validado por hash.
+- `GET /v1/projects/:project_id/usage/calls` — chamadas individuais com prompt e resposta; exige Bearer.
+- `GET /v1/projects/:project_id/transcripts/:transcript_id` — transcript comprimido, validado por hash; exige Bearer.
+- `GET /v1/projects/:project_id/security` — policy, contagens de tokens e audit sanitizado; exige admin.
+- `PUT /v1/projects/:project_id/security/policy` — atualiza a policy efetiva sem restart; exige admin.
+- `POST /v1/projects/:project_id/security/purge` — dry-run/purge transacional com receipt; exige admin.
 
 As rotas `/v1` rejeitam corpo transportado ou expandido acima do limite e validam projeto, caminho,
 revisão, hash, idempotência e isolamento antes de gravar o conteúdo no SQLite. Para preservar uma

@@ -73,9 +73,25 @@ function validatePrivatePayload(payload) {
   }
 }
 
+function normalizePolicyRef(value) {
+  if (value == null) return null;
+  const keys = Object.keys(value).sort();
+  if (keys.join(',') !== 'hash,policy_id,version'
+    || !HASH_PATTERN.test(String(value.hash || ''))
+    || !Number.isSafeInteger(Number(value.version)) || Number(value.version) < 1) {
+    throw syncError('WENDKEEP_SYNC_POLICY_REF_INVALID', 'policy_ref must contain only policy_id, version and sha256 hash');
+  }
+  return {
+    policy_id: requiredText(value.policy_id, 'policy_ref.policy_id', 160),
+    version: Number(value.version),
+    hash: String(value.hash),
+  };
+}
+
 export function createSyncEvent({
   projectId, recordKey, revision, baseRevision, payload = null, causalParentIds = [],
   actorId, deviceId, leaseId = '', observedAt, operation = 'put', privacy = 'shared',
+  policyRef = null,
 } = {}) {
   const project_id = requiredText(projectId, 'project_id', 160);
   const record_key = requiredText(recordKey, 'record_key', 2048);
@@ -108,6 +124,7 @@ export function createSyncEvent({
     observed_at: timestamp.toISOString(),
     operation,
     privacy,
+    ...(policyRef ? { policy_ref: normalizePolicyRef(policyRef) } : {}),
     payload: operation === 'tombstone' ? null : structuredClone(payload),
   };
   return { ...draft, event_id: syncSha256(draft).slice(7) };
@@ -137,6 +154,7 @@ export function validateSyncEvent(event, { projectId = '' } = {}) {
     observedAt: event.observed_at,
     operation: event.operation,
     privacy: event.privacy,
+    policyRef: event.policy_ref || null,
   });
   return event;
 }
@@ -153,6 +171,7 @@ function eventCandidate(event) {
     observed_at: event.observed_at,
     operation: event.operation,
     privacy: event.privacy,
+    ...(event.policy_ref ? { policy_ref: structuredClone(event.policy_ref) } : {}),
     payload: structuredClone(event.payload),
   };
 }
@@ -168,6 +187,7 @@ function recordFromEvent(event, { conflicted = false } = {}) {
     observed_at: event.observed_at,
     operation: event.operation,
     privacy: event.privacy,
+    ...(event.policy_ref ? { policy_ref: structuredClone(event.policy_ref) } : {}),
     payload: structuredClone(event.payload),
     tombstone: event.operation === 'tombstone',
     conflicted,

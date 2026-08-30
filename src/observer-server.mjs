@@ -1,5 +1,4 @@
 import { createServer } from 'node:http';
-import { createHash, timingSafeEqual } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { gunzipSync } from 'node:zlib';
@@ -12,9 +11,8 @@ import { validateMemoryEvent } from './observer-memory.mjs';
 import {
   OBSERVER_SQL_FILE,
   OBSERVER_SQL_SCHEMA_VERSION,
-  ensureObserverDatabase,
+  bootstrapObserverDatabase,
   ingestObserverEvents,
-  migrateObserverDatabase,
   readSqlProject,
   readSqlProjectOverview,
   readSqlProjectSnapshot,
@@ -32,6 +30,11 @@ import {
   upsertSqlProjectSnapshot,
 } from './observer-sql-store.mjs';
 import { migrateObserverContainerData } from './observer-sql-migrate.mjs';
+import { authorizeObserverPrincipal, recordObserverAudit } from '../packages/observer/src/authz.mjs';
+import { ensureObserverBootstrapToken, resolveObserverPrincipal } from '../packages/observer/src/token-registry.mjs';
+import { readObserverPolicy, saveObserverPolicy } from '../packages/observer/src/policy.mjs';
+import { purgeObserverData } from '../packages/observer/src/purge.mjs';
+import { runObserverRetention } from '../packages/observer/src/retention.mjs';
 
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '::1']);
 const MAX_BODY_BYTES = MAX_SNAPSHOT_BYTES + 4096;
@@ -48,13 +51,6 @@ const STATIC_ASSETS = new Map([
 
 function loopbackOnly(host) {
   return LOOPBACK_HOSTS.has(String(host || '').toLowerCase());
-}
-
-function safeTokenEqual(actual, expected) {
-  if (!actual || !expected) return false;
-  const left = createHash('sha256').update(String(actual)).digest();
-  const right = createHash('sha256').update(String(expected)).digest();
-  return timingSafeEqual(left, right);
 }
 
 function bearerToken(req) {
@@ -173,6 +169,32 @@ function projectIdFrom(parts) {
   return parts[0] === 'v1' && parts[1] === 'projects' && parts[2] ? parts[2] : '';
 }
 
+function observerEndpointCapability(method, parts) {
+  const action = String(method || 'GET').toUpperCase();
+  const resource = parts[3] || '';
+  if (parts.length === 2 && action === 'GET') return 'project:read';
+  if (parts.length === 3) return action === 'GET' ? 'project:read' : 'project:write';
+  if (resource === 'ingest') return 'ingest:write';
+  if (resource === 'usage') {
+    if (parts[4] === 'calls') return 'usage:calls:read';
+    if (parts[4] === 'breakdown') return 'usage:breakdown:read';
+    return 'usage:summary:read';
+  }
+  if (resource === 'transcripts') return 'transcript:read';
+  if (resource === 'sync') return action === 'GET' ? 'sync:read' : 'sync:write';
+  if (resource === 'memory') {
+    if (action !== 'GET') return 'memory:write';
+    return parts[4] === 'tree' ? 'memory:metadata:read' : 'memory:content:read';
+  }
+  if (resource === 'snapshot' || resource === 'snapshots') return 'snapshot:write';
+  if (resource === 'security') return 'security:admin';
+  return 'project:read';
+}
+
+function sensitiveCapability(capability) {
+  return ['usage:calls:read', 'transcript:read', 'memory:content:read', 'audit:read', 'security:admin'].includes(capability);
+}
+
 function ensureSqlProjectRegistration(dataDir, sqlDb, projectId) {
   try {
     if (readSqlProject(sqlDb, projectId)) return true;
@@ -215,7 +237,9 @@ export async function startObserverServer({
   port = 8787,
   dataDir,
   allowNonLoopback = false,
-  token = process.env.WENDKEEP_OBSERVER_TOKEN || '',
+  token = '',
+  bootstrap = {},
+  security = {},
 } = {}) {
   if (!loopbackOnly(host) && !allowNonLoopback) {
     throw new Error(`Observer HTTP aceita somente host loopback; recebido: ${host}`);
@@ -226,9 +250,30 @@ export async function startObserverServer({
     throw error;
   }
   if (!dataDir) throw new Error('dataDir é obrigatório.');
-  const sqlDb = ensureObserverDatabase(dataDir);
-  const databaseMigration = migrateObserverDatabase(sqlDb);
-  const legacyMigration = migrateObserverContainerData(dataDir, { database: sqlDb });
+  const { db: sqlDb, databaseMigration, protectedDataMigration } = bootstrapObserverDatabase(dataDir, { security: {
+    policy: security.policy || null,
+    encryption: security.encryption || null,
+    enforcePolicy: Boolean(security.enabled),
+  } });
+  const bootstrapToken = token
+    ? ensureObserverBootstrapToken(sqlDb, {
+      token,
+      tokenId: bootstrap.tokenId,
+      role: bootstrap.role,
+      projectIds: bootstrap.projectIds,
+      scopes: bootstrap.scopes,
+      expiresAt: bootstrap.expiresAt,
+      now: security.clock?.().toISOString?.() || new Date().toISOString(),
+    })
+    : null;
+  const legacyMigration = migrateObserverContainerData(dataDir, {
+    database: sqlDb,
+    security: {
+      policy: security.policy || null,
+      encryption: security.encryption || null,
+      enforcePolicy: Boolean(security.enabled),
+    },
+  });
   const registered = [
     ...listRegisteredObserverProjects(dataDir),
     ...readObserverIndexSource(dataDir).projects.map((item) => ({
@@ -249,12 +294,7 @@ export async function startObserverServer({
         errorResponse(res, authority.status, authority.code, authority.message);
         return;
       }
-      const authenticated = safeTokenEqual(bearerToken(req), token);
       const mutating = !['GET', 'HEAD', 'OPTIONS'].includes(String(req.method || '').toUpperCase());
-      if ((mutating || !loopbackOnly(host)) && !authenticated) {
-        errorResponse(res, 401, 'observer_auth_required', 'Bearer token válido é obrigatório para esta operação.');
-        return;
-      }
       if (req.method === 'GET' && pathname === '/healthz') {
         json(res, 200, {
           ok: true,
@@ -265,9 +305,17 @@ export async function startObserverServer({
             file: OBSERVER_SQL_FILE,
             schema_version: OBSERVER_SQL_SCHEMA_VERSION,
             migrations: databaseMigration.applied.length,
+            protected_data_migration: protectedDataMigration,
             legacy_migration: legacyMigration,
             ready: true,
           },
+          bootstrap: bootstrapToken ? {
+            token_id: bootstrapToken.token_id,
+            role: bootstrapToken.role,
+            project_ids: bootstrapToken.project_ids,
+            expires_at: bootstrapToken.expires_at,
+            active: !bootstrapToken.revoked && !bootstrapToken.expired,
+          } : null,
         });
         return;
       }
@@ -285,10 +333,57 @@ export async function startObserverServer({
         return;
       }
 
+      let requestPrincipal = null;
+      {
+        const projectId = projectIdFrom(parts);
+        const capability = observerEndpointCapability(req.method, parts);
+        const suppliedToken = bearerToken(req);
+        const mustAuthenticate = mutating || !loopbackOnly(host) || Boolean(security.requireLoopbackAuth)
+          || sensitiveCapability(capability) || Boolean(suppliedToken);
+        const authorizationActive = Boolean(security.enabled) || mustAuthenticate;
+        const principal = resolveObserverPrincipal(sqlDb, suppliedToken, {
+          now: security.clock?.().toISOString?.() || new Date().toISOString(),
+        });
+        if (!principal.ok && authorizationActive) {
+          if (projectId && sensitiveCapability(capability)) recordObserverAudit(sqlDb, {
+            projectId,
+            tokenId: principal.token_id || '',
+            capability,
+            outcome: 'denied',
+            occurredAt: security.clock?.().toISOString?.() || new Date().toISOString(),
+            metadata: { route: pathname, method: req.method || 'GET', reason: principal.code || 'observer_auth_required' },
+          });
+          const authenticationCode = principal.code === 'observer_token_missing'
+            ? 'observer_auth_required'
+            : principal.code || 'observer_auth_required';
+          errorResponse(res, 401, authenticationCode, 'Bearer token válido é obrigatório para esta operação.');
+          return;
+        }
+        if (principal.ok && authorizationActive) {
+          const authorized = authorizeObserverPrincipal(principal, { projectId: projectId || principal.project_ids?.[0] || '*', capability });
+          if (!authorized.ok) {
+            if (projectId) recordObserverAudit(sqlDb, {
+              projectId, tokenId: principal.token_id, capability, outcome: 'denied',
+              occurredAt: security.clock?.().toISOString?.() || new Date().toISOString(),
+              metadata: { route: pathname, method: req.method || 'GET', reason: authorized.code },
+            });
+            errorResponse(res, authorized.status, authorized.code, 'Token sem autorização para este projeto/capability.');
+            return;
+          }
+          requestPrincipal = principal;
+          if (projectId && sensitiveCapability(capability)) recordObserverAudit(sqlDb, {
+            projectId, tokenId: principal.token_id, capability, outcome: 'allowed',
+            occurredAt: security.clock?.().toISOString?.() || new Date().toISOString(),
+            metadata: { route: pathname, method: req.method || 'GET' },
+          });
+        }
+      }
+
       if (parts.length === 2 && req.method === 'GET') {
         json(res, 200, {
           schema_version: 1,
           projects: listSqlProjects(sqlDb)
+            .filter((project) => !requestPrincipal || requestPrincipal.project_ids?.includes('*') || requestPrincipal.project_ids?.includes(project.project_id))
             .map((project) => readSqlProjectOverview(sqlDb, project.project_id))
             .sort((a, b) => a.projectId.localeCompare(b.projectId)),
         });
@@ -359,6 +454,66 @@ export async function startObserverServer({
           errorResponse(res, error?.code === 'transcript_not_found' ? 404 : 400, error?.code || 'transcript_error', error?.message || 'transcript indisponível.');
         }
         return;
+      }
+
+      if (parts[3] === 'security') {
+        if (!ensureSqlProjectRegistration(dataDir, sqlDb, projectId)) {
+          errorResponse(res, 404, 'project_not_found', 'projeto não encontrado: ' + projectId);
+          return;
+        }
+        if (parts.length === 4 && req.method === 'GET') {
+          const currentTime = security.clock?.().toISOString?.() || new Date().toISOString();
+          const tokens = sqlDb.prepare(`SELECT
+            COUNT(*) AS total,
+            SUM(CASE WHEN revoked_at IS NULL AND expires_at > ? THEN 1 ELSE 0 END) AS active,
+            SUM(CASE WHEN revoked_at IS NOT NULL THEN 1 ELSE 0 END) AS revoked,
+            SUM(CASE WHEN revoked_at IS NULL AND expires_at <= ? THEN 1 ELSE 0 END) AS expired
+            FROM observer_tokens WHERE project_ids_json LIKE ? OR project_ids_json LIKE '%"*"%'`)
+            .get(currentTime, currentTime, `%"${projectId}"%`);
+          const recentAudit = sqlDb.prepare(`SELECT audit_id, token_id, capability, outcome, occurred_at, metadata_json
+            FROM observer_access_audit WHERE project_id = ? ORDER BY occurred_at DESC LIMIT 50`).all(projectId)
+            .map((row) => ({ ...row, metadata: parseJson(row.metadata_json), metadata_json: undefined }));
+          json(res, 200, {
+            schema_version: 1,
+            project_id: projectId,
+            policy: readObserverPolicy(sqlDb, projectId),
+            tokens: { total: Number(tokens.total) || 0, active: Number(tokens.active) || 0, revoked: Number(tokens.revoked) || 0, expired: Number(tokens.expired) || 0 },
+            audit: recentAudit,
+            encryption: { configured: Boolean(security.encryption), required: Boolean(security.encryption?.required), key_id: security.encryption?.keyId || '' },
+          });
+          return;
+        }
+        if (parts.length === 5 && parts[4] === 'policy' && req.method === 'PUT') {
+          const body = parseJson(await readBody(req));
+          json(res, 200, { schema_version: 1, project_id: projectId, policy: saveObserverPolicy(sqlDb, projectId, body) });
+          return;
+        }
+        if (parts.length === 5 && parts[4] === 'purge' && req.method === 'POST') {
+          const body = parseJson(await readBody(req));
+          const result = purgeObserverData(sqlDb, {
+            projectId,
+            before: body.before,
+            classes: body.classes,
+            dryRun: body.dry_run === true,
+            operationId: body.operation_id || '',
+            now: security.clock?.().toISOString?.() || new Date().toISOString(),
+          });
+          json(res, body.dry_run === true ? 200 : 201, result);
+          return;
+        }
+        if (parts.length === 5 && parts[4] === 'retention' && req.method === 'POST') {
+          const body = parseJson(await readBody(req));
+          const storedPolicy = readObserverPolicy(sqlDb, projectId);
+          const result = runObserverRetention(sqlDb, {
+            projectId,
+            policy: storedPolicy.retention,
+            clock: () => security.clock?.() || new Date(),
+            dryRun: body.dry_run === true,
+            operationId: body.operation_id || '',
+          });
+          json(res, body.dry_run === true ? 200 : 201, result);
+          return;
+        }
       }
 
       if (parts.length === 4 && parts[3] === 'sync' && req.method === 'GET') {
@@ -511,7 +666,11 @@ export async function startObserverServer({
       errorResponse(res, 404, 'not_found', 'rota não encontrada.');
     } catch (error) {
       if (res.headersSent) return;
-      const status = error?.code === 'payload_too_large' ? 413 : ['invalid_json', 'invalid_content_encoding'].includes(error?.code) ? 400 : 500;
+      const status = error?.code === 'payload_too_large'
+        ? 413
+        : ['invalid_json', 'invalid_content_encoding', 'observer_policy_invalid', 'observer_purge_invalid', 'observer_retention_invalid'].includes(error?.code)
+          ? 400
+          : 500;
       errorResponse(res, status, error?.code || 'observer_error', error?.message || 'erro interno do Observer.');
     }
   });

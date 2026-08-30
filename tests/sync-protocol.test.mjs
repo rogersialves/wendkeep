@@ -63,6 +63,24 @@ test('[req:SYNC-1] CAS applies the expected revision and duplicate delivery is i
   assert.equal(state.applied_event_ids.length, 1);
 });
 
+test('[req:OBS-SEC-SYNC] sync carries only a canonical policy reference and never duplicates Observer authority', () => {
+  const policyRef = {
+    policy_id: 'observer-policy',
+    version: 3,
+    hash: `sha256:${'a'.repeat(64)}`,
+  };
+  const first = event({ policyRef });
+  assert.deepEqual(first.policy_ref, policyRef);
+  assert.equal(JSON.stringify(first).includes('token'), false);
+  const state = createSyncState(PROJECT);
+  applySyncEvent(state, first);
+  assert.deepEqual(state.records[first.record_key].policy_ref, policyRef);
+  assert.throws(
+    () => event({ policyRef: { ...policyRef, token: 'forbidden' } }),
+    (error) => error.code === 'WENDKEEP_SYNC_POLICY_REF_INVALID',
+  );
+});
+
 test('[req:SYNC-2] concurrent writes from one base become an order-independent explicit conflict set', () => {
   const left = event({ actorId: 'left', deviceId: 'machine-left', payload: { content: 'left' } });
   const right = event({ actorId: 'right', deviceId: 'machine-right', payload: { content: 'right' } });
