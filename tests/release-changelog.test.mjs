@@ -281,7 +281,7 @@ test('[sensor:release-tests] [req:REL-CI-2] workflow confiável publica antes de
   assert.ok(tagAt > -1, 'workflow precisa criar a tag comprovada');
   assert.ok(publishAt < tagAt, 'publish precisa ocorrer antes da tag');
   assert.match(RELEASE_PUBLISH_STEP, /npm view[\s\S]*--prefer-online/);
-  assert.match(RELEASE_PUBLISH_STEP, /npm publish artifacts\/release-candidate\.tgz --provenance/);
+  assert.match(RELEASE_PUBLISH_STEP, /npm publish \.\/artifacts\/release-candidate\.tgz --provenance/);
   assert.match(RELEASE_WORKFLOW, /git tag -a "\$TAG" "\$GITHUB_SHA"/);
 });
 

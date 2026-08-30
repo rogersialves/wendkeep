@@ -22,6 +22,8 @@ All notable changes to **wendkeep** are documented here. Format based on
 
 ### Fixed
 
+- **Publicação do candidato local.** O workflow passa o tarball preservado ao npm com path relativo
+  explícito (`./artifacts/...`), impedindo que o package spec seja interpretado como shorthand Git.
 - **Ingestão gzip sob pressão.** O publisher repete uma única vez o mesmo lote idempotente quando
   um socket keep-alive é encerrado transitoriamente, preservando o timeout total e a outbox diante
   de outras falhas.

@@ -74,7 +74,7 @@ test('[req:CI-SC-5] release preserves the tested tarball, SBOM and #40 commit bi
   assert.ok(upload > prepare && consume > upload && publish > consume,
     'the durable candidate must pass isolated consumers before publish');
   assert.match(release, /npm run release:candidate:test/);
-  assert.match(release, /npm publish artifacts\/release-candidate\.tgz --provenance/);
+  assert.match(release, /npm publish \.\/artifacts\/release-candidate\.tgz --provenance/);
   assert.doesNotMatch(release.slice(prepare, publish), /npm pack/,
     'no second tarball may replace the candidate between preparation and publish');
   const provenanceAttempts = release
