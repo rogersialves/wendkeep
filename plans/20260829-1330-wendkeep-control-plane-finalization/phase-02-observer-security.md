@@ -4,7 +4,7 @@
 
 - **Branch:** `wk/observer-security`
 - **Prioridade:** alta; superfície sensível
-- **Estado:** pendente
+- **Estado:** implementação concluída na branch; validação final pré-merge pendente
 
 Adicionar policy, AuthZ, retenção, purge, auditoria e criptografia sem quebrar isolamento por projeto.
 
@@ -98,6 +98,10 @@ dependem de segredos ou tempo real.
 - Purge repetido é seguro e possui receipt verificável.
 - Dados protegidos não são legíveis sem a chave correta.
 - Upgrade de DB existente preserva dados permitidos e falha recuperavelmente.
+
+## Fechamento da entrega intermediária
+
+- [x] 10.1 Integrar a segurança e o ciclo de vida do Observer no candidato `0.88.0`, com package, lockfile, changelog, inventário modular, paridade de importação e contrato tipado/bilíngue de identidade/hash/exclusão/timestamp alinhados. [sensor:observer-security] [sensor:observer-sql-incremental] [sensor:observer-sql-store] [sensor:observer-memory-import] [sensor:modular-workspaces] [sensor:docs-bilingual]
 
 ## Riscos e mitigação
 

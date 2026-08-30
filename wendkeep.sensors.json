@@ -82,6 +82,14 @@
       "command": "node --test tests/modular-package-boundaries.test.mjs tests/operating-profile-boundaries.test.mjs"
     },
     {
+      "id": "modular-workspaces",
+      "name": "Modular workspace inventory",
+      "description": "Validates the exact private workspace inventory and approved root public surfaces without external dependencies",
+      "severity": "critical",
+      "type": "command",
+      "command": "node --test tests/modular-workspace-inventory.test.mjs"
+    },
+    {
       "id": "project-vault",
       "name": "Project Vault binding",
       "description": "Exercises project-local Vault resolution and binding compatibility",
@@ -372,7 +380,7 @@
     {
       "id": "observer-local-http",
       "name": "Observer local HTTP and publisher",
-      "description": "Validates local API and outbox without authentication headers",
+      "description": "Validates Host/Origin guards, scoped sensitive reads, authenticated mutations and outbox behavior",
       "severity": "critical",
       "type": "command",
       "command": "node --test tests/observer-server.test.mjs tests/observer-publish.test.mjs"
@@ -380,7 +388,7 @@
     {
       "id": "observer-local-ui",
       "name": "Observer local UI",
-      "description": "Validates direct dashboard loading without a token form",
+      "description": "Validates the in-memory Bearer form and authenticated Observer workspace",
       "severity": "critical",
       "type": "command",
       "command": "node --test tests/observer-dashboard.test.mjs tests/observer-dashboard-browser.test.mjs"
@@ -392,6 +400,14 @@
       "severity": "critical",
       "type": "command",
       "command": "node --test tests/observer-docker.test.mjs tests/readme-packaging.test.mjs tests/release-changelog.test.mjs"
+    },
+    {
+      "id": "observer-security",
+      "name": "Observer security lifecycle",
+      "description": "Validates policy/redaction, hash-only AuthZ, encryption/backfill, retention/purge receipts and recoverable schema migration",
+      "severity": "critical",
+      "type": "command",
+      "command": "node --test tests/observer-policy.test.mjs tests/observer-authz.test.mjs tests/observer-encryption.test.mjs tests/observer-retention-purge.test.mjs tests/observer-security-migration.test.mjs tests/mcp-executor.test.mjs"
     },
     {
       "id": "observer-local-e2e",
@@ -412,7 +428,7 @@
     {
       "id": "observer-memory-http",
       "name": "Observer memory HTTP",
-      "description": "Validates complete memory ingestion, tree, document, search, sync mode and export",
+      "description": "Validates memory ingestion, metadata tree, authenticated content/search and sanitized export",
       "severity": "critical",
       "type": "command",
       "command": "node --test tests/observer-memory-server.test.mjs"
@@ -436,7 +452,7 @@
     {
       "id": "observer-memory-ui",
       "name": "Observer memory UI",
-      "description": "Validates workspace routes, complete document view models and no-token loading",
+      "description": "Validates workspace routes, protected document view models and in-memory authenticated loading",
       "severity": "critical",
       "type": "command",
       "command": "node --test tests/observer-memory-ui.test.mjs tests/observer-dashboard.test.mjs tests/observer-dashboard-browser.test.mjs"
@@ -528,6 +544,14 @@
       "severity": "critical",
       "type": "command",
       "command": "node --test tests/observer-sql-publish.test.mjs"
+    },
+    {
+      "id": "observer-sql-incremental",
+      "name": "Observer SQL incremental publication",
+      "description": "Validates scoped hook publication, canonical call timestamps, coalescing and leases",
+      "severity": "critical",
+      "type": "command",
+      "command": "node --test tests/observer-incremental-publication.test.mjs"
     },
     {
       "id": "observer-sql-dashboard",

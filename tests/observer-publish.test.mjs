@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { startObserverServer } from '../src/observer-server.mjs';
 import { publishObserverSnapshot } from '../src/observer-publish.mjs';
 import { listSqlOutbox } from '../src/observer-sql-publish.mjs';
-import { makeDataDir, makeObserverFixture } from './helpers/observer-fixture.mjs';
+import { makeDataDir, makeObserverFixture, observerBootstrap } from './helpers/observer-fixture.mjs';
 
 const HOOK = join(dirname(fileURLToPath(import.meta.url)), '..', 'hooks', 'observer-publish.mjs');
 const TOKEN = 'observer-test-token';
@@ -44,7 +44,7 @@ test('[req:OBS-LOCAL-4] publisher grava outbox e não bloqueia quando Observer e
 test('[req:OBS-LOCAL-4] publisher autenticado confirma evento e remove somente outbox aceita', async () => {
   const fixture = makeObserverFixture();
   const dataDir = makeDataDir();
-  const server = await startObserverServer({ host: '127.0.0.1', port: 0, dataDir, token: TOKEN });
+  const server = await startObserverServer({ host: '127.0.0.1', port: 0, dataDir, ...observerBootstrap(TOKEN) });
   const url = `http://127.0.0.1:${server.address().port}`;
   try {
     addSession(fixture);

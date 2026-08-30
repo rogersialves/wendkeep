@@ -2,6 +2,20 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
+export function observerBootstrap(token, projectIds = ['project-a', 'project-b', 'sql-only', 'legacy-project'], overrides = {}) {
+  return {
+    token,
+    bootstrap: {
+      tokenId: 'test-bootstrap',
+      role: 'admin',
+      projectIds,
+      scopes: ['*'],
+      expiresAt: '2099-01-01T00:00:00.000Z',
+      ...overrides,
+    },
+  };
+}
+
 export function makeObserverFixture({
   projectId = 'project-a',
   projectName = 'Project A',

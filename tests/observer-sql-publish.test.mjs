@@ -13,7 +13,8 @@ import {
   SQL_EVENT_BATCH_SIZE,
   SQL_EVENT_BATCH_BYTES,
 } from '../src/observer-sql-publish.mjs';
-import { makeDataDir, makeObserverFixture } from './helpers/observer-fixture.mjs';
+import { makeDataDir, makeObserverFixture, observerBootstrap } from './helpers/observer-fixture.mjs';
+import { createObserverPolicy } from '../packages/observer/src/policy.mjs';
 
 const TOKEN = 'observer-test-token';
 const MUTATION_HEADERS = { 'content-type': 'application/json', authorization: `Bearer ${TOKEN}` };
@@ -81,6 +82,49 @@ test('[req:SQL-OBS-SEC] captura padrão omite mensagens, transcript bruto e cami
   } finally {
     fixture.cleanup();
   }
+});
+
+test('[req:OBS-SEC-POLICY] publisher policy is the sole transcript authority across none/metadata/messages/full/selected', () => {
+  const fixture = makeObserverFixture();
+  const transcriptPath = join(fixture.projectRoot, 'canonical-transcript.json');
+  writeFileSync(transcriptPath, JSON.stringify({ messages: [
+    { role: 'user', content: 'private question', id: 'drop-id' },
+    { role: 'tool', content: 'private tool result' },
+    { role: 'assistant', content: 'private answer', metadata: { trace: 'drop-trace' } },
+  ] }));
+  sessionFixture(fixture, transcriptPath);
+  const input = { session_id: 'live-session', transcript_path: transcriptPath, transcript_id: 'live-transcript' };
+  try {
+    const build = (transcriptCapture, captureLevel = 'metadata') => buildObserverSqlEventBatch({
+      vaultBase: fixture.vaultBase,
+      projectId: fixture.projectId,
+      input,
+      captureLevel,
+      forceFull: true,
+      now: '2026-08-29T12:00:00.000Z',
+      policy: createObserverPolicy({ transcript_capture: transcriptCapture }),
+    }).events.filter((event) => event.kind === 'transcript.upsert' && event.payload.transcript_id === 'live-transcript').at(-1);
+    assert.equal(build('none'), undefined);
+    assert.equal(build('metadata').payload.content, '');
+    const messages = build('messages');
+    assert.deepEqual(JSON.parse(messages.payload.content), { messages: [
+      { role: 'user', content: 'private question' },
+      { role: 'assistant', content: 'private answer' },
+    ] });
+    assert.doesNotMatch(JSON.stringify(messages), /private tool result|drop-id|drop-trace/);
+    assert.match(build('full').payload.content, /private tool result/);
+    const selectedDocuments = buildObserverSqlEventBatch({
+      vaultBase: fixture.vaultBase,
+      projectId: fixture.projectId,
+      input,
+      captureLevel: 'full-transcript',
+      forceFull: true,
+      policy: createObserverPolicy({ document_capture: 'selected', transcript_capture: 'metadata' }),
+    }).events.filter((event) => event.kind === 'document.upsert');
+    assert.ok(selectedDocuments.length > 0);
+    assert.equal(selectedDocuments.every((event) => event.payload.content === ''), true);
+    assert.equal(build('metadata', 'full-transcript').payload.content, '', 'legacy captureLevel cannot elevate explicit policy');
+  } finally { fixture.cleanup(); }
 });
 
 test('[req:TDD-7] Observer publishes the TDD attestation as change evidence', () => {
@@ -165,7 +209,7 @@ test('[req:SQL-OBS-10] publisher envia lote gzip quando o JSON puro excede 64 MB
   const decisions = join(fixture.vaultBase, '04-Decisões/2026/08-AGO');
   mkdirSync(decisions, { recursive: true });
   writeFileSync(join(decisions, 'ADR-large-transcript.md'), `# Histórico grande\n${'linha de evidência repetida para medir transporte.\n'.repeat(1_400_000)}`);
-  const server = await startObserverServer({ host: '127.0.0.1', port: 0, dataDir, token: TOKEN });
+  const server = await startObserverServer({ host: '127.0.0.1', port: 0, dataDir, ...observerBootstrap(TOKEN) });
   const url = `http://127.0.0.1:${server.address().port}`;
   try {
     const registration = await fetch(`${url}/v1/projects/${fixture.projectId}`, {
@@ -198,7 +242,7 @@ test('[req:SQL-OBS-4] publisher envia rollups, chamada individual e transcript c
   const transcriptPath = join(fixture.projectRoot, 'live-transcript.jsonl');
   transcriptFixture(transcriptPath);
   sessionFixture(fixture, transcriptPath);
-  const server = await startObserverServer({ host: '127.0.0.1', port: 0, dataDir, token: TOKEN });
+  const server = await startObserverServer({ host: '127.0.0.1', port: 0, dataDir, ...observerBootstrap(TOKEN) });
   const url = `http://127.0.0.1:${server.address().port}`;
   try {
     const registration = await fetch(`${url}/v1/projects/${fixture.projectId}`, {
@@ -222,10 +266,10 @@ test('[req:SQL-OBS-4] publisher envia rollups, chamada individual e transcript c
     assert.equal(summary.cost_usd, 0.25);
     assert.equal(summary.tokens.total, 42);
     assert.equal(summary.raw_calls, 1);
-    const calls = await (await fetch(`${url}/v1/projects/${fixture.projectId}/usage/calls`)).json();
+    const calls = await (await fetch(`${url}/v1/projects/${fixture.projectId}/usage/calls`, { headers: { authorization: `Bearer ${TOKEN}` } })).json();
     assert.equal(calls.total, 1);
     assert.equal(calls.calls[0].prompt, 'Mostre o resumo do projeto.');
-    const transcript = await (await fetch(`${url}/v1/projects/${fixture.projectId}/transcripts/live-transcript`)).json();
+    const transcript = await (await fetch(`${url}/v1/projects/${fixture.projectId}/transcripts/live-transcript`, { headers: { authorization: `Bearer ${TOKEN}` } })).json();
     assert.equal(transcript.coverage, 'complete');
     assert.match(transcript.content, /Resumo pronto/);
   } finally {
@@ -252,7 +296,7 @@ test('[req:SQL-OBS-8] publisher preserva outbox e faz replay depois da indisponi
     assert.equal(queued.ok, false);
     assert.equal(queued.queued, true);
     assert.equal(listSqlOutbox(fixture.vaultBase).length, 1);
-    const server = await startObserverServer({ host: '127.0.0.1', port: 0, dataDir, token: TOKEN });
+    const server = await startObserverServer({ host: '127.0.0.1', port: 0, dataDir, ...observerBootstrap(TOKEN) });
     const url = `http://127.0.0.1:${server.address().port}`;
     try {
       const registration = await fetch(`${url}/v1/projects/${fixture.projectId}`, {

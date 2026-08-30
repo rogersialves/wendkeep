@@ -3,9 +3,36 @@ import { join } from 'node:path';
 import { publishObserverSqlIncremental } from './observer-sql-publish.mjs';
 import { observerAuthHeaders, resolveObserverToken } from './observer-auth.mjs';
 import { readProjectForValidation } from '../packages/vault/src/validate-memory.mjs';
+import { createObserverPolicy } from '../packages/observer/src/policy.mjs';
+import { createObserverEncryption } from '../packages/observer/src/encryption.mjs';
 
 const OUTBOX_REL = join('.brain', 'observer-outbox');
 const REQUEST_TIMEOUT_MS = 500;
+
+function decodeObserverKey(value) {
+  const raw = String(value || '').trim();
+  const key = /^[a-f0-9]{64}$/i.test(raw) ? Buffer.from(raw, 'hex') : Buffer.from(raw, 'base64');
+  if (key.byteLength !== 32) throw Object.assign(new Error('Observer outbox key deve ter 32 bytes em hex/base64.'), { code: 'observer_encryption_key_invalid' });
+  return key;
+}
+
+export function resolveObserverPublisherSecurity({ env = process.env } = {}) {
+  const policyFile = String(env.WENDKEEP_OBSERVER_POLICY_FILE || '').trim();
+  const policy = policyFile
+    ? createObserverPolicy(JSON.parse(readFileSync(policyFile, 'utf8')))
+    : createObserverPolicy();
+  const keyEnvName = String(env.WENDKEEP_OBSERVER_OUTBOX_KEY_ENV || '').trim();
+  if (!keyEnvName) return { policy, outboxEncryption: null };
+  const key = decodeObserverKey(env[keyEnvName]);
+  return {
+    policy,
+    outboxEncryption: createObserverEncryption({
+      required: true,
+      keyId: String(env.WENDKEEP_OBSERVER_OUTBOX_KEY_ID || keyEnvName),
+      keyProvider: () => key,
+    }),
+  };
+}
 
 function outboxDir(vaultBase) {
   return join(vaultBase, OUTBOX_REL);
@@ -92,6 +119,8 @@ export async function publishObserverSnapshot({
   now = new Date(),
   input = {},
   token = process.env.WENDKEEP_OBSERVER_TOKEN || '',
+  policy = null,
+  outboxEncryption = null,
 } = {}) {
   try {
     const project = readProjectForValidation(vaultBase);
@@ -103,6 +132,8 @@ export async function publishObserverSnapshot({
       input,
       now,
       token,
+      policy,
+      outboxEncryption,
     });
     // SQLite is the only live authority. The legacy snapshot store remains
     // readable solely as a migration source for pre-SQL installations.

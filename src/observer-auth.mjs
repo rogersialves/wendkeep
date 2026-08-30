@@ -8,3 +8,11 @@ export function observerAuthHeaders(token, headers = {}) {
     ? { ...headers, authorization: `Bearer ${resolved}` }
     : { ...headers };
 }
+
+export {
+  registerObserverToken,
+  resolveObserverPrincipal,
+  revokeObserverToken,
+  rotateObserverToken,
+} from '../packages/observer/src/token-registry.mjs';
+export { authorizeObserverPrincipal } from '../packages/observer/src/authz.mjs';

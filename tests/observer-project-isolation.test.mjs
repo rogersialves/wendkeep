@@ -111,7 +111,7 @@ test('[req:SQL-MIGRATE-1] structural migration is backed up, checksummed and res
   const dataDir = makeDataDir();
   const db = openObserverDatabase(dataDir);
   try {
-    for (let version = 1; version <= 4; version += 1) {
+    for (let version = 1; version <= 5; version += 1) {
       const name = readdirSync(SCHEMA).find((file) => file.startsWith(`${String(version).padStart(3, '0')}-`));
       db.exec(readFileSync(new URL(name, SCHEMA), 'utf8'));
       db.prepare('INSERT INTO schema_migrations(version, name, applied_at) VALUES (?, ?, ?)')
@@ -123,15 +123,15 @@ test('[req:SQL-MIGRATE-1] structural migration is backed up, checksummed and res
       VALUES ('session-a', 'project-a', '2026-08-20')`).run();
 
     const migrated = migrateObserverDatabase(db);
-    assert.equal(migrated.version, 5);
+    assert.equal(migrated.version, 6);
     assert.equal(migrated.backups.length, 1);
-    assert.equal(readdirSync(dataDir).some((name) => /observer\.sqlite\.pre-005-\d+\.bak/.test(name)), true);
+    assert.equal(readdirSync(dataDir).some((name) => /observer\.sqlite\.pre-006-\d+\.bak/.test(name)), true);
     assert.equal(migrated.applied.every((item) => /^[a-f0-9]{64}$/.test(item.checksum)), true);
     assert.equal(db.prepare('SELECT session_id FROM sessions WHERE project_id = ?').get('project-a').session_id, 'session-a');
     assert.deepEqual(db.prepare('PRAGMA foreign_key_check').all(), []);
 
     const replay = migrateObserverDatabase(db);
-    assert.equal(replay.version, 5);
+    assert.equal(replay.version, 6);
     assert.equal(replay.backups.length, 0);
     db.prepare("UPDATE schema_migrations SET checksum = 'tampered' WHERE version = 1").run();
     assert.throws(

@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { startObserverServer } from '../src/observer-server.mjs';
-import { makeDataDir } from './helpers/observer-fixture.mjs';
+import { makeDataDir, observerBootstrap } from './helpers/observer-fixture.mjs';
 
 const TOKEN = 'observer-test-token';
 const MUTATION_HEADERS = { 'content-type': 'application/json', authorization: `Bearer ${TOKEN}` };
@@ -41,7 +41,7 @@ async function request(base, path, options = {}) {
 
 test('[req:MEM-API-3] [req:MEM-QUERY-4] API ingere lote, lista árvore, lê documento completo e busca', async () => {
   const dataDir = makeDataDir();
-  const server = await startObserverServer({ host: '127.0.0.1', port: 0, dataDir, token: TOKEN });
+  const server = await startObserverServer({ host: '127.0.0.1', port: 0, dataDir, ...observerBootstrap(TOKEN) });
   const base = 'http://127.0.0.1:' + server.address().port;
   const headers = MUTATION_HEADERS;
   try {
@@ -66,12 +66,12 @@ test('[req:MEM-API-3] [req:MEM-QUERY-4] API ingere lote, lista árvore, lê docu
     assert.equal(tree.body.document_count, 1);
     assert.equal(tree.body.documents[0].logical_path, event.logical_path);
 
-    const document = await request(base, '/v1/projects/project-a/memory/document?path=' + encodeURIComponent(event.logical_path));
+    const document = await request(base, '/v1/projects/project-a/memory/document?path=' + encodeURIComponent(event.logical_path), { headers });
     assert.equal(document.status, 200);
     assert.equal(document.body.content, event.content);
     assert.equal(document.body.content_hash, event.content_hash);
 
-    const search = await request(base, '/v1/projects/project-a/memory/search?q=consultável');
+    const search = await request(base, '/v1/projects/project-a/memory/search?q=consultável', { headers });
     assert.equal(search.status, 200);
     assert.equal(search.body.results[0].logical_path, event.logical_path);
 
@@ -91,10 +91,12 @@ test('[req:MEM-API-3] [req:MEM-QUERY-4] API ingere lote, lista árvore, lê docu
     for (const legacy of ['PROJECTS.json', 'EVENTS.jsonl', 'INDEX.json', 'MEMORY_EVENTS.jsonl', 'MEMORY_INDEX.json']) {
       assert.equal(existsSync(join(dataDir, legacy)), false, `${legacy} remains migration-only`);
     }
-    const exported = await request(base, '/v1/projects/project-a/memory/export');
+    const exported = await request(base, '/v1/projects/project-a/memory/export', { headers });
     assert.equal(exported.status, 200);
     assert.equal(exported.body.mode, 'container-authority');
-    assert.equal(exported.body.documents[0].content, event.content);
+    assert.equal(exported.body.sanitized, true);
+    assert.equal(exported.body.documents[0].content, '');
+    assert.equal(exported.body.documents[0].content_hash, event.content_hash);
   } finally {
     await server.close();
     rmSync(dataDir, { recursive: true, force: true });
@@ -103,7 +105,7 @@ test('[req:MEM-API-3] [req:MEM-QUERY-4] API ingere lote, lista árvore, lê docu
 
 test('[req:MEM-API-3] API isola projetos e rejeita caminhos inválidos', async () => {
   const dataDir = makeDataDir();
-  const server = await startObserverServer({ host: '127.0.0.1', port: 0, dataDir, token: TOKEN });
+  const server = await startObserverServer({ host: '127.0.0.1', port: 0, dataDir, ...observerBootstrap(TOKEN) });
   const base = 'http://127.0.0.1:' + server.address().port;
   const headers = MUTATION_HEADERS;
   try {
@@ -122,7 +124,7 @@ test('[req:MEM-API-3] API isola projetos e rejeita caminhos inválidos', async (
 
     const other = await request(base, '/v1/projects/project-b/memory/tree');
     assert.equal(other.status, 404);
-    const invalid = await request(base, '/v1/projects/project-a/memory/document?path=' + encodeURIComponent('../outside.md'));
+    const invalid = await request(base, '/v1/projects/project-a/memory/document?path=' + encodeURIComponent('../outside.md'), { headers });
     assert.equal(invalid.status, 400);
   } finally {
     await server.close();

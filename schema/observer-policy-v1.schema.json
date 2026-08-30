@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wendkeep.dev/schema/observer-policy-v1.schema.json",
+  "title": "WendKeep Observer policy v1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "document_capture": { "enum": ["none", "metadata", "selected", "full"] },
+    "transcript_capture": { "enum": ["none", "metadata", "messages", "full"] },
+    "prompt_capture": { "enum": ["none", "redacted", "full"] },
+    "response_capture": { "enum": ["none", "redacted", "full"] },
+    "usage_capture": { "enum": ["none", "aggregate", "calls"] },
+    "require_loopback_auth": { "type": "boolean" },
+    "encryption_required": { "type": "boolean" },
+    "rules": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["data_class", "capture"],
+        "properties": {
+          "project_id": { "type": "string", "minLength": 1, "maxLength": 121 },
+          "data_class": { "enum": ["document", "transcript", "prompt", "response", "usage"] },
+          "path": { "type": "string", "maxLength": 2048 },
+          "entity_type": { "type": "string", "maxLength": 160 },
+          "capture": { "enum": ["none", "metadata", "selected", "full", "messages", "redacted", "aggregate", "calls"] }
+        }
+      }
+    },
+    "redaction": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "rules": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["pattern"],
+            "properties": {
+              "pattern": { "type": "string", "minLength": 1, "maxLength": 512 },
+              "replacement": { "type": "string", "maxLength": 160 }
+            }
+          }
+        }
+      }
+    },
+    "retention": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "document": { "type": "integer", "minimum": 0 },
+        "transcript": { "type": "integer", "minimum": 0 },
+        "prompt": { "type": "integer", "minimum": 0 },
+        "response": { "type": "integer", "minimum": 0 },
+        "usage": { "type": "integer", "minimum": 0 },
+        "documents": { "type": "integer", "minimum": 0 },
+        "calls": { "type": "integer", "minimum": 0 },
+        "transcripts": { "type": "integer", "minimum": 0 }
+      }
+    }
+  }
+}

@@ -57,6 +57,10 @@ button:focus-visible, input:focus-visible, a:focus-visible { outline: 2px solid 
 .brand-name { display: block; font-family: Georgia, serif; font-size: 1.06rem; font-weight: 500; letter-spacing: -.02em; }
 .eyebrow { margin: 0 0 7px; color: var(--faint); font-family: "Bahnschrift", sans-serif; font-size: .66rem; font-weight: 700; letter-spacing: .16em; line-height: 1; text-transform: uppercase; }
 .connection-cluster { display: flex; align-items: center; gap: 9px; color: var(--muted); font-size: .78rem; }
+.observer-auth-form { display: flex; align-items: center; gap: 4px; margin-left: 8px; }
+.observer-auth-form input { width: 112px; padding: 7px 9px; border: 1px solid var(--line); border-radius: 8px; background: rgba(7, 16, 21, .65); color: var(--text); }
+.observer-auth-form button { padding: 7px 9px; border: 1px solid var(--line); border-radius: 8px; background: transparent; color: var(--muted); cursor: pointer; }
+.observer-auth-form button:hover { border-color: var(--mint); color: var(--mint-bright); }
 .connection-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--faint); box-shadow: 0 0 0 4px rgba(94, 119, 116, .12); }
 .connection-dot.is-online { background: var(--mint); box-shadow: 0 0 0 4px rgba(156, 224, 198, .1), 0 0 18px rgba(156, 224, 198, .7); }
 .connection-dot.is-warning { background: var(--amber); box-shadow: 0 0 0 4px rgba(246, 189, 114, .1); }
@@ -232,6 +236,7 @@ input::placeholder { color: var(--faint); }
 @media (max-width: 560px) {
   .topbar { min-height: 76px; }
   .connection-cluster > #connection-label { display: none; }
+  .observer-auth-form input { width: 80px; }
   .global-search { margin-left: 5px; }
   .global-search input { width: 92px; }
   .hero-row { align-items: start; flex-direction: column; }

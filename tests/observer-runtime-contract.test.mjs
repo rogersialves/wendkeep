@@ -6,7 +6,7 @@ import { startObserverServer } from '../src/observer-server.mjs';
 import {
   observerSqlRuntimeSupport,
 } from '../src/observer-sql-store.mjs';
-import { makeDataDir } from './helpers/observer-fixture.mjs';
+import { makeDataDir, observerBootstrap } from './helpers/observer-fixture.mjs';
 
 async function request(base, path, options = {}) {
   const response = await fetch(base + path, options);
@@ -63,7 +63,7 @@ test('[req:OBS-SEC-1] non-loopback exige token já na abertura', async () => {
 test('[req:OBS-SEC-2] mutações loopback exigem Bearer token', async () => {
   const dataDir = makeDataDir();
   const token = 'observer-test-token';
-  const server = await startObserverServer({ host: '127.0.0.1', port: 0, dataDir, token });
+  const server = await startObserverServer({ host: '127.0.0.1', port: 0, dataDir, ...observerBootstrap(token) });
   const base = `http://127.0.0.1:${server.address().port}`;
   try {
     const denied = await request(base, '/v1/projects/project-a', {
@@ -89,7 +89,7 @@ test('[req:OBS-SEC-2] mutações loopback exigem Bearer token', async () => {
 test('[req:OBS-SEC-3] Host e Origin incompatíveis são recusados', async () => {
   const dataDir = makeDataDir();
   const token = 'observer-test-token';
-  const server = await startObserverServer({ host: '127.0.0.1', port: 0, dataDir, token });
+  const server = await startObserverServer({ host: '127.0.0.1', port: 0, dataDir, ...observerBootstrap(token) });
   const base = `http://127.0.0.1:${server.address().port}`;
   try {
     const badHost = await requestWithHost(base, '/v1/projects', 'evil.example');

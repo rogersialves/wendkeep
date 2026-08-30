@@ -12,7 +12,7 @@ import {
 import { registerObserverProject } from '../src/observer-store.mjs';
 import { buildSessionMemoryEvents } from '../packages/vault/src/memory-handoff.mjs';
 import { deriveHandoffContract } from '../src/task-contracts.mjs';
-import { makeDataDir, makeObserverFixture } from './helpers/observer-fixture.mjs';
+import { makeDataDir, makeObserverFixture, observerBootstrap } from './helpers/observer-fixture.mjs';
 import { makeSyntheticHandoff } from './fixtures/synthetic-memory-lifecycle.mjs';
 
 const TOKEN = 'observer-test-token';
@@ -165,7 +165,7 @@ test('[req:MEM-HOOK-5] [req:MEM-RECOVERY-8] publisher faz outbox completo quando
 test('[req:MEM-HOOK-5] reenvio do outbox confirma o conteúdo no container e remove somente o lote aceito', async () => {
   const fixture = makeObserverFixture();
   const dataDir = makeDataDir();
-  const server = await startObserverServer({ host: '127.0.0.1', port: 0, dataDir, token: TOKEN });
+  const server = await startObserverServer({ host: '127.0.0.1', port: 0, dataDir, ...observerBootstrap(TOKEN) });
   try {
     seedMemory(fixture);
     registerObserverProject(dataDir, { projectId: fixture.projectId, projectName: fixture.projectName });

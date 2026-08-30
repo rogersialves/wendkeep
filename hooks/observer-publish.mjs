@@ -1,15 +1,17 @@
 #!/usr/bin/env node
 import { pathToFileURL } from 'node:url';
 import { debugLog, readHookInput, resolveVault } from './obsidian-common.mjs';
-import { publishObserverSnapshot } from '../src/observer-publish.mjs';
+import { publishObserverSnapshot, resolveObserverPublisherSecurity } from '../src/observer-publish.mjs';
 
 async function main() {
   const input = readHookInput();
   const resolved = resolveVault(input);
+  const publisherSecurity = resolveObserverPublisherSecurity();
   const result = await publishObserverSnapshot({
     vaultBase: resolved.base,
     projectRoot: resolved.projectRoot,
     input,
+    ...publisherSecurity,
   });
   if (!result.ok && result.error) debugLog('Observer publish fail-open:', result.error);
 }

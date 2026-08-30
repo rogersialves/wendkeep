@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { rmSync } from 'node:fs';
 import { startObserverServer } from '../src/observer-server.mjs';
 import { ensureObserverDatabase, registerSqlProject } from '../src/observer-sql-store.mjs';
-import { makeDataDir } from './helpers/observer-fixture.mjs';
+import { makeDataDir, observerBootstrap } from './helpers/observer-fixture.mjs';
 
 const TOKEN = 'observer-test-token';
 const MUTATION_HEADERS = { 'content-type': 'application/json', authorization: `Bearer ${TOKEN}` };
@@ -22,7 +22,7 @@ function event(kind, eventId, payload, occurredAt = '2026-08-17T12:00:00.000Z') 
 
 test('[req:SQL-OBS-6] API local ingere eventos e consulta summary, breakdown, calls e transcript', async () => {
   const dataDir = makeDataDir();
-  const server = await startObserverServer({ host: '127.0.0.1', port: 0, dataDir, token: TOKEN });
+  const server = await startObserverServer({ host: '127.0.0.1', port: 0, dataDir, ...observerBootstrap(TOKEN) });
   const base = `http://127.0.0.1:${server.address().port}`;
   const headers = MUTATION_HEADERS;
   try {
@@ -51,11 +51,11 @@ test('[req:SQL-OBS-6] API local ingere eventos e consulta summary, breakdown, ca
     assert.equal(breakdown.status, 200);
     assert.equal(breakdown.body.agents[0].agent_id, 'agent-a');
 
-    const calls = await request(base, '/v1/projects/project-a/usage/calls');
+    const calls = await request(base, '/v1/projects/project-a/usage/calls', { headers });
     assert.equal(calls.status, 200);
     assert.equal(calls.body.calls[0].prompt, 'pergunta');
 
-    const transcript = await request(base, '/v1/projects/project-a/transcripts/transcript-a');
+    const transcript = await request(base, '/v1/projects/project-a/transcripts/transcript-a', { headers });
     assert.equal(transcript.status, 200);
     assert.equal(transcript.body.content, '{"messages":[]}');
   } finally {
@@ -66,7 +66,7 @@ test('[req:SQL-OBS-6] API local ingere eventos e consulta summary, breakdown, ca
 
 test('[req:SQL-OBS-2] API retorna conflito e duplicate sem alterar o evento original', async () => {
   const dataDir = makeDataDir();
-  const server = await startObserverServer({ host: '127.0.0.1', port: 0, dataDir, token: TOKEN });
+  const server = await startObserverServer({ host: '127.0.0.1', port: 0, dataDir, ...observerBootstrap(TOKEN) });
   const base = `http://127.0.0.1:${server.address().port}`;
   const headers = MUTATION_HEADERS;
   try {
@@ -93,7 +93,7 @@ test('[req:SQL-OBS-7] filtros distinguem subagente e changes de projeto somente-
   const db = ensureObserverDatabase(dataDir);
   registerSqlProject(db, { projectId: 'sql-only', projectName: 'SQL Only' });
   db.close();
-  const server = await startObserverServer({ host: '127.0.0.1', port: 0, dataDir, token: TOKEN });
+  const server = await startObserverServer({ host: '127.0.0.1', port: 0, dataDir, ...observerBootstrap(TOKEN) });
   const base = `http://127.0.0.1:${server.address().port}`;
   const headers = MUTATION_HEADERS;
   try {

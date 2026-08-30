@@ -4,14 +4,14 @@ import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { startObserverServer } from '../src/observer-server.mjs';
 import { runObserver } from '../src/observer.mjs';
-import { makeDataDir, makeObserverFixture } from './helpers/observer-fixture.mjs';
+import { makeDataDir, makeObserverFixture, observerBootstrap } from './helpers/observer-fixture.mjs';
 
 const TOKEN = 'observer-test-token';
 
 test('[req:MEM-MIGRATION-6] observer memory import registra o projeto, envia o vault e devolve paridade', async () => {
   const fixture = makeObserverFixture();
   const dataDir = makeDataDir();
-  const server = await startObserverServer({ host: '127.0.0.1', port: 0, dataDir, token: TOKEN });
+  const server = await startObserverServer({ host: '127.0.0.1', port: 0, dataDir, ...observerBootstrap(TOKEN) });
   try {
     mkdirSync(join(fixture.vaultBase, '02-Sessões/2026/08-AGO/DIA 17'), { recursive: true });
     writeFileSync(
