@@ -1,3 +1,4 @@
+import * as bridgeFs from 'node:fs';
 import { isAbsolute, resolve } from 'node:path';
 import { activeChange } from '../hooks/change-core.mjs';
 import { resolveActiveContext } from '../hooks/active-context-store.mjs';
@@ -6,6 +7,19 @@ import { buildTaskContractSnapshot, evaluateTaskContracts } from './task-contrac
 import { claimTaskLease, releaseTaskLease } from './task-leases.mjs';
 import { findProjectRoot } from '../packages/harness/src/sensors-core.mjs';
 import { resolveHookOperatingProfile } from '../hooks/operating-profile-runtime.mjs';
+import { buildSuperpowersDispatch } from '../packages/integrations/src/superpowers-adapter.mjs';
+import { importSpecKitProjection } from '../packages/integrations/src/spec-kit-adapter.mjs';
+import { validateBridgeProjection } from '../packages/integrations/src/bridge-contract.mjs';
+import { issueCanonicalDispatchAuthority } from '../packages/integrations/src/canonical-bridge-authority.mjs';
+
+export function buildExternalTaskDispatch({ adapter = '', taskContract, ...options } = {}) {
+  if (String(adapter) !== 'superpowers') {
+    throw Object.assign(new Error(`unsupported task adapter: ${adapter || '(missing)'}`), {
+      code: 'TASK_ADAPTER_UNSUPPORTED',
+    });
+  }
+  return buildSuperpowersDispatch({ taskContract, ...options });
+}
 
 const HELP = `wendkeep task <list|show|evaluate|claim|release> [task-id]
 
@@ -54,6 +68,74 @@ function commandState(argv) {
     json, vaultBase, projectRoot, sessionId: identity.sessionId || sessionId,
     identity, context, changeSlug, profile: runtime.profile,
   };
+}
+
+function resolveCanonicalTaskAuthority(argv = [], taskIdOverride = '') {
+  const state = commandState(argv);
+  const snapshot = buildTaskContractSnapshot(state);
+  const taskId = String(taskIdOverride || opt(argv, '--task-id') || '').trim();
+  const contract = snapshot.contracts.find((item) => item.task_id === taskId);
+  if (!contract) {
+    throw Object.assign(new Error(`task not found: ${taskId || '(missing id)'}`), { code: 'TASK_NOT_FOUND' });
+  }
+  return {
+    authority: 'wendkeep-canonical',
+    task_contract: structuredClone(contract),
+    active_context: structuredClone(snapshot.binding),
+  };
+}
+
+export function buildCanonicalExternalTaskDispatch({
+  adapter = '', authorityArgv = [], taskId = '', submittedTaskContract = null,
+  projectRoot = '', config, specKitProjection = null, baselineProjection = null, ...options
+} = {}) {
+  if (adapter !== 'superpowers') return buildExternalTaskDispatch({ adapter, taskContract: null, ...options });
+  if (specKitProjection) {
+    const supplied = validateBridgeProjection(specKitProjection);
+    if (!supplied.valid) {
+      return {
+        schema_version: 1, adapter: 'superpowers', active: true, ok: false,
+        diagnostics: [{
+          schema_version: 1, code: 'BRIDGE_PROJECTION_INVALID', adapter: 'spec-kit', blocking: true,
+          message: 'submitted Spec Kit projection is not sealed by its complete decision state',
+        }],
+      };
+    }
+  }
+  if (config?.adapters?.['spec-kit']?.enabled) {
+    if (!specKitProjection || !baselineProjection) {
+      return {
+        schema_version: 1, adapter: 'superpowers', active: true, ok: false,
+        diagnostics: [{
+          schema_version: 1, code: 'BRIDGE_BASELINE_MISSING', adapter: 'spec-kit', blocking: true,
+          message: 'active Spec Kit dispatch requires its canonical baseline and submitted projection',
+        }],
+      };
+    }
+    const baseline = validateBridgeProjection(baselineProjection);
+    if (!baseline.valid || baselineProjection.projection_id !== specKitProjection.projection_id) {
+      return {
+        schema_version: 1, adapter: 'superpowers', active: true, ok: false,
+        diagnostics: [{
+          schema_version: 1, code: 'BRIDGE_BASELINE_STALE', adapter: 'spec-kit', blocking: true,
+          message: 'submitted projection does not match the canonical Spec Kit baseline',
+        }],
+      };
+    }
+  }
+  const canonical = resolveCanonicalTaskAuthority(authorityArgv, taskId);
+  const canonicalReceipt = issueCanonicalDispatchAuthority(canonical);
+  const liveProjection = specKitProjection
+    ? importSpecKitProjection({ projectRoot, config, previousProjection: baselineProjection || specKitProjection, fs: bridgeFs })
+    : null;
+  return buildExternalTaskDispatch({
+    adapter,
+    taskContract: submittedTaskContract || canonical.task_contract,
+    canonicalAuthority: canonicalReceipt,
+    specKitProjection: liveProjection,
+    config,
+    ...options,
+  });
 }
 
 function write(value, json, line = '') {

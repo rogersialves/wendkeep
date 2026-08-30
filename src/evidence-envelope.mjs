@@ -268,6 +268,7 @@ export function buildEvidenceEnvelope({
   version = '',
   runtimePlatform = `${process.platform}-${process.arch}`,
   hostCoverage = null,
+  externalArtifacts = [],
 } = {}) {
   const envelope = {
     schema_version: 2,
@@ -287,6 +288,7 @@ export function buildEvidenceEnvelope({
     started_at: startedAt,
     finished_at: finishedAt,
     sensors,
+    ...(externalArtifacts.length ? { external_artifacts: structuredClone(externalArtifacts) } : {}),
     ...(hostCoverage ? { host_coverage: structuredClone(hostCoverage) } : {}),
     tdd_attestations: tddAttestations,
   };

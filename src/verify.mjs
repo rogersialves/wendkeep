@@ -25,6 +25,7 @@ import { resolveCommandActiveContext } from './active-context-runtime.mjs';
 import { resolveHookOperatingProfile } from '../hooks/operating-profile-runtime.mjs';
 import { evaluateTddAttestation } from './tdd-attestation.mjs';
 import { readTddAttestationStore } from './tdd-attestation-store.mjs';
+import { collectBridgeArtifactEvidence } from './ecosystem-bridge-artifact-collector.mjs';
 import { writeVaultFileAtomic } from '../packages/vault/src/vault-path-safety.mjs';
 import { evaluateHostCoverage } from '../packages/integrations/src/capabilities.mjs';
 import { evidenceCheckoutBinding } from '../packages/vault/src/evidence-envelope.mjs';
@@ -151,6 +152,13 @@ export function runVerify(argv) {
     process.stderr.write(`wendkeep verify: ${error.code || 'WENDKEEP_EVIDENCE_BINDING_FAILED'}: ${error.message}\n`);
     process.exit(2);
   }
+  let externalArtifacts;
+  try {
+    externalArtifacts = collectBridgeArtifactEvidence({ projectRoot, tasks, sensors: evidence });
+  } catch (error) {
+    process.stderr.write(`wendkeep verify: ${error.code || 'BRIDGE_ARTIFACT_COLLECTION_FAILED'}: ${error.message}\n`);
+    process.exit(2);
+  }
   const envelope = buildEvidenceEnvelope({
     identity,
     changeSlug: slug,
@@ -159,6 +167,7 @@ export function runVerify(argv) {
     effectiveSpecSha256: `sha256:${effective.hash}`,
     sensorConfigSha256: sensorConfigSha256(sensors, ids),
     sensors: evidence,
+    externalArtifacts,
     tddAttestations,
     startedAt,
     finishedAt: new Date().toISOString(),

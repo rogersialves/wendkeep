@@ -110,6 +110,36 @@ function runTask(f, args, projectRoot = f.project) {
   return runCli(f, ['task', ...args], projectRoot);
 }
 
+test('[req:BRIDGE-18] bridge dispatch rederives the task contract and active context from canonical state', () => {
+  const f = fixture();
+  try {
+    assert.equal(runCli(f, ['change', 'use', 'change-a', '--session', 'session-a']).status, 0);
+    mkdirSync(join(f.project, '.wendkeep'), { recursive: true });
+    mkdirSync(join(f.project, '.superpowers'), { recursive: true });
+    writeFileSync(join(f.project, '.superpowers', 'version'), '1.2.0\n');
+    writeFileSync(join(f.project, '.wendkeep', 'ecosystem-bridges.json'), JSON.stringify({
+      schema_version: 1,
+      adapters: { superpowers: { enabled: true, version: '1.2.0', root: '.superpowers' } },
+    }));
+
+    const result = runCli(f, ['bridge', 'dispatch-superpowers', '--task-id', '1.1', '--session', 'session-a', '--json']);
+    assert.equal(result.status, 0, result.stderr);
+    const dispatch = JSON.parse(result.stdout);
+    assert.equal(dispatch.task_contract.task_id, '1.1');
+    assert.equal(dispatch.task_contract.binding.head_sha.length, 40);
+
+    const tampered = structuredClone(dispatch.task_contract);
+    tampered.binding.head_sha = '9'.repeat(40);
+    writeFileSync(join(f.project, 'untrusted-task.json'), JSON.stringify(tampered));
+    const rejected = runCli(f, [
+      'bridge', 'dispatch-superpowers', '--task-id', '1.1', '--task-contract', 'untrusted-task.json',
+      '--session', 'session-a', '--json',
+    ]);
+    assert.equal(rejected.status, 1, rejected.stderr);
+    assert.equal(JSON.parse(rejected.stdout).diagnostics.some((item) => item.code === 'BRIDGE_CONTRACT_STALE'), true);
+  } finally { rmSync(f.parent, { recursive: true, force: true }); }
+});
+
 test('[req:TC-5] task list/show/evaluate stay scoped to the selected causal session', () => {
   const f = fixture();
   try {

@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wendkeep.dev/schema/ecosystem-bridge-v1.schema.json",
+  "title": "WendKeep ecosystem bridge contracts v1",
+  "oneOf": [
+    { "$ref": "#/$defs/specProjection" }, { "$ref": "#/$defs/dispatch" },
+    { "$ref": "#/$defs/handoff" }, { "$ref": "#/$defs/externalArtifact" },
+    { "$ref": "#/$defs/proof" }, { "$ref": "#/$defs/statusProjection" }
+  ],
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "envelopeId": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "origin": {
+      "type": "object", "required": ["tool"],
+      "properties": { "tool": { "type": "string", "minLength": 1 }, "version": { "type": "string" }, "root": { "type": "string" }, "external_id": { "type": "string" }, "source_projection_id": { "$ref": "#/$defs/sha256" }, "evidence_envelope_id": { "$ref": "#/$defs/envelopeId" } }
+    },
+    "compatibility": {
+      "type": "object", "additionalProperties": false,
+      "required": ["range", "detected_version", "supported"],
+      "properties": { "range": { "type": "string", "minLength": 1 }, "detected_version": { "type": "string", "minLength": 1 }, "supported": { "type": "boolean" } }
+    },
+    "provenance": {
+      "type": "object", "additionalProperties": false, "required": ["state", "source"],
+      "properties": { "state": { "enum": ["reported", "verified"] }, "source": { "type": "string", "minLength": 1 } }
+    },
+    "mapping": {
+      "type": "object", "additionalProperties": false,
+      "required": ["source_id", "source_kind", "capability", "change_slug", "task_ids"],
+      "properties": { "source_id": { "type": "string", "minLength": 1 }, "source_kind": { "enum": ["story", "requirement"] }, "capability": { "type": "string", "minLength": 1 }, "change_slug": { "type": "string", "minLength": 1 }, "task_ids": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true } }
+    },
+    "reference": {
+      "type": "object", "required": ["kind", "source_id", "path", "sha256", "authority"],
+      "properties": { "kind": { "enum": ["constitution", "spec", "plan", "task", "artifact", "review", "commit"] }, "source_id": { "type": "string", "minLength": 1 }, "path": { "type": "string", "minLength": 1 }, "sha256": { "$ref": "#/$defs/sha256" }, "authority": { "const": "reported" }, "title": { "type": "string", "maxLength": 300 } }
+    },
+    "ownership": {
+      "type": "object", "required": ["concept", "owner"],
+      "properties": { "concept": { "enum": ["spec_source", "plan", "task", "execution", "artifact", "evidence"] }, "owner": { "const": "wendkeep" } }
+    },
+    "specProjection": {
+      "type": "object", "required": ["schema_version", "contract_kind", "projection_id", "adapter", "adapter_version", "authority", "origin", "compatibility", "provenance", "ownership", "references", "mappings", "diagnostics", "ok"],
+      "properties": { "schema_version": { "const": 1 }, "contract_kind": { "const": "spec-projection" }, "projection_id": { "$ref": "#/$defs/sha256" }, "adapter": { "const": "spec-kit" }, "adapter_version": { "type": "string", "minLength": 1 }, "authority": { "const": "reported" }, "origin": { "$ref": "#/$defs/origin" }, "compatibility": { "$ref": "#/$defs/compatibility" }, "provenance": { "$ref": "#/$defs/provenance" }, "ownership": { "type": "array", "items": { "$ref": "#/$defs/ownership" } }, "references": { "type": "array", "items": { "$ref": "#/$defs/reference" } }, "mappings": { "type": "array", "items": { "$ref": "#/$defs/mapping" } }, "diagnostics": { "type": "array" }, "ok": { "type": "boolean" } }
+    },
+    "dispatch": {
+      "type": "object", "required": ["schema_version", "contract_kind", "dispatch_id", "adapter", "authority", "canonical_owner", "origin", "compatibility", "provenance", "task_contract", "worktree"],
+      "properties": { "schema_version": { "const": 1 }, "contract_kind": { "const": "dispatch" }, "dispatch_id": { "$ref": "#/$defs/sha256" }, "adapter": { "const": "superpowers" }, "authority": { "const": "reported" }, "canonical_owner": { "const": "wendkeep" }, "origin": { "$ref": "#/$defs/origin" }, "compatibility": { "$ref": "#/$defs/compatibility" }, "provenance": { "$ref": "#/$defs/provenance" }, "task_contract": { "type": "object" }, "worktree": { "type": "object" } }
+    },
+    "handoff": {
+      "type": "object", "required": ["schema_version", "contract_kind", "handoff_id", "task_contract_id", "head_sha", "authority", "origin", "provenance"],
+      "properties": { "schema_version": { "const": 1 }, "contract_kind": { "const": "handoff" }, "handoff_id": { "type": "string", "minLength": 1 }, "task_contract_id": { "$ref": "#/$defs/sha256" }, "head_sha": { "type": "string", "pattern": "^[a-f0-9]{40}$" }, "authority": { "const": "reported" }, "origin": { "$ref": "#/$defs/origin" }, "provenance": { "$ref": "#/$defs/provenance" } }
+    },
+    "externalArtifact": {
+      "type": "object", "required": ["schema_version", "contract_kind", "source", "external_id", "kind", "sha256", "authority", "origin", "provenance"],
+      "properties": { "schema_version": { "const": 1 }, "contract_kind": { "const": "external-artifact" }, "source": { "const": "superpowers" }, "external_id": { "type": "string", "minLength": 1 }, "kind": { "enum": ["artifact", "review", "commit"] }, "sha256": { "$ref": "#/$defs/sha256" }, "authority": { "enum": ["reported", "verified"] }, "origin": { "$ref": "#/$defs/origin" }, "provenance": { "$ref": "#/$defs/provenance" }, "proof": { "$ref": "#/$defs/proof" } },
+      "allOf": [{ "if": { "properties": { "authority": { "const": "verified" } }, "required": ["authority"] }, "then": { "required": ["proof"] } }]
+    },
+    "proof": {
+      "type": "object", "required": ["schema_version", "contract_kind", "proof_id", "type", "external_id", "artifact_sha256", "authority", "origin", "provenance", "evidence_envelope_id", "sensor_id", "task_id", "path", "head_sha", "git_blob", "manifest_git_blob"],
+      "properties": { "schema_version": { "const": 1 }, "contract_kind": { "const": "proof" }, "proof_id": { "$ref": "#/$defs/sha256" }, "type": { "const": "evidence-envelope" }, "external_id": { "type": "string", "minLength": 1 }, "artifact_sha256": { "$ref": "#/$defs/sha256" }, "authority": { "const": "verified" }, "origin": { "$ref": "#/$defs/origin" }, "provenance": { "$ref": "#/$defs/provenance" }, "evidence_envelope_id": { "$ref": "#/$defs/envelopeId" }, "sensor_id": { "type": "string", "minLength": 1 }, "task_id": { "type": "string", "minLength": 1 }, "path": { "type": "string", "minLength": 1 }, "head_sha": { "type": "string", "pattern": "^[a-f0-9]{40}$" }, "git_blob": { "type": "string", "pattern": "^[a-f0-9]{40}$" }, "manifest_git_blob": { "type": "string", "pattern": "^[a-f0-9]{40}$" } }
+    },
+    "statusProjection": {
+      "type": "object", "required": ["schema_version", "contract_kind", "status_projection_id", "adapter", "authority", "canonical_owner", "origin", "provenance", "source_projection_id", "tasks", "evidence"],
+      "properties": { "schema_version": { "const": 1 }, "contract_kind": { "const": "status-projection" }, "status_projection_id": { "$ref": "#/$defs/sha256" }, "adapter": { "const": "spec-kit" }, "authority": { "const": "reported" }, "canonical_owner": { "const": "wendkeep" }, "origin": { "$ref": "#/$defs/origin" }, "provenance": { "$ref": "#/$defs/provenance" }, "source_projection_id": { "$ref": "#/$defs/sha256" }, "tasks": { "type": "array" }, "evidence": { "type": "array" } }
+    }
+  }
+}

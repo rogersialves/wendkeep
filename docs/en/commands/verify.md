@@ -87,6 +87,12 @@ temporary in the same directory and an atomic rename. In deep mode, `verificacao
 `verdict.json` carry the same `evidenceEnvelopeId` and complete `evidenceBinding`; the independent
 reviewer must preserve both.
 
+For bridge artifacts, `.wendkeep/bridge-artifacts.json` and every referenced file must be committed
+and equal to the Git index. The sensor bound to the same task declares v1 `artifact_results` in
+`wendkeep.sensors.json`; after GREEN, the runner computes SHA-256 directly from the bytes and records
+the structured result on that sensor. `verify` crosses manifest, task, sensor, digest, and Git blobs
+before populating `external_artifacts`; stdout, transcripts, and `output_tail` never prove the file.
+
 The envelope carries `tdd_attestations`, and `verificacao.json` carries `tddAttestations`. Under GOVERN, a task marked
 `[tdd]` requires a current GREEN or explicit waiver; under ASSURE this applies to testable
 behavior. A later refactor/commit or a surviving mutant invalidates GREEN in the Task Contract.

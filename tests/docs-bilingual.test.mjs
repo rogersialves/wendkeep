@@ -28,6 +28,7 @@ const GUIDES = [
   'mcp.md',
   'evidence-embeddings.md',
   'capabilities.md',
+  'ecosystem-bridges.md',
   'tdd.md',
   'commit.md',
 ];
@@ -56,6 +57,7 @@ const README_GROUPS = [
   { pt: 'MCP nativo', en: 'Native MCP', guide: 'mcp.md' },
   { pt: 'Recall e embeddings', en: 'Evidence recall and embeddings', guide: 'evidence-embeddings.md' },
   { pt: 'Capacidades dos hosts', en: 'Host capabilities', guide: 'capabilities.md' },
+  { pt: 'Bridges do ecossistema', en: 'Ecosystem bridges', guide: 'ecosystem-bridges.md' },
   { pt: 'Perfis de operação', en: 'Operating profiles', guide: 'operating-profiles.md' },
   { pt: 'Changes e verificação', en: 'Changes and verification', guide: 'changes-and-verification.md' },
   { pt: 'Memória compartilhada', en: 'Shared memory', guide: 'memory.md' },
@@ -98,6 +100,7 @@ const GUIDE_FOR_FAMILY = new Map([
   ['wendkeep sync status', 'sync-protocol.md'],
   ['wendkeep mcp', 'mcp.md'],
   ['wendkeep capabilities', 'capabilities.md'],
+  ['wendkeep bridge', 'ecosystem-bridges.md'],
 ]);
 const SEMANTIC_CONCEPTS = {
   'getting-started.md': { pt: [/instala/i, /atualiza/i, /vínculo|vincul/i], en: [/install/i, /updat/i, /bind/i] },
@@ -120,6 +123,7 @@ const SEMANTIC_CONCEPTS = {
   'mcp.md': { pt: [/semântic/i, /capability/i, /stdio/i], en: [/semantic/i, /capability/i, /stdio/i] },
   'evidence-embeddings.md': { pt: [/embeddings/i, /local/i, /budget/i], en: [/embeddings/i, /local/i, /budget/i] },
   'capabilities.md': { pt: [/lifecycle/i, /degradad/i, /waiver/i], en: [/lifecycle/i, /degraded/i, /waiver/i] },
+  'ecosystem-bridges.md': { pt: [/Spec Kit/i, /Superpowers/i, /ownership|autoridade/i], en: [/Spec Kit/i, /Superpowers/i, /ownership|authority/i] },
   'tdd.md': { pt: [/atesta/i, /RED/i, /waiver/i], en: [/attestation/i, /RED/i, /waiver/i] },
   'commit.md': { pt: [/evidência/i, /staged/i, /privad/i], en: [/evidence/i, /staged/i, /private/i] },
 };

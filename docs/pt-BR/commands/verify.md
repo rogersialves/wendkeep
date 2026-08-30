@@ -88,6 +88,12 @@ mesmo diretório e rename atômico. No deep, `verificacao.json` e `verdict.json`
 `evidenceEnvelopeId` e `evidenceBinding` completo; o verificador independente deve preservar ambos
 no verdict.
 
+Para artefatos de bridge, `.wendkeep/bridge-artifacts.json` e os arquivos referenciados precisam
+estar versionados e iguais ao índice Git. O sensor ligado à mesma task declara `artifact_results`
+v1 em `wendkeep.sensors.json`; após GREEN, o runner calcula o SHA-256 diretamente dos bytes e grava
+o resultado estruturado no sensor. `verify` cruza manifest, task, sensor, digest e blobs Git antes
+de preencher `external_artifacts`; stdout, transcript e `output_tail` nunca são prova do arquivo.
+
 O envelope carrega `tdd_attestations`, e `verificacao.json`, `tddAttestations`. Em GOVERN, uma tarefa marcada
 `[tdd]` precisa de GREEN atual ou waiver explícito; em ASSURE, isso vale para comportamento
 testável. Refactor/commit posterior ou mutante sobrevivente invalida o GREEN no Task Contract.

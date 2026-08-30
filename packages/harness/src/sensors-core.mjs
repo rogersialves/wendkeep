@@ -3,12 +3,13 @@
 // at the PROJECT ROOT (wendkeep.sensors.json); evidence lives per-change in the vault.
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, readFileSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { existsSync, lstatSync, readFileSync, realpathSync } from 'node:fs';
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 
 export const SENSOR_VAULT_ENV = 'WENDKEEP_SENSOR_VAULT';
 const SENSOR_OUTPUT_MAX_BUFFER = 8 * 1024 * 1024;
 const SENSOR_DIAGNOSTIC_MAX_LENGTH = 2000;
+const SENSOR_ARTIFACT_MAX_BYTES = 1024 * 1024;
 
 function sanitizeSensorDiagnostic(value) {
   return String(value || '')
@@ -25,6 +26,41 @@ function sanitizeSensorDiagnostic(value) {
 
 function sha256(value) {
   return `sha256:${createHash('sha256').update(String(value || '')).digest('hex')}`;
+}
+
+function containedPath(root, target) {
+  const rel = relative(root, target);
+  return rel === '' || (rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel));
+}
+
+function collectSensorArtifactResults(sensor, cwd) {
+  const declarations = sensor?.artifact_results;
+  if (declarations === undefined) return [];
+  if (!Array.isArray(declarations)) throw new Error('artifact_results must be an array');
+  const root = realpathSync(resolve(cwd || '.'));
+  const seen = new Set();
+  return declarations.map((declaration) => {
+    const externalId = String(declaration?.external_id || '').trim();
+    const configuredPath = String(declaration?.path || '').trim();
+    if (Object.keys(declaration || {}).some((key) => ![
+      'schema_version', 'external_id', 'path', 'algorithm',
+    ].includes(key)) || declaration?.schema_version !== 1 || !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(externalId)
+      || !configuredPath || declaration?.algorithm !== 'sha256' || seen.has(externalId)) {
+      throw new Error('artifact result declaration is invalid');
+    }
+    seen.add(externalId);
+    const candidate = resolve(root, configuredPath);
+    if (!containedPath(root, candidate) || !existsSync(candidate) || !lstatSync(candidate).isFile()) {
+      throw new Error(`artifact result path is unavailable: ${externalId}`);
+    }
+    const file = realpathSync(candidate);
+    if (!containedPath(root, file) || lstatSync(file).size > SENSOR_ARTIFACT_MAX_BYTES) {
+      throw new Error(`artifact result path is unsafe: ${externalId}`);
+    }
+    const path = relative(root, file).replaceAll('\\', '/');
+    const digest = createHash('sha256').update(readFileSync(file)).digest('hex');
+    return { schema_version: 1, external_id: externalId, path, algorithm: 'sha256', digest };
+  });
 }
 
 function sensorNow(now) {
@@ -167,7 +203,17 @@ export function runSensors(sensors, ids, { spawn = spawnSync, cwd, env, now } = 
       output_sha256: sha256(rawOutput),
       output_tail: boundedOutputTail,
     };
-    if (entry.status === 'red') entry.note = sensorFailureNote(r);
+    if (entry.status === 'green' && s.artifact_results !== undefined) {
+      try {
+        entry.artifact_results = collectSensorArtifactResults(s, cwd);
+      } catch (error) {
+        entry.status = 'red';
+        entry.exit_code = 1;
+        entry.artifact_results = [];
+        entry.note = sanitizeSensorDiagnostic(error?.message || 'artifact result collection failed');
+      }
+    }
+    if (entry.status === 'red' && !entry.note) entry.note = sensorFailureNote(r);
     if (s.type === 'mutation' && s.report) {
       // Delegated mutation (Wave B): read the tool's mutation-testing-elements report and
       // attach surviving mutants so verify can turn them into fix tasks.

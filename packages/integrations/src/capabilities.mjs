@@ -7,6 +7,40 @@ export const HOST_CAPABILITIES = [
 
 export const HOST_CAPABILITY_STATES = ['native', 'adapted', 'polled', 'manual', 'unavailable'];
 
+export const ECOSYSTEM_ADAPTER_MANIFESTS = Object.freeze({
+  'spec-kit': Object.freeze({
+    adapter_id: 'spec-kit', contract_version: 1, compatibility_range: '>=0.1.0 <2.0.0', optional: true,
+  }),
+  superpowers: Object.freeze({
+    adapter_id: 'superpowers', contract_version: 1, compatibility_range: '>=1.0.0 <2.0.0', optional: true,
+  }),
+});
+
+function semverTuple(value) {
+  const match = String(value || '').trim().match(/^(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$/);
+  return match ? match.slice(1).map(Number) : null;
+}
+
+function compareVersion(left, right) {
+  for (let index = 0; index < 3; index += 1) {
+    if (left[index] !== right[index]) return left[index] < right[index] ? -1 : 1;
+  }
+  return 0;
+}
+
+export function isVersionInRange(version, range) {
+  const observed = semverTuple(version);
+  if (!observed) return false;
+  const clauses = String(range || '').split(/\s+/).filter(Boolean);
+  if (!clauses.length) return false;
+  return clauses.every((clause) => {
+    const match = clause.match(/^(>=|>|<=|<|=)?(\d+\.\d+\.\d+)$/);
+    if (!match) return false;
+    const comparison = compareVersion(observed, semverTuple(match[2]));
+    return ({ '>=': comparison >= 0, '>': comparison > 0, '<=': comparison <= 0, '<': comparison < 0, '=': comparison === 0 }[match[1] || '=']);
+  });
+}
+
 function matrix(defaultState, overrides = {}) {
   return Object.fromEntries(HOST_CAPABILITIES.map((capability) => [
     capability, overrides[capability] || defaultState,
