@@ -3,6 +3,7 @@ import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from '
 import { join } from 'node:path';
 import { parseSessionCost } from './cost.mjs';
 import {
+  configureObserverDatabaseSecurity,
   ensureObserverDatabase,
   ingestObserverEvents,
   registerSqlProject,
@@ -237,11 +238,12 @@ export function sessionEvents({ projectId, logicalPath, content, cost, revision 
   return { events, sessionId, rollups: events.filter((event) => event.kind === 'usage.rollup').length, summaryOnly: transcriptId ? 1 : 0 };
 }
 
-export function migrateObserverData({ dataDir, vaultBase, projectId, projectName = projectId, transcriptSources = {}, database = null } = {}) {
+export function migrateObserverData({ dataDir, vaultBase, projectId, projectName = projectId, transcriptSources = {}, database = null, security = null } = {}) {
   if (!dataDir || !vaultBase || !projectId) throw new Error('dataDir, vaultBase e projectId são obrigatórios.');
   const db = database || ensureObserverDatabase(dataDir);
   const ownsDatabase = !database;
   try {
+    if (security) configureObserverDatabaseSecurity(db, security);
     registerSqlProject(db, { projectId, projectName });
     const stats = { project_id: projectId, documents: 0, sessions: 0, rollups: 0, summary_only_transcripts: 0, accepted: 0, duplicates: 0, conflicts: 0, rejected: 0 };
     const sourceEvents = readMemoryEvents(dataDir, projectId);
@@ -298,7 +300,7 @@ export function migrateObserverData({ dataDir, vaultBase, projectId, projectName
   } finally { if (ownsDatabase) db.close(); }
 }
 
-export function migrateObserverContainerData(dataDir, { database = null } = {}) {
+export function migrateObserverContainerData(dataDir, { database = null, security = null } = {}) {
   const memoryRoot = join(dataDir, 'memory');
   if (!existsSync(memoryRoot)) return { skipped: true, projects: 0, documents: 0, events: 0 };
   const markerPath = join(dataDir, 'observer-sql-legacy-migration.json');
@@ -321,6 +323,7 @@ export function migrateObserverContainerData(dataDir, { database = null } = {}) 
       projectId,
       projectName: project.project_name || projectId,
       database,
+      security,
     });
     stats.projects += 1;
     stats.documents += result.documents;

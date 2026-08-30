@@ -4,6 +4,24 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.88.0] — 2026-08-29
+
+### Added
+
+- **Políticas oficiais e RBAC do Observer por projeto.** Captura de transcripts, uso, memória e
+  sync passa por policy única, redaction por classe/campo e matriz explícita de papéis e scopes;
+  tokens são armazenados somente por hash, escopados, expirados, revogáveis e rotacionáveis.
+- **Ciclo de vida auditável.** Retenção e purge idempotentes ficam disponíveis por CLI e endpoint,
+  com receipts retriáveis, tratamento de chegadas tardias e reconciliação segura do índice FTS.
+
+### Security
+
+- **Criptografia fail-closed no Observer.** Quando exigida, ingestão, outbox e publicação recusam
+  plaintext; o backfill protege dados legados antes de leituras, e backups de migração v5 usam
+  AES-256-GCM, manifest de integridade, permissões restritas e restore autenticado.
+- **Bootstrap remoto sem credencial irrestrita.** Server, MCP, CLI e Compose usam o registry
+  hash-only com projeto, papel, scopes e expiração explícitos, incluindo revogação e rotação.
+
 ## [0.87.0] — 2026-08-29
 
 ### Added

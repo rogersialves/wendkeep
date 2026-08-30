@@ -155,13 +155,16 @@ function changeResult(tool, args, vaultBase) {
 
 async function observerQuery(args, ctx) {
   const {
-    openObserverDatabase,
+    bootstrapObserverDatabase,
     readSqlProjectOverview,
     readUsageBreakdown,
     readUsageCalls,
     readUsageSummary,
     searchSqlDocuments,
   } = await import('../../../src/observer-sql-store.mjs');
+  const { authorizeObserverPrincipal, recordObserverAudit } = await import('../../observer/src/authz.mjs');
+  const { resolveObserverPrincipal } = await import('../../observer/src/token-registry.mjs');
+  const { observerEncryptionFromEnvironment } = await import('../../observer/src/encryption.mjs');
   const kind = String(args.query || 'overview').trim();
   const filters = args.payload?.filters && typeof args.payload.filters === 'object'
     ? args.payload.filters
@@ -169,7 +172,37 @@ async function observerQuery(args, ctx) {
   const dataDir = resolve(process.env.WENDKEEP_OBSERVER_DATA_DIR || join(homedir(), '.wendkeep-observer'));
   let db;
   try {
-    db = openObserverDatabase(dataDir);
+    const encryption = observerEncryptionFromEnvironment();
+    ({ db } = bootstrapObserverDatabase(dataDir, { security: { encryption } }));
+    const capability = {
+      overview: 'project:read',
+      usage_summary: 'usage:summary:read',
+      usage_breakdown: 'usage:breakdown:read',
+      usage_calls: 'usage:calls:read',
+      memory_search: 'memory:content:read',
+    }[kind] || 'project:read';
+    const rawToken = String(process.env.WENDKEEP_OBSERVER_TOKEN || '');
+    const requireToken = ['usage:calls:read', 'memory:content:read'].includes(capability)
+      || process.env.WENDKEEP_OBSERVER_REQUIRE_LOOPBACK_AUTH === '1';
+    if (rawToken || requireToken) {
+      const principal = resolveObserverPrincipal(db, rawToken);
+      const authorized = authorizeObserverPrincipal(principal, {
+        projectId: ctx.resolution.projectId,
+        capability,
+      });
+      if (!authorized.ok) {
+        throw Object.assign(new Error('Observer query requires a project-scoped token and capability'), {
+          code: authorized.code || 'MCP_OBSERVER_AUTH_REQUIRED',
+        });
+      }
+      if (['usage:calls:read', 'memory:content:read'].includes(capability)) recordObserverAudit(db, {
+        projectId: ctx.resolution.projectId,
+        tokenId: principal.token_id,
+        capability,
+        outcome: 'allowed',
+        metadata: { route: `mcp:${kind}`, method: 'MCP' },
+      });
+    }
     switch (kind) {
       case 'overview': return sanitize(readSqlProjectOverview(db, ctx.resolution.projectId));
       case 'usage_summary': return sanitize(readUsageSummary(db, ctx.resolution.projectId, filters));

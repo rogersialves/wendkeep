@@ -95,10 +95,58 @@ test('[req:SQL-INCR-2] SubagentStop reads only the affected transcript', () => {
       },
       state: { files: {}, transcripts: {} },
       captureLevel: 'full-transcript',
+      now: '2026-08-20T12:00:00Z',
     });
     const transcripts = batch.events.filter((item) => item.kind === 'transcript.upsert');
+    const calls = batch.events.filter((item) => item.kind === 'llm_call');
     assert.deepEqual(transcripts.map((item) => item.payload.transcript_id), ['fixture-subagent']);
+    assert.deepEqual(calls.map((item) => [item.occurred_at, item.payload.occurred_at]), [
+      ['2026-08-20T12:00:00.000Z', '2026-08-20T12:00:00.000Z'],
+    ]);
     assert.equal(batch.scanned, 1);
+  } finally { fixture.cleanup(); }
+});
+
+test('[req:SQL-INCR-2] transcript call timestamps canonicalize epoch milliseconds and reject invalid input', () => {
+  const fixture = makeObserverFixture();
+  try {
+    const { subagent } = prepareSession(fixture);
+    writeFileSync(subagent, `${JSON.stringify({
+      type: 'assistant',
+      timestamp: Date.parse('2026-08-20T11:00:00Z'),
+      message: { content: [{ type: 'text', text: 'subagent done' }] },
+    })}\n`);
+    const input = {
+      hook_event_name: 'SubagentStop',
+      session_id: 'fixture-session',
+      agent_transcript_path: subagent,
+      agent_transcript_id: 'fixture-subagent',
+    };
+    const batch = buildObserverSqlIncrementalBatch({
+      vaultBase: fixture.vaultBase,
+      projectId: fixture.projectId,
+      input,
+      state: { files: {}, transcripts: {} },
+      captureLevel: 'full-transcript',
+      now: '2026-08-20T12:00:00Z',
+    });
+    const call = batch.events.find((item) => item.kind === 'llm_call');
+    assert.equal(call.occurred_at, '2026-08-20T11:00:00.000Z');
+    assert.equal(call.payload.occurred_at, '2026-08-20T11:00:00.000Z');
+
+    writeFileSync(subagent, `${JSON.stringify({
+      type: 'assistant',
+      timestamp: 'not-a-date',
+      message: { content: [{ type: 'text', text: 'subagent done' }] },
+    })}\n`);
+    assert.throws(() => buildObserverSqlIncrementalBatch({
+      vaultBase: fixture.vaultBase,
+      projectId: fixture.projectId,
+      input,
+      state: { files: {}, transcripts: {} },
+      captureLevel: 'full-transcript',
+      now: '2026-08-20T12:00:00Z',
+    }), /occurred_at inválido/);
   } finally { fixture.cleanup(); }
 });
 

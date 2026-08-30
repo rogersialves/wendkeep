@@ -1,0 +1,16 @@
+{
+  "name": "@wendkeep/observer",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.mjs",
+    "./policy": "./src/policy.mjs",
+    "./redaction": "./src/redaction.mjs",
+    "./authz": "./src/authz.mjs",
+    "./token-registry": "./src/token-registry.mjs",
+    "./encryption": "./src/encryption.mjs",
+    "./retention": "./src/retention.mjs",
+    "./purge": "./src/purge.mjs",
+    "./audit": "./src/audit.mjs"
+  }
+}

@@ -7,7 +7,7 @@ import { parse } from 'acorn';
 import { importSpecifiers } from './helpers/import-specifiers.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const SURFACES = ['cli', 'commit', 'harness', 'vault', 'mcp', 'integrations', 'pi'];
+const SURFACES = ['cli', 'commit', 'harness', 'integrations', 'mcp', 'observer', 'pi', 'vault'];
 const ADAPTERS = new Set(['cli', 'mcp', 'integrations', 'pi']);
 const INITIAL_MEMORY_KERNEL = [
   { module: 'memory-schema.mjs', legacy: '../hooks/memory-schema.mjs' },
@@ -108,7 +108,7 @@ function assertAdapterSiblings(graph) {
   }
 }
 
-test('[req:MOD-1] root declares all seven internal workspaces exactly once', () => {
+test('[req:MOD-1] root declares all eight internal workspaces exactly once', () => {
   const root = json(join(ROOT, 'package.json'));
   const packageDirs = readdirSync(join(ROOT, 'packages'), { withFileTypes: true })
     .filter((entry) => entry.isDirectory()

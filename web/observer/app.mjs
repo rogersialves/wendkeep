@@ -75,9 +75,15 @@ export function classifyRefreshError(error = {}, hasModels = false) {
   };
 }
 
-async function requestJson(fetchImpl, url) {
+export function observerDashboardHeaders(token = '') {
+  return token
+    ? { Accept: 'application/json', Authorization: `Bearer ${String(token)}` }
+    : { Accept: 'application/json' };
+}
+
+async function requestJson(fetchImpl, url, token = '') {
   const response = await fetchImpl(url, {
-    headers: { Accept: 'application/json' },
+    headers: observerDashboardHeaders(token),
   });
   if (!response.ok) {
     const error = new Error(`Observer respondeu HTTP ${response.status}.`);
@@ -87,11 +93,11 @@ async function requestJson(fetchImpl, url) {
   return response.json();
 }
 
-export async function loadProjectMemory(fetchImpl = globalThis.fetch, projectId = '') {
+export async function loadProjectMemory(fetchImpl = globalThis.fetch, projectId = '', token = '') {
   const id = encodeURIComponent(projectId);
   const [tree, sync] = await Promise.all([
-    requestJson(fetchImpl, '/v1/projects/' + id + '/memory/tree'),
-    requestJson(fetchImpl, '/v1/projects/' + id + '/sync'),
+    requestJson(fetchImpl, '/v1/projects/' + id + '/memory/tree', token),
+    requestJson(fetchImpl, '/v1/projects/' + id + '/sync', token),
   ]);
   return { tree, sync };
 }
@@ -107,13 +113,13 @@ export function usageQuery(filters = {}) {
   return query ? `?${query}` : '';
 }
 
-export async function loadProjectUsage(fetchImpl = globalThis.fetch, projectId = '', filters = {}) {
+export async function loadProjectUsage(fetchImpl = globalThis.fetch, projectId = '', filters = {}, token = '') {
   const id = encodeURIComponent(projectId);
   const query = usageQuery(filters);
   const [summary, breakdown, calls] = await Promise.all([
-    requestJson(fetchImpl, `/v1/projects/${id}/usage/summary${query}`),
-    requestJson(fetchImpl, `/v1/projects/${id}/usage/breakdown${query}`),
-    requestJson(fetchImpl, `/v1/projects/${id}/usage/calls${query}`),
+    requestJson(fetchImpl, `/v1/projects/${id}/usage/summary${query}`, token),
+    requestJson(fetchImpl, `/v1/projects/${id}/usage/breakdown${query}`, token),
+    requestJson(fetchImpl, `/v1/projects/${id}/usage/calls${query}`, token),
   ]);
   return { summary, breakdown, calls, filters: { ...filters } };
 }
@@ -163,27 +169,51 @@ export function buildUsageViewModel(usage = {}) {
   };
 }
 
-export async function loadMemoryDocument(fetchImpl = globalThis.fetch, projectId = '', logicalPath = '') {
+export async function loadMemoryDocument(fetchImpl = globalThis.fetch, projectId = '', logicalPath = '', token = '') {
   const query = new URLSearchParams({ path: logicalPath });
-  return requestJson(fetchImpl, '/v1/projects/' + encodeURIComponent(projectId) + '/memory/document?' + query.toString());
+  return requestJson(fetchImpl, '/v1/projects/' + encodeURIComponent(projectId) + '/memory/document?' + query.toString(), token);
 }
 
-export async function loadProjectTranscript(fetchImpl = globalThis.fetch, projectId = '', transcriptId = '') {
-  return requestJson(fetchImpl, `/v1/projects/${encodeURIComponent(projectId)}/transcripts/${encodeURIComponent(transcriptId)}`);
+export async function loadProjectTranscript(fetchImpl = globalThis.fetch, projectId = '', transcriptId = '', token = '') {
+  return requestJson(fetchImpl, `/v1/projects/${encodeURIComponent(projectId)}/transcripts/${encodeURIComponent(transcriptId)}`, token);
 }
 
-export async function searchProjectMemory(fetchImpl = globalThis.fetch, projectId = '', query = '') {
+export async function searchProjectMemory(fetchImpl = globalThis.fetch, projectId = '', query = '', token = '') {
   const params = new URLSearchParams({ q: query });
-  return requestJson(fetchImpl, '/v1/projects/' + encodeURIComponent(projectId) + '/memory/search?' + params.toString());
+  return requestJson(fetchImpl, '/v1/projects/' + encodeURIComponent(projectId) + '/memory/search?' + params.toString(), token);
 }
 
-export async function loadDashboardData(fetchImpl = globalThis.fetch) {
-  const index = await requestJson(fetchImpl, '/v1/projects');
+export async function loadDashboardData(fetchImpl = globalThis.fetch, token = '') {
+  const index = await requestJson(fetchImpl, '/v1/projects', token);
   const projects = Array.isArray(index?.projects) ? index.projects : [];
   return Promise.all(projects.map(async (summary) => {
-    const detail = await requestJson(fetchImpl, `/v1/projects/${encodeURIComponent(summary.projectId)}`);
+    const detail = await requestJson(fetchImpl, `/v1/projects/${encodeURIComponent(summary.projectId)}`, token);
     return buildProjectViewModel(summary, detail, new Date());
   }));
+}
+
+export async function loadProjectSecurity(fetchImpl = globalThis.fetch, projectId = '', token = '') {
+  return requestJson(fetchImpl, `/v1/projects/${encodeURIComponent(projectId)}/security`, token);
+}
+
+export async function loadMemoryExport(fetchImpl = globalThis.fetch, projectId = '', token = '') {
+  return requestJson(fetchImpl, `/v1/projects/${encodeURIComponent(projectId)}/memory/export`, token);
+}
+
+export function buildObserverSecurityViewModel(payload = {}) {
+  return {
+    tokenCount: Number(payload.tokens?.total || 0),
+    activeTokens: Number(payload.tokens?.active || 0),
+    revokedTokens: Number(payload.tokens?.revoked || 0),
+    encryptionRequired: payload.encryption?.required === true,
+    encryptionConfigured: payload.encryption?.configured === true,
+    policy: payload.policy || {},
+    recentAudit: (Array.isArray(payload.audit) ? payload.audit : []).map((row) => ({
+      capability: String(row.capability || ''),
+      outcome: String(row.outcome || ''),
+      occurredAt: String(row.occurred_at || ''),
+    })),
+  };
 }
 
 export function buildProjectViewModel(summary = {}, detail = {}, now = new Date()) {
@@ -455,7 +485,7 @@ function renderChanges(container, projectId, documents) {
   container.replaceChildren(heading, list);
 }
 
-function renderSync(container, sync, projectId = '') {
+function renderSync(container, sync, projectId = '', onExport = null) {
   const heading = node('div', 'workspace-section-heading');
   heading.append(node('p', 'eyebrow', 'SYNC CONTROL'), node('h2', '', 'Sincronização'));
   const facts = node('div', 'detail-facts');
@@ -465,11 +495,35 @@ function renderSync(container, sync, projectId = '') {
     fact('Conflitos', sync?.conflict_count || 0),
   );
   const note = node('div', 'sync-callout', sync?.conflict_count ? 'Existem conflitos que exigem revisão.' : 'A memória local está acompanhando o container.');
-  const exportLink = node('a', 'workspace-open', 'Exportar cópia read-only →');
-  exportLink.href = '/v1/projects/' + encodeURIComponent(projectId) + '/memory/export';
-  exportLink.target = '_blank';
-  exportLink.rel = 'noopener';
-  container.replaceChildren(heading, facts, note, exportLink);
+  const exportButton = node('button', 'workspace-open', 'Exportar cópia sanitizada →');
+  exportButton.type = 'button';
+  exportButton.addEventListener('click', async () => {
+    try {
+      const payload = await onExport?.();
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `wendkeep-observer-${projectId}.json`;
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch { exportButton.textContent = 'Exportação não autorizada'; }
+  });
+  container.replaceChildren(heading, facts, note, exportButton);
+}
+
+function renderSecurity(container, payload) {
+  const view = buildObserverSecurityViewModel(payload);
+  const heading = node('div', 'workspace-section-heading');
+  heading.append(node('p', 'eyebrow', 'OBSERVER SECURITY'), node('h2', '', 'Política e acesso'));
+  const grid = node('div', 'detail-facts');
+  grid.append(
+    fact('Tokens ativos', view.activeTokens),
+    fact('Tokens revogados', view.revokedTokens),
+    fact('Criptografia', view.encryptionConfigured ? (view.encryptionRequired ? 'obrigatória' : 'configurada') : 'não configurada'),
+  );
+  const policy = node('pre', 'usage-transcript', JSON.stringify(view.policy, null, 2));
+  container.replaceChildren(heading, grid, node('h3', '', 'Política efetiva'), policy);
 }
 
 function formatNumber(value) {
@@ -670,6 +724,7 @@ function startDashboardV2() {
     memory: new Map(),
     usage: new Map(),
     usageFilters: new Map(),
+    token: '',
     route: parseObserverRoute(globalThis.location?.hash || ''),
   };
   const dashboardError = byId('dashboard-error');
@@ -726,12 +781,12 @@ function startDashboardV2() {
     workspaceContent.replaceChildren(node('div', 'workspace-error', message || 'Não foi possível carregar a memória.'));
   };
   const ensureProjectMemory = async (projectId) => {
-    if (!state.memory.has(projectId)) state.memory.set(projectId, await loadProjectMemory(fetchJson, projectId));
+    if (!state.memory.has(projectId)) state.memory.set(projectId, await loadProjectMemory(fetchJson, projectId, state.token));
     return state.memory.get(projectId);
   };
   const ensureProjectUsage = async (projectId) => {
     const filters = state.usageFilters.get(projectId) || {};
-    const usage = await loadProjectUsage(fetchJson, projectId, filters);
+    const usage = await loadProjectUsage(fetchJson, projectId, filters, state.token);
     state.usage.set(projectId, usage);
     return usage;
   };
@@ -752,7 +807,7 @@ function startDashboardV2() {
         node('p', 'eyebrow', 'MEMORY SEARCH'),
         node('h2', '', query ? 'Resultados para “' + query + '”' : 'Buscar na memória'),
       );
-      const results = query ? (await searchProjectMemory(fetchJson, model.projectId, query)).results || [] : [];
+      const results = query ? (await searchProjectMemory(fetchJson, model.projectId, query, state.token)).results || [] : [];
       const list = node('div', 'memory-document-list');
       renderDocumentRows(list, model.projectId, results, query ? 'Nenhum documento contém esse termo.' : 'Digite um termo para pesquisar.');
       workspaceContent?.replaceChildren(heading, list);
@@ -776,7 +831,7 @@ function startDashboardV2() {
       setWorkspaceHeader(model, memory, route);
       const documents = memory.tree?.documents || [];
       if (route.kind === 'document') {
-        const payload = await loadMemoryDocument(fetchJson, model.projectId, route.logicalPath);
+        const payload = await loadMemoryDocument(fetchJson, model.projectId, route.logicalPath, state.token);
         renderReader(workspaceContent, buildMemoryDocumentViewModel(payload, payload.content));
         return;
       }
@@ -787,12 +842,18 @@ function startDashboardV2() {
             state.usageFilters.set(model.projectId, filters);
             renderWorkspaceRoute({ ...route });
           },
-          onTranscript: (transcriptId) => loadProjectTranscript(fetchJson, model.projectId, transcriptId),
+          onTranscript: (transcriptId) => loadProjectTranscript(fetchJson, model.projectId, transcriptId, state.token),
         });
       } else if (route.section === 'sessions') renderSessions(workspaceContent, model.projectId, documents);
       else if (route.section === 'memory') renderMemory(workspaceContent, model.projectId, documents);
       else if (route.section === 'changes') renderChanges(workspaceContent, model.projectId, documents);
-      else if (route.section === 'sync') renderSync(workspaceContent, memory.sync, model.projectId);
+      else if (route.section === 'sync') renderSync(
+        workspaceContent,
+        memory.sync,
+        model.projectId,
+        () => loadMemoryExport(fetchJson, model.projectId, state.token),
+      );
+      else if (route.section === 'security') renderSecurity(workspaceContent, await loadProjectSecurity(fetchJson, model.projectId, state.token));
       else renderWorkspaceOverview(workspaceContent, model, memory);
     } catch (error) {
       showWorkspaceError(error.message);
@@ -815,7 +876,7 @@ function startDashboardV2() {
   const refresh = async () => {
     setConnection('is-warning', 'Sincronizando');
     try {
-      const models = await loadDashboardData(fetchJson);
+      const models = await loadDashboardData(fetchJson, state.token);
       state.models = models;
       if (!state.selectedId || !models.some((model) => model.projectId === state.selectedId)) state.selectedId = models[0]?.projectId || '';
       setHidden(dashboardError, true);
@@ -831,6 +892,21 @@ function startDashboardV2() {
     }
   };
   byId('refresh-button')?.addEventListener('click', refresh);
+  byId('observer-auth-form')?.addEventListener('submit', (event) => {
+    event.preventDefault();
+    state.token = byId('observer-token-input')?.value || '';
+    state.memory.clear();
+    state.usage.clear();
+    refresh();
+  });
+  byId('observer-token-clear')?.addEventListener('click', () => {
+    state.token = '';
+    const input = byId('observer-token-input');
+    if (input) input.value = '';
+    state.memory.clear();
+    state.usage.clear();
+    refresh();
+  });
   byId('project-filter')?.addEventListener('input', (event) => {
     state.filter = event.target.value;
     renderProjectList(state.models, state.selectedId, state.filter);

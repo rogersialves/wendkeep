@@ -9,7 +9,7 @@ function jsonResponse(body, status = 200) {
   return { status, ok: status >= 200 && status < 300, json: async () => body };
 }
 
-test('[req:SQL-OBS-7] cliente carrega consumo por projeto com filtros e sem autenticação', async () => {
+test('[req:OBS-SEC-UI] cliente carrega consumo por projeto com filtros e bearer explícito', async () => {
   const calls = [];
   const fetchImpl = async (url, options) => {
     calls.push({ url, options });
@@ -17,10 +17,10 @@ test('[req:SQL-OBS-7] cliente carrega consumo por projeto com filtros e sem aute
     if (url.includes('/usage/breakdown')) return jsonResponse({ project_id: 'project-a', agents: [] });
     return jsonResponse({ project_id: 'project-a', calls: [], total: 0 });
   };
-  const usage = await loadProjectUsage(fetchImpl, 'project-a', { from: '2026-08-01', role: 'subagent', model: 'gpt-5.6-luna' });
+  const usage = await loadProjectUsage(fetchImpl, 'project-a', { from: '2026-08-01', role: 'subagent', model: 'gpt-5.6-luna' }, 'usage-secret');
   assert.equal(usage.summary.cost_usd, 1.25);
   assert.equal(calls.length, 3);
-  assert.equal(calls.every(({ options }) => !Object.hasOwn(options.headers, 'Authorization')), true);
+  assert.equal(calls.every(({ options }) => options.headers.Authorization === 'Bearer usage-secret'), true);
   assert.equal(calls.every(({ url }) => url.includes('from=2026-08-01') && url.includes('role=subagent') && url.includes('model=gpt-5.6-luna')), true);
 });
 

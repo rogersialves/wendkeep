@@ -22,4 +22,4 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
   CMD node -e "fetch('http://127.0.0.1:8787/healthz').then(r => { if (!r.ok) process.exit(1); }).catch(() => process.exit(1))"
 
 ENTRYPOINT ["node", "bin/wendkeep.mjs", "observer", "serve"]
-CMD ["--host", "0.0.0.0", "--allow-non-loopback", "--port", "8787", "--data-dir", "/data"]
+CMD ["--host", "0.0.0.0", "--allow-non-loopback", "--require-loopback-auth", "--require-encryption", "--port", "8787", "--data-dir", "/data"]

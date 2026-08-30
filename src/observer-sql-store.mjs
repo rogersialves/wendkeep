@@ -1,15 +1,17 @@
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, readdirSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { join, basename, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { decodeTranscript, encodeTranscript } from './observer-transcript-store.mjs';
+import { decryptObserverValue, encryptObserverValue } from '../packages/observer/src/encryption.mjs';
+import { protectObserverEvent, readObserverPolicy } from '../packages/observer/src/policy.mjs';
 import {
   chunkMarkdownDocument, recallEvidence, recallTerms,
 } from '../packages/vault/src/evidence-recall.mjs';
 
 export const OBSERVER_SQL_FILE = 'observer.sqlite';
-export const OBSERVER_SQL_SCHEMA_VERSION = 5;
+export const OBSERVER_SQL_SCHEMA_VERSION = 6;
 export const OBSERVER_EVENT_SCHEMA_VERSION = 1;
 
 const SCHEMA_DIR = fileURLToPath(new URL('../schema/observer/', import.meta.url));
@@ -23,6 +25,29 @@ const OBSERVER_SQL_MINIMUM_NODE = '22.13.0';
 const require = createRequire(import.meta.url);
 let DatabaseSync;
 const DATABASE_PATHS = new WeakMap();
+const DATABASE_SECURITY = new WeakMap();
+
+export function configureObserverDatabaseSecurity(db, { policy = null, encryption = null, enforcePolicy = false } = {}) {
+  if (!db) throw new Error('db é obrigatório.');
+  DATABASE_SECURITY.set(db, { policy, encryption, enforcePolicy: Boolean(enforcePolicy) });
+  return { policy: Boolean(policy) || Boolean(enforcePolicy), encryption: Boolean(encryption) };
+}
+
+function databaseSecurity(db) {
+  return DATABASE_SECURITY.get(db) || { policy: null, encryption: null, enforcePolicy: false };
+}
+
+function encryptedJson(encryption, value, aad) {
+  return encryption ? json(encryptObserverValue(encryption, json(value), { aad })) : '';
+}
+
+function encryptedText(encryption, value, aad) {
+  return encryption ? json(encryptObserverValue(encryption, text(value), { aad })) : '';
+}
+
+function decryptedJson(encryption, envelope, fallback, aad) {
+  return envelope ? parseJson(decryptObserverValue(encryption, parseJson(envelope), { aad }), fallback) : fallback;
+}
 
 export function observerSqlRuntimeSupport(version = process.versions.node) {
   const current = String(version || '0.0.0');
@@ -109,7 +134,50 @@ export function openObserverDatabase(dataDir) {
   return db;
 }
 
-export function migrateObserverDatabase(db) {
+function encryptedStructuralBackup(db, databasePath, version, encryption) {
+  if (!encryption) throw Object.assign(new Error('Migração estrutural exige chave para backup protegido.'), { code: 'observer_encryption_required' });
+  const prefix = `${databasePath}.pre-${String(version).padStart(3, '0')}-${Date.now()}.bak`;
+  const temporaryPath = `${prefix}.tmp`;
+  const encryptedPath = `${prefix}.enc`;
+  const manifestPath = `${encryptedPath}.manifest.json`;
+  const aad = `observer-backup:${basename(databasePath)}:${version}`;
+  try {
+    db.exec(`VACUUM INTO '${temporaryPath.replaceAll("'", "''")}'`);
+    try { chmodSync(temporaryPath, 0o600); } catch { /* best effort on Windows */ }
+    const plaintext = readFileSync(temporaryPath);
+    const envelope = encryptObserverValue(encryption, plaintext.toString('base64'), { aad });
+    writeFileSync(encryptedPath, `${JSON.stringify(envelope)}\n`, { mode: 0o600 });
+    writeFileSync(manifestPath, `${JSON.stringify({
+      schema_version: 1,
+      encrypted_file: basename(encryptedPath),
+      algorithm: envelope.algorithm,
+      key_id: envelope.key_id,
+      aad,
+      plaintext_sha256: createHash('sha256').update(plaintext).digest('hex'),
+      source_database: basename(databasePath),
+      target_schema_version: version,
+      created_at: now(),
+    }, null, 2)}\n`, { mode: 0o600 });
+    try { chmodSync(encryptedPath, 0o600); chmodSync(manifestPath, 0o600); } catch { /* best effort on Windows */ }
+    return encryptedPath;
+  } finally {
+    rmSync(temporaryPath, { force: true });
+  }
+}
+
+export function restoreObserverEncryptedBackup({ backupPath, destinationPath, encryption } = {}) {
+  if (!backupPath || !destinationPath || !encryption) throw new Error('backupPath, destinationPath e encryption são obrigatórios.');
+  const manifest = parseJson(readFileSync(`${backupPath}.manifest.json`, 'utf8'), null);
+  if (!manifest || manifest.encrypted_file !== basename(backupPath)) throw Object.assign(new Error('Manifest do backup inválido.'), { code: 'observer_backup_manifest_invalid' });
+  const envelope = parseJson(readFileSync(backupPath, 'utf8'), null);
+  const plaintext = Buffer.from(decryptObserverValue(encryption, envelope, { aad: manifest.aad }), 'base64');
+  if (createHash('sha256').update(plaintext).digest('hex') !== manifest.plaintext_sha256) throw Object.assign(new Error('Integridade do backup inválida.'), { code: 'observer_backup_integrity_invalid' });
+  writeFileSync(destinationPath, plaintext, { mode: 0o600 });
+  try { chmodSync(destinationPath, 0o600); } catch { /* best effort on Windows */ }
+  return { restored: true, destination_path: destinationPath, sha256: manifest.plaintext_sha256 };
+}
+
+export function migrateObserverDatabase(db, { backupEncryption = null, requireEncryptedBackup = false } = {}) {
   if (!db) throw new Error('db é obrigatório.');
   db.exec('CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at TEXT NOT NULL)');
   const migrationColumns = db.prepare('PRAGMA table_info(schema_migrations)').all().map((row) => row.name);
@@ -136,9 +204,13 @@ export function migrateObserverDatabase(db) {
     if (/^\s*--\s*wendkeep:structural\b/m.test(sql) && applied.size > 0) {
       const databasePath = DATABASE_PATHS.get(db);
       if (!databasePath) throw new Error('Caminho do Observer desconhecido para backup estrutural.');
-      const backupPath = `${databasePath}.pre-${String(version).padStart(3, '0')}-${Date.now()}.bak`;
-      const escaped = backupPath.replaceAll("'", "''");
-      db.exec(`VACUUM INTO '${escaped}'`);
+      const backupPath = requireEncryptedBackup
+        ? encryptedStructuralBackup(db, databasePath, version, backupEncryption)
+        : `${databasePath}.pre-${String(version).padStart(3, '0')}-${Date.now()}.bak`;
+      if (!requireEncryptedBackup) {
+        const escaped = backupPath.replaceAll("'", "''");
+        db.exec(`VACUUM INTO '${escaped}'`);
+      }
       backups.push(backupPath);
     }
     db.exec('BEGIN IMMEDIATE');
@@ -229,6 +301,7 @@ export function rebuildSqlEvidenceIndex(db, { missingOnly = false } = {}) {
   const documents = db.prepare(`SELECT d.project_id, d.logical_path, d.content, d.metadata_json, d.entity_type, d.captured_at
     FROM documents d
     WHERE d.deleted_at IS NULL
+      AND COALESCE(d.content_envelope, '') = ''
       AND (? = 0 OR NOT EXISTS (
         SELECT 1 FROM document_chunks c
         WHERE c.project_id = d.project_id AND c.logical_path = d.logical_path
@@ -252,15 +325,96 @@ export function rebuildSqlEvidenceIndex(db, { missingOnly = false } = {}) {
   return { documents: documents.length, chunks, fts };
 }
 
-export function ensureObserverDatabase(dataDir) {
+export function bootstrapObserverDatabase(dataDir, { security = {} } = {}) {
   const db = openObserverDatabase(dataDir);
   try {
-    migrateObserverDatabase(db);
-    return db;
+    configureObserverDatabaseSecurity(db, security);
+    const databaseMigration = migrateObserverDatabase(db, {
+      backupEncryption: security?.encryption || null,
+      requireEncryptedBackup: Boolean(security?.encryption?.required),
+    });
+    const protectedDataMigration = security.encryption
+      ? migrateObserverProtectedData(db, { encryption: security.encryption })
+      : { protected_rows: 0, projects: 0 };
+    return { db, databaseMigration, protectedDataMigration };
   } catch (error) {
     db.close();
     throw error;
   }
+}
+
+export function ensureObserverDatabase(dataDir, { security = null } = {}) {
+  return bootstrapObserverDatabase(dataDir, { security: security || {} }).db;
+}
+
+export function migrateObserverProtectedData(db, { projectId = '', encryption } = {}) {
+  if (!encryption) return { protected_rows: 0, projects: 0 };
+  const projects = projectId
+    ? [requireProject(db, projectId)]
+    : db.prepare('SELECT project_id FROM projects ORDER BY project_id').all();
+  let protectedRows = 0;
+  for (const project of projects) {
+    const id = project.project_id;
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      const documents = db.prepare("SELECT logical_path, content, metadata_json, content_envelope, metadata_envelope FROM documents WHERE project_id = ? AND (content <> '' OR metadata_json <> '{}' OR content_envelope = '' OR metadata_envelope = '')").all(id);
+      for (const row of documents) {
+        const contentEnvelope = row.content_envelope || encryptedText(encryption, row.content, `${id}:document:${row.logical_path}`);
+        const metadataEnvelope = row.metadata_envelope || encryptedJson(encryption, parseJson(row.metadata_json), `${id}:document:${row.logical_path}:metadata`);
+        db.prepare("UPDATE documents SET content = '', content_envelope = ?, metadata_json = '{}', metadata_envelope = ? WHERE project_id = ? AND logical_path = ?")
+          .run(contentEnvelope, metadataEnvelope, id, row.logical_path);
+        db.prepare('DELETE FROM document_chunks WHERE project_id = ? AND logical_path = ?').run(id, row.logical_path);
+        if (observerFts5Support(db).supported) db.prepare('DELETE FROM evidence_chunks_fts WHERE project_id = ? AND logical_path = ?').run(id, row.logical_path);
+        protectedRows += 1;
+      }
+      const calls = db.prepare("SELECT call_id, prompt_text, response_text, metadata_json, prompt_envelope, response_envelope, metadata_envelope FROM llm_calls WHERE project_id = ? AND (prompt_text <> '' OR response_text <> '' OR metadata_json <> '{}')").all(id);
+      for (const row of calls) {
+        db.prepare("UPDATE llm_calls SET prompt_text = '', response_text = '', metadata_json = '{}', prompt_envelope = ?, response_envelope = ?, metadata_envelope = ? WHERE project_id = ? AND call_id = ?").run(
+          row.prompt_envelope || encryptedText(encryption, row.prompt_text, `${id}:call:${row.call_id}:prompt`),
+          row.response_envelope || encryptedText(encryption, row.response_text, `${id}:call:${row.call_id}:response`),
+          row.metadata_envelope || encryptedJson(encryption, parseJson(row.metadata_json), `${id}:call:${row.call_id}:metadata`), id, row.call_id,
+        );
+        protectedRows += 1;
+      }
+      const transcripts = db.prepare("SELECT * FROM transcripts WHERE project_id = ? AND codec <> 'aes-256-gcm+gzip'").all(id);
+      for (const row of transcripts) {
+        const decoded = decodeTranscript(row);
+        const encoded = encodeTranscript(decoded.content, { encryption, aad: `${id}:transcript:${row.transcript_id}` });
+        db.prepare("UPDATE transcripts SET codec = ?, content_gzip = ?, compressed_bytes = ?, metadata_json = '{}', metadata_envelope = ? WHERE project_id = ? AND transcript_id = ?").run(
+          encoded.codec, encoded.content_gzip, encoded.compressed_bytes,
+          encryptedJson(encryption, parseJson(row.metadata_json), `${id}:transcript:${row.transcript_id}:metadata`), id, row.transcript_id,
+        );
+        protectedRows += 1;
+      }
+      const snapshots = db.prepare("SELECT project_id, snapshot_json, snapshot_envelope FROM project_snapshots WHERE project_id = ? AND snapshot_json <> '{}'").all(id);
+      for (const row of snapshots) {
+        db.prepare("UPDATE project_snapshots SET snapshot_json = '{}', snapshot_envelope = ? WHERE project_id = ?").run(
+          row.snapshot_envelope || encryptedJson(encryption, parseJson(row.snapshot_json), `${id}:snapshot`), id,
+        );
+        protectedRows += 1;
+      }
+      for (const table of ['ingest_events', 'memory_events']) {
+        const rows = db.prepare(`SELECT event_id, payload_json FROM ${table} WHERE project_id = ?`).all(id);
+        for (const row of rows) {
+          const source = parseJson(row.payload_json);
+          const protectedPayload = { ...source };
+          for (const field of ['content', 'prompt', 'promptText', 'prompt_text', 'response', 'responseText', 'response_text']) {
+            if (Object.hasOwn(protectedPayload, field)) protectedPayload[field] = '[PROTECTED]';
+          }
+          if (Object.hasOwn(protectedPayload, 'metadata')) protectedPayload.metadata = '[PROTECTED]';
+          db.prepare(`UPDATE ${table} SET payload_json = ? WHERE event_id = ?`).run(json(protectedPayload), row.event_id);
+        }
+      }
+      db.prepare(`INSERT INTO observer_security_backfill(project_id, status, protected_rows, updated_at)
+        VALUES (?, 'complete', ?, ?) ON CONFLICT(project_id) DO UPDATE SET status = 'complete', protected_rows = excluded.protected_rows, updated_at = excluded.updated_at`)
+        .run(id, protectedRows, now());
+      db.exec('COMMIT');
+    } catch (error) {
+      db.exec('ROLLBACK');
+      throw error;
+    }
+  }
+  return { protected_rows: protectedRows, projects: projects.length };
 }
 
 export function registerSqlProject(db, { projectId, projectName = projectId, wendkeepVersion = '', registeredAt = now() } = {}) {
@@ -348,6 +502,7 @@ function ensureAgent(db, projectId, payload) {
 function applyDocument(db, event) {
   const p = event.payload;
   const content = text(p.content);
+  const { encryption } = databaseSecurity(db);
   const logicalPath = text(p.logical_path || p.logicalPath);
   if (!logicalPath || logicalPath.includes('..') || /^[A-Za-z]:[\\/]/.test(logicalPath)) throw new Error('logical_path inválido.');
   const current = db.prepare('SELECT revision FROM documents WHERE project_id = ? AND logical_path = ?').get(event.project_id, logicalPath);
@@ -371,15 +526,24 @@ function applyDocument(db, event) {
   }
   const title = text(p.title || basename(logicalPath).replace(/\.md$/i, ''));
   const documentId = text(p.document_id || p.documentId) || `${event.project_id}:${logicalPath}`;
+  const contentEnvelope = encryption
+    ? encryptObserverValue(encryption, content, { aad: `${event.project_id}:document:${logicalPath}` })
+    : null;
+  const metadataEnvelope = encryption
+    ? encryptedJson(encryption, p.metadata || {}, `${event.project_id}:document:${logicalPath}:metadata`)
+    : '';
+  const storedContent = contentEnvelope ? '' : content;
   db.prepare(`
-    INSERT INTO documents(document_id, project_id, logical_path, entity_type, title, content, metadata_json, content_hash, revision, source_session_id, source_turn_id, captured_at, deleted_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
+    INSERT INTO documents(document_id, project_id, logical_path, entity_type, title, content, content_envelope, metadata_json, metadata_envelope, content_hash, revision, source_session_id, source_turn_id, captured_at, deleted_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
     ON CONFLICT(project_id, logical_path) DO UPDATE SET
       document_id = excluded.document_id,
       entity_type = excluded.entity_type,
       title = excluded.title,
       content = excluded.content,
+      content_envelope = excluded.content_envelope,
       metadata_json = excluded.metadata_json,
+      metadata_envelope = excluded.metadata_envelope,
       content_hash = excluded.content_hash,
       revision = excluded.revision,
       source_session_id = excluded.source_session_id,
@@ -387,22 +551,27 @@ function applyDocument(db, event) {
       captured_at = excluded.captured_at,
       deleted_at = NULL
   `).run(
-    documentId, event.project_id, logicalPath, text(p.entity_type || p.entityType, 'memory'), title, content, json(p.metadata), contentHash,
-    revision, text(p.source_session_id || p.sourceSessionId), text(p.source_turn_id || p.sourceTurnId), text(p.captured_at || event.occurred_at),
+    documentId, event.project_id, logicalPath, text(p.entity_type || p.entityType, 'memory'), title, storedContent, contentEnvelope ? json(contentEnvelope) : '', encryption ? '{}' : json(p.metadata), metadataEnvelope, contentHash,
+    revision, text(p.source_session_id || p.sourceSessionId), text(p.source_turn_id || p.sourceTurnId), text(p.captured_at || p.capturedAt || event.occurred_at),
   );
   db.prepare(`
     INSERT INTO memory_events(event_id, project_id, entity_type, logical_path, operation, revision, content_hash, source_session_id, source_turn_id, occurred_at, payload_json)
     VALUES (?, ?, ?, ?, 'upsert', ?, ?, ?, ?, ?, ?)
   `).run(event.event_id, event.project_id, text(p.entity_type || p.entityType, 'memory'), logicalPath, revision, contentHash,
-    text(p.source_session_id || p.sourceSessionId), text(p.source_turn_id || p.sourceTurnId), event.occurred_at, json(p));
-  writeSqlDocumentChunks(db, {
-    projectId: event.project_id,
-    logicalPath,
-    content,
-    metadata: p.metadata,
-    entityType: text(p.entity_type || p.entityType, 'memory'),
-    capturedAt: text(p.captured_at || event.occurred_at),
-  });
+    text(p.source_session_id || p.sourceSessionId), text(p.source_turn_id || p.sourceTurnId), event.occurred_at,
+    json(ledgerPayload(event, encryption)));
+  if (contentEnvelope) {
+    db.prepare('DELETE FROM document_chunks WHERE project_id = ? AND logical_path = ?').run(event.project_id, logicalPath);
+  } else {
+    writeSqlDocumentChunks(db, {
+      projectId: event.project_id,
+      logicalPath,
+      content,
+      metadata: p.metadata,
+      entityType: text(p.entity_type || p.entityType, 'memory'),
+      capturedAt: text(p.captured_at || p.capturedAt || event.occurred_at),
+    });
+  }
   return { stale: false };
 }
 
@@ -461,13 +630,26 @@ function applyCall(db, event) {
     throw error;
   }
   const [input, cacheWrite, cacheRead, output, reasoning, total] = tokenFields(p.tokens);
+  const { encryption } = databaseSecurity(db);
+  const prompt = text(p.prompt_text || p.promptText || p.prompt);
+  const response = text(p.response_text || p.responseText || p.response);
+  const promptEnvelope = encryption
+    ? encryptObserverValue(encryption, prompt, { aad: `${event.project_id}:call:${callId}:prompt` })
+    : null;
+  const responseEnvelope = encryption
+    ? encryptObserverValue(encryption, response, { aad: `${event.project_id}:call:${callId}:response` })
+    : null;
+  const metadataEnvelope = encryption
+    ? encryptedJson(encryption, p.metadata || {}, `${event.project_id}:call:${callId}:metadata`)
+    : '';
   db.prepare(`
-    INSERT INTO llm_calls(call_pk, call_id, project_id, session_id, agent_id, role, provider, model_provider, model, effort, sequence, occurred_at, tokens_input, tokens_cache_write, tokens_cache_read, tokens_output, tokens_reasoning, tokens_total, cost_usd, cost_status, transcript_id, prompt_text, response_text, status, metadata_json)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO llm_calls(call_pk, call_id, project_id, session_id, agent_id, role, provider, model_provider, model, effort, sequence, occurred_at, tokens_input, tokens_cache_write, tokens_cache_read, tokens_output, tokens_reasoning, tokens_total, cost_usd, cost_status, transcript_id, prompt_text, response_text, prompt_envelope, response_envelope, status, metadata_json, metadata_envelope)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     scopedIdentity(event.project_id, callId), callId, event.project_id, sessionId, agentId, text(p.role, 'main'), text(p.provider), text(p.model_provider || p.modelProvider), text(p.model), text(p.effort), integer(p.sequence),
     text(p.occurred_at || event.occurred_at), input, cacheWrite, cacheRead, output, reasoning, total, number(p.cost_usd ?? p.costUsd), text(p.cost_status || p.costStatus, 'unknown'),
-    p.transcript_id || p.transcriptId || null, text(p.prompt_text || p.promptText || p.prompt), text(p.response_text || p.responseText || p.response), text(p.status, 'complete'), json(p.metadata),
+    p.transcript_id || p.transcriptId || null, promptEnvelope ? '' : prompt, responseEnvelope ? '' : response,
+    promptEnvelope ? json(promptEnvelope) : '', responseEnvelope ? json(responseEnvelope) : '', text(p.status, 'complete'), encryption ? '{}' : json(p.metadata), metadataEnvelope,
   );
   return { stale: false };
 }
@@ -478,17 +660,22 @@ function applyTranscript(db, event) {
   const agentId = ensureAgent(db, event.project_id, p);
   const transcriptId = text(p.transcript_id || p.transcriptId);
   if (!transcriptId) throw new Error('transcript_id ausente.');
-  const encoded = encodeTranscript(p.content);
+  const { encryption } = databaseSecurity(db);
+  const encoded = encodeTranscript(p.content, { encryption, aad: `${event.project_id}:transcript:${transcriptId}` });
+  const metadataEnvelope = encryption
+    ? encryptedJson(encryption, p.metadata || {}, `${event.project_id}:transcript:${transcriptId}:metadata`)
+    : '';
   db.prepare(`
-    INSERT INTO transcripts(transcript_pk, transcript_id, project_id, session_id, agent_id, coverage, codec, content_gzip, content_sha256, original_bytes, compressed_bytes, source, occurred_at, metadata_json)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO transcripts(transcript_pk, transcript_id, project_id, session_id, agent_id, coverage, codec, content_gzip, content_sha256, original_bytes, compressed_bytes, source, occurred_at, metadata_json, metadata_envelope)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(project_id, transcript_id) DO UPDATE SET
       coverage = excluded.coverage, codec = excluded.codec, content_gzip = excluded.content_gzip,
       content_sha256 = excluded.content_sha256, original_bytes = excluded.original_bytes, compressed_bytes = excluded.compressed_bytes,
-      source = excluded.source, occurred_at = excluded.occurred_at, metadata_json = excluded.metadata_json
+      source = excluded.source, occurred_at = excluded.occurred_at, metadata_json = excluded.metadata_json,
+      metadata_envelope = excluded.metadata_envelope
   `).run(
     scopedIdentity(event.project_id, transcriptId), transcriptId, event.project_id, sessionId, agentId, text(p.coverage, 'complete'), encoded.codec, encoded.content_gzip, encoded.content_sha256,
-    encoded.original_bytes, encoded.compressed_bytes, text(p.source), event.occurred_at, json(p.metadata),
+    encoded.original_bytes, encoded.compressed_bytes, text(p.source), event.occurred_at, encryption ? '{}' : json(p.metadata), metadataEnvelope,
   );
   return { stale: false };
 }
@@ -504,10 +691,36 @@ function applyEvent(db, event) {
   throw new Error('kind não implementado.');
 }
 
+function ledgerPayload(event, encryption) {
+  if (!encryption) return event.payload;
+  const payload = structuredClone(event.payload || {});
+  if (event.kind === 'document.upsert' || event.kind === 'transcript.upsert') payload.content = '[PROTECTED]';
+  if (event.kind === 'llm_call') {
+    for (const key of ['prompt', 'promptText', 'prompt_text', 'response', 'responseText', 'response_text']) {
+      if (Object.hasOwn(payload, key)) payload[key] = '[PROTECTED]';
+    }
+  }
+  if (['document.upsert', 'transcript.upsert', 'llm_call'].includes(event.kind)
+    && Object.hasOwn(payload, 'metadata')) payload.metadata = '[PROTECTED]';
+  return payload;
+}
+
 export function ingestObserverEvents(db, { projectId, events = [] } = {}) {
   requireProject(db, projectId);
-  const result = { accepted: 0, duplicates: 0, conflicts: 0, stale: 0, rejected: 0, results: [] };
-  for (const event of events) {
+  const security = databaseSecurity(db);
+  const storedPolicy = readObserverPolicy(db, projectId);
+  const effectivePolicy = security.policy || (security.enforcePolicy ? storedPolicy : null);
+  if ((security.policy?.encryption_required || storedPolicy.encryption_required) && !security.encryption) {
+    throw Object.assign(new Error('A policy exige criptografia antes da ingestão.'), { code: 'observer_encryption_required' });
+  }
+  const result = { accepted: 0, duplicates: 0, conflicts: 0, stale: 0, rejected: 0, dropped: 0, results: [] };
+  for (const incoming of events) {
+    const event = effectivePolicy ? protectObserverEvent(incoming, { policy: effectivePolicy }) : incoming;
+    if (!event) {
+      result.dropped += 1;
+      result.results.push({ accepted: false, dropped: true, event_id: incoming?.event_id || '' });
+      continue;
+    }
     const validation = validateEvent(event, projectId);
     if (!validation.ok) {
       result.rejected += 1;
@@ -537,7 +750,7 @@ export function ingestObserverEvents(db, { projectId, events = [] } = {}) {
     let savepointOpen = true;
     try {
       db.prepare('INSERT INTO ingest_events(event_id, project_id, kind, payload_hash, payload_json, occurred_at, ingested_at, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
-        .run(event.event_id, projectId, event.kind, payloadHash, json(event.payload), event.occurred_at, now(), 'accepted');
+        .run(event.event_id, projectId, event.kind, payloadHash, json(ledgerPayload(event, security.encryption)), event.occurred_at, now(), 'accepted');
       const applied = applyEvent(db, event);
       if (applied.stale) {
         db.prepare('UPDATE ingest_events SET status = ? WHERE event_id = ?').run('stale', event.event_id);
@@ -647,12 +860,23 @@ export function readUsageCalls(db, projectId, filters = {}) {
     offset,
     limit,
     total: integer(rows[0]?.total_count),
-    calls: rows.map((row) => ({
+    calls: rows.map((row) => {
+      const { encryption } = databaseSecurity(db);
+      const prompt = row.prompt_envelope
+        ? decryptObserverValue(encryption, parseJson(row.prompt_envelope), { aad: `${projectId}:call:${row.call_id}:prompt` })
+        : row.prompt_text;
+      const response = row.response_envelope
+        ? decryptObserverValue(encryption, parseJson(row.response_envelope), { aad: `${projectId}:call:${row.call_id}:response` })
+        : row.response_text;
+      return ({
       call_id: row.call_id, session_id: row.session_id, agent_id: row.agent_id, role: row.role, provider: row.provider,
       model_provider: row.model_provider, model: row.model, effort: row.effort, sequence: integer(row.sequence), occurred_at: row.occurred_at,
       tokens: tokenObject(row), cost_usd: Number(number(row.cost_usd).toFixed(4)), cost_status: row.cost_status,
-      transcript_id: row.transcript_id, prompt: row.prompt_text, response: row.response_text, status: row.status, metadata: parseJson(row.metadata_json),
-    })),
+      transcript_id: row.transcript_id, prompt, response, status: row.status,
+      metadata: row.metadata_envelope
+        ? decryptedJson(encryption, row.metadata_envelope, {}, `${projectId}:call:${row.call_id}:metadata`)
+        : parseJson(row.metadata_json),
+    }); }),
   };
 }
 
@@ -664,7 +888,14 @@ export function readTranscript(db, projectId, transcriptId) {
     error.code = 'transcript_not_found';
     throw error;
   }
-  return decodeTranscript(row);
+  const decoded = decodeTranscript(row, {
+    encryption: databaseSecurity(db).encryption,
+    aad: `${projectId}:transcript:${transcriptId}`,
+  });
+  decoded.metadata = row.metadata_envelope
+    ? decryptedJson(databaseSecurity(db).encryption, row.metadata_envelope, {}, `${projectId}:transcript:${transcriptId}:metadata`)
+    : parseJson(row.metadata_json);
+  return decoded;
 }
 
 export function readSqlDocument(db, projectId, logicalPath) {
@@ -680,7 +911,13 @@ export function readSqlDocument(db, projectId, logicalPath) {
     error.code = 'memory_not_found';
     throw error;
   }
-  return { ...row, metadata: parseJson(row.metadata_json) };
+  const content = row.content_envelope
+    ? decryptObserverValue(databaseSecurity(db).encryption, parseJson(row.content_envelope), { aad: `${projectId}:document:${logicalPath}` })
+    : row.content;
+  const metadata = row.metadata_envelope
+    ? decryptedJson(databaseSecurity(db).encryption, row.metadata_envelope, {}, `${projectId}:document:${logicalPath}:metadata`)
+    : parseJson(row.metadata_json);
+  return { ...row, content, metadata };
 }
 
 export function readSqlTree(db, projectId, prefix = '') {
@@ -731,10 +968,16 @@ export function readSqlSync(db, projectId) {
   return { mode: 'container-authority', project_id: projectId, document_count: integer(documents.count), event_count: integer(events.count), pending_count: integer(pending.count), database: OBSERVER_SQL_FILE, schema_version: OBSERVER_SQL_SCHEMA_VERSION };
 }
 
-export function exportSqlMemoryBundle(db, projectId) {
+export function exportSqlMemoryBundle(db, projectId, { includeContent = false } = {}) {
   requireProject(db, projectId);
   const rows = db.prepare('SELECT logical_path, entity_type, content, content_hash, revision, captured_at FROM documents WHERE project_id = ? AND deleted_at IS NULL ORDER BY logical_path').all(projectId);
-  return { schema_version: OBSERVER_SQL_SCHEMA_VERSION, project_id: projectId, generated_at: now(), documents: rows };
+  return {
+    schema_version: OBSERVER_SQL_SCHEMA_VERSION,
+    project_id: projectId,
+    generated_at: now(),
+    sanitized: !includeContent,
+    documents: rows.map((row) => ({ ...row, content: includeContent ? row.content : '' })),
+  };
 }
 
 export function readSqlProject(db, projectId) {
@@ -745,6 +988,11 @@ export function readSqlProject(db, projectId) {
 export function upsertSqlProjectSnapshot(db, snapshot) {
   const projectId = text(snapshot?.project_id || snapshot?.projectId);
   requireProject(db, projectId);
+  const security = databaseSecurity(db);
+  const storedPolicy = readObserverPolicy(db, projectId);
+  if ((security.policy?.encryption_required || storedPolicy.encryption_required) && !security.encryption) {
+    throw Object.assign(new Error('A policy exige criptografia antes de persistir snapshots.'), { code: 'observer_encryption_required' });
+  }
   const eventId = text(snapshot?.event_id);
   const capturedAt = text(snapshot?.captured_at);
   if (!eventId || !capturedAt || Number.isNaN(Date.parse(capturedAt))) throw new Error('snapshot SQL inválido.');
@@ -754,19 +1002,25 @@ export function upsertSqlProjectSnapshot(db, snapshot) {
     || (current.captured_at === capturedAt && current.event_id >= eventId))) {
     return { accepted: false, stale: true, event_id: eventId };
   }
-  db.prepare(`INSERT INTO project_snapshots(project_id, event_id, captured_at, snapshot_json)
-    VALUES (?, ?, ?, ?)
+  const { encryption } = security;
+  const snapshotEnvelope = encryption ? encryptedJson(encryption, snapshot, `${projectId}:snapshot`) : '';
+  db.prepare(`INSERT INTO project_snapshots(project_id, event_id, captured_at, snapshot_json, snapshot_envelope)
+    VALUES (?, ?, ?, ?, ?)
     ON CONFLICT(project_id) DO UPDATE SET
       event_id = excluded.event_id,
       captured_at = excluded.captured_at,
-      snapshot_json = excluded.snapshot_json`).run(projectId, eventId, capturedAt, json(snapshot));
+      snapshot_json = excluded.snapshot_json,
+      snapshot_envelope = excluded.snapshot_envelope`).run(projectId, eventId, capturedAt, encryption ? '{}' : json(snapshot), snapshotEnvelope);
   return { accepted: true, duplicate: false, event_id: eventId };
 }
 
 export function readSqlProjectSnapshot(db, projectId) {
   requireProject(db, projectId);
-  const row = db.prepare('SELECT snapshot_json FROM project_snapshots WHERE project_id = ?').get(projectId);
-  return row ? parseJson(row.snapshot_json, null) : null;
+  const row = db.prepare('SELECT snapshot_json, snapshot_envelope FROM project_snapshots WHERE project_id = ?').get(projectId);
+  if (!row) return null;
+  return row.snapshot_envelope
+    ? decryptedJson(databaseSecurity(db).encryption, row.snapshot_envelope, null, `${projectId}:snapshot`)
+    : parseJson(row.snapshot_json, null);
 }
 
 export function readSqlProjectOverview(db, projectId) {

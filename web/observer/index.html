@@ -24,6 +24,12 @@
         <div class="connection-cluster" aria-live="polite">
           <span id="connection-dot" class="connection-dot is-offline" aria-hidden="true"></span>
           <span id="connection-label">Conectando</span>
+          <form id="observer-auth-form" class="observer-auth-form" autocomplete="off">
+            <label class="sr-only" for="observer-token-input">Token do Observer</label>
+            <input id="observer-token-input" type="password" placeholder="Token" autocomplete="off" spellcheck="false">
+            <button type="submit">Conectar</button>
+            <button id="observer-token-clear" type="button" aria-label="Limpar token">×</button>
+          </form>
           <form id="global-search-form" class="global-search">
             <label class="sr-only" for="global-search">Buscar na memória</label>
             <span aria-hidden="true">⌕</span>
@@ -101,6 +107,7 @@
                 <a data-workspace-section="memory" href="#project/project-a/memory">Memória</a>
                 <a data-workspace-section="changes" href="#project/project-a/changes">Changes</a>
                 <a data-workspace-section="sync" href="#project/project-a/sync">Sincronização</a>
+                <a data-workspace-section="security" href="#project/project-a/security">Segurança</a>
               </nav>
               <div id="workspace-meta" class="workspace-meta"></div>
             </aside>
