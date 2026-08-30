@@ -1,11 +1,20 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 
 import { verifyReleaseCandidateBytes } from '../src/release-candidate.mjs';
+
+test('[req:CI-SC-9] candidate runner is published without matching Node test discovery', () => {
+  const packageJson = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+  const command = packageJson.scripts['release:candidate:test'];
+  const runner = command.match(/^node\s+(\S+)/)?.[1];
+  assert.ok(runner, 'release:candidate:test must execute a versioned Node runner');
+  assert.doesNotMatch(runner.split('/').at(-1), /^test-/u);
+  assert.ok(packageJson.files.includes(runner), 'candidate runner must be present in the published tarball');
+});
 
 test('[req:CI-SC-9] canonical candidate receipt binds the exact bytes consumed before publish', () => {
   const root = mkdtempSync(join(tmpdir(), 'wendkeep-candidate-proof-'));
