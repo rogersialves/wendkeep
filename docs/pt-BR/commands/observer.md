@@ -139,7 +139,9 @@ um único publisher. Sem servidor disponível, a outbox `.brain/observer-sql-out
 sem bloquear a sessão; a varredura integral fica reservada a `observer reconcile`. O `doctor`
 mostra lotes, eventos, bytes e idade da fila. Os lotes SQL são enviados com gzip para que transcripts completos maiores que
 64 MB em JSON puro continuem dentro do limite do transporte; o Observer descomprime e valida o
-corpo antes de ingerir. O outbox é transporte temporário, não autoridade.
+corpo antes de ingerir. Como a ingestão é idempotente, o publisher repete o mesmo lote uma única vez
+quando o socket é encerrado transitoriamente (`ECONNRESET`, `EPIPE` ou `UND_ERR_SOCKET`), sempre
+dentro do timeout total calculado. Outras falhas preservam a outbox. O outbox é transporte temporário, não autoridade.
 
 ## Erros comuns e diagnóstico
 

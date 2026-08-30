@@ -20,6 +20,12 @@ All notable changes to **wendkeep** are documented here. Format based on
   sem SQLite; o Observer completo em Node 22.13/24 no Linux, Windows e macOS, com documentação
   bilíngue de suporte e depreciação para a linha 0.x — sem declarar 1.0.
 
+### Fixed
+
+- **Ingestão gzip sob pressão.** O publisher repete uma única vez o mesmo lote idempotente quando
+  um socket keep-alive é encerrado transitoriamente, preservando o timeout total e a outbox diante
+  de outras falhas.
+
 ### Security
 
 - **Supply chain fail-closed.** Actions são fixadas por SHA e usam permissões mínimas por job;

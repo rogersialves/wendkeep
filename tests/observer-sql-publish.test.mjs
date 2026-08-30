@@ -26,6 +26,36 @@ test('[req:SQL-OBS-10] timeout de ingestão cresce com o payload e permanece lim
   assert.equal(observerSqlRequestTimeoutMs(1024 * 1024 * 1024), 120_000);
 });
 
+test('[req:SQL-OBS-10] publisher repete uma vez o lote gzip após reset transitório', async () => {
+  const fixture = makeObserverFixture();
+  let postAttempts = 0;
+  try {
+    const result = await publishObserverSql({
+      vaultBase: fixture.vaultBase,
+      projectId: fixture.projectId,
+      url: 'http://observer.test',
+      now: '2026-08-17T11:00:00Z',
+      fetchImpl: async (_url, init = {}) => {
+        if (!init.method) return { ok: false, status: 503, json: async () => ({}) };
+        postAttempts += 1;
+        if (postAttempts === 1) {
+          const error = new TypeError('fetch failed');
+          error.cause = { code: 'ECONNRESET' };
+          throw error;
+        }
+        assert.equal(init.headers['content-encoding'], 'gzip');
+        const body = JSON.parse(gunzipSync(init.body).toString('utf8'));
+        return { ok: true, status: 201, json: async () => ({ accepted: body.events.length }) };
+      },
+    });
+    assert.equal(result.ok, true);
+    assert.equal(result.pending, 0);
+    assert.equal(postAttempts, 2);
+  } finally {
+    fixture.cleanup();
+  }
+});
+
 function sessionFixture(fixture, transcriptPath) {
   const sessionDir = join(fixture.vaultBase, '02-Sessões/2026/08-AGO/DIA 17');
   mkdirSync(sessionDir, { recursive: true });
@@ -211,6 +241,7 @@ test('[req:SQL-OBS-10] publisher envia lote gzip quando o JSON puro excede 64 MB
   writeFileSync(join(decisions, 'ADR-large-transcript.md'), `# Histórico grande\n${'linha de evidência repetida para medir transporte.\n'.repeat(1_400_000)}`);
   const server = await startObserverServer({ host: '127.0.0.1', port: 0, dataDir, ...observerBootstrap(TOKEN) });
   const url = `http://127.0.0.1:${server.address().port}`;
+  let wireBytes = 0;
   try {
     const registration = await fetch(`${url}/v1/projects/${fixture.projectId}`, {
       method: 'PUT',
@@ -224,9 +255,14 @@ test('[req:SQL-OBS-10] publisher envia lote gzip quando o JSON puro excede 64 MB
       url,
       now: '2026-08-17T11:00:00Z',
       token: TOKEN,
+      fetchImpl: async (requestUrl, init) => {
+        if (init.body) wireBytes = Buffer.byteLength(init.body);
+        return fetch(requestUrl, init);
+      },
     });
-    assert.equal(result.ok, true);
+    assert.equal(result.ok, true, `${result.error || JSON.stringify(result)}; wireBytes=${wireBytes}`);
     assert.equal(result.pending, 0);
+    assert.ok(wireBytes > 0 && wireBytes <= SQL_EVENT_BATCH_BYTES);
     const tree = await (await fetch(`${url}/v1/projects/${fixture.projectId}/memory/tree`)).json();
     assert.ok(tree.documents.some((document) => document.logical_path === '04-Decisões/2026/08-AGO/ADR-large-transcript.md'));
   } finally {

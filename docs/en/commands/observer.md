@@ -137,8 +137,10 @@ the documents they wrote. Events are coalesced by scope and one lease admits a s
 When the server is unavailable, `.brain/observer-sql-outbox/` remains durable without blocking the
 session; full-vault scanning is reserved for `observer reconcile`. `doctor` reports queue batches,
 events, bytes, and age. SQL batches use gzip so complete transcripts larger than 64 MB as plain JSON remain within
-the transport limit; the Observer decompresses and validates the body before ingesting it. The
-outbox is temporary transport, not authority.
+the transport limit; the Observer decompresses and validates the body before ingesting it. Because
+ingestion is idempotent, the publisher retries the same batch once when the socket is transiently
+closed (`ECONNRESET`, `EPIPE`, or `UND_ERR_SOCKET`), always within the computed total timeout. Other
+failures preserve the outbox. The outbox is temporary transport, not authority.
 
 ## Common errors and diagnosis
 
