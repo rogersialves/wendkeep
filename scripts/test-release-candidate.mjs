@@ -25,13 +25,24 @@ try {
     cwd: temporary, encoding: 'utf8', shell: npm.shell,
     stdio: ['ignore', 'pipe', 'pipe'],
   });
+  const cliHelp = execFileSync(process.execPath, [
+    join(temporary, 'node_modules', 'wendkeep', 'bin', 'wendkeep.mjs'), '--help',
+  ], {
+    cwd: temporary, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  if (!cliHelp.includes('wendkeep hook <name>')) {
+    throw new Error('release candidate does not expose the Claude/Codex hook consumer');
+  }
+  if (!cliHelp.includes('config: --client generic|claude|codex|cursor')) {
+    throw new Error('release candidate does not expose Claude/Codex MCP configuration');
+  }
   execFileSync(process.execPath, ['--input-type=module', '--eval', [
     "import assert from 'node:assert/strict';",
-    "const integrations = await import('wendkeep/integrations');",
     "const mcp = await import('wendkeep/mcp');",
-    "assert.equal(integrations.hookCommand('session-stop'), 'npx --no-install wendkeep hook session-stop');",
-    "const codex = integrations.codexHookEntry({ name: 'session-stop', timeout: 60 });",
-    "assert.equal(codex.command, 'npx --no-install wendkeep hook session-stop');",
+    "await assert.rejects(",
+    "  () => import('wendkeep/integrations'),",
+    "  (error) => ['ERR_MODULE_NOT_FOUND', 'ERR_PACKAGE_PATH_NOT_EXPORTED'].includes(error?.code),",
+    ");",
     "assert.equal(typeof mcp.createNativeMcpServer, 'function');",
   ].join('\n')], {
     cwd: temporary, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
