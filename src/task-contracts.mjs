@@ -43,6 +43,25 @@ function uniqueStrings(values) {
   return [...new Set(list.map((value) => String(value).trim()).filter(Boolean))];
 }
 
+export function normalizeExternalArtifactEvidence(input = {}) {
+  const source = String(input.source || '').trim();
+  const externalId = String(input.external_id || '').trim();
+  const kind = String(input.kind || '').trim();
+  const sha256Value = String(input.sha256 || '').trim();
+  if (!source || !externalId || !['artifact', 'review', 'commit'].includes(kind)
+    || !/^[a-f0-9]{64}$/.test(sha256Value)) {
+    throw Object.assign(new Error('external artifact evidence is incomplete'), { code: 'TASK_EXTERNAL_ARTIFACT_INVALID' });
+  }
+  return {
+    schema_version: 1,
+    source,
+    external_id: externalId,
+    kind,
+    sha256: sha256Value,
+    authority: 'reported',
+  };
+}
+
 function bindingFrom(input) {
   return {
     project_id: String(input.projectId || ''),

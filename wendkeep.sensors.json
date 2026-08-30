@@ -730,6 +730,38 @@
       "command": "node --test tests/task-handoff.test.mjs tests/memory-handoff.test.mjs tests/active-context-handoff-evidence.test.mjs tests/observer-memory-publish.test.mjs"
     },
     {
+      "id": "ecosystem-bridge-units",
+      "name": "Ecosystem bridge units",
+      "description": "Validates bridge ownership, compatibility, Spec Kit projections and Superpowers dispatch",
+      "severity": "critical",
+      "type": "command",
+      "command": "node --test tests/ecosystem-bridge-contract.test.mjs tests/spec-kit-adapter.test.mjs tests/superpowers-adapter.test.mjs"
+    },
+    {
+      "id": "ecosystem-bridge-evidence",
+      "name": "Ecosystem bridge evidence",
+      "description": "Validates Git-indexed bridge artifacts, sensor evidence and Evidence Envelope integration",
+      "severity": "critical",
+      "type": "command",
+      "command": "node --test tests/ecosystem-bridge-evidence.test.mjs tests/evidence-envelope.test.mjs"
+    },
+    {
+      "id": "ecosystem-bridge-cli",
+      "name": "Ecosystem bridge CLI",
+      "description": "Validates canonical task dispatch and verify integration",
+      "severity": "critical",
+      "type": "command",
+      "command": "node --test tests/task-cli.test.mjs tests/task-verify.test.mjs"
+    },
+    {
+      "id": "ecosystem-bridge-e2e",
+      "name": "Ecosystem bridge E2E",
+      "description": "Validates the isolated Spec Kit to WendKeep to Superpowers delivery flow",
+      "severity": "critical",
+      "type": "command",
+      "command": "node --test tests/ecosystem-bridge-e2e.test.mjs"
+    },
+    {
       "id": "npm-unpublished",
       "name": "npm-unpublished",
       "description": "node scripts/check-unpublished-version.mjs",

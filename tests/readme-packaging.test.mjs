@@ -25,6 +25,7 @@ const GUIDE_SLUGS = [
   'mcp.md',
   'evidence-embeddings.md',
   'capabilities.md',
+  'ecosystem-bridges.md',
   'tdd.md',
   'commit.md',
 ];

@@ -61,6 +61,7 @@ Usage:
                            serve: --vault P · --timeout-ms N.
                            config: --client generic|claude|codex|cursor · --vault P.
   wendkeep capabilities [...]  Show declared lifecycle/effect coverage by host. --host <id> · --host-version <v> · --json.
+  wendkeep bridge <sub>        Optional ecosystem adapters: status | import-spec-kit | export-status | dispatch-superpowers | verify-artifacts.
   wendkeep observer <sub>     Local multi-project Observer: serve | register | publish | reconcile | status.
   wendkeep worktree create <slug> [--base ref] [--branch name] [--open vscode|none] [--json]
   wendkeep worktree list [--json]
@@ -237,6 +238,9 @@ async function main(argv) {
     } else if (cmd === 'commit') {
       const { COMMIT_HELP } = await import('../../commit/src/cli.mjs');
       process.stdout.write(COMMIT_HELP);
+    } else if (cmd === 'bridge') {
+      const { BRIDGE_HELP } = await import('../../../src/ecosystem-bridges.mjs');
+      process.stdout.write(BRIDGE_HELP);
     } else {
       process.stdout.write(HELP);
     }
@@ -250,7 +254,7 @@ async function main(argv) {
     // `sync` starts with `init` and resolves the freshly bound Vault itself. Pre-resolving
     // here would prevent that repair step from reporting a corrupt binding as its own
     // first-stage failure (and could never make it as far as the guarded init).
-    && !['init', 'sync', 'worktree', 'hook', 'observer', 'mcp', 'capabilities', 'commit', '--version', '-v', '--help', '-h', 'help'].includes(cmd)) {
+    && !['init', 'sync', 'worktree', 'hook', 'observer', 'mcp', 'capabilities', 'commit', 'bridge', '--version', '-v', '--help', '-h', 'help'].includes(cmd)) {
     await preferProjectVault(rest);
   }
   switch (cmd) {
@@ -292,6 +296,11 @@ async function main(argv) {
     case 'capabilities': {
       const { runCapabilities } = await import('../../../src/capabilities.mjs');
       process.exit(runCapabilities(rest));
+      break;
+    }
+    case 'bridge': {
+      const { runEcosystemBridge } = await import('../../../src/ecosystem-bridges.mjs');
+      process.exit(runEcosystemBridge(rest));
       break;
     }
     case 'worktree': {

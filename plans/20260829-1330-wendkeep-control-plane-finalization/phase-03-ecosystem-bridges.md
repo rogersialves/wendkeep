@@ -2,9 +2,9 @@
 
 ## Visão geral
 
-- **Branch:** `wk/ecosystem-bridges`
+- **Branch:** `wk/ecosystem-bridges-release`
 - **Prioridade:** alta
-- **Estado:** pendente
+- **Estado:** candidato `0.89.0` pronto para revisão
 
 Adicionar adapters opcionais sem criar uma segunda autoridade de plano, tarefa ou evidência.
 
@@ -68,6 +68,10 @@ external artifacts --verify Git/CI--> Evidence Envelope
 6. Verificar artifacts/reviews/commits por Git/CI antes de promover autoridade.
 7. Cobrir adapter ausente, incompatível e desabilitado.
 8. Executar E2E em consumidor isolado e documentar small/medium/large.
+
+## Fechamento da entrega intermediária
+
+- [x] 9.1 Integrar os bridges Spec Kit/Superpowers no candidato `0.89.0`, preservando autoridade única, drift fail-closed, artifacts vinculados a Git/CI, CLI/verify e documentação bilíngue. [sensor:ecosystem-bridge-units] [sensor:ecosystem-bridge-evidence] [sensor:ecosystem-bridge-cli] [sensor:ecosystem-bridge-e2e] [sensor:docs-bilingual] [sensor:release-tests]
 
 ## Testes focados
 

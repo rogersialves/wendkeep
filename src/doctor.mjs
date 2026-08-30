@@ -1,5 +1,6 @@
 // `wendkeep doctor` — vault/session integrity (hooks/vault-health.mjs) PLUS the a2
 // harness integrity check (hooks/harness-doctor.mjs). Exits 1 on any error.
+import * as bridgeFs from 'node:fs';
 import { resolve } from 'node:path';
 import { checkHarness, checkVaultLinks, checkSessionActivity, checkStackedFrontmatter, renderStackedFrontmatterLines, checkUnpricedModels, renderUnpricedModelLines, checkStaleDerivedSections, renderStaleDerivedSectionLines, checkSessionObservability, renderSessionObservabilityLines } from '../hooks/harness-doctor.mjs';
 import { diagnoseManagedWorktrees } from './worktree.mjs';
@@ -20,6 +21,7 @@ import { inspectPortableState } from './portable.mjs';
 import { inspectSyncOutbox, readLocalSyncState } from './sync-outbox.mjs';
 import { readProjectForValidation } from '../packages/vault/src/validate-memory.mjs';
 import { inspectGitCommitHooks } from './git-commit-hooks.mjs';
+import { inspectEcosystemBridges, renderEcosystemBridgeLines } from '../packages/integrations/src/ecosystem-bridge.mjs';
 
 const healthStatusLabel = (status) => ({
   healthy: 'saudável', warning: 'atenção', degraded: 'degradada', blocked: 'bloqueada', legacy: 'legado',
@@ -178,6 +180,8 @@ export function runDoctor(argv) {
   for (const w of warnings) process.stdout.write(`  ! ${w}\n`);
 
   const worktrees = diagnoseManagedWorktrees({ startDir: projectRoot });
+  const bridges = inspectEcosystemBridges({ projectRoot, fs: bridgeFs });
+  process.stdout.write(`\n${renderEcosystemBridgeLines(bridges).join('\n')}\n`);
   process.stdout.write(`\n[worktrees] ${worktrees.initialized ? `${worktrees.issues.length} problema(s)` : 'não inicializado'}\n`);
   for (const issue of worktrees.issues) {
     process.stdout.write(`  → ${issue.slug}: ${issue.errorCode} — ${issue.repair}\n`);
@@ -264,6 +268,7 @@ export function runDoctor(argv) {
     || warnings.length
     || worktrees.issues.length
     || (commitHooks.configured && commitHooks.status !== 'healthy')
+    || !bridges.ok
     || activeContexts.issues.length
     || ['diverged', 'invalid'].includes(portable.status)
     || sync.status === 'corrupt'
@@ -276,5 +281,5 @@ export function runDoctor(argv) {
     || (staleDerived.notes || staleDerived.items || []).length
     || !observability.ok
   );
-  return (scope !== 'runtime' && (healthStatus !== 0 || recallStatus !== 0)) || errors.length || strictDebt ? 1 : 0;
+  return (scope !== 'runtime' && (healthStatus !== 0 || recallStatus !== 0)) || errors.length || !bridges.ok || strictDebt ? 1 : 0;
 }

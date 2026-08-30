@@ -52,6 +52,10 @@
       "type": "array",
       "items": { "$ref": "#/$defs/sensor" }
     },
+    "external_artifacts": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/externalArtifact" }
+    },
     "host_coverage": { "$ref": "host-coverage-v1.schema.json" },
     "tdd_attestations": {
       "type": "array",
@@ -100,9 +104,44 @@
         "exit_code": { "type": ["integer", "null"] },
         "output_sha256": { "$ref": "#/$defs/sha256" },
         "output_tail": { "type": "string", "maxLength": 2000 },
+        "artifact_results": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/sensorArtifactResult" }
+        },
         "note": { "type": "string", "maxLength": 2000 },
         "survivors": { "type": "array" },
         "ts": { "type": "string", "format": "date-time" }
+      }
+    },
+    "sensorArtifactResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "external_id", "path", "algorithm", "digest"],
+      "properties": {
+        "schema_version": { "const": 1 },
+        "external_id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$" },
+        "path": { "type": "string", "minLength": 1 },
+        "algorithm": { "const": "sha256" },
+        "digest": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+      }
+    },
+    "externalArtifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "source", "external_id", "kind", "path", "sha256", "authority", "sensor_id", "task_id", "git_blob", "manifest_path", "manifest_git_blob"],
+      "properties": {
+        "schema_version": { "const": 1 },
+        "source": { "const": "superpowers" },
+        "external_id": { "type": "string", "minLength": 1 },
+        "kind": { "enum": ["artifact", "review", "commit"] },
+        "path": { "type": "string", "minLength": 1 },
+        "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "authority": { "enum": ["reported", "verified"] },
+        "sensor_id": { "type": "string", "minLength": 1 },
+        "task_id": { "type": "string", "minLength": 1 },
+        "git_blob": { "$ref": "#/$defs/gitObject" },
+        "manifest_path": { "const": ".wendkeep/bridge-artifacts.json" },
+        "manifest_git_blob": { "$ref": "#/$defs/gitObject" }
       }
     }
   }

@@ -4,6 +4,23 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.89.0] — 2026-08-30
+
+### Added
+
+- **Bridges opcionais oficiais para Spec Kit e Superpowers.** Projeções read-only preservam IDs,
+  hashes e ownership canônico do WendKeep; adapters são habilitados separadamente, validam
+  versões compatíveis e degradam com diagnósticos tipados sem afetar o Core nativo.
+- **Prova externa vinculada ao Git e ao CI.** Dispatch deriva somente de contratos canônicos e
+  artifacts externos permanecem `reported` até que manifest, blob, task, sensor e Evidence
+  Envelope coincidam com o checkout versionado.
+
+### Security
+
+- **Autoridade única e drift fail-closed.** Ownership concorrente, projeção stale, hashes/paths
+  divergentes, claims fabricados e promoção autoafirmada para `verified` bloqueiam import,
+  dispatch e verify antes de qualquer execução externa.
+
 ## [0.88.0] — 2026-08-29
 
 ### Added

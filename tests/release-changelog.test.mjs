@@ -83,11 +83,11 @@ test('extractReleaseNotes: throws when the version is absent', () => {
 });
 
 test('[sensor:release-tests] [req:RECALL-13] current release notes are extractable and match the package', () => {
-  assert.equal(PACKAGE.version, '0.88.0');
+  assert.equal(PACKAGE.version, '0.89.0');
   const release = extractReleaseNotes(CHANGELOG, PACKAGE.version);
-  assert.equal(release.date, '2026-08-29');
-  assert.match(release.notes, /Políticas oficiais e RBAC do Observer por projeto/i);
-  assert.match(release.notes, /Criptografia fail-closed no Observer/i);
+  assert.equal(release.date, '2026-08-30');
+  assert.match(release.notes, /Bridges opcionais oficiais para Spec Kit e Superpowers/i);
+  assert.match(release.notes, /Autoridade única e drift fail-closed/i);
   assert.doesNotMatch(release.notes, /019f[0-9a-f-]+/i);
 });
 
