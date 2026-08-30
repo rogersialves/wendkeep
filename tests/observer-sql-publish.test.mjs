@@ -26,7 +26,106 @@ test('[req:SQL-OBS-10] timeout de ingestão cresce com o payload e permanece lim
   assert.equal(observerSqlRequestTimeoutMs(1024 * 1024 * 1024), 120_000);
 });
 
-test('[req:SQL-OBS-10] publisher repete uma vez o lote gzip após reset transitório', async () => {
+for (const code of ['ECONNRESET', 'EPIPE', 'UND_ERR_SOCKET']) {
+  test(`[req:SQL-OBS-10] publisher repete uma vez o mesmo lote gzip e deadline após ${code}`, async () => {
+    const fixture = makeObserverFixture();
+    const bodies = [];
+    const signals = [];
+    try {
+      const result = await publishObserverSql({
+        vaultBase: fixture.vaultBase,
+        projectId: fixture.projectId,
+        url: 'http://observer.test',
+        now: '2026-08-17T11:00:00Z',
+        fetchImpl: async (_url, init = {}) => {
+          if (!init.method) return { ok: false, status: 503, json: async () => ({}) };
+          bodies.push(init.body);
+          signals.push(init.signal);
+          if (bodies.length === 1) {
+            const error = new TypeError('fetch failed');
+            error.cause = { code };
+            throw error;
+          }
+          assert.equal(init.headers['content-encoding'], 'gzip');
+          const body = JSON.parse(gunzipSync(init.body).toString('utf8'));
+          return { ok: true, status: 201, json: async () => ({ accepted: body.events.length }) };
+        },
+      });
+      assert.equal(result.ok, true);
+      assert.equal(result.pending, 0);
+      assert.equal(bodies.length, 2);
+      assert.strictEqual(bodies[0], bodies[1]);
+      assert.strictEqual(signals[0], signals[1]);
+    } finally {
+      fixture.cleanup();
+    }
+  });
+}
+
+for (const failure of [
+  { label: 'erro não elegível', makeError: () => Object.assign(new TypeError('fetch failed'), { cause: { code: 'ECONNREFUSED' } }) },
+  { label: 'aborto', makeError: () => Object.assign(new Error('aborted'), { name: 'AbortError' }) },
+]) {
+  test(`[req:SQL-OBS-10] publisher não repete o lote após ${failure.label}`, async () => {
+    const fixture = makeObserverFixture();
+    let postAttempts = 0;
+    try {
+      const result = await publishObserverSql({
+        vaultBase: fixture.vaultBase,
+        projectId: fixture.projectId,
+        url: 'http://observer.test',
+        now: '2026-08-17T11:00:00Z',
+        fetchImpl: async (_url, init = {}) => {
+          if (!init.method) return { ok: false, status: 503, json: async () => ({}) };
+          postAttempts += 1;
+          throw failure.makeError();
+        },
+      });
+      assert.equal(result.ok, false);
+      assert.equal(result.pending, 1);
+      assert.equal(postAttempts, 1);
+    } finally {
+      fixture.cleanup();
+    }
+  });
+}
+
+test('[req:SQL-OBS-10] publisher não repete reset transitório depois que o deadline aborta', async () => {
+  const fixture = makeObserverFixture();
+  const originalSetTimeout = globalThis.setTimeout;
+  const originalClearTimeout = globalThis.clearTimeout;
+  let postAttempts = 0;
+  try {
+    globalThis.setTimeout = (callback) => {
+      callback();
+      return 1;
+    };
+    globalThis.clearTimeout = () => {};
+    const result = await publishObserverSql({
+      vaultBase: fixture.vaultBase,
+      projectId: fixture.projectId,
+      url: 'http://observer.test',
+      now: '2026-08-17T11:00:00Z',
+      fetchImpl: async (_url, init = {}) => {
+        if (!init.method) return { ok: false, status: 503, json: async () => ({}) };
+        postAttempts += 1;
+        assert.equal(init.signal.aborted, true);
+        const error = new TypeError('fetch failed');
+        error.cause = { code: 'ECONNRESET' };
+        throw error;
+      },
+    });
+    assert.equal(result.ok, false);
+    assert.equal(result.pending, 1);
+    assert.equal(postAttempts, 1);
+  } finally {
+    globalThis.setTimeout = originalSetTimeout;
+    globalThis.clearTimeout = originalClearTimeout;
+    fixture.cleanup();
+  }
+});
+
+test('[req:SQL-OBS-10] publisher limita reset persistente a duas tentativas e preserva outbox', async () => {
   const fixture = makeObserverFixture();
   let postAttempts = 0;
   try {
@@ -38,19 +137,15 @@ test('[req:SQL-OBS-10] publisher repete uma vez o lote gzip após reset transit�
       fetchImpl: async (_url, init = {}) => {
         if (!init.method) return { ok: false, status: 503, json: async () => ({}) };
         postAttempts += 1;
-        if (postAttempts === 1) {
-          const error = new TypeError('fetch failed');
-          error.cause = { code: 'ECONNRESET' };
-          throw error;
-        }
-        assert.equal(init.headers['content-encoding'], 'gzip');
-        const body = JSON.parse(gunzipSync(init.body).toString('utf8'));
-        return { ok: true, status: 201, json: async () => ({ accepted: body.events.length }) };
+        const error = new TypeError('fetch failed');
+        error.cause = { code: 'ECONNRESET' };
+        throw error;
       },
     });
-    assert.equal(result.ok, true);
-    assert.equal(result.pending, 0);
+    assert.equal(result.ok, false);
+    assert.equal(result.pending, 1);
     assert.equal(postAttempts, 2);
+    assert.equal(listSqlOutbox(fixture.vaultBase, fixture.projectId).length, 1);
   } finally {
     fixture.cleanup();
   }
