@@ -6,7 +6,12 @@ import { join } from 'node:path';
 
 import { bindProjectVault } from '../packages/vault/src/project-vault.mjs';
 import { executeNativeMcpTool } from '../packages/mcp/src/executor.mjs';
-import { ensureObserverDatabase, ingestObserverEvents, registerSqlProject } from '../src/observer-sql-store.mjs';
+import {
+  ensureObserverDatabase,
+  ingestObserverEvents,
+  observerSqlRuntimeSupport,
+  registerSqlProject,
+} from '../src/observer-sql-store.mjs';
 import { registerObserverToken } from '../packages/observer/src/token-registry.mjs';
 import { makeDataDir } from './helpers/observer-fixture.mjs';
 
@@ -43,7 +48,9 @@ test('[req:MCP-7] a foreign project declaration cannot borrow another project wo
   );
 });
 
-test('[req:OBS-SEC-MCP] sensitive MCP reads require project-scoped capability and decrypt through the external key provider', async () => {
+test('[req:OBS-SEC-MCP] sensitive MCP reads require project-scoped capability and decrypt through the external key provider', {
+  skip: !observerSqlRuntimeSupport().supported && 'Observer SQL requires Node.js >=22.13.0',
+}, async () => {
   const fixture = boundProject('observer-security');
   const dataDir = makeDataDir();
   const key = Buffer.alloc(32, 4);

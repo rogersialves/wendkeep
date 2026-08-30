@@ -8,7 +8,7 @@ import { createProductionMigrationHarness } from '../src/control-plane-migration
 import { readReceiptLedger, createFileReceiptStore } from '../src/receipt-ledger.mjs';
 import { validateMemoryBundle } from '../src/validate-memory.mjs';
 import { renderCoreSkeleton } from '../src/validate-core.mjs';
-import { openObserverDatabase } from '../src/observer-sql-store.mjs';
+import { observerSqlRuntimeSupport, openObserverDatabase } from '../src/observer-sql-store.mjs';
 import { renderSharedMemory } from '../hooks/memory-schema.mjs';
 import { readSessionRegistry } from '../hooks/obsidian-common.mjs';
 
@@ -101,7 +101,9 @@ test('[req:MIG-2] ledger v1 is formally migrated by the harness and reopened by 
   }
 });
 
-test('[req:MIG-2] Observer v5 uses the SQL migrator with backup, replay, rollback and repair over a real database', () => {
+test('[req:MIG-2] Observer v5 uses the SQL migrator with backup, replay, rollback and repair over a real database', {
+  skip: !observerSqlRuntimeSupport().supported && 'Observer SQL requires Node.js >=22.13.0',
+}, () => {
   const dataDir = mkdtempSync(join(tmpdir(), 'wk-native-observer-'));
   const harness = createProductionMigrationHarness();
   try {

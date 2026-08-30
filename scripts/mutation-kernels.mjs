@@ -92,9 +92,9 @@ export const CRITICAL_MUTANTS = Object.freeze([
     id: 'worktree-composition-authority-bypass',
     domain: 'worktrees', package: '@wendkeep/worktrees',
     file: 'packages/worktrees/src/worktree-cleanup.mjs',
-    search: 'if (!controlPlaneComposition) {',
+    search: "if (typeof composition[name] !== 'function') {",
     replacement: 'if (false) {',
-    tests: ['tests/worktree-cleanup.test.mjs'],
+    tests: ['tests/worktree-cleanup-branches.test.mjs'],
   }),
 ]);
 
