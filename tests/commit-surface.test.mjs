@@ -2,8 +2,9 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const ROOT = resolve(import.meta.dirname, '..');
+const ROOT = resolve(fileURLToPath(new URL('../', import.meta.url)));
 const read = (...parts) => readFileSync(join(ROOT, ...parts), 'utf8');
 
 test('[req:COMMIT-15] pacote raiz exporta kernel, empacota hooks/schema e checa a superfície', () => {

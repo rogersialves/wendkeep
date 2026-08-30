@@ -4,8 +4,9 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const ROOT = resolve(import.meta.dirname, '..');
+const ROOT = resolve(fileURLToPath(new URL('../', import.meta.url)));
 const CLI = join(ROOT, 'bin', 'wendkeep.mjs');
 const HOOKS = join(ROOT, '.githooks');
 

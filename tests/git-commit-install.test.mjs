@@ -11,10 +11,11 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { inspectGitCommitHooks, installGitCommitHooks } from '../src/git-commit-hooks.mjs';
 
-const ROOT = resolve(import.meta.dirname, '..');
+const ROOT = resolve(fileURLToPath(new URL('../', import.meta.url)));
 const CLI = join(ROOT, 'bin', 'wendkeep.mjs');
 
 function git(cwd, ...args) {

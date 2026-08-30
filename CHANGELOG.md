@@ -28,6 +28,9 @@ All notable changes to **wendkeep** are documented here. Format based on
 
 ### Security
 
+- **Parser de tarefas em tempo linear.** Checkboxes e metadados continuam preservando a gramática
+  canônica, mas o prefixo de cada tarefa agora é varrido por linha sem regex ambígua sobre entrada
+  não confiável, incluindo casos adversariais com grandes sequências de espaços.
 - **Supply chain fail-closed.** Actions são fixadas por SHA e usam permissões mínimas por job;
   os workflows versionados encadeiam CodeQL, dependency review/audit, matriz macOS e gates de
   coverage/mutação para onze packages críticos. Os required checks candidatos só serão aplicados

@@ -2,8 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readdirSync, readFileSync } from 'node:fs';
 import { dirname, join, relative, resolve, sep } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const ROOT = resolve(import.meta.dirname, '..');
+const ROOT = resolve(fileURLToPath(new URL('../', import.meta.url)));
 const PACKAGES = join(ROOT, 'packages');
 const EXPECTED = Object.freeze([
   'cli', 'commit', 'contracts', 'evidence', 'harness', 'integrations', 'mcp', 'migrations',

@@ -42,6 +42,15 @@ test('[req:TC-1] parser preserves plain tasks and deduplicates optional metadata
   assert.equal(task.tdd, undefined);
 });
 
+test('[req:TC-1] parser scans adversarial whitespace linearly without joining task lines', () => {
+  const padding = ' '.repeat(250_000);
+  const tasks = parseTasks(`- [ ] ! ${padding}\n-\t[x]\t2.1\tdone [req:R-1]\r\n`);
+  assert.deepEqual(tasks, [
+    { id: '!', text: '', done: false },
+    { id: '2.1', text: 'done', done: true, req: 'R-1', reqs: ['R-1'] },
+  ]);
+});
+
 test('[req:TDD-1] [req:TDD-6] a required TDD task stays blocked until a valid or waived attestation exists', () => {
   const input = {
     projectId: 'project-1',
