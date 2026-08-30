@@ -4,7 +4,7 @@
 
 - **Branch:** `wk/ci-supply-chain-0x`
 - **Dependências:** packages e migration harness
-- **Estado:** bloqueada
+- **Estado:** implementada localmente; configuração remota continua pendente do mantenedor
 
 Fechar os gates de plataforma, qualidade, dependências, artefatos e proteção remota sem antecipar 1.0.
 

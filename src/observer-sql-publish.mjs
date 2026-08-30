@@ -31,6 +31,7 @@ const MAX_REQUEST_TIMEOUT_MS = 120000;
 export const SQL_LEASE_STALE_MS = MAX_REQUEST_TIMEOUT_MS + 30000;
 const REQUEST_TIMEOUT_BYTES_STEP = 1024 * 1024;
 const CAPTURE_LEVELS = new Set(['metadata', 'messages', 'full-transcript']);
+const RETRYABLE_SQL_FETCH_CODES = new Set(['ECONNRESET', 'EPIPE', 'UND_ERR_SOCKET']);
 
 export function observerSqlRequestTimeoutMs(rawBytes) {
   const size = Math.max(0, Number(rawBytes) || 0);
@@ -730,12 +731,20 @@ async function postSqlChunk({ url, projectId, events, fetchImpl = globalThis.fet
   const timer = setTimeout(() => controller.abort(), observerSqlRequestTimeoutMs(rawBody.byteLength));
   const wireBody = gzipSync(rawBody);
   try {
-    const response = await fetchImpl(`${String(url).replace(/\/$/, '')}/v1/projects/${encodeURIComponent(projectId)}/ingest`, {
-      method: 'POST',
-      headers: observerAuthHeaders(token, { 'content-type': 'application/json', 'content-encoding': 'gzip', accept: 'application/json' }),
-      body: wireBody,
-      signal: controller.signal,
-    });
+    const request = () => fetchImpl(`${String(url).replace(/\/$/, '')}/v1/projects/${encodeURIComponent(projectId)}/ingest`, {
+        method: 'POST',
+        headers: observerAuthHeaders(token, { 'content-type': 'application/json', 'content-encoding': 'gzip', accept: 'application/json' }),
+        body: wireBody,
+        signal: controller.signal,
+      });
+    let response;
+    try {
+      response = await request();
+    } catch (error) {
+      const code = error?.cause?.code || error?.code || '';
+      if (!RETRYABLE_SQL_FETCH_CODES.has(code) || controller.signal.aborted) throw error;
+      response = await request();
+    }
     const responseBody = await response.json().catch(() => ({}));
     if (!response.ok || responseBody.conflicts > 0 || responseBody.rejected > 0) throw new Error(`Observer ingest respondeu HTTP ${response.status}.`);
     return responseBody;

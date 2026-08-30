@@ -24,12 +24,12 @@ import { resolveProjectVault } from '../../vault/src/project-vault.mjs';
 import {
   captureGitSnapshot,
   resolveEvidenceIdentity,
-} from '../../../src/evidence-envelope.mjs';
+} from '../../evidence/src/evidence-envelope.mjs';
 import { loadSensorsDetailed } from '../../harness/src/sensors-core.mjs';
 import { resolveCommandActiveContext } from '../../../src/active-context-runtime.mjs';
 import { activeContextKey, resolveActiveContext } from '../../../hooks/active-context-store.mjs';
 import { buildEffectiveRequirementPackage } from '../../../hooks/spec-core.mjs';
-import { getLocale } from '../../../hooks/locale.mjs';
+import { getLocale } from '../../vault/src/locale.mjs';
 
 export const COMMIT_CONTEXT_FILE = 'wendkeep-commit-input.json';
 

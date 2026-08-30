@@ -75,6 +75,17 @@ test('[req:COMMIT-2] mensagem contém somente prova resolvida e referência caus
   assert.equal(validateCommitMessage(message).ok, true);
 });
 
+test('[req:COMMIT-2] renderer omite limites vazios e aceita assunto sem scope', () => {
+  const input = validInput({
+    subject: { type: 'fix', summary: 'corrige fronteira' },
+    authority: { kind: 'adr', adr: 'ADR-1234', ref: 'docs/ADR-1234.md' },
+    limits: [],
+  });
+  const message = renderCommitMessage(input);
+  assert.match(message, /^fix: corrige fronteira \(ADR-1234\)$/m);
+  assert.doesNotMatch(message, /^Limits:|^Refs:/m);
+});
+
 test('[req:COMMIT-3] policy rejeita prova não verificável, coautoria presumida e conteúdo privado', () => {
   const mutations = [
     validInput({ evidence: [{ kind: 'receipt', ref: 'receipt.json', status: 'reported' }] }),
@@ -125,6 +136,10 @@ test('[req:COMMIT-5] schema recusa versões desconhecidas e assunto fora de Conv
 test('[req:COMMIT-19] prepare é idempotente e preserva fontes amend, merge e squash', () => {
   const generated = renderCommitMessage(validInput());
   assert.equal(prepareCommitMessage(generated, validInput()), generated);
+  const priorGoverned = generated.replace('adiciona política universal de commits', 'preserva mensagem governada anterior');
+  assert.equal(prepareCommitMessage(priorGoverned, validInput()), priorGoverned);
+  assert.equal(prepareCommitMessage('rascunho local\n', validInput()), generated);
+  assert.equal(prepareCommitMessage('rascunho sem contexto\n', null), 'rascunho sem contexto\n');
   for (const source of ['commit', 'merge', 'squash']) {
     const existing = `${source}: mensagem existente\n`;
     assert.equal(prepareCommitMessage(existing, validInput(), { source }), existing);

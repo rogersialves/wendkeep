@@ -29,6 +29,28 @@ test('[req:TC-1] [req:TC-2] [req:TDD-1] task metadata derives from tarefas.md wi
   });
 });
 
+test('[req:TC-1] parser preserves plain tasks and deduplicates optional metadata independently', () => {
+  assert.deepEqual(parseTasks('- [x] 1.1 tarefa simples\n'), [{
+    id: '1.1', text: 'tarefa simples', done: true,
+  }]);
+  const [task] = parseTasks('- [ ] 1.2 tarefa [sensor:a] [sensor:a] [req:R-1] [req:R-2] [depends:x] [artifact:a] [phase:p]\n');
+  assert.deepEqual(task.sensors, ['a']);
+  assert.deepEqual(task.reqs, ['R-1', 'R-2']);
+  assert.deepEqual(task.dependencies, ['x']);
+  assert.deepEqual(task.artifacts, ['a']);
+  assert.equal(task.phase, 'p');
+  assert.equal(task.tdd, undefined);
+});
+
+test('[req:TC-1] parser scans adversarial whitespace linearly without joining task lines', () => {
+  const padding = ' '.repeat(250_000);
+  const tasks = parseTasks(`- [ ] ! ${padding}\n-\t[x]\t2.1\tdone [req:R-1]\r\n`);
+  assert.deepEqual(tasks, [
+    { id: '!', text: '', done: false },
+    { id: '2.1', text: 'done', done: true, req: 'R-1', reqs: ['R-1'] },
+  ]);
+});
+
 test('[req:TDD-1] [req:TDD-6] a required TDD task stays blocked until a valid or waived attestation exists', () => {
   const input = {
     projectId: 'project-1',

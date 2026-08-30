@@ -12,6 +12,12 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
+const MANIFEST = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8'));
+const PUBLIC_DOMAIN_SUBPATHS = Object.entries(MANIFEST.exports)
+  .filter(([key, target]) => /^\.\/[a-z-]+$/.test(key)
+    && /^\.\/packages\/[a-z-]+\/src\/index\.mjs$/.test(String(target)))
+  .map(([key]) => `wendkeep/${key.slice(2)}`)
+  .sort();
 const isPt = (s) => /Seu agente de código esquece/.test(s);
 const isEn = (s) => /Your AI coding agent forgets/.test(s);
 const GUIDE_SLUGS = [
@@ -49,6 +55,16 @@ test('os dois READMEs apontam um para o outro, sem link morto', () => {
   assert.match(pt, /\]\(README\.en\.md\)/, 'português linka o inglês');
   assert.match(en, /\]\(README\.md\)/, 'inglês linka o português');
   assert.ok(!/README\.pt-BR\.md/.test(pt + en), 'o nome antigo não sobrevive em nenhum dos dois');
+});
+
+test('[req:DOC-84-2] READMEs derive the exact public domain subpaths from package exports', () => {
+  for (const file of ['README.md', 'README.en.md']) {
+    const text = readFileSync(join(ROOT, file), 'utf8');
+    const publicIntro = text.match(/(?:O pacote raiz|The root package)[^]*?(?=\n(?:Na fase|In the))/)?.[0] || '';
+    const documented = [...new Set(publicIntro.match(/wendkeep\/[a-z-]+/g) || [])].sort();
+    assert.deepEqual(documented, PUBLIC_DOMAIN_SUBPATHS, `${file} must list the exact public domain exports`);
+    assert.doesNotMatch(publicIntro, /wendkeep\/integrations/, `${file} must keep Integrations private`);
+  }
 });
 
 test('os dois idiomas viajam no pacote', () => {
@@ -216,10 +232,16 @@ test('[req:OP-9] [req:RECALL-13] npm pack leva módulos de profile/FLOW/delivery
       ]) assert.match(profiles, new RegExp(token), `guia empacotado ${locale} sem ${token}`);
     }
     const expectedDocs = ['pt-BR', 'en']
-      .flatMap((locale) => GUIDE_SLUGS.map((guide) => `${locale}/commands/${guide}`))
+      .flatMap((locale) => [
+        `${locale}/architecture.md`,
+        `${locale}/compatibility.md`,
+        `${locale}/migrations.md`,
+        `${locale}/support-policy.md`,
+        ...GUIDE_SLUGS.map((guide) => `${locale}/commands/${guide}`),
+      ])
       .sort();
     assert.deepEqual(filesUnder(join(pkg, 'docs')).sort(), expectedDocs,
-      'o tarball não pode incluir o acervo histórico de docs');
+      'o tarball inclui somente guias e políticas públicas bilíngues');
 
     // O prepack troca os arquivos; o postpack tem de restaurar.
     assert.ok(isPt(readFileSync(join(packRoot, 'README.md'), 'utf8')),

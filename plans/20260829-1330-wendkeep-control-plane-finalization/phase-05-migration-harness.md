@@ -4,7 +4,7 @@
 
 - **Branch:** `wk/migration-harness-0x`
 - **Dependência:** packages da fase 04
-- **Estado:** bloqueada
+- **Estado:** implementada na issue #84; fechamento registrado em `issue-84-execution.md`
 
 Unificar migrations de Vault, ledger, contexts, Observer e portable state com recuperação explícita.
 

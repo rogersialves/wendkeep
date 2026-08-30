@@ -438,3 +438,26 @@ test('[req:COMMIT-61] authority remota exige exatamente um ADR/design público v
     }), /exactly one versioned adr authority artifact/);
   }
 });
+
+test('[req:COMMIT-62] tasks rederivadas usam a mesma ordem canônica da mensagem', () => {
+  const source = [
+    '# Tasks', '',
+    '- [x] 84.1 Primeiro passo [sensor:commit-focused]',
+    '- [x] 84.2 Segundo passo [sensor:commit-focused]',
+    '- [x] 84.10 Décimo passo [sensor:commit-focused]',
+    '- [x] 84.11 Décimo primeiro passo [sensor:commit-focused]',
+    '',
+  ].join('\n');
+  const resolved = validateCommitProofSet({
+    entries: [adr(), task(source)],
+    authority: { kind: 'adr', adr: 'ADR-1234', ref: 'docs/ADR-1234.md', issue: '#123' },
+    stagedHash: STAGED,
+    context: { ...context, executionProof: EXECUTION_PROOF },
+  });
+  assert.deepEqual(resolved.tasks, [
+    '84.1: Primeiro passo',
+    '84.10: Décimo passo',
+    '84.11: Décimo primeiro passo',
+    '84.2: Segundo passo',
+  ]);
+});

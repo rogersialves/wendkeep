@@ -26,6 +26,131 @@ test('[req:SQL-OBS-10] timeout de ingestão cresce com o payload e permanece lim
   assert.equal(observerSqlRequestTimeoutMs(1024 * 1024 * 1024), 120_000);
 });
 
+for (const code of ['ECONNRESET', 'EPIPE', 'UND_ERR_SOCKET']) {
+  test(`[req:SQL-OBS-10] publisher repete uma vez o mesmo lote gzip e deadline após ${code}`, async () => {
+    const fixture = makeObserverFixture();
+    const bodies = [];
+    const signals = [];
+    try {
+      const result = await publishObserverSql({
+        vaultBase: fixture.vaultBase,
+        projectId: fixture.projectId,
+        url: 'http://observer.test',
+        now: '2026-08-17T11:00:00Z',
+        fetchImpl: async (_url, init = {}) => {
+          if (!init.method) return { ok: false, status: 503, json: async () => ({}) };
+          bodies.push(init.body);
+          signals.push(init.signal);
+          if (bodies.length === 1) {
+            const error = new TypeError('fetch failed');
+            error.cause = { code };
+            throw error;
+          }
+          assert.equal(init.headers['content-encoding'], 'gzip');
+          const body = JSON.parse(gunzipSync(init.body).toString('utf8'));
+          return { ok: true, status: 201, json: async () => ({ accepted: body.events.length }) };
+        },
+      });
+      assert.equal(result.ok, true);
+      assert.equal(result.pending, 0);
+      assert.equal(bodies.length, 2);
+      assert.strictEqual(bodies[0], bodies[1]);
+      assert.strictEqual(signals[0], signals[1]);
+    } finally {
+      fixture.cleanup();
+    }
+  });
+}
+
+for (const failure of [
+  { label: 'erro não elegível', makeError: () => Object.assign(new TypeError('fetch failed'), { cause: { code: 'ECONNREFUSED' } }) },
+  { label: 'aborto', makeError: () => Object.assign(new Error('aborted'), { name: 'AbortError' }) },
+]) {
+  test(`[req:SQL-OBS-10] publisher não repete o lote após ${failure.label}`, async () => {
+    const fixture = makeObserverFixture();
+    let postAttempts = 0;
+    try {
+      const result = await publishObserverSql({
+        vaultBase: fixture.vaultBase,
+        projectId: fixture.projectId,
+        url: 'http://observer.test',
+        now: '2026-08-17T11:00:00Z',
+        fetchImpl: async (_url, init = {}) => {
+          if (!init.method) return { ok: false, status: 503, json: async () => ({}) };
+          postAttempts += 1;
+          throw failure.makeError();
+        },
+      });
+      assert.equal(result.ok, false);
+      assert.equal(result.pending, 1);
+      assert.equal(postAttempts, 1);
+    } finally {
+      fixture.cleanup();
+    }
+  });
+}
+
+test('[req:SQL-OBS-10] publisher não repete reset transitório depois que o deadline aborta', async () => {
+  const fixture = makeObserverFixture();
+  const originalSetTimeout = globalThis.setTimeout;
+  const originalClearTimeout = globalThis.clearTimeout;
+  let postAttempts = 0;
+  try {
+    globalThis.setTimeout = (callback) => {
+      callback();
+      return 1;
+    };
+    globalThis.clearTimeout = () => {};
+    const result = await publishObserverSql({
+      vaultBase: fixture.vaultBase,
+      projectId: fixture.projectId,
+      url: 'http://observer.test',
+      now: '2026-08-17T11:00:00Z',
+      fetchImpl: async (_url, init = {}) => {
+        if (!init.method) return { ok: false, status: 503, json: async () => ({}) };
+        postAttempts += 1;
+        assert.equal(init.signal.aborted, true);
+        const error = new TypeError('fetch failed');
+        error.cause = { code: 'ECONNRESET' };
+        throw error;
+      },
+    });
+    assert.equal(result.ok, false);
+    assert.equal(result.pending, 1);
+    assert.equal(postAttempts, 1);
+  } finally {
+    globalThis.setTimeout = originalSetTimeout;
+    globalThis.clearTimeout = originalClearTimeout;
+    fixture.cleanup();
+  }
+});
+
+test('[req:SQL-OBS-10] publisher limita reset persistente a duas tentativas e preserva outbox', async () => {
+  const fixture = makeObserverFixture();
+  let postAttempts = 0;
+  try {
+    const result = await publishObserverSql({
+      vaultBase: fixture.vaultBase,
+      projectId: fixture.projectId,
+      url: 'http://observer.test',
+      now: '2026-08-17T11:00:00Z',
+      fetchImpl: async (_url, init = {}) => {
+        if (!init.method) return { ok: false, status: 503, json: async () => ({}) };
+        postAttempts += 1;
+        const error = new TypeError('fetch failed');
+        error.cause = { code: 'ECONNRESET' };
+        throw error;
+      },
+    });
+    assert.equal(result.ok, false);
+    assert.equal(result.pending, 1);
+    assert.equal(postAttempts, 2);
+    assert.equal(listSqlOutbox(fixture.vaultBase, fixture.projectId).length, 1);
+  } finally {
+    fixture.cleanup();
+  }
+});
+
 function sessionFixture(fixture, transcriptPath) {
   const sessionDir = join(fixture.vaultBase, '02-Sessões/2026/08-AGO/DIA 17');
   mkdirSync(sessionDir, { recursive: true });
@@ -211,6 +336,7 @@ test('[req:SQL-OBS-10] publisher envia lote gzip quando o JSON puro excede 64 MB
   writeFileSync(join(decisions, 'ADR-large-transcript.md'), `# Histórico grande\n${'linha de evidência repetida para medir transporte.\n'.repeat(1_400_000)}`);
   const server = await startObserverServer({ host: '127.0.0.1', port: 0, dataDir, ...observerBootstrap(TOKEN) });
   const url = `http://127.0.0.1:${server.address().port}`;
+  let wireBytes = 0;
   try {
     const registration = await fetch(`${url}/v1/projects/${fixture.projectId}`, {
       method: 'PUT',
@@ -224,9 +350,14 @@ test('[req:SQL-OBS-10] publisher envia lote gzip quando o JSON puro excede 64 MB
       url,
       now: '2026-08-17T11:00:00Z',
       token: TOKEN,
+      fetchImpl: async (requestUrl, init) => {
+        if (init.body) wireBytes = Buffer.byteLength(init.body);
+        return fetch(requestUrl, init);
+      },
     });
-    assert.equal(result.ok, true);
+    assert.equal(result.ok, true, `${result.error || JSON.stringify(result)}; wireBytes=${wireBytes}`);
     assert.equal(result.pending, 0);
+    assert.ok(wireBytes > 0 && wireBytes <= SQL_EVENT_BATCH_BYTES);
     const tree = await (await fetch(`${url}/v1/projects/${fixture.projectId}/memory/tree`)).json();
     assert.ok(tree.documents.some((document) => document.logical_path === '04-Decisões/2026/08-AGO/ADR-large-transcript.md'));
   } finally {

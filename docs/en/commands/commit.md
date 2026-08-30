@@ -114,6 +114,8 @@ the context becomes stale and must be recreated.
 `commit-msg` rereads context, compares the complete message and staged hash/files, and consumes
 context only after success. Merge, squash, and amend clear incompatible context so it cannot leak
 to the next commit. `--message-file` stays inside the repository or Git directory.
+Derived tasks use the same canonical ordering in the message and remote range validation; IDs such
+as `84.2` and `84.10` do not depend on incidental checklist order.
 
 Other commands:
 

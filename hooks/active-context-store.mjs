@@ -9,6 +9,7 @@ import {
   readSessionRegistry,
 } from './obsidian-common.mjs';
 import { mkdirVaultPath, writeVaultFileSync } from './vault-path-safety.mjs';
+import { migrateActiveContextRegistryState } from '../packages/migrations/src/index.mjs';
 
 export const ACTIVE_CONTEXTS_SCHEMA_VERSION = 1;
 const POINTER = '.brain/CURRENT_CHANGE.md';
@@ -252,6 +253,7 @@ export function mutateActiveContext(vaultBase, identity, updater, {
   const normalized = normalizeIdentity(identity);
   const key = activeContextKey(normalized);
   const result = mutateRegistry(vaultBase, (registry) => {
+    Object.assign(registry, migrateActiveContextRegistryState(registry));
     const terminal = cleanupTombstoneForWorktree(
       registry, normalized.worktreeId, normalized.repositoryId,
     ) || cleanupTombstoneForWorktree(registry, normalized.worktreeId);

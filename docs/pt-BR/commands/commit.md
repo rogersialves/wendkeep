@@ -115,6 +115,8 @@ stale e deve ser recriado.
 O `commit-msg` relê o contexto, compara a mensagem inteira e o hash/files staged, e só consome o
 contexto após sucesso. `merge`, `squash` e amend limpam contexto incompatível para não contaminar o
 commit seguinte. `--message-file` fica contido no repositório ou git-dir.
+As tasks derivadas usam a mesma ordenação canônica na mensagem e na revalidação do range; IDs como
+`84.2` e `84.10` não dependem da ordem incidental do checklist.
 
 Outros comandos:
 

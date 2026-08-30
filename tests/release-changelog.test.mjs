@@ -83,12 +83,20 @@ test('extractReleaseNotes: throws when the version is absent', () => {
 });
 
 test('[sensor:release-tests] [req:RECALL-13] current release notes are extractable and match the package', () => {
-  assert.equal(PACKAGE.version, '0.89.0');
+  assert.equal(PACKAGE.version, '0.90.0');
   const release = extractReleaseNotes(CHANGELOG, PACKAGE.version);
   assert.equal(release.date, '2026-08-30');
+  assert.match(release.notes, /Grafo modular incremental para a linha 0\.x/i);
+  assert.match(release.notes, /Supply chain fail-closed/i);
+  assert.match(release.notes, /required checks candidatos só serão aplicados\s+remotamente/i);
+  assert.match(release.notes, /attestation SLSA verificada pelo npm/i);
+  assert.doesNotMatch(release.notes, /019f[0-9a-f-]+/i);
+});
+
+test('[sensor:release-tests] 0.89.0 ecosystem bridge notes remain extractable', () => {
+  const release = extractReleaseNotes(CHANGELOG, '0.89.0');
   assert.match(release.notes, /Bridges opcionais oficiais para Spec Kit e Superpowers/i);
   assert.match(release.notes, /Autoridade única e drift fail-closed/i);
-  assert.doesNotMatch(release.notes, /019f[0-9a-f-]+/i);
 });
 
 test('[req:RECALL-13] release preflight distinguishes unpublished, published, and stale versions', () => {
@@ -252,7 +260,7 @@ test('[sensor:release-tests] as notas de 0.68.1 seguem extraíveis depois do bum
 });
 
 test('[sensor:release-tests] [req:REL-CI-1] release depende da matriz verde do mesmo SHA', () => {
-  assert.match(RELEASE_WORKFLOW, /^  release:\r?\n    needs:\s*test$/m);
+  assert.match(RELEASE_WORKFLOW, /^  release:\r?\n    needs:\s*\[test, observer-macos, quality, codeql, dependency-audit\]$/m);
   assert.match(RELEASE_WORKFLOW, /^  push:\r?\n    branches:\s*\[main\]$/m);
   assert.match(RELEASE_WORKFLOW, /^  test:\r?\n    strategy:/m);
   assert.doesNotMatch(TEST_WORKFLOW, /^\s{2}push:/m, 'test.yml fica exclusivo para pull requests');
@@ -260,8 +268,11 @@ test('[sensor:release-tests] [req:REL-CI-1] release depende da matriz verde do m
 });
 
 test('[sensor:release-tests] [req:REL-CI-2] workflow confiável publica antes de criar a tag no SHA testado', () => {
-  const permissions = RELEASE_WORKFLOW.match(/^permissions:\r?\n(?:  [^\r\n]+\r?\n?)+/m)?.[0] || '';
-  assert.match(permissions, /id-token:\s*write/);
+  const globalPermissions = RELEASE_WORKFLOW.match(/^permissions:\r?\n(?:  [^\r\n]+\r?\n?)+/m)?.[0] || '';
+  const releasePermissions = RELEASE_WORKFLOW.match(/^  release:[\s\S]*?^    permissions:\r?\n(?:      [^\r\n]+\r?\n?)+/m)?.[0] || '';
+  assert.match(globalPermissions, /contents:\s*read/);
+  assert.doesNotMatch(globalPermissions, /id-token:\s*write/);
+  assert.match(releasePermissions, /id-token:\s*write/);
   assert.match(RELEASE_WORKFLOW, /registry-url:\s*['"]https:\/\/registry\.npmjs\.org['"]/);
   assert.match(RELEASE_WORKFLOW, /node-version:\s*['"]2[4-9]['"]/);
   const publishAt = RELEASE_WORKFLOW.indexOf('      - name: Publish package');
@@ -270,14 +281,15 @@ test('[sensor:release-tests] [req:REL-CI-2] workflow confiável publica antes de
   assert.ok(tagAt > -1, 'workflow precisa criar a tag comprovada');
   assert.ok(publishAt < tagAt, 'publish precisa ocorrer antes da tag');
   assert.match(RELEASE_PUBLISH_STEP, /npm view[\s\S]*--prefer-online/);
-  assert.match(RELEASE_PUBLISH_STEP, /npm publish/);
+  assert.match(RELEASE_PUBLISH_STEP, /npm publish artifacts\/release-candidate\.tgz --provenance/);
   assert.match(RELEASE_WORKFLOW, /git tag -a "\$TAG" "\$GITHUB_SHA"/);
 });
 
 test('[sensor:release-tests] [req:REL-CI-3] release verifica proveniência e publica receipt', () => {
   assert.match(RELEASE_WORKFLOW, /release-provenance\.mjs --require-published --json/);
   assert.match(RELEASE_WORKFLOW, /release-receipt\.json/);
-  assert.match(RELEASE_WORKFLOW, /actions\/upload-artifact@v4/);
+  assert.match(RELEASE_WORKFLOW, /actions\/upload-artifact@[a-f0-9]{40}\s+# v4/);
+  assert.match(RELEASE_WORKFLOW, /finalize-release-receipt\.mjs/);
   assert.match(RELEASE_WORKFLOW, /gh release view "\$TAG" --json url/);
 });
 

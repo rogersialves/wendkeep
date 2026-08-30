@@ -1,0 +1,58 @@
+#!/usr/bin/env node
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { isAbsolute, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+import { verifyReleaseCandidateBytes } from '../src/release-candidate.mjs';
+import { npmExecutorSpec } from './release-plan.mjs';
+
+const root = resolve(fileURLToPath(new URL('../', import.meta.url)));
+const requestedTarball = process.argv[2] || join(root, 'artifacts', 'release-candidate.tgz');
+const tarballPath = isAbsolute(requestedTarball) ? requestedTarball : resolve(root, requestedTarball);
+const receiptPath = join(root, 'artifacts', 'release-candidate.json');
+const verified = verifyReleaseCandidateBytes({ tarballPath, receiptPath });
+const temporary = mkdtempSync(join(tmpdir(), 'wendkeep-release-consumer-'));
+try {
+  writeFileSync(join(temporary, 'package.json'), '{"private":true,"type":"module"}\n', {
+    encoding: 'utf8', mode: 0o600,
+  });
+  const npm = npmExecutorSpec([
+    'install', '--ignore-scripts', '--no-audit', '--no-fund', tarballPath,
+  ]);
+  execFileSync(npm.command, npm.args, {
+    cwd: temporary, encoding: 'utf8', shell: npm.shell,
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  const cliHelp = execFileSync(process.execPath, [
+    join(temporary, 'node_modules', 'wendkeep', 'bin', 'wendkeep.mjs'), '--help',
+  ], {
+    cwd: temporary, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  if (!cliHelp.includes('wendkeep hook <name>')) {
+    throw new Error('release candidate does not expose the Claude/Codex hook consumer');
+  }
+  if (!cliHelp.includes('config: --client generic|claude|codex|cursor')) {
+    throw new Error('release candidate does not expose Claude/Codex MCP configuration');
+  }
+  execFileSync(process.execPath, ['--input-type=module', '--eval', [
+    "import assert from 'node:assert/strict';",
+    "const mcp = await import('wendkeep/mcp');",
+    "await assert.rejects(",
+    "  () => import('wendkeep/integrations'),",
+    "  (error) => ['ERR_MODULE_NOT_FOUND', 'ERR_PACKAGE_PATH_NOT_EXPORTED'].includes(error?.code),",
+    ");",
+    "assert.equal(typeof mcp.createNativeMcpServer, 'function');",
+  ].join('\n')], {
+    cwd: temporary, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  process.stdout.write(`${JSON.stringify({
+    ok: true,
+    artifact: tarballPath,
+    integrity: verified.integrity,
+    consumers: ['claude', 'codex', 'mcp'],
+  })}\n`);
+} finally {
+  rmSync(temporary, { recursive: true, force: true });
+}

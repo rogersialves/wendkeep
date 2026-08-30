@@ -149,6 +149,7 @@ test('[req:BRIDGE-21] Spec Kit projection builder and runtime stay fail-closed w
     { label: 'ok-false-without-blocker', value: { ...valid, ok: false, diagnostics: [] } },
     { label: 'ok-true-with-blocker', value: { ...valid, ok: true, diagnostics: [blockingDiagnostic] } },
     { label: 'adapter-kind', value: { ...valid, adapter: 'superpowers', origin: { ...valid.origin, tool: 'superpowers' } } },
+    { label: 'origin-adapter', value: { ...valid, origin: { ...valid.origin, tool: 'superpowers' } } },
     { label: 'unsupported-version', value: {
       ...valid, adapter_version: '9.0.0', origin: { ...valid.origin, version: '9.0.0' },
       compatibility: { ...valid.compatibility, detected_version: '9.0.0', supported: false },

@@ -238,6 +238,10 @@ test('[req:EVID-1] [req:EVID-3] verify publishes the complete v2 envelope and ch
       'tasks_sha256', 'effective_spec_sha256', 'sensor_config_sha256', 'wendkeep_version',
       'platform', 'started_at', 'finished_at', 'envelope_id',
     ]) assert.ok(first[key], `${key} is present`);
+    assert.equal(
+      first.wendkeep_version,
+      JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version,
+    );
     assert.deepEqual(first.sensors.map((sensor) => sensor.id), ['proof']);
 
     writeFileSync(join(root, 'wendkeep.sensors.json'), JSON.stringify({

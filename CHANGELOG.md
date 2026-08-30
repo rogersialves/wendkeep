@@ -4,6 +4,42 @@ All notable changes to **wendkeep** are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.90.0] — 2026-08-30
+
+### Added
+
+- **Grafo modular incremental para a linha 0.x.** O tarball único passa a expor facades canônicas de
+  Contracts, Evidence, Worktrees, Observer, Sync, MCP e Migrations; Integrations permanece um
+  workspace interno acessado pelas fachadas históricas. CLI/Pi seguem como composition roots, com
+  imports legados por identidade e um sensor de grafo acíclico.
+- **Harness comum de migrations N-2/N-1 integrado.** Composition roots reais de Vault, ledger,
+  active contexts, Observer e portable state invocam plan, preconditions, journal atômico, checksums, backup verificável,
+  resume/repair, rollback determinístico e receipt público sem perder authority, memory, contracts
+  ou evidence.
+- **Matriz e políticas de compatibilidade intermediárias.** Keep Core é exercitado em Node 18/20
+  sem SQLite; o Observer completo em Node 22.13/24 no Linux, Windows e macOS, com documentação
+  bilíngue de suporte e depreciação para a linha 0.x — sem declarar 1.0.
+
+### Fixed
+
+- **Ingestão gzip sob pressão.** O publisher repete uma única vez o mesmo lote idempotente quando
+  um socket keep-alive é encerrado transitoriamente, preservando o timeout total e a outbox diante
+  de outras falhas.
+
+### Security
+
+- **Parser de tarefas em tempo linear.** Checkboxes e metadados continuam preservando a gramática
+  canônica, mas o prefixo de cada tarefa agora é varrido por linha sem regex ambígua sobre entrada
+  não confiável, incluindo casos adversariais com grandes sequências de espaços.
+- **Supply chain fail-closed.** Actions são fixadas por SHA e usam permissões mínimas por job;
+  os workflows versionados encadeiam CodeQL, dependency review/audit, matriz macOS e gates de
+  coverage/mutação para onze packages críticos. Os required checks candidatos só serão aplicados
+  remotamente pelo mantenedor depois de verdes.
+- **Um artefato, uma proveniência.** O mesmo tarball preservado antes do publish gera SBOM
+  CycloneDX, é instalado em consumidores isolados Claude/Codex/MCP e gera receipt ligado ao commit
+  universal da #40; a attestation SLSA verificada pelo npm precisa vincular subject digest,
+  repositório, workflow e commit antes do fechamento da release.
+
 ## [0.89.0] — 2026-08-30
 
 ### Added

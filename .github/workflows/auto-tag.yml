@@ -5,8 +5,7 @@ on:
     branches: [main]
 
 permissions:
-  contents: write
-  id-token: write
+  contents: read
 
 concurrency:
   group: release-${{ github.ref }}
@@ -20,7 +19,7 @@ jobs:
     outputs:
       release_required: ${{ steps.release-scope.outputs.required }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           fetch-depth: 2
 
@@ -49,7 +48,7 @@ jobs:
           fi
 
       - name: Set up Node.js 18
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: 18
 
@@ -60,7 +59,7 @@ jobs:
         run: npm run check
 
       - name: Set up Node.js 22.13
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: 22.13.0
 
@@ -81,27 +80,110 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-node@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: ${{ matrix.node }}
       - run: npm ci --ignore-scripts
       - run: npm test
 
+  observer-macos:
+    name: test / observer-macos (node ${{ matrix.node }})
+    needs: test-linux
+    if: needs.test-linux.outputs.release_required == 'true'
+    runs-on: macos-latest
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [22.13.0, 24]
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: ${{ matrix.node }}
+      - run: npm ci --ignore-scripts
+      - run: npm run test:observer
+
+  quality:
+    name: test / quality-release
+    needs: test-linux
+    if: needs.test-linux.outputs.release_required == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: 24
+      - run: npm ci --ignore-scripts
+      - run: npm run quality:coverage
+      - run: npm run quality:mutation
+
+  codeql:
+    name: security / codeql-release
+    needs: test-linux
+    if: needs.test-linux.outputs.release_required == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: github/codeql-action/init@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
+        with:
+          languages: javascript-typescript
+      - uses: github/codeql-action/analyze@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
+
+  dependency-audit:
+    name: security / dependency-audit
+    needs: test-linux
+    if: needs.test-linux.outputs.release_required == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: 24
+      - run: npm ci --ignore-scripts
+      - run: npm audit --audit-level=moderate
+
   release:
-    needs: test
+    needs: [test, observer-macos, quality, codeql, dependency-audit]
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           fetch-depth: 0
           ref: ${{ github.sha }}
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: '24'
           registry-url: 'https://registry.npmjs.org'
       - run: npm ci --ignore-scripts
+      - name: Validate canonical commit receipt
+        run: >-
+          node scripts/validate-commit-range.mjs
+          --base "${{ github.event.before }}"
+          --head "${{ github.sha }}"
+      - name: Prepare immutable tarball and SBOM
+        run: npm run release:artifact
+      - name: Upload release candidate
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-candidate-${{ github.sha }}
+          path: artifacts/
+          if-no-files-found: error
+      - name: Test exact release candidate in isolated consumers
+        run: npm run release:candidate:test
       - name: Validate release candidate
         run: node scripts/release-provenance.mjs --json
       - name: Publish package
@@ -111,7 +193,7 @@ jobs:
           if npm view "$PKG@$VERSION" version --prefer-online >/dev/null 2>&1; then
             echo "$PKG@$VERSION já está no registry — publish idempotente"
           else
-            npm publish
+            npm publish artifacts/release-candidate.tgz --provenance
           fi
       - name: Create verified tag
         env:
@@ -131,12 +213,18 @@ jobs:
       - name: Verify published provenance
         run: |
           for attempt in 1 2 3 4 5 6 7 8 9 10; do
-            if node scripts/release-provenance.mjs --require-published --json > release-receipt.json; then
+            if node scripts/release-provenance.mjs --require-published --json > published-provenance.json; then
               exit 0
             fi
             sleep 6
           done
-          node scripts/release-provenance.mjs --require-published --json
+          node scripts/release-provenance.mjs --require-published --json > published-provenance.json
+      - name: Finalize bound release receipt
+        run: >-
+          node scripts/finalize-release-receipt.mjs
+          artifacts/release-candidate.json
+          published-provenance.json
+          release-receipt.json
       - name: Create or update GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -154,7 +242,7 @@ jobs:
           node -e 'const fs=require("node:fs"); const norm=(path)=>fs.readFileSync(path,"utf8").replace(/\r\n/g,"\n").trimEnd(); if(norm("RELEASE_NOTES.md")!==norm("PUBLISHED_RELEASE_NOTES.md")){throw new Error("GitHub Release diverge do CHANGELOG")}'
           RECEIPT_RELEASE_URL="$RELEASE_URL" node -e 'const fs=require("node:fs"); const receipt=JSON.parse(fs.readFileSync("release-receipt.json","utf8")); receipt.workflow_run=process.env.GITHUB_SERVER_URL+"/"+process.env.GITHUB_REPOSITORY+"/actions/runs/"+process.env.GITHUB_RUN_ID; receipt.github_release=process.env.RECEIPT_RELEASE_URL; fs.writeFileSync("release-receipt.json",JSON.stringify(receipt,null,2)+"\n")'
       - name: Upload release receipt
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: release-receipt-${{ github.sha }}
           path: release-receipt.json

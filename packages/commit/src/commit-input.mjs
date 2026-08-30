@@ -45,7 +45,7 @@ export function assertPublicText(value, field = 'value') {
   }
 }
 
-function uniqueSorted(values) {
+export function canonicalCommitStringOrder(values) {
   return [...new Set(values)].sort((a, b) => a.localeCompare(b, 'en'));
 }
 
@@ -56,7 +56,7 @@ function assertKnownFields(value, allowed, field) {
 
 function stringList(value, field, { required = true } = {}) {
   if (!Array.isArray(value)) throw new CommitPolicyError(`${field} must be an array`);
-  const normalized = uniqueSorted(value.map((item, index) => text(item, `${field}[${index}]`)));
+  const normalized = canonicalCommitStringOrder(value.map((item, index) => text(item, `${field}[${index}]`)));
   if (required && !normalized.length) throw new CommitPolicyError(`${field} must not be empty`);
   return normalized;
 }
@@ -113,7 +113,7 @@ function normalizeStagedDiff(value) {
   if (!/^[a-f0-9]{64}$/.test(sha256)) throw new CommitPolicyError('staged_diff.sha256 must be a SHA-256 digest');
   const files = stringList(value.files, 'staged_diff.files').map((file) => file.replaceAll('\\', '/'));
   for (const [index, file] of files.entries()) assertPublicText(file, `staged_diff.files[${index}]`);
-  return { sha256, files: uniqueSorted(files) };
+  return { sha256, files: canonicalCommitStringOrder(files) };
 }
 
 function normalizeIdentity(value) {

@@ -129,6 +129,17 @@ test('[req:MOD-4] [req:MOD-8] [req:MOD-10] [req:MOD-11] [req:MOD-12] [req:MOD-13
     'packages/integrations/src/transcripts.mjs',
     'packages/integrations/src/spec-kit-adapter.mjs',
     'packages/integrations/src/superpowers-adapter.mjs',
+    'packages/migrations/package.json',
+    'packages/migrations/src/index.mjs',
+    'packages/migrations/src/registry.mjs',
+    'packages/migrations/src/runner.mjs',
+    'packages/observer/package.json',
+    'packages/observer/src/index.mjs',
+    'packages/sync/package.json',
+    'packages/sync/src/index.mjs',
+    'packages/worktrees/package.json',
+    'packages/worktrees/src/index.mjs',
+    'schema/migration-receipt-v1.schema.json',
     'schema/ecosystem-bridge-v1.schema.json',
     'src/ecosystem-bridges.mjs',
     'packages/pi/package.json',
@@ -197,18 +208,18 @@ test('[req:MOD-14] [req:MOD-16] CLI workspace declares its private runtime witho
   assert.equal(Object.hasOwn(root.exports, './cli'), false);
 });
 
-test('[req:MOD-17] [req:MOD-19] MCP workspace declares its private kernel without publishing wendkeep/mcp', () => {
+test('[req:MOD-17] [req:MOD-19] MCP workspace stays privately owned behind the public root subpath', () => {
   const root = JSON.parse(readFileSync(join(pkgRoot, 'package.json'), 'utf8'));
   const mcp = JSON.parse(readFileSync(join(pkgRoot, 'packages', 'mcp', 'package.json'), 'utf8'));
 
   assert.equal(mcp.private, true);
   assert.equal(mcp.exports, './src/index.mjs');
-  assert.equal(Object.hasOwn(root.exports, './mcp'), false);
+  assert.equal(root.exports['./mcp'], './packages/mcp/src/index.mjs');
   assert.match(root.scripts.check, /node --check packages\/mcp\/src\/config\.mjs/);
   assert.match(root.scripts.check, /node --check packages\/mcp\/src\/index\.mjs/);
 });
 
-test('[req:MOD-20] [req:MOD-22] Integrations workspace is packaged privately without a public subpath', () => {
+test('[req:MOD-20] [req:MOD-22] domain workspaces are private packages behind explicit public root subpaths', () => {
   const root = JSON.parse(readFileSync(join(pkgRoot, 'package.json'), 'utf8'));
   const integrations = JSON.parse(readFileSync(
     join(pkgRoot, 'packages', 'integrations', 'package.json'),
@@ -222,8 +233,15 @@ test('[req:MOD-20] [req:MOD-22] Integrations workspace is packaged privately wit
   assert.equal(Object.hasOwn(root.exports, './*'), false);
   const publicPackageTargets = new Set([
     './packages/commit/src/index.mjs',
+    './packages/contracts/src/index.mjs',
+    './packages/evidence/src/index.mjs',
     './packages/harness/src/index.mjs',
     './packages/vault/src/index.mjs',
+    './packages/mcp/src/index.mjs',
+    './packages/migrations/src/index.mjs',
+    './packages/observer/src/index.mjs',
+    './packages/sync/src/index.mjs',
+    './packages/worktrees/src/index.mjs',
   ]);
   assert.equal(
     Object.entries(root.exports).some(([key, target]) => (
@@ -261,6 +279,11 @@ test('[req:MOD-4] [req:MOD-6] [req:MOD-9] [req:MOD-10] [req:MOD-11] [req:MOD-12]
     const imported = spawnSync(process.execPath, ['--input-type=module', '--eval', [
       "const vault = await import('wendkeep/vault');",
       "const harness = await import('wendkeep/harness');",
+      "const publicMcp = await import('wendkeep/mcp');",
+      "const publicMigrations = await import('wendkeep/migrations');",
+      "const publicObserver = await import('wendkeep/observer');",
+      "const publicSync = await import('wendkeep/sync');",
+      "const publicWorktrees = await import('wendkeep/worktrees');",
       "const installedChange = await import('wendkeep/src/change.mjs');",
       "const installedChangeCore = await import('wendkeep/hooks/change-core.mjs');",
       "const installedSpecCore = await import('wendkeep/hooks/spec-core.mjs');",
@@ -274,6 +297,7 @@ test('[req:MOD-4] [req:MOD-6] [req:MOD-9] [req:MOD-10] [req:MOD-11] [req:MOD-12]
       "const internal = (...parts) => import(pathToFileURL(path.join(installedRoot, ...parts)).href);",
       "const canonicalMcp = await internal('packages', 'mcp', 'src', 'index.mjs');",
       "const canonicalIntegrations = await internal('packages', 'integrations', 'src', 'index.mjs');",
+      "const canonicalMigrations = await internal('packages', 'migrations', 'src', 'index.mjs');",
       "const canonicalLocale = await internal('packages', 'vault', 'src', 'locale.mjs');",
       "const canonicalFlowStore = await internal('packages', 'harness', 'src', 'flow-store.mjs');",
       "const legacyLocale = await import('wendkeep/hooks/locale.mjs');",
@@ -362,6 +386,11 @@ test('[req:MOD-4] [req:MOD-6] [req:MOD-9] [req:MOD-10] [req:MOD-11] [req:MOD-12]
       "const promoted = canonicalFlowStore.readFlow(runtimeVault, { sessionId: 'session-promoted', flowId: 'flow-promoted' });",
       "if (promoted.state !== 'promoted' || canonicalFlowStore.listFlows(runtimeVault).length !== 2) process.exit(26);",
       "if (canonicalMcp.MCP_SERVER_KEY !== legacyTaxonomy.MCP_SERVER_KEY) process.exit(27);",
+      "if (publicMcp.MCP_SERVER_KEY !== canonicalMcp.MCP_SERVER_KEY) process.exit(36);",
+      "if (publicMigrations.runMigration !== canonicalMigrations.runMigration) process.exit(38);",
+      "if (typeof publicObserver.protectObserverEvent !== 'function') process.exit(39);",
+      "if (typeof publicSync.createSyncEvent !== 'function') process.exit(40);",
+      "if (typeof publicWorktrees.createManagedWorktree !== 'function') process.exit(41);",
       "if (canonicalMcp.mcpServerEntry !== legacyTaxonomy.mcpServerEntry) process.exit(28);",
       "const mcpMerged = canonicalMcp.mergeMcpConfig({ mcpServers: { user: { command: 'user' } } }, { vaultPath: 'C:/vault' });",
       "if (mcpMerged.mcpServers.user.command !== 'user') process.exit(29);",
@@ -383,7 +412,8 @@ test('[req:MOD-4] [req:MOD-6] [req:MOD-9] [req:MOD-10] [req:MOD-11] [req:MOD-12]
       "  }",
       "}",
       "for (const specifier of [",
-      "  'wendkeep/mcp', '@wendkeep/mcp', 'wendkeep/integrations', '@wendkeep/integrations',",
+      "  '@wendkeep/mcp', '@wendkeep/integrations', 'wendkeep/integrations', '@wendkeep/migrations', '@wendkeep/observer',",
+      "  '@wendkeep/sync', '@wendkeep/worktrees',",
       "  'wendkeep/packages/mcp/src/index.mjs', 'wendkeep/packages/harness/src/index.mjs',",
       "  'wendkeep/packages/vault/src/index.mjs', 'wendkeep/packages/integrations',",
       "  'wendkeep/packages/integrations/src/index.mjs', 'wendkeep/%70ackages/integrations/src/index.mjs',",

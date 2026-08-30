@@ -11,6 +11,28 @@ into private workspaces so migration can be incremental and dependency direction
 | `mcp` | MCP transport and configuration. |
 | `integrations` | Pure host-integration rules for hooks, envelopes, transcripts, and identity. |
 | `pi` | Pi-specific extension and hooks. |
+| `commit` | Universal message, proof set, and commit-range gate. |
+| `contracts` | Derived task, TDD, and verdict contracts without parallel authority. |
+| `evidence` | Evidence Envelope, provenance gate, and append-only receipt ledger. |
+| `migrations` | Upgrade registry, journal, backup, repair, rollback, and receipts. |
+| `observer` | Policy, RBAC, redaction, encryption, retention, and purge. |
+| `sync` | Local-first protocol, outbox, and adapters. |
+| `worktrees` | Safe worktree lifecycle and cleanup. |
+
+## 0.90 Public graph and composition roots
+
+The root tarball exposes exactly `wendkeep/commit`, `wendkeep/contracts`, `wendkeep/evidence`,
+`wendkeep/harness`, `wendkeep/mcp`, `wendkeep/migrations`, `wendkeep/observer`, `wendkeep/sync`,
+`wendkeep/vault`, and `wendkeep/worktrees`. `cli`, `pi`, and `integrations` remain private
+composition roots or adapters: they compose effects but do not become programmatic APIs. No
+`@wendkeep/*` package is published independently.
+
+The boundary test computes the import graph and requires it to remain acyclic. Domain kernels do
+not read ambient environment, stdin, or incidental filesystem state; imports into the legacy layer
+are confined to versioned composition roots with an exact file-and-target allowlist. Facades under
+`src/` and `hooks/` re-export canonical bindings
+throughout 0.x without duplicating authority. Incremental `sync` and `worktrees` extraction
+preserves identity.
 
 ## Dependency direction
 
@@ -18,7 +40,7 @@ Host adapters (`cli`, `mcp`, `integrations`, and `pi`) compose the runtime throu
 in turn uses `vault`. The allowed direction is:
 
 ```text
-adapters (cli/mcp/integrations/pi) -> Harness -> Vault
+composition roots (cli/mcp/pi) -> domain adapters -> Harness -> Vault
 ```
 
 `vault` is the independent base and never depends on `harness`. The `harness` workspace
@@ -41,9 +63,9 @@ configuration, path, or schema migration.
 
 MCP and Integrations are sibling adapters with no dependency between them. Both follow
 `cli/mcp/integrations/pi → Harness → Vault`, and boundary tests reject cycles or ambient access
-inside the kernel. Integrations remains internal to the root tarball: there is no separate
-`@wendkeep/integrations` npm publication or public `wendkeep/integrations` subpath. Pi is the next
-phase of the modular migration.
+inside the kernel. Integrations remains internal to the root tarball: there is neither a separate
+`@wendkeep/integrations` npm publication nor a public `wendkeep/integrations` subpath. Consumers use
+the supported historical facades.
 
 ## Native semantic MCP
 
@@ -130,9 +152,8 @@ compatibility. The exports map also keeps installed bare specifiers. Therefore, 
 changes neither profiles, sensor contracts, schema v2, ledger, projection, nor session data: there
 is no data migration.
 
-All six workspaces remain private and internal to the monorepo; they are not independent npm
+All thirteen workspaces remain private and internal to the monorepo; they are not independent npm
 packages. Installation remains `wendkeep`; `wendkeep/harness` and `wendkeep/vault` are public
-subpaths of the root package, not separate publications. CLI, MCP, and Integrations now have
-private canonical implementations: the first remains exposed through the binaries, the second
-through `init` configuration effects, and the third through the historical host facades. `pi`
-remains the reserved boundary and is the next planned migration phase.
+subpaths of the root package, not separate publications. CLI remains exposed through the binaries
+and MCP retains its public subpath. Integrations and `pi` remain private boundaries whose effects
+are controlled by composition roots.
